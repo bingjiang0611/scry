@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { CERT, grantedController, routing } from './host-controller-fixtures'
+import { CERT, grantedController, MemoryLedgerStore, routing } from './host-controller-fixtures'
 import { ShadowMirror } from '../../host-runtime/orchestration/shadow-mirror'
 
 describe('P4-1 question answer peer side-channel (no peer fingerprint in persistent H1 poll)', () => {
@@ -16,7 +16,9 @@ describe('P4-1 question answer peer side-channel (no peer fingerprint in persist
         releaseQuestion = resolve
       })
 
+      const ledgerStore = new MemoryLedgerStore()
       const { controller } = await grantedController(async () => undefined, undefined, {
+        ledgerStore,
         runProvider: async ({ runId, requestUserInput, stopSignal }) => {
           const pending = requestUserInput(
             {
@@ -72,9 +74,8 @@ describe('P4-1 question answer peer side-channel (no peer fingerprint in persist
         expect(row.payload.shadowOnly).toBe(true)
       }
 
-      // 2. Persistent H1 poll() MUST NOT contain peer fingerprint or answeredByPeer!
-      const polled = controller.poll(CERT, { cursor: 0 })
-      const answeredEvt = polled.events.find(
+      // 2. The original recorded H1 event has no peer fingerprint.
+      const answeredEvt = ledgerStore.log.find(
         (evt) => evt.kind === 'run_progress' && evt.detail?.includes('question_answered')
       )
       expect(answeredEvt).toBeDefined()

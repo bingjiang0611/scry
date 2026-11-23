@@ -3,7 +3,6 @@ import type { RemoteHostService, RemoteHostServiceDependencies } from '../main/r
 import type { LocalChannel } from './local-channel'
 import type { LocalEnrollSocket } from './local-enrollment'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
-import type { DaemonOrchestrationShadow } from './orchestration-shadow'
 import type { DaemonTerminalServiceDeps } from './terminal-service'
 import type { HostAdminStore } from './host-admin-store'
 import type { HostAdminSocket } from './host-admin-socket'
@@ -19,11 +18,10 @@ export interface DaemonHostProcessOptions {
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
   log?: (line: string) => void
   terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
-  orchestrationShadowBeforeCommitHook?: () => void
-  orchestrationMirrorWriteHook?: (op: 'append' | 'compact', seq: number) => void
-  orchestrationMirrorMaxPendingEvents?: number
-  orchestrationMirrorRetryIntervalMs?: number
-  orchestrationShadowPauseBackfill?: Promise<void>
+  /** Tests: inject a commit fault into the authoritative sink. */
+  orchestrationBeforeCommitHook?: () => void
+  /** Tests: pause deferred legacy backfill until resolved to verify live/backfill interleaving. */
+  orchestrationPauseBackfill?: Promise<void>
   providerDisposeTimeoutMs?: number
   executionTargetCallTimeoutMs?: number
 }
@@ -35,7 +33,6 @@ export interface DaemonHostProcess {
   adminSocket?: HostAdminSocket
   hostAdmin: HostAdminStore
   providerOperationGate: ProviderOperationGate
-  orchestrationShadow?: DaemonOrchestrationShadow
   orchestrationAuthority?: DaemonOrchestrationAuthority
   dispose(): Promise<void>
 }

@@ -3,7 +3,7 @@ import { authorizedMcpExecution, ensureMcpExecutionAuthorized } from '../../main
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import type { DaemonLocalOpGroup } from './deps'
 
-export const mcpLocalOps: DaemonLocalOpGroup = ({ providers, session, workspace, events, runs }) => mcpChannelHandlers({
+export const mcpLocalOps: DaemonLocalOpGroup = ({ providers, session, workspace, publishHint, runs }) => mcpChannelHandlers({
   providerRegistry: providers.providerRegistry,
   withProviderOperation: session.withProviderOperation,
   ensureMcpExecutionAuthorized,
@@ -12,6 +12,6 @@ export const mcpLocalOps: DaemonLocalOpGroup = ({ providers, session, workspace,
   getRuns: runs,
   canonicalProviderCwd: session.canonicalProviderCwd,
   providerOperationGate: session.providerOperationGate,
-  openExternal: async (url) => { events.append({ kind: 'oauth', url }) },
+  openExternal: async (url) => { publishHint({ kind: 'oauth', url }) },
   assertOwner: () => undefined
 }) as Record<string, LocalOpHandler>

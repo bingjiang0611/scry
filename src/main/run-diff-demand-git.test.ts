@@ -1,14 +1,14 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { expect, it, vi } from 'vitest'
-import { beginGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnAndSessionDiff, previewGitTurnDiff, type GitTurnDiffCapture } from './git'
+import { beginAppGitTurnDiff, cancelGitTurnDiff, cloneGitTurnDiffCapture, finishGitTurnAndSessionDiff, previewGitTurnDiff, type GitTurnDiffCapture } from './git'
 import { RunDiffPreviewer } from './run-diff-previewer'
 const exec = promisify(execFile)
 
-it('retains full terminal turn/session patches and the user index when no view ever requests a preview', async () => {
+it.each([false, true])('retains terminal patches and the user index without preview demand, with .scry ignored: %s', async (ignored) => {
   const root = await mkdtemp(join(tmpdir(), 'scry-diff-never-viewed-'))
   let turn: GitTurnDiffCapture | undefined, session: GitTurnDiffCapture | undefined
   const git = (...args: string[]) => exec('git', args, { cwd: root, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } })
@@ -18,10 +18,16 @@ it('retains full terminal turn/session patches and the user index when no view e
     await git('config', 'user.email', '307659028+bingjiang0611@users.noreply.github.com')
     await writeFile(join(root, 'tracked.txt'), 'before\n')
     await writeFile(join(root, 'removed.txt'), 'removed evidence\n')
+    await mkdir(join(root, '.scry'))
+    await writeFile(join(root, '.scry', 'tracked-record.json'), 'old recorder data\n')
+    if (ignored) await writeFile(join(root, '.gitignore'), '.scry/\n')
     await git('add', '.')
+    await git('add', '-f', '.scry/tracked-record.json')
     await git('-c', 'core.hooksPath=/dev/null', 'commit', '--no-gpg-sign', '-qm', 'fixture')
     const index = await readFile(join(root, '.git/index'))
-    turn = await beginGitTurnDiff(root)
+    await writeFile(join(root, '.scry', 'tracked-record.json'), 'dirty recorder baseline\n')
+    turn = await beginAppGitTurnDiff(root)
+    expect(turn.baselineClean).toBe(true)
     session = await cloneGitTurnDiffCapture(turn)
     const preview = vi.fn(previewGitTurnDiff), emit = vi.fn()
     const view = new RunDiffPreviewer({ runId: 'never-viewed', turnCapture: Promise.resolve(turn), sessionCapture: Promise.resolve(session), hints: () => ({}), preview, emit })
@@ -29,6 +35,8 @@ it('retains full terminal turn/session patches and the user index when no view e
     const tracked = '完整 final tracked 数据 '.repeat(128), untracked = '完整 untracked 数据 '.repeat(128)
     await writeFile(join(root, 'tracked.txt'), tracked)
     await writeFile(join(root, 'new.txt'), untracked)
+    await writeFile(join(root, '.scry', 'tracked-record.json'), 'new recorder data\n')
+    await writeFile(join(root, '.scry', 'new-record.json'), 'additional recorder data\n')
     await unlink(join(root, 'removed.txt'))
     await view.notifyChange()
     view.sealAll()

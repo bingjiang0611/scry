@@ -50,7 +50,7 @@ function makeSetup(options: {
     platform: options.platform ?? 'darwin',
     uid: 501,
     homeDir,
-    daemonMode: true,
+    
     allowLinux: options.allowLinux ?? false,
     systemctlAvailable: true,
     target: { executable, appPath, resourcesPath, userDataDir, isPackaged: true },

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { CLIENT_MATRIX_DOC, CONVERSATION_MATRIX_DOC, MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, loadRouting, protocolOps, renderClientMatrix, renderConversationMatrix, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
+import { CLIENT_MATRIX_DOC, CONVERSATION_MATRIX_DOC, MATRIX_DOC, OPS_DOC, WORKBENCH_MATRIX_DOC, buildMatrix, collectChannels, gateTableChannels, loadRouting, protocolOps, renderClientMatrix, renderConversationMatrix, renderMatrix, renderOps, preloadChannels, renderWorkbenchMatrix, workbenchMethods } from './daemon-ipc-matrix.mjs'
 
 const routing = loadRouting()
 const matrix = buildMatrix(routing)
 
 describe('daemon IPC routing matrix', () => {
   it('classifies every privileged channel and only privileged channels', () => {
-    expect(matrix.channels).toBe(182)
+    expect(matrix.channels).toBe(183)
     expect(matrix.defects).toEqual([])
     expect(matrix.rows.filter((row) => row.route === 'main').length).toBeGreaterThan(0)
     expect(matrix.rows.filter((row) => row.route === 'forward').length).toBeGreaterThan(0)
@@ -54,14 +54,14 @@ describe('daemon IPC routing matrix', () => {
 
   it('fails when the preload invokes a channel the registration scan did not find', () => {
     const invoked = preloadChannels()
-    expect(invoked.size).toBe(182)
+    expect(invoked.size).toBe(183)
     const missed = buildMatrix(routing, undefined, new Set([...invoked, 'agent:registeredSomeNewWay']))
     expect(missed.defects).toEqual([{ channel: 'agent:registeredSomeNewWay', problem: expect.stringContaining('registration scan did not find it') }])
   })
 
   it('reads its own inputs instead of trusting an empty scan', () => {
     const channels = collectChannels().map((entry) => entry.channel)
-    expect(channels.length).toBe(182)
+    expect(channels.length).toBe(183)
     // Registered through a handler table and through the `handle(` parameter name; both
     // were missing from the first scan, which only matched handleTrusted('literal').
     expect(channels).toContain('sourceControl:read')
@@ -80,21 +80,25 @@ describe('daemon IPC routing matrix', () => {
     expect(workbenchMethods().get('workspace')?.has('workspaceTrash')).toBe(true)
   })
 
-  it('counts a shared handler table only when main registers it', () => {
-    // The scan reads channel keys from `satisfies ChannelHandlers` tables; that is only
-    // honest if every exported factory is actually registered in main.
-    const tables = readFileSync(new URL('../src/main/bootstrap/startup-channels.ts', import.meta.url), 'utf8')
-    const factories = [...tables.matchAll(/^export function (\w+ChannelHandlers)\(/gm)].map(([, name]) => name).filter((name) => name !== 'registerChannelHandlers')
-    expect(factories.length).toBeGreaterThan(0)
-    // Every production main source, not only files that register a channel literally: a
-    // bootstrap module may now register nothing but shared tables.
+  it('counts a shared handler table only when the App reaches it through the daemon gate', () => {
+    // The scan reads channel keys from `satisfies ChannelHandlers` tables. The App main
+    // entry registers none of them in process: each must be a channel the daemon answers
+    // (the gate's local-op or forward tables), or a channel the App keeps (route main).
+    const gate = gateTableChannels()
+    expect(gate.size).toBe(111)
+    const kept = new Set(routing.channels.filter((row: { route: string }) => row.route === 'main').map((row: { channel: string }) => row.channel))
     const mainSources = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const path = join(directory, entry.name)
       if (entry.isDirectory()) return mainSources(path)
       return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [readFileSync(path, 'utf8')] : []
     })
-    const sources = mainSources(join(process.cwd(), 'src/main')).join('\n')
-    for (const factory of factories) expect(sources, `${factory} is never registered in main`).toMatch(new RegExp(`registerChannelHandlers\\(handleTrusted, ${factory}\\(`))
+    const tableKeys = mainSources(join(process.cwd(), 'src/main')).flatMap((source) =>
+      [...source.matchAll(/return \{([\s\S]*?)\} satisfies ChannelHandlers/g)].flatMap((table) => [...table[1].matchAll(/^\s+'([a-zA-Z]+:[a-zA-Z:]+)':/gm)].map(([, key]) => key)))
+    expect(tableKeys.length).toBeGreaterThan(0)
+    for (const channel of tableKeys) expect(gate.has(channel) || kept.has(channel), `${channel} is in a shared table but the App cannot reach it`).toBe(true)
+    // The App main entry registers the gate's channels from the tables themselves.
+    const index = readFileSync(join(process.cwd(), 'src/main/index.ts'), 'utf8')
+    expect(index).toMatch(/registerDaemonOwnedChannels\(handleTrusted, registered\)/)
   })
 
   it('keeps both generated documents up to date', () => {

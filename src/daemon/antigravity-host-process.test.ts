@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
 import { createRecentFoldersStore } from '../main/app-store'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
@@ -140,6 +140,7 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
           reason: 'antigravity 尚未提供可验证的历史输入交接'
         })
 
+        // 正常 daemon 直发链路（submit + subscribe）：完整跑通 fake ACP Agent 并产出输出块。
         const submitted = await req({
           op: 'submit',
           intentId: randomUUID(),
@@ -148,24 +149,13 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
         expect(submitted.status).toBe('recorded')
         const runId = submitted.runId as string
 
-        let state = 'dispatched'
-        let cursor = 0
-        let outputCursor = 0
-        const events: Array<{ kind: string }> = []
-        const chunks: Array<{ payload?: string }> = []
-        const deadline = Date.now() + 10_000
-        while (Date.now() < deadline && state === 'dispatched') {
-          const watched = await req({ op: 'watch', runId, cursor, outputCursor, waitMs: 3_000 })
-          state = watched.watch.state
-          cursor = watched.watch.poll.cursor
-          outputCursor = watched.watch.output.cursor
-          events.push(...watched.watch.poll.events)
-          chunks.push(...watched.watch.output.chunks)
-        }
-        expect(state, JSON.stringify(events)).toBe('settled')
-        expect(events.some((event) => event.kind === 'run_settled')).toBe(true)
-        expect(chunks.length).toBeGreaterThan(0)
-        expect(JSON.stringify(chunks)).toContain('hello from fake agy')
+        expect(await waitForProjectedRun(host.channel.socketPath, host.service.caCertificatePEM,
+          device.certPEM, device.keyPEM, runId)).toBe('settled')
+        expect(host.orchestrationAuthority?.sink.listEvents())
+          .toContainEqual(expect.objectContaining({ runId, type: 'run.settled' }))
+        const result = await req({ op: 'output', runId, cursor: 0 })
+        expect(result.output.chunks.length).toBeGreaterThan(0)
+        expect(JSON.stringify(result.output.chunks)).toContain('hello from fake agy')
       } finally {
         await host.dispose()
       }

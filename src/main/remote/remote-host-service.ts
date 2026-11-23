@@ -105,6 +105,7 @@ export class RemoteHostService {
         serverCertPEM: server.certificatePEM,
         serverKeyPEM: server.privateKeyPEM,
         caPEM: identity.caCertificatePEM,
+        networkSubscribe: deps.localEndpoint?.subscribe,
         ...(executionTargets ? { executionTargets } : {})
       })
       pairing = new PairingTransport({
@@ -235,7 +236,7 @@ export class RemoteHostService {
   }
 
   async #enableDesktop(ports?: DesktopHostListenerPorts): Promise<void> {
-    const listeners = new DesktopHostListeners({ pair: this.#pairing, run: this.#host, ...ports })
+    const listeners = new DesktopHostListeners({ pair: this.#pairing, run: { serve: (stream) => this.#host.serveDesktop(stream) }, ...ports })
     // Own the instance before awaiting bind, so dispose can close a pending start.
     this.#desktopListeners = listeners
     try {

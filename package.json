@@ -37,7 +37,6 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test:unit": "vitest run",
-    "test:in-process": "vitest run --maxWorkers=1 src/main/daemon-mode-default.test.ts src/main/daemon-channel-gate.test.ts src/main/remote/remote-defaults.test.ts src/main/bootstrap/app-startup-writers.test.ts src/main/bootstrap/background-service.test.ts src/main/bootstrap/daemon-run-mode.test.ts src/main/bootstrap/provider-handlers.test.ts src/main/bootstrap/session-selection.test.ts src/main/bootstrap/workspace-daemon.test.ts src/main/background-service-status.test.ts src/main/background-service-mismatch-prompt.test.ts src/renderer/components/BackgroundServiceSettings.test.tsx",
     "test:coverage": "vitest run --coverage",
     "test:regressions": "vitest run src/renderer/session-archive-effects.test.ts src/main/app-store.test.ts src/renderer/skill-load-evidence.test.ts src/renderer/session-capability-contract.test.tsx src/renderer/session-capability-calls.test.ts src/renderer/components/PinnedSummary.test.tsx src/renderer/components/render.test.tsx src/renderer/dock-badge-permission.test.ts src/main/context-admission.test.ts src/main/trace-turn-progress.test.ts src/main/trace-turn-progress.regression.test.ts src/main/commit-hook-trust.test.ts src/main/commit-hook-trust.regression.test.ts src/main/managed-turn-notifications.test.ts && npm run test:renderer:ui",
     "test:renderer:ui": "npm run test:renderer:ui:1 && npm run test:renderer:ui:2 && npm run test:renderer:ui:3",

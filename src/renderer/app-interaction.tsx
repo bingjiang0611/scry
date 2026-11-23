@@ -15,7 +15,7 @@ import { useChatNavigation } from './hooks/useChatNavigation'
 import { useRemoteWorkbench } from './hooks/useRemoteWorkbench'
 import type { SessionRef } from './env'
 import type { SettingsTab } from './components/Modals'
-import { useResizablePane } from './hooks/useResizablePane'
+import { APP_PANE_LIMITS, useAppPanes, useSessionDetailWatch } from './hooks/useAppPanes'
 import { applyProviderCatalogRefresh, resetQueuedPromptControl, updateSessionPromptQueue, type DraftAttachment } from './app-model'
 import { scrollChatToBottomIfNeeded } from './chat-scroll'
 import { retainProtectedSteerPrompts } from './steer'
@@ -24,10 +24,6 @@ import { useAppSessionRuntime } from './app-session-runtime'
 import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
-const SIDEBAR_MIN = 190
-const SIDEBAR_MAX = 260
-const PANEL_MIN = 360
-const PANEL_MAX = 960
 const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 type AppInteractionContext = { state: ReturnType<typeof import('./app-state').useAppState> }
 export function useAppInteraction(context: AppInteractionContext) {
@@ -50,23 +46,9 @@ export function useAppInteraction(context: AppInteractionContext) {
     markRunFinished, setWorkspaceRefreshKey, selectSessionId, loadProjects, sessionLoading, activeSessionId, draftKey
   })
   const { session, steerEvidenceByMessageId, steerCapability } = sessionRuntime
-
-  const sidebarPane = useResizablePane({
-    // The evidence-system shell deliberately resets the old 256px default once;
-    // subsequent user resizing is still persisted under this geometry version.
-    id: 'sidebar-evidence-system',
-    defaultWidth: 230,
-    min: SIDEBAR_MIN,
-    max: SIDEBAR_MAX,
-    side: 'left'
-  })
-  const surfacePane = useResizablePane({
-    id: 'right-surface-panel',
-    defaultWidth: 520,
-    min: PANEL_MIN,
-    max: PANEL_MAX,
-    side: 'right'
-  })
+  useSessionDetailWatch(view === 'chat' && session.historyWindow?.sessionId === activeSessionId
+    ? session.historyWindow?.projectionKey : undefined)
+  const { sidebarPane, surfacePane } = useAppPanes()
   const [turnDiffSelection, setTurnDiffSelection] = useDiffReviewSelection(currentSurface.id)
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null)
   const [archiveUndo, setArchiveUndo] = useState<{ ref: SessionRef; preview: string } | null>(null)
@@ -295,10 +277,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     setShowMcp,
     integrations,
     session,
-    sidebarMin: SIDEBAR_MIN,
-    sidebarMax: SIDEBAR_MAX,
-    panelMin: PANEL_MIN,
-    panelMax: PANEL_MAX,
+    ...APP_PANE_LIMITS,
     openTurnInChat,
     addWorkspaceReference,
     summary: pinnedSummary,

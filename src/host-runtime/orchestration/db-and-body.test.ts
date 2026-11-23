@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { BodyStore } from './body-store'
 import { detectNetworkFilesystem, enforceOrchestrationFileModes, openOrchestrationDatabase } from './db'
 import { migrateOrchestrationDatabase } from './migrations'
-import { ORCHESTRATION_SCHEMA_VERSION } from './schema'
+import { ORCHESTRATION_SCHEMA_VERSION, ORCH_DDL_V1, ORCH_DDL_V2 } from './schema'
 import { INLINE_BODY_MAX_BYTES, OrchestrationStoreError } from './types'
 
 const require = createRequire(import.meta.url)
@@ -46,7 +46,8 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           'orch_p_run',
           'orch_p_interaction',
           'orch_outbox',
-          'orch_legacy_run'
+          'orch_legacy_run',
+          'orch_body_erase'
         ]) {
           expect(tables).toContain(required)
         }
@@ -65,7 +66,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         const meta = new Map(metaRows.map((r) => [r.key, r.value]))
         expect(meta.get('log_id')).toMatch(/^[0-9a-f-]{36}$/i)
         expect(meta.get('pruned_through')).toBe('0')
-        expect(meta.get('projection_schema_version')).toBe('1')
+        expect(meta.get('projection_schema_version')).toBe('4')
         expect(meta.get('legacy_ledger_seq')).toBe('0')
         expect(meta.has('legacy_catalog_sha256')).toBe(true)
 
@@ -104,7 +105,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
     })
   })
 
-  it('migrates an older V1 database (output_seq NOT NULL DEFAULT 0) to V2 nullable output_seq', () => {
+  it('preserves the V2 nullable output_seq migration when upgrading from V1', () => {
     withTempDir((userData) => {
       const orchDir = join(userData, 'orchestration')
       mkdirSync(orchDir, { recursive: true, mode: 0o700 })
@@ -112,30 +113,8 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
       const Database = require('better-sqlite3') as typeof import('better-sqlite3')
       const legacy = new Database(dbPath)
       try {
-        legacy.pragma('user_version = 1')
+        migrateOrchestrationDatabase(legacy, [ORCH_DDL_V1])
         legacy.exec(`
-          CREATE TABLE orch_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-          CREATE TABLE orch_p_run (
-            run_id TEXT PRIMARY KEY,
-            session_key TEXT,
-            owner_actor TEXT NOT NULL,
-            scope TEXT NOT NULL,
-            origin TEXT NOT NULL,
-            provider TEXT,
-            profile TEXT,
-            cwd TEXT,
-            prompt_preview TEXT,
-            lifecycle TEXT NOT NULL,
-            stop_state TEXT,
-            output_seq INTEGER NOT NULL DEFAULT 0,
-            intent_seq INTEGER NOT NULL,
-            body TEXT,
-            settled_at INTEGER,
-            recovered_at INTEGER,
-            outcome TEXT,
-            rev_seq INTEGER NOT NULL,
-            parent_run_id TEXT
-          );
           INSERT INTO orch_p_run (
             run_id, owner_actor, scope, origin, lifecycle, output_seq, intent_seq, rev_seq
           ) VALUES
@@ -148,11 +127,11 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
 
       const upgraded = openOrchestrationDatabase({ userDataDir: userData })
       try {
-        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(2)
+        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(6)
         const oldRow = upgraded.db
-          .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
-          .get('old-v1-run') as { output_seq: number | null }
-        expect(oldRow.output_seq).toBe(5)
+          .prepare('SELECT output_seq, app_run_id FROM orch_p_run WHERE run_id = ?')
+          .get('old-v1-run')
+        expect(oldRow).toEqual({ output_seq: 5, app_run_id: null })
         const zeroRow = upgraded.db
           .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
           .get('old-v1-zero-run') as { output_seq: number | null }
@@ -170,6 +149,31 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         upgraded.close()
       }
     })
+  })
+
+  it('upgrades a populated V2 catalog without changing its session key, revision or event cursor', () => {
+    const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+    const db = new Database(':memory:')
+    try {
+      migrateOrchestrationDatabase(db, [ORCH_DDL_V1, ORCH_DDL_V2], { logId: 'before' })
+      db.exec(`
+        UPDATE orch_meta SET value = '1' WHERE key = 'projection_schema_version';
+        UPDATE orch_meta SET value = 'old-hash' WHERE key = 'legacy_catalog_sha256';
+        INSERT INTO orch_p_session (session_key, cwd, ts, rev_seq, title)
+          VALUES ('old', '/tmp/工作区', 10, 42, '旧标题');
+      `)
+      migrateOrchestrationDatabase(db)
+      expect(db.pragma('user_version', { simple: true })).toBe(6)
+      expect(db.prepare('SELECT session_key, cwd, rev_seq, title, catalog FROM orch_p_session').get()).toEqual({
+        session_key: 'old', cwd: '/tmp/工作区', rev_seq: 42, title: '旧标题', catalog: null
+      })
+      const meta = db.prepare('SELECT value FROM orch_meta WHERE key = ?').pluck()
+      expect(meta.get('projection_schema_version')).toBe('4')
+      expect(meta.get('legacy_catalog_sha256')).toBe('')
+      expect(meta.get('log_id')).toBe('before')
+    } finally {
+      db.close()
+    }
   })
 
   it('refuses to open corrupt/non-database files and never auto-rebuilds', () => {

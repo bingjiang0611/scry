@@ -7,8 +7,6 @@ import {
   stopBackgroundService,
   type BackgroundServiceStopDeps
 } from '../main/background-service-stop'
-import { daemonModeEnabled } from '../main/daemon-channel-gate'
-import { applyDaemonModeDefault } from '../main/daemon-mode-default'
 import { daemonLogPath } from './daemon-log'
 import { createLoginStartManager, type LoginStartManager } from './login-start'
 import { callHostAdmin } from './host-admin-client'
@@ -48,10 +46,7 @@ export function getLoginStartManager(ctx: HostCliServiceContext): LoginStartMana
     homeDir: ctx.homeDir,
     env: ctx.env
   })
-  const resolvedEnv: NodeJS.ProcessEnv = { ...ctx.env }
-  applyDaemonModeDefault(resolvedEnv, { isPackaged: target.isPackaged })
   return createLoginStartManager({
-    daemonMode: daemonModeEnabled(resolvedEnv),
     target,
     platform: ctx.platform,
     homeDir: ctx.homeDir,

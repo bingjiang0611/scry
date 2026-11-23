@@ -43,15 +43,6 @@ export function recoverDispatchedLedgerRuns(
 // run. Kept apart from the device API so the controller reads as a list of
 // device operations and this file as the composition itself.
 
-function sessionMarkerId(detail: string | undefined): string | undefined {
-  if (!detail) return undefined
-  try {
-    const marker = JSON.parse(detail) as { event?: unknown; externalSessionId?: unknown }
-    return marker.event === 'session' && typeof marker.externalSessionId === 'string' && marker.externalSessionId.length <= 256
-      ? marker.externalSessionId : undefined
-  } catch { return undefined }
-}
-
 export interface ExecutionDeps {
   deps: HostControllerDependencies
   authority: PairingAuthority
@@ -60,13 +51,11 @@ export interface ExecutionDeps {
   fileDownloads: RemoteFileDownloads
   interactions: RemoteInteractionBroker
   stops: Map<string, AbortController>
-  live: Map<string, { routing: RemoteIntentRouting; externalSessionId?: string }>
   resolveAttachments(routing: RemoteIntentRouting): Promise<RemoteIntentRouting>
   releaseAttachments(routing: RemoteIntentRouting): Promise<void>
-  notify(): void
 }
 
-/** Tell the App event feed which run changed; observation only, never fails the run. */
+/** Tell the App subscription which run changed; observation only, never fails the run. */
 export function runActivity(deps: Pick<HostControllerDependencies, 'onRunActivity'>, runId: string, ledger: Pick<SessionLedger, 'intentSeq'>): void {
   try { deps.onRunActivity?.(runId, ledger.intentSeq(runId)) } catch (error) { console.warn('[scry] run activity notice failed:', error) }
 }
@@ -88,13 +77,11 @@ function resolveAnsweredByPeer(
   }
 }
 
-/** A ledger event wakes parked watchers and names its run for the App event feed. */
+/** Projects progress and names the changed run for the App subscription. */
 export function ledgerEventObserver(
-  deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent' | 'orchestration'>,
-  notify: () => void
+  deps: Pick<HostControllerDependencies, 'onRunActivity' | 'onLedgerEvent' | 'orchestration'>
 ): (event: LedgerEvent, intentSeq?: number) => void {
   return (event, intentSeq) => {
-    notify()
     runActivity(deps, event.runId, { intentSeq: () => intentSeq })
     if (deps.orchestration && event.kind === 'run_progress') {
       try { deps.orchestration.onRunProgress(event.runId, event.detail) } catch { /* ignore */ }
@@ -118,7 +105,7 @@ export function createExecution(input: ExecutionDeps): {
   immediateDispatch: OrchestrationImmediateDispatchChecks
   dispose(): void
 } {
-  const { deps, ledger, output, fileDownloads, interactions, stops, live, notify } = input
+  const { deps, ledger, output, fileDownloads, interactions, stops } = input
   const gateway = new RemoteGateway({
     authority: input.authority,
     ledger,
@@ -152,21 +139,15 @@ export function createExecution(input: ExecutionDeps): {
       const stop = new AbortController()
       const scope = gateway.runScope(executorInput.runId)
       const routing = await input.resolveAttachments(parseRouting(executorInput.detail, scope))
-      const current: { routing: RemoteIntentRouting; externalSessionId?: string } = { routing }
       stops.set(executorInput.runId, stop)
-      live.set(executorInput.runId, current)
       reached.add(executorInput.runId)
       try {
-        await deps.runProvider({
+        return await deps.runProvider({
           runId: executorInput.runId,
           routing,
-          progress: (detail) => {
-            const sessionId = sessionMarkerId(detail)
-            if (sessionId) current.externalSessionId = sessionId
-            executorInput.progress(detail)
-          },
+          progress: executorInput.progress,
           output: executorInput.output,
-          // Content-free trace changes name the run for the App event feed (P3f E2).
+          // Content-free trace changes name the run for the App subscription (P3f E2).
           activity: () => runActivity(deps, executorInput.runId, ledger),
           requestUserInput: (request, signal) => interactions.request(executorInput.runId, request, signal),
           stopSignal: stop.signal,
@@ -177,9 +158,7 @@ export function createExecution(input: ExecutionDeps): {
         })
       } finally {
         stops.delete(executorInput.runId)
-        live.delete(executorInput.runId)
         interactions.cancelRun(executorInput.runId)
-        notify()
       }
     }
   }
@@ -221,14 +200,14 @@ export function createExecution(input: ExecutionDeps): {
         }
         return check
       },
-      onSettled: (runId, ok, detail) => {
-        deps.orchestration!.onRunTerminal(runId, ok ? 'settled' : 'failed', detail)
+      onSettled: (runId, lifecycle, detail) => {
+        deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
       }
     } : {}),
     executor: { execute: async (executorInput) => {
       try {
         const routing = parseRouting(executorInput.detail, gateway.runScope(executorInput.runId))
-        try { await gated.execute(executorInput) }
+        try { return await gated.execute(executorInput) }
         finally {
           // Attachments are per-intent scratch: released after the run, whatever it did.
           try { await input.releaseAttachments(routing) }
@@ -245,7 +224,7 @@ export function createExecution(input: ExecutionDeps): {
       }
     } },
     outputSink: {
-      append: (runId, chunk) => { output.append(runId, chunk); notify(); runActivity(deps, runId, ledger) },
+      append: (runId, chunk) => { output.append(runId, chunk); runActivity(deps, runId, ledger) },
       flush: (runId) => output.flush(runId)
     }
   })

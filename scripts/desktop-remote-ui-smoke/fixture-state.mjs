@@ -6,7 +6,7 @@ export function fixtureState(options) {
   listCalls: 0, catalogCalls: 0, remoteStatusCalls: 0, runStatusCalls: 0, holdHistory: false, providerControlsCalls: [], holdProviderControls: false, providerControlWaiters: [],
   providerControlsFailure: null, legacyProviderHost: false, oldWorktreeHost: false, workspaceExecutionCwd: null,
   fileLists: [], fileReads: [], localWorkspaceCalls: [], workbenchCalls: [], workspaceChoiceCalls: [], workspaceBranchCalls: [],
-  uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false, answerFailure: false,
+  uiEvents: [], backgroundStopCalls: 0, intentsCalls: 0, firstIntentCleared: false,
   intent: ${unknownReceiptOnly ? `{ intentId: 'unknown-original-id', connectionId: 'fixture-connection', context: { cwd: '/fixture/project-b', providerId: 'qoder', externalSessionId: 'other-native' }, createdAt: 1, status: 'unknown', failure: 'transport receipt unavailable' }` : 'null'},
   resolveIntentCalls: [], resolveFailure: null, holdSubmit: false, runState: 'dispatched', exposeTrace: true, runStatusFailure: false, autoResetOnSubmit: false, holdRunStatus: false,
   connected: true, hostEnabled: false, hostInviteCalls: 0, hostDisableCalls: 0,
@@ -46,7 +46,7 @@ const catalog = {
     { sessionId: 'old-session', externalSessionId: 'old-native', providerId: 'claude', cwd: '/fixture/project-a', label: 'Old session', ts: 1700000000000 },
     { sessionId: 'other-session', externalSessionId: 'other-native', providerId: 'qoder', cwd: '/fixture/project-b', label: 'Other history', ts: 1 }
   ],
-  providerEvidence: 'host_snapshot', managedWorktrees: 1, directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
+  subscribe: 1, providerEvidence: 'host_snapshot', managedWorktrees: 1, directorySelection: true, sessionActions: true, sessionFork: true, sessionDelete: true,
   workbench: ${structureOnly ? '1' : 'undefined'},
   attachments: { transport: 'chunked', maxBytes: 16 * 1024 * 1024, maxTotalBytes: 32 * 1024 * 1024, maxCount: 16, chunkBytes: 256 * 1024 }
 }

@@ -24,14 +24,17 @@ import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
 import { openLocalChannel } from './local-channel'
 import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
-import { AppEventFeed, DAEMON_WINDOW_NOTICES } from '../main/remote/app-event-feed'
+import { SUBSCRIBE_RETAINED_WINDOW_NOTICES } from '../shared/orchestration-subscribe'
+import type { AppHint } from './orchestration-authority-subscribe'
 import type { createForkOperations } from '../main/bootstrap/run-fork'
 import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
-import { parseOrchestrationMode } from '../host-runtime/orchestration/mode'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
+import { authoritySubscribeDeps, createAuthorityDetailReader } from './orchestration-authority-subscribe'
+import { createDaemonCatalogScans } from './orchestration-catalog-scan'
+import { createOrchestrationCatalogAccess } from './orchestration-catalog-access'
 import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from './host-process-dispose'
 import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
@@ -58,11 +61,13 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   let remoteHostService: RemoteHostService | null = null
 
   const mirrorSessionTranscript = createMirrorSessionTranscript(options.userDataDir)
-  const events = new AppEventFeed({ state: () => [{ kind: 'attention', snapshot: session.dockBadge.snapshot() }] })
-  const publishData = (event: AgentDataUpdated): void => events.append({ kind: 'data', event })
+  // New and resynchronizing Apps receive the full unread set (E1b).
+  let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
+  const publishHint = (hint: AppHint): void => orchestrationAuthority?.publishHint(hint)
+  const publishData = (event: AgentDataUpdated): void => publishHint({ kind: 'data', event })
   const session = createSessionState({
     setBadgeCount: () => true,
-    publishUnreadSessions: (snapshot) => events.append({ kind: 'attention', snapshot })
+    publishUnreadSessions: (snapshot) => publishHint({ kind: 'attention', snapshot })
   })
 
   let loadSessions = (): Array<{ cwd?: string }> => []
@@ -70,14 +75,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
   })
-  let orchestrationAuthority: DaemonOrchestrationAuthority | undefined
+  const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink, log)
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
     homeDir: workspace.homeDir,
     recordingWorkerUrl: new URL('./terminal-recording-worker.js', import.meta.url),
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
-    notify: () => events.append({ kind: 'terminal' }),
-    idleMs: () => orchestrationAuthority ? Math.min(events.idleMs(), orchestrationAuthority.subscribeHub.idleMs()) : events.idleMs(),
+    notify: () => publishHint({ kind: 'terminal' }),
+    idleMs: () => orchestrationAuthority?.subscribeHub.idleMs() ?? 0,
     log,
     ...options.terminal
   })
@@ -116,7 +121,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       ? conversationSend.startAppRun(request, { managedConversation: startOptions.managedConversation })
       : Promise.reject(new Error('daemon_catalog_start_requires_conversation')),
     homeDir: workspace.homeDir,
-    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory
+    resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
+    projection: catalogProjection
   })
   loadSessions = () => catalog.appSessionStore().load()
 
@@ -131,10 +137,12 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const remoteRunLedgerIds = new Map<string, string>()
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
+    observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
+    // The pipeline's volatile notices travel on the App subscription. The trace and questions
     renderer: {
       send: (channel, payload) => {
         if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated)
-        else if (DAEMON_WINDOW_NOTICES.has(channel)) events.append({ kind: 'window', channel, payload })
+        else if (SUBSCRIBE_RETAINED_WINDOW_NOTICES.has(channel)) publishHint({ kind: 'window', channel, payload })
       },
       isFocused: () => false,
       acceptsNotices: () => true
@@ -185,11 +193,13 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
     deferMs: 0,
-    skipConversationRecovery: parseOrchestrationMode(process.env).effective === 'on'
+    skipConversationRecovery: true
   })
   await startupManagedRecovery
 
-  const sessionLinks: DaemonSessionLinks = {}
+  const sessionLinks: DaemonSessionLinks = {
+    deleteNativeProjection: catalogProjection.deleteNative, deleteConversationProjection: catalogProjection.deleteConversation
+  }
   const targetBridge = createAppExecutionTargetBridge({
     isPrimaryAppPeer: (fingerprint) => remoteHostService?.authority.isPrimaryAppLocalGrant(fingerprint) ?? false,
     ...(options.executionTargetCallTimeoutMs !== undefined ? { callTimeoutMs: options.executionTargetCallTimeoutMs } : {})
@@ -197,6 +207,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const { providerDiscovery, refreshRemoteProviderSnapshot, runtime, history, historyChannels, forkOperations: forks } =
     createDaemonRemoteAssembly({
       userDataDir: options.userDataDir, workspace, pi, providers, session, catalog, pipeline, sourceControl, remoteRunIds, requestRunStop,
+      readProjectedHistory: catalogProjection.readDetail,
       getRemoteHostService: () => remoteHostService, setRemoteHostService: (value) => { remoteHostService = value },
       getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery, isShuttingDown: () => isShuttingDown,
       desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log
@@ -205,23 +216,21 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
 
   await refreshRemoteProviderSnapshot()
   const remoteStateDirectory = join(options.userDataDir, 'remote')
-  const attachedOrchestration = await attachHostProcessOrchestration({
+  const authority = await attachHostProcessOrchestration({
     options,
-    remoteStateDirectory,
     conversationStore: catalog.conversationStore,
     runs: pipeline.runs,
     requestRunStop,
     attentionSnapshot: () => session.dockBadge.snapshot(),
-    events,
     log
   })
-  const orchestrationShadow = attachedOrchestration.orchestrationShadow
-  orchestrationAuthority = attachedOrchestration.orchestrationAuthority
+  orchestrationAuthority = authority
   const hostAdmin = new HostAdminStore({
     stateDirectory: remoteStateDirectory,
-    onNotice: (notice) => events.append({ kind: 'hostAdmin', notice })
+    onNotice: (notice) => publishHint({ kind: 'hostNotice', notice })
   })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
+  const listHostAdminNotices = isHostCliExperimentalEnabled(process.env) ? () => hostAdmin.recentNotices() : undefined
   const service = await createHostRuntime({
     runtime,
     stateDirectory: remoteStateDirectory,
@@ -234,12 +243,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
     toolPanels: undefined,
     managedLaunches: conversationSend.launches,
-    onRunActivity: (runId, intentSeq) => events.append({ kind: 'run', runId, ...(intentSeq !== undefined ? { intentSeq } : {}) }),
-    ...(orchestrationShadow ? { onLedgerEvent: orchestrationShadow.onLedgerEvent } : {}),
-    ...(orchestrationAuthority ? { orchestration: orchestrationAuthority.hooks } : {}),
-    ...(isHostCliExperimentalEnabled(process.env) ? { listHostAdminNotices: () => hostAdmin.recentNotices() } : {}),
+    onRunActivity: (runId) => publishHint({ kind: 'run', runId }),
+    orchestration: authority.hooks,
+    ...(listHostAdminNotices ? { listHostAdminNotices } : {}),
     localEndpoint: daemonLocalEndpoint({
-      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, events, terminal,
+      catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, publishHint, terminal,
       runs: () => pipeline.runs,
       requestRunStop,
       forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
@@ -253,14 +261,15 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
       links: sessionLinks,
-      ...(orchestrationAuthority ? {
-        orchestrationStatus: () => orchestrationAuthority!.status(),
-        subscribe: orchestrationAuthority.createSubscribeHandler({
-          hostId: () => remoteHostService?.hostId ?? '',
-          authorizePeer: (peer) => { remoteHostService?.controller.authorizeDevicePeer(peer) },
-          grantScope: (peer) => remoteHostService?.authority.grantScope(peer) ?? 'remote'
-        })
-      } : {}),
+      orchestrationStatus: () => authority.status(),
+      subscribe: authority.createSubscribeHandler({
+        ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
+        remoteHostNotices: listHostAdminNotices,
+        runQuestions: (runId) => pipeline.runs.get(runId)?.state.pendingQuestions,
+        readFirstPage: createAuthorityDetailReader(historyChannels, (id) => catalog.conversationService().read(id)),
+        scans: createDaemonCatalogScans(authority.sink, options.userDataDir, workspace,
+          catalog.appSessionStore, () => publishData({ kind: 'catalog_recovered' }), log)
+      }),
       log
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
@@ -275,14 +284,13 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
     activeRuns: () => pipeline.runs.unsettledStates().length,
     isPackaged: options.isPackaged,
-    ...(orchestrationAuthority ? { subscribe: 1 as const } : {})
+    subscribe: 1
   })
   const channel = await openLocalChannel({
     directory: options.daemonStateDirectory,
     serve: (stream) => localHost.serve(stream)
   })
-  orchestrationShadow?.startImport()
-  orchestrationAuthority?.startImport()
+  authority.startImport()
   const enrollment = openLocalEnrollmentStore(options.daemonStateDirectory)
   enrollment.ensure(service.hasActiveLocalGrant())
   const enrollSocket = await openLocalEnrollSocket({
@@ -299,7 +307,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     hostAdmin,
     remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
     activeRuns: () => pipeline.runs.unsettledStates().length,
-    ...(orchestrationAuthority ? { orchestrationStatus: () => orchestrationAuthority.status() } : {}),
+    orchestrationStatus: () => authority.status(),
     log
   })
   log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}${adminSocket ? ` admin=${adminSocket.socketPath}` : ''}`)
@@ -312,15 +320,13 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     ...(adminSocket ? { adminSocket } : {}),
     hostAdmin,
     providerOperationGate: session.providerOperationGate,
-    ...(orchestrationShadow ? { orchestrationShadow } : {}),
-    ...(orchestrationAuthority ? { orchestrationAuthority } : {}),
+    orchestrationAuthority: authority,
     dispose: async () => {
       if (disposed) return
       disposed = true
       isShuttingDown = true
       startupManagedRecovery = Promise.resolve()
-      events.close()
-      orchestrationAuthority?.subscribeHub.close()
+      authority.subscribeHub.close()
       targetBridge.close()
       await terminal.dispose()
       await adminSocket?.close()
@@ -328,8 +334,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       await channel.close()
       await localHost.close()
       await service.dispose()
-      orchestrationShadow?.close()
-      await orchestrationAuthority?.close()
+      await authority.close()
       await disposeProviderRegistryBounded(providers.providerRegistry, options.providerDisposeTimeoutMs ?? 5_000, log)
     }
   }

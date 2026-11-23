@@ -12,7 +12,6 @@ const { registerWorkspaceHandlers } = await import('./workspace')
 // no shell. They stay bound to the window's selection exactly as in process, and read
 // nothing the daemon owns: the cross-project fallback asks the daemon for its projects.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 type Listener = (event: unknown, ...args: unknown[]) => Promise<unknown>
 const dirs: string[] = []
 const tempDir = (): string => { const dir = realpathSync(mkdtempSync(join(tmpdir(), 'scry-workspace-daemon-'))); dirs.push(dir); return dir }
@@ -42,13 +41,10 @@ describe('workspace shell channels in daemon mode', () => {
     })
     if (daemon) undo.push(installDaemonChannelForwarder(forwarded))
     registerWorkspaceHandlers({
-      handleTrusted: ((channel: string, listener: Listener) => { handlers.set(channel, gateDaemonChannel(channel, listener, ON)) }) as never,
-      getCurrentCwd: () => window, setCurrentCwd: vi.fn(), invalidateSessionHistoryLoad: vi.fn(),
-      resolveKnownProjectDirectory, homeFileAccess: {} as never, knownProjectDirectories, openLocalPath,
+      handleTrusted: ((channel: string, listener: Listener) => { handlers.set(channel, gateDaemonChannel(channel, listener)) }) as never,
+      getCurrentCwd: () => window, setCurrentCwd: vi.fn(), homeFileAccess: {} as never, openLocalPath,
       shell: { trashItem } as never, dialog: { showMessageBox } as never, getWindow: () => null,
-      getTerminalManager: vi.fn(), isShuttingDown: () => false, rendererCanReceive: () => true, assertTrustedIpcEvent: vi.fn(),
-      terminalOutput: {} as never, providerRegistry: { invalidateContext: vi.fn() }, providerContextKey: () => 'k',
-      resetSessionContext: vi.fn(), dockBadge: { view: vi.fn() }
+      isShuttingDown: () => false, rendererCanReceive: () => true, dockBadge: { view: vi.fn() }
     })
     return { handlers, knownProjectDirectories, resolveKnownProjectDirectory, openLocalPath, trashItem, showMessageBox, forwarded }
   }

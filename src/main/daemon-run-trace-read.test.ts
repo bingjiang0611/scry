@@ -90,7 +90,7 @@ describe('daemon trace read past the single-response limit', () => {
     // frame inside the lane's response limit, every read replayable.
     expect(calls.length).toBe(Math.ceil(size / DESKTOP_HISTORY_CHUNK_BYTES))
     const first = calls[0]!.request.query as Record<string, unknown>
-    expect(first).toMatchObject({ kind: 'trace', runId, byteChunks: true, settledTail: true, images: true })
+    expect(first).toMatchObject({ kind: 'trace', runId, byteChunks: true, images: true })
     expect(first.chunk).toBeUndefined()
     const id = (calls[1]!.request.query as { chunk: { id: string } }).chunk.id
     calls.slice(1).forEach((call, index) => {

@@ -24,6 +24,7 @@ export function prepareSupervisorLaunch(env: NodeJS.ProcessEnv, options: {
     appVersion: config.appVersion,
     isPackaged: config.isPackaged,
     startedBy: `supervisor:${options.pid}`,
+    hop: 'supervisor',
     ...(config.launchedBy ? { launchedBy: config.launchedBy } : {})
   })
   return { config, daemonEnv }

@@ -1,11 +1,22 @@
-import type { DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
+import type { SubscribeRequest } from '../../shared/orchestration-subscribe'
+import type { DesktopRemoteCatalog, DesktopRemoteConnection, DesktopPairingResult, DesktopSshTarget } from '../../shared/desktop-remote'
 import { DesktopRemoteClientBase } from './desktop-client-base'
-import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, record, type EncryptedState, type StoredConnection } from './desktop-client-validation'
+import { fail, text, validateSsh, parseInvitation, connectionId, publicConnection, type EncryptedState, type StoredConnection } from './desktop-client-validation'
 import { validateInfo } from './desktop-client-capabilities'
-import { readRemoteSessionPages } from './desktop-client-session-catalog'
+import { DesktopStatusSubscription } from './desktop-client-session-catalog'
 
 export abstract class DesktopRemoteClientConnections extends DesktopRemoteClientBase {
-  async list(): Promise<DesktopRemoteConnection[]> { const state = await this.state(); return state.connections.map((item) => publicConnection(item, this.active.get(item.id)?.tunnel.alive === true)) }
+  async list(): Promise<DesktopRemoteConnection[]> {
+    const state = await this.state()
+    return state.connections.map((item) => {
+      const active = this.active.get(item.id)
+      const connected = active?.tunnel.alive === true
+      return {
+        ...publicConnection(item, connected),
+        ...(connected && active.subscribe === 1 ? { subscribe: 1 as const } : {})
+      }
+    })
+  }
 
   async pair(input: { label: string; ssh: DesktopSshTarget; invitation: string }): Promise<DesktopPairingResult> {
     this.assertLive()
@@ -91,24 +102,29 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
       const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, { op: 'desktop', query: { kind: 'info' } }, { tunnel, classifySshFailure: true })
       const capabilities = validateInfo(response, item.hostId)
       if (this.disposed) fail('desktop_client_disposed')
-      try {
-        // The attention baseline reads the session pages on the same lanes as every run request.
-        const baseline = await readRemoteSessionPages(async (request) => {
-          const response = await this.laneRequest(item.id, tunnel.runPath, item, state.identity, request, { tunnel, classifySshFailure: true })
-          if (!record(response)) fail('invalid_catalog_response')
-          return response
-        })
-        this.attention?.baseline(item.id, baseline)
-      } catch (error) {
-        if (this.disposed || !tunnel.alive) throw error
+      if (capabilities.subscribe !== 1) fail('subscribe_unsupported')
+      if (this.attention) {
+        try {
+          await this.openStatusSubscription(item.id, item.hostId, (request, signal) => this.laneRequest(
+            item.id, tunnel.runPath, item, state.identity, { op: 'subscribe', ...request },
+            { tunnel, classifySshFailure: true, signal }
+          ))
+        } catch (error) {
+          if (this.disposed || !tunnel.alive ||
+              (error instanceof Error && error.message === 'desktop_remote_device_not_authorized')) throw error
+        }
       }
+      if (this.disposed) fail('desktop_client_disposed')
       await this.save(state, state.connections.map((connection) => connection.id === item.id ? { ...connection, autoConnect: true } : connection))
       this.active.set(item.id, { tunnel, serial: Promise.resolve(),
         ...(capabilities.attachments ? { attachments: capabilities.attachments } : {}),
+        subscribe: 1,
         ...(capabilities.traceDelta ? { traceDelta: capabilities.traceDelta } : {}),
         ...(capabilities.managedWorktrees === 1 ? { managedWorktrees: 1 as const } : {}) })
       await this.reconcileUnknown(state, item.id)
     } catch (error) {
+      this.statusSubscriptions.get(item.id)?.close()
+      this.statusSubscriptions.delete(item.id)
       this.lanes.closeConnection(item.id)
       this.active.delete(item.id)
       this.attention?.disconnect(item.id)
@@ -117,6 +133,72 @@ export abstract class DesktopRemoteClientConnections extends DesktopRemoteClient
     }
   }
 
+  protected async statusSubscription(id: string): Promise<DesktopStatusSubscription> {
+    const item = this.connection(await this.state(), id)
+    const active = this.active.get(id)
+    if (!active?.tunnel.alive) fail('desktop_not_connected')
+    return this.openStatusSubscription(id, item.hostId,
+      (request, signal) => this.requestForConnection(id, { op: 'subscribe', ...request }, undefined, signal))
+  }
+
+  private async openStatusSubscription(id: string, hostId: string,
+    read: (request: SubscribeRequest, signal: AbortSignal) => Promise<Record<string, unknown>>
+  ): Promise<DesktopStatusSubscription> {
+    const existing = this.statusSubscriptions.get(id)
+    if (existing) { await existing.open(); return existing }
+    let baseline = true
+    const subscription = new DesktopStatusSubscription({
+      hostId, read,
+      onChange: (change, hints) => {
+        if (change.catalog && baseline) {
+          this.attention?.baseline(id, subscription.sessions())
+          baseline = false
+        }
+        const cached = this.catalogCache.get(id)?.catalog
+        const catalog = cached && change.catalog
+          ? this.withAttention(id, { ...cached, sessions: subscription.sessions() })
+          : undefined
+        const notices = hints.flatMap(hint => hint.kind === 'hostNotice' ? [hint.notice] : [])
+        const next = catalog ?? (cached && notices.length ? this.withAttention(id, { ...cached, sessions: subscription.sessions() }) : undefined)
+        if (next && notices.length) {
+          const prior = next.hostAdminNoticeItems ?? []
+          const unique = new Map([...prior, ...notices].map(notice => [notice.id, notice]))
+          next.hostAdminNoticeItems = [...unique.values()].sort((left, right) => right.ts - left.ts).slice(0, 32)
+        }
+        this.publishSubscription?.({
+          connectionId: id, ...(next ? { catalog: next } : {}),
+          ...(change.runs ? { runs: true } : {}), ...(change.stale ? { stale: true } : {})
+        })
+      }
+    })
+    this.statusSubscriptions.set(id, subscription)
+    try { await subscription.open() }
+    catch (error) {
+      if (this.statusSubscriptions.get(id) === subscription) this.statusSubscriptions.delete(id)
+      subscription.close()
+      throw error
+    }
+    return subscription
+  }
+
+  // Unread keys are this client's view state, derived from the host's catalog evidence
+  // on every read (cached or fresh); they are never stored in the cached catalog.
+  protected withAttention(connectionIdValue: string, catalog: DesktopRemoteCatalog): DesktopRemoteCatalog {
+    const unreadSessionKeys = this.attention?.catalog(connectionIdValue, { sessions: catalog.sessions })
+    return unreadSessionKeys ? { ...catalog, unreadSessionKeys: [...unreadSessionKeys] } : catalog
+  }
+
+  protected async disconnectActive(connectionIdValue: string): Promise<void> {
+    const active = this.active.get(connectionIdValue)
+    this.statusSubscriptions.get(connectionIdValue)?.close()
+    this.statusSubscriptions.delete(connectionIdValue)
+    this.detailSubscriptions.get(connectionIdValue)?.close()
+    this.detailSubscriptions.delete(connectionIdValue)
+    this.lanes.closeConnection(connectionIdValue)
+    if (!active) return
+    this.active.delete(connectionIdValue)
+    await active.tunnel.close()
+  }
   async disconnect(connectionIdValue: string): Promise<void> {
     return this.serializeLifecycle(async () => {
       const state = await this.state()

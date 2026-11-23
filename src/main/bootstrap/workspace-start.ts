@@ -4,7 +4,7 @@ import type { ProviderRegistry } from '../providers/registry'
 import { canonicalExistingDirectory } from '../workspace-authorization'
 import { PerformanceTrace } from '../performance-timing'
 import type { RemoteRunCompletion } from '../remote/remote-run-binding'
-import type { AppRunStartOptions } from './run-frontdoor'
+import { runSemantics, type AppRunStartOptions } from './run-frontdoor'
 
 export type RemoteWorkspaceRunStart = AgentStartResult & { remoteCompletion: Promise<RemoteRunCompletion> }
 
@@ -30,7 +30,9 @@ export async function startWorkspaceRun(payload: AgentStartRequest, options: App
     await deps.getStartupManagedRecovery()
     const remote = options.origin === 'remote'
     if (remote && !options.runId) throw new Error('远程 Worktree 启动缺少运行标识')
-    const cwd = remote ? deps.resolveRemoteProjectDirectory(request.cwd) : deps.resolveKnownProjectDirectory(request.cwd)
+    // The App's own submit reaches the daemon through the ledger (origin remote) under a
+    // local grant: its project is one of the App's known projects, as for any App run.
+    const cwd = runSemantics(options).appSemantics ? deps.resolveKnownProjectDirectory(request.cwd) : deps.resolveRemoteProjectDirectory(request.cwd)
     const selected = deps.getCurrentCwd()
     if (!remote && selected && cwd !== canonicalExistingDirectory(selected)) throw new Error('发送前项目已切换；请确认保留的草稿后再发送')
     timing.mark('source_authorized')

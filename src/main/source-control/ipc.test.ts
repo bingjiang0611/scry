@@ -1,7 +1,7 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { registerTrustedIpcHandler } from '../ipc-trust'
+import { registerTrustCheckedListener } from '../ipc-trust'
 import { parseScMutation, registerSourceControlIpc } from './ipc'
 import type { SourceControlService } from './service'
 
@@ -37,7 +37,7 @@ describe('production source-control IPC boundary', () => {
     const privileged = Object.fromEntries(methods.map((method) => [method, vi.fn()]))
     registerSourceControlIpc(
       (channel, listener) =>
-        registerTrustedIpcHandler(
+        registerTrustCheckedListener(
           ipcMain,
           channel,
           () => window as unknown as BrowserWindow,

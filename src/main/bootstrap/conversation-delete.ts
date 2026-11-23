@@ -8,7 +8,7 @@ import type { ConversationTableDependencies } from './conversation'
 
 type DeletionDependencies = Pick<ConversationTableDependencies, 'providerContextKey' | 'contextAdmission' |
   'getStartupManagedRecovery' | 'appSessionStore' | 'conversationStore' | 'getRuns' | 'invalidateSessionHistoryLoad' | 'publishDataUpdated' |
-  'deleteOneSession' | 'resolveSessionRunIds' | 'deleteConversationHistory' | 'appUserDataDir'>
+  'deleteOneSession' | 'resolveSessionRunIds' | 'deleteConversationHistory' | 'deleteConversationProjection' | 'appUserDataDir'>
 /** The conversation table's collecting registrar: main serves it as IPC, the daemon as local ops. */
 type ChannelRegistrar = (channel: string, listener: (event: unknown, ...args: any[]) => unknown) => void
 
@@ -35,7 +35,7 @@ const message = (error: unknown): string => error instanceof Error ? error.messa
 export function registerConversationDeletionHandlers(handle: ChannelRegistrar, deps: DeletionDependencies) {
   const { providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
     getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
-    appUserDataDir } = deps
+    appUserDataDir, deleteConversationProjection } = deps
 
   function assertConversationDeletionIdle(conversation: Conversation): void {
     const runIds = new Set(conversation.turns.map(turn => turn.runId))
@@ -104,17 +104,31 @@ export function registerConversationDeletionHandlers(handle: ChannelRegistrar, d
         })
         result.deleted.push(...receipt.deleted.map(store => `${scope}: ${store}`))
         result.retained.push(...receipt.retained)
-        result.failed.push(...receipt.failed.map(failure => ({ ...failure, store: `${scope}: ${failure.store}` })))
-        if (!receipt.ok && !receipt.failed.length) result.failed.push({ store: scope, error: receipt.reason ?? '删除结果未确认' })
+        if (receipt.reason === 'unavailable') result.reason = 'unavailable'
+        const reason = receipt.reason ? { reason: receipt.reason } : {}
+        result.failed.push(...receipt.failed.map(failure => ({ ...failure, ...reason, store: `${scope}: ${failure.store}` })))
+        if (!receipt.ok && !receipt.failed.length) {
+          result.failed.push({ store: scope, error: receipt.reason ?? '删除结果未确认', ...reason })
+        }
       } catch (error) { result.failed.push({ store: scope, error: message(error) }) }
     }
     try {
       await deleteConversationHistory(appUserDataDir, conversation)
       result.deleted.push('frozen handoff bodies')
     } catch (error) { result.failed.push({ store: 'frozen handoff bodies', error: message(error) }) }
+    if (!result.failed.length && deleteConversationProjection) {
+      try {
+        const projection = deleteConversationProjection(conversation)
+        if (projection.status === 'deleted') result.deleted.push('orchestration')
+        if (projection.status === 'unavailable') {
+          result.reason = 'unavailable'
+          result.failed.push({ store: 'orchestration', error: projection.error ?? 'orchestration_unavailable' })
+        }
+      } catch (error) { result.failed.push({ store: 'orchestration', error: message(error) }) }
+    }
     result.retained = [...new Set(result.retained)]
     result.ok = result.failed.length === 0
-    if (!result.ok) result.reason = 'partial_failure'
+    if (!result.ok) result.reason ??= 'partial_failure'
     await conversationStore().finishDeletion(conversation.id, fingerprint, result, plan.targets.some(target => target.sharedWith.length > 0))
     publishDataUpdated({ kind: 'conversation_changed', conversationId: conversation.id })
     return result
@@ -148,6 +162,7 @@ export function registerConversationDeletionHandlers(handle: ChannelRegistrar, d
           return plan
         })
         const result = await executeDeletion(child, plan, plan.fingerprint, emptyResult())
+        if (result.reason === 'unavailable') into.reason = 'unavailable'
         into.deleted.push(...result.deleted.map(store => `${label}: ${store}`))
         into.retained.push(...result.retained)
         into.failed.push(...result.failed.map(failure => ({ ...failure, store: `${label}: ${failure.store}` })))

@@ -90,7 +90,7 @@ describe('required PR checks', () => {
   // The fourth entry is the changes output that gates the macOS App jobs: CI keys them on desktop,
   // Performance keys native on native_performance, which implies desktop.
   for (const [file, dependencies, desktopJobs, desktopOutput] of [
-    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'daemon-orchestration', 'unit-in-process', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
+    ['ci.yml', ['changes', 'node', 'unit', 'unit-coverage', 'cli-compat', 'daemon-orchestration', 'packaged-electron', 'packaged-linux'], ['packaged-electron'], 'desktop'],
     ['performance.yml', ['changes', 'compare', 'native'], ['native'], 'native_performance']
   ] as const) {
     const changes = (required: string, desktop: string) => ({ result: 'success', outputs: { required, desktop, node_performance: required, native_performance: desktop } })
@@ -156,7 +156,7 @@ describe('required PR checks', () => {
     const job = workflow('ci.yml').jobs.node
     expect(job.steps.filter(step => step.run).map(step => step.run)).toEqual([
       'npm ci --ignore-scripts', 'npm run typecheck', 'npm run check:source-comments -- --base HEAD^1',
-      'npm run check:harness-bindings',
+      'node scripts/main-import-boundary.mjs --strict', 'npm run check:harness-bindings',
       'npm run test:shell', 'npm run build', 'npm run build:cli',
       source(job, 'Package unpublished recorder with source provenance').run
     ])
@@ -184,6 +184,14 @@ describe('required PR checks', () => {
       'if-no-files-found': 'error',
       'retention-days': 7
     })
+  })
+
+  it('does not set the retired SCRY_HOST_DAEMON switch on any job or step (S3)', () => {
+    // The daemon is the only runtime; the variable is ignored with a warning, so a job that
+    // sets it only pretends to choose a mode.
+    expect(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')).not.toMatch(/SCRY_HOST_DAEMON/)
+    const job = workflow('ci.yml').jobs['daemon-orchestration']
+    expect(job.steps.find(step => step.run?.includes('vitest'))?.run).toContain('src/host-runtime/orchestration src/daemon')
   })
 
   it('pins the packaged macOS gate to a supported standard runner image', () => {
@@ -307,12 +315,11 @@ describe('required PR checks', () => {
     expect(source(workflow('ci.yml').jobs['cli-compat'], 'CLI tests and clean tarball smoke').run).toBe('npm run check:cli-runtime')
   })
 
-  it('retains an explicit SCRY_HOST_DAEMON=0 job for the in-process escape hatch', () => {
-    const job = workflow('ci.yml').jobs['unit-in-process']
-    expect(job['runs-on']).toBe('ubuntu-latest')
-    expect(job.env?.ELECTRON_SKIP_BINARY_DOWNLOAD).toBe('1')
-    const step = source(job, 'In-process escape-hatch tests (SCRY_HOST_DAEMON=0)') as Step & { env?: Record<string, string> }
-    expect(step.env?.SCRY_HOST_DAEMON).toBe('0')
-    expect(step.run).toBe('npm run test:in-process')
+  it('has no in-process escape-hatch job, and gates the App main import graph strictly (S3)', () => {
+    expect(workflow('ci.yml').jobs['unit-in-process']).toBeUndefined()
+    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }
+    expect(scripts['test:in-process']).toBeUndefined()
+    const step = source(workflow('ci.yml').jobs.node, 'Main import boundary (strict)')
+    expect(step.run).toBe('node scripts/main-import-boundary.mjs --strict')
   })
 })

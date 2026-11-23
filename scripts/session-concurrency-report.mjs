@@ -5,7 +5,7 @@ import { evaluateStatus } from './session-concurrency-contract.mjs'
 export function buildConcurrencyReport(parts) {
   const { scenario, concurrency, tasks = concurrency, taskPool, identity, runs, failures, probe, resources,
     quietResources, startupResources,
-    spanningResources, resourceSampling, mainCpu, rendererTask, processCpu, quietProcessCpu,
+    spanningResources, resourceSampling, daemonResources, mainCpu, rendererTask, processCpu, quietProcessCpu,
     quietMainCpu, quietRendererTask,
     switchPreparation, switchStartedRows, observedConcurrency, rendererMount,
     rendererWindows, phases, journal, sqlite, cleanup, switches, archiveFiles, diagnostics, sidebarSessions } = parts
@@ -39,11 +39,12 @@ export function buildConcurrencyReport(parts) {
     taskPool: taskPool ?? unavailable('this report carried no task pool lane'),
     rendererMount,
     resourceWindowSampling: resourceSampling,
+    daemonResources: daemonResources ?? unavailable('this report carried no daemon samples'),
     cpu: resources,
     quietCpu: quietResources,
     startupCpu: startupResources,
     spanningCpu: spanningResources,
-    providerProcess: unavailable('in-process offline smoke adapter has no Provider child process'),
+    providerProcess: unavailable('the daemon runs the offline adapter without a separate Provider process'),
     // forced:false only means no collection was forced; this harness collects no GC events, so post-GC
     // residency cannot be observed and is not attributed to a natural GC.
     gc: { forced: false, postCollectionResidency: unavailable('GC events are not collected by this harness'),
@@ -112,7 +113,7 @@ export function buildConcurrencyReport(parts) {
         + 'samples is not a continuous peak, and per-process peaks added together are not a simultaneous whole-App '
         + 'peak, so no peak and no post-GC residency is claimed beyond what a sample observed',
       gc: 'no GC is forced and no GC event is collected: post-collection residency is unavailable, not observed',
-      providerProcess: 'unavailable (in-process offline fixture)',
+      providerProcess: 'unavailable (offline adapter inside the daemon)',
       realProviderCost: 'not proven; this fixture exercises Scry paths only',
       rendererMirroring: 'main mirrors the focused run only',
       crossProcessClock: 'renderer boundaries use one clock; main windows are separate samples, never subtracted',
@@ -122,8 +123,8 @@ export function buildConcurrencyReport(parts) {
         + 'close stays unknown instead of repeating the stop',
       archiveAuthority: 'durable turn archive plus the referenced app-trace content blob, re-read after process exit',
       phaseAttribution: 'main phases are aggregate-only; per-run boundaries are renderer samples',
-      cpuAttribution: 'mainProcessCpu = main process + in-process smoke Provider from two boundary snapshots; rendererTask = CDP '
-        + 'renderer main-thread task time; neither is Provider CPU and neither is React commit',
+      cpuAttribution: 'mainProcessCpu covers Electron main; rendererTask covers CDP renderer main-thread task time. '
+        + 'Daemon samples record cumulative process CPU and point RSS, including offline adapter work in that process',
       gpuAttribution: 'the measured App runs hidden and offscreen with --disable-gpu; the GPU process CPU reported under '
         + 'that configuration is process CPU only, not hardware GPU utilisation and not the cost of a hardware-accelerated '
         + 'daily App, and no phase evidence attributes it to a specific renderer or CDP workload',

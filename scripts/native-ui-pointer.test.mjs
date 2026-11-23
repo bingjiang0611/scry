@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { nativeUiPointer } from './native-ui-pointer.mjs'
+import { aimNativeUiPointer, nativeUiPointer } from './native-ui-pointer.mjs'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
@@ -79,6 +79,34 @@ describe('native pointer readiness', () => {
     const pending = nativeUiPointer('.location-button', { timeoutMs: 7000, scroll: false, captureReceipt: false })
     await f.frame(); await f.frame()
     await expect(pending).resolves.toEqual({ x: 20, y: 20 })
+  })
+  it('refuses to arm a click when the hovered point no longer hits the target', async () => {
+    const f = fixture(150)
+    f.element.getAnimations = () => []
+    f.move(100)
+    const arm = vi.fn()
+    document.addEventListener = arm
+    vi.stubGlobal('window', {})
+    const pending = nativeUiPointer('.location-button', {
+      timeoutMs: 7000, scroll: false, captureReceipt: true, confirmPoint: { x: 20, y: 20 }
+    })
+    await f.frame(); await f.frame()
+    await expect(pending).resolves.toBeNull()
+    expect(arm).not.toHaveBeenCalled()
+  })
+  it('keeps the original deadline when CDP has not acknowledged the pointer move', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    let acknowledge
+    const send = vi.fn(() => new Promise(resolve => { acknowledge = resolve }))
+    const evaluate = vi.fn(async () => ({ x: 20, y: 20 }))
+    const result = aimNativeUiPointer({ send }, evaluate, '.row', 40)
+    const expired = expect(result).rejects.toThrow('Pointer target moved before press: .row')
+    await vi.advanceTimersByTimeAsync(40)
+    await expired
+    acknowledge()
+    await Promise.resolve()
+    expect(evaluate).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledExactlyOnceWith('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 20 })
   })
   it('retains a finite-animation failure and its target evidence at the original deadline', async () => {
     const f = fixture(150)

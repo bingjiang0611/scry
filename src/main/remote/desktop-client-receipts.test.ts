@@ -35,7 +35,7 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
   })
 
   it('keeps a submit unknown when a concurrent SSH channel failure cannot be attributed to that request', async () => {
-    const fixture = await setup()
+    const fixture = await setup({ trackSubscribe: true })
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
     let readStarted!: () => void
@@ -49,8 +49,8 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       await fixture.client.connect(id)
       fixture.tlsRequest.mockImplementation(async (options) => {
         const request = options.request as { op?: string }
-        // The run-status read is the lifecycle long poll on its own lane.
-        if (request.op === 'watch') {
+        // The startup status subscription reads on its own lane.
+        if (request.op === 'subscribe') {
           readStarted()
           await gate
           fixture.setTunnelFailure('target_unreachable')
@@ -132,6 +132,29 @@ describe('DesktopRemoteClient receipt and mobile delivery', () => {
       release?.(); writeSpy?.mockRestore()
       await fixture.client.dispose(); await fs.rm(fixture.directory, { recursive: true, force: true })
     }
+  })
+
+  it.each([undefined, 1, 2])('requires subscribe version 1 before announcing or forwarding to a target (%s)', async (subscribe) => {
+    const reply = { subscribe: { hostId: 'mac2', logId: 'log-1', seq: 1, mode: 'idle' } }
+    const fixture = await setup({ subscribe, subscribeResponse: () => reply })
+    try {
+      const paired = await fixture.client.pair({ label: 'Mac2', ssh, invitation: fixture.invitation })
+      await fixture.client.finishPairing(paired.connection.id)
+      const request = { op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 20_000 }
+      if (subscribe === 1) {
+        await fixture.client.connect(paired.connection.id)
+        const [target] = await fixture.client.executionTargets()
+        expect(target).toHaveProperty('subscribe', 1)
+        await expect(fixture.client.mobileRequest(target, request)).resolves.toEqual(reply)
+        expect(fixture.tlsRequest.mock.calls.filter(([value]) => (value.request as { op?: string }).op === 'subscribe')).toHaveLength(1)
+      } else {
+        await expect(fixture.client.connect(paired.connection.id)).rejects.toThrow('subscribe_unsupported')
+        const [target] = await fixture.client.executionTargets()
+        expect(target).not.toHaveProperty('subscribe')
+        expect(target.state).toBe('disconnected')
+        expect(fixture.tlsRequest.mock.calls.some(([value]) => (value.request as { op?: string }).op === 'subscribe')).toBe(false)
+      }
+    } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
   it('rejects relayed managed-worktree submissions when the target host did not negotiate support', async () => {

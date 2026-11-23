@@ -1,5 +1,5 @@
 import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
-import type { RemoteExecutor, RemoteExecutorInput } from './remote-dispatcher'
+import type { RemoteExecutor, RemoteExecutorInput, RemoteExecutionOutcome } from './remote-dispatcher'
 
 // G2 trust + mutual-exclusion seam. Before a remote intent may start a Provider
 // run it must (1) target a workspace already authorized through Scry's directory
@@ -94,14 +94,14 @@ export class GatedExecutor implements RemoteExecutor {
     this.#base = deps.base
   }
 
-  async execute(input: RemoteExecutorInput): Promise<void> {
+  async execute(input: RemoteExecutorInput): Promise<RemoteExecutionOutcome> {
     let target: RemoteRunTarget
     try { target = this.#resolveTarget(input) }
     catch { throw new RemoteRunDenied('invalid_target') }
     const authorization = this.#policy.authorize(target)
     if (!authorization.ok) throw new RemoteRunDenied(authorization.reason)
     try {
-      await this.#base.execute(input)
+      return await this.#base.execute(input)
     } finally {
       authorization.release()
     }

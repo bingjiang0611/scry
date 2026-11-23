@@ -6,8 +6,7 @@ import type { SessionHistoryPage } from '../session-history'
 import { registerLoadSessionHandler, type LoadSessionDependencies } from './history-load'
 import { registerOlderHistoryHandler, type SessionHistoryCache } from './history-older'
 import { registerTurnTerminalEvidenceHandler } from './turn-terminal-evidence'
-import { applySessionSelection, type SessionSelection, type SessionSelectionTarget } from './session-selection'
-import { daemonModeEnabled, installDaemonChannelResultHandler } from '../daemon-channel-gate'
+import { applySessionSelection, type SessionSelectionTarget } from './session-selection'
 
 type HistoryInternals = 'getLoadSessionAbortController' | 'setLoadSessionAbortController' |
   'nextLoadSessionRevision' | 'getLoadSessionRevision' | 'getSessionHistoryCache' | 'setSessionHistoryCache' |
@@ -62,15 +61,6 @@ export function createHistoryRuntime() {
     const applySelection = deps.applySelection ?? ((selection) => applySessionSelection({
       ...deps, providerContextKey: deps.providerContextKey, isWindowFocused: () => Boolean(deps.getWindow()?.isFocused())
     }, selection))
-    if (!deps.applySelection && daemonModeEnabled()) {
-      installDaemonChannelResultHandler('agent:loadSession', (value) => {
-        if (value === null) return null
-        const loaded = value as { page?: unknown; selection?: SessionSelection } | undefined
-        if (!loaded || typeof loaded !== 'object' || loaded.page === undefined || !loaded.selection) throw new Error('invalid_daemon_response')
-        applySelection(loaded.selection)
-        return loaded.page
-      })
-    }
     const sessionHistoryCacheKey = (payload: ProviderContext, cwd: string): string =>
       `${deps.providerContextKey(payload.providerId, cwd, payload.agentProfileId)}\u0000${payload.externalSessionId ?? ''}`
     const shared = {

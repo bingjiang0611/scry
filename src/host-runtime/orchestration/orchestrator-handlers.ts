@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { assertBoundedPayload, assertNoUsageNumbersInEvent } from './canonical-json'
 import { getEffectPolicy, type EffectKind } from './effect-policy'
+import { scopedNativeSessionKey, type NativeSessionIdentity } from './native-session-lookup'
 import type { OrchestrationCommand, RunEffectResultPayload } from './orchestrator-commands'
 import { canTransitionRun } from './run-transitions'
 import {
@@ -25,6 +26,7 @@ export interface OrchestratorReadView {
   getReceipt(commandId: string, actor: string): CommandReceiptRow | undefined
   getRun(runId: string): RunProjectionRow | undefined
   getSession(sessionKey: string): SessionProjectionRow | undefined
+  getNativeSession?(identity: NativeSessionIdentity): SessionProjectionRow | undefined
   getTurnByRunId?(runId: string): TurnProjectionRow | undefined
   getNextTurnOrdinal?(sessionKey: string): number
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined
@@ -241,13 +243,37 @@ export function decideRunEffectResult(
     }
     case 'session_bound': {
       if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      const identity = p.attachNative && !run.sessionKey && p.nativeSessionId && run.provider && run.cwd !== null
+        ? { sessionId: p.nativeSessionId, provider: run.provider, profile: run.profile, cwd: run.cwd }
+        : undefined
+      const existing = identity ? view.getNativeSession?.(identity) ??
+        (p.catalogRunId ? view.getNativeSession?.({ ...identity, sessionId: p.catalogRunId }) : undefined) : undefined
+      const attach = identity && (!existing?.activeRunId || existing.activeRunId === run.runId)
+      const sessionKey = attach
+        ? existing?.sessionKey ?? (view.getSession(identity.sessionId) ? scopedNativeSessionKey(identity) : identity.sessionId)
+        : run.sessionKey
       events.push(
         makeEvent(cmd, 0, {
           ...common,
           type: 'run.session_bound',
-          payload: { runId: run.runId, nativeSessionId: p.nativeSessionId ?? null, bindingId: p.bindingId ?? null }
+          sessionKey,
+          payload: {
+            runId: run.runId, nativeSessionId: p.nativeSessionId ?? null, bindingId: p.bindingId ?? null,
+            ...(p.catalogRunId ? { appRunId: p.catalogRunId } : {}),
+            ...(attach ? { attachNative: true, provider: run.provider, profile: run.profile } : {})
+          }
         })
       )
+      if (attach && sessionKey) {
+        events.push(makeEvent(cmd, 1, {
+          type: 'turn.began', stream: `session:${sessionKey}`, runId: run.runId, sessionKey, cwd: run.cwd,
+          payload: {
+            sessionKey, runId: run.runId, ordinal: view.getNextTurnOrdinal?.(sessionKey) ?? 1,
+            ordinalOrigin: existing?.legacy ? 'since_import' : 'native',
+            userTextPreview: run.promptPreview, author: 'user'
+          }
+        }))
+      }
       return acceptDecision(cmd, events, [], { runId: run.runId })
     }
     case 'question_opened': {
@@ -292,6 +318,15 @@ export function decideRunEffectResult(
       }
       events.push(makeEvent(cmd, 0, { ...common, type: 'run.provider_settled', payload }))
       return acceptDecision(cmd, events, [], { runId: run.runId })
+    }
+    case 'transcript_referenced': {
+      if (cmd.actor !== 'system' || !p.transcript) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      const event = makeEvent(cmd, 0, {
+        ...common,
+        type: 'run.transcript_referenced',
+        payload: { runId: run.runId, transcript: p.transcript }
+      })
+      return acceptDecision(cmd, [event], [], { runId: run.runId })
     }
     case 'finalized': {
       if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
@@ -340,6 +375,7 @@ export function decideRunEffectResult(
             runId: run.runId,
             ...(p.reason ? { reason: p.reason } : {}),
             ...(p.detail ? { detail: p.detail } : {}),
+            ...(p.catalogRunId ? { appRunId: p.catalogRunId } : {}),
             settledAt,
             recoveredAt,
             outcome,
@@ -354,4 +390,54 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, events, [], { runId: run.runId, lifecycle: target })
     }
   }
+}
+
+export function decideCatalogChange(
+  cmd: Extract<OrchestrationCommand, { type: 'session.discover' | 'session.withdraw' }>,
+  view: OrchestratorReadView
+): DecisionResult {
+  if (cmd.type === 'session.withdraw') {
+    const { sessionKey } = cmd.payload
+    const session = view.getSession(sessionKey)
+    if (cmd.actor !== 'system' || !session || !isWithdrawableSession(session)) {
+      return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+    }
+    const event = makeEvent(cmd, 0, {
+      type: 'session.withdrawn', stream: `session:${sessionKey}`, sessionKey, cwd: session.cwd,
+      payload: { sessionKey }
+    })
+    return acceptDecision(cmd, [event], [], { sessionKey })
+  }
+  const p = cmd.payload
+  if (p.conversationId && (cmd.actor !== 'system' || p.conversationId !== p.sessionKey)) {
+    return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+  }
+  const event = makeEvent(cmd, 0, {
+    type: 'session.discovered',
+    stream: `session:${p.sessionKey}`,
+    sessionKey: p.sessionKey,
+    cwd: p.cwd,
+    payload: {
+      sessionKey: p.sessionKey,
+      ...(p.conversationId ? { conversationId: p.conversationId } : {}),
+      provider: p.provider,
+      profile: p.profile ?? null,
+      cwd: p.cwd,
+      title: p.title ?? null,
+      ...(p.catalog ? { catalog: p.catalog } : {}),
+      ...(p.display ? { display: p.display } : {}),
+      ...(p.transcript ? { transcript: p.transcript } : {})
+    },
+    evidence: p.evidence ?? null
+  })
+  return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
+}
+
+/** A row the App may withdraw: a provisional send that never bound a native session, or
+ * an external transcript the catalog scan listed that Scry never ran, named or pinned. */
+export function isWithdrawableSession(session: SessionProjectionRow): boolean {
+  if (session.activeRunId || !session.catalog) return false
+  if (session.catalog.nativeSessionId === null) return true
+  return !session.catalog.preview && session.lastRunId === null && session.title === null &&
+    session.pinnedAt === null && session.archivedAt === null && session.conversationId === null
 }

@@ -34,7 +34,7 @@ export function installSessionLifecycleDialogs(dialogs: SessionLifecycleDialogs)
     }),
     installDaemonChannelResultHandler('agent:deleteSession', async (value) => {
       const result = value as DeleteSessionResult
-      if (!result.ok && result.reason === 'partial_failure' && result.failed.length > 0) {
+      if (!result.ok && result.failed.length > 0) {
         await dialogs.notifyFailure({
           message: '会话未完整删除，catalog 已保留供重试',
           detail: result.failed.map((failure) => `${failure.store}: ${failure.error}`).join('\n')

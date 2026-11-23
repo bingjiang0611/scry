@@ -44,7 +44,8 @@ export class SessionHistorySnapshotCache {
     const key = snapshotKey(context)
     const previous = this.entries.get(key)
     this.remove(key)
-    if (page.offset + page.turns.length !== page.totalTurns || page.turns.some(turn => turn.done === false)) {
+    if (page.projection?.activeRun || page.offset + page.turns.length !== page.totalTurns ||
+        page.turns.some(turn => turn.done === false)) {
       this.scheduleExpiry()
       return page
     }

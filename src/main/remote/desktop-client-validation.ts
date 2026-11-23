@@ -1,6 +1,6 @@
 import { createHash, X509Certificate as NodeCertificate } from 'node:crypto'
 import { isRemoteProviderObservationTime, isRemoteSessionOutcome, type DesktopHostInvitation, type DesktopRemoteConnection, type DesktopRemoteContext, type DesktopRemoteIntent, type DesktopSshTarget, type RemoteProviderRef, type RemoteProjectRef, type RemoteSessionRef } from '../../shared/desktop-remote'
-import type { WorkspaceCheckoutProgress, WorkspacePrepareProgress, WorkspacePrepareStage } from '../../shared/workspace-selection'
+import type { WorkspacePrepareProgress } from '../../shared/workspace-selection'
 import { type DesktopAttachmentCapability } from './desktop-attachments'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { TraceEvent } from '../../shared/trace'
@@ -55,9 +55,10 @@ export interface StoredConnection {
   autoConnect?: boolean
   pending?: { pairingId: string; secret: string; expiresAt: number; publicKeySHA256: string }
 }
-export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1; managedWorktrees?: 1 }
+export interface ActiveConnection { tunnel: DesktopSshTunnel; serial: Promise<void>; attachments?: DesktopAttachmentCapability; traceDelta?: 1; managedWorktrees?: 1; subscribe?: 1 }
 export interface RunStatusCursor {
-  cursor: number
+  revSeq?: number
+  outputSeq?: number
   scryRunId?: string
   externalSessionId?: string
   // The run's own cwd (a worktree start runs outside the submitted project).
@@ -68,47 +69,7 @@ export interface RunStatusCursor {
   state?: string
 }
 
-const WORKSPACE_PREPARE_STAGES: ReadonlySet<string> = new Set([
-  'preparing', 'checking_out', 'verifying', 'cancelling', 'cancelled', 'completed', 'failed'
-])
-
-export function parseWorkspacePrepareProgress(value: unknown): WorkspacePrepareProgress | undefined {
-  if (!record(value)) return undefined
-  if (!text(value.operationId, 64) || !hash(value.repositoryId)) return undefined
-  if (typeof value.stage !== 'string' || !WORKSPACE_PREPARE_STAGES.has(value.stage)) return undefined
-  if (typeof value.workspacePrepared !== 'boolean' || typeof value.cancellable !== 'boolean') return undefined
-  if (!Number.isFinite(value.updatedAt)) return undefined
-  let checkout: WorkspaceCheckoutProgress | undefined
-  if (value.checkout !== undefined) {
-    if (!record(value.checkout)) return undefined
-    const { completed, total, percent } = value.checkout
-    if (
-      typeof completed !== 'number' || !Number.isSafeInteger(completed) || completed < 0 ||
-      typeof total !== 'number' || !Number.isSafeInteger(total) || total <= 0 || completed > total ||
-      typeof percent !== 'number' || !Number.isSafeInteger(percent) || percent < 0 || percent > 100
-    ) return undefined
-    checkout = { completed, total, percent }
-  }
-  const details: string[] = []
-  if (Array.isArray(value.details)) {
-    for (const entry of value.details.slice(-40)) {
-      if (typeof entry === 'string' && !entry.includes('\0')) details.push(entry.slice(0, 300))
-    }
-  }
-  return {
-    operationId: value.operationId,
-    repositoryId: value.repositoryId,
-    stage: value.stage as WorkspacePrepareStage,
-    workspacePrepared: value.workspacePrepared,
-    ...(checkout ? { checkout } : {}),
-    cancellable: value.cancellable,
-    details,
-    ...(text(value.branch, 256) ? { branch: value.branch } : {}),
-    ...(text(value.baseRef, 256) ? { baseRef: value.baseRef } : {}),
-    ...(text(value.message, 512) ? { message: value.message } : {}),
-    updatedAt: Number(value.updatedAt)
-  }
-}
+export { parseWorkspacePrepareProgress } from '../../shared/workspace-selection-input'
 
 export function fail(code: string): never { throw new Error(code) }
 export function submitFailure(error: unknown): string {
@@ -211,7 +172,7 @@ export function validateDeleteSessionResult(value: unknown): DeleteSessionResult
   if (!record(value) || typeof value.ok !== 'boolean' || !Array.isArray(value.deleted) || !Array.isArray(value.retained) || !Array.isArray(value.failed) ||
       value.deleted.some((item) => typeof item !== 'string') || value.retained.some((item) => typeof item !== 'string') ||
       value.failed.some((item) => !record(item) || !text(item.store, 256) || !text(item.error, 16_384)) ||
-      (value.cancelled !== undefined && typeof value.cancelled !== 'boolean') || (value.reason !== undefined && !['invalid_request', 'active_session', 'user_cancelled', 'partial_failure'].includes(String(value.reason)))) fail('invalid_session_delete_response')
+      (value.cancelled !== undefined && typeof value.cancelled !== 'boolean') || (value.reason !== undefined && !['invalid_request', 'active_session', 'user_cancelled', 'partial_failure', 'unavailable'].includes(String(value.reason)))) fail('invalid_session_delete_response')
   return value as unknown as DeleteSessionResult
 }
 

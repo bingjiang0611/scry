@@ -14,18 +14,16 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 
 afterEach(cleanupTempDirs)
 
-function setOrchEnv(mode: 'on' | 'shadow') {
+function setSmokeEnv() {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -35,8 +33,6 @@ function setOrchEnv(mode: 'on' | 'shadow') {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -75,7 +71,7 @@ function walBytes(userDataDir: string): number {
 }
 
 describe('W9 Blocker N2: bounded WAL checkpoints during deferred backfill (no whole-backfill pause)', () => {
-  it('runs WAL checkpoints between slices during real daemon deferred backfill in on mode and bounds WAL peak size', async () => {
+  it('runs WAL checkpoints between slices during real daemon deferred backfill and bounds WAL peak size', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -86,7 +82,7 @@ describe('W9 Blocker N2: bounded WAL checkpoints during deferred backfill (no wh
 
     seedLedgerRuns(userDataDir, canonicalWs, 2_500)
 
-    const restore = setOrchEnv('on')
+    const restore = setSmokeEnv()
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     try {
       host = await createDaemonHostProcess({

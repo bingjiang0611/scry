@@ -120,7 +120,7 @@ export async function readValidTraceArchiveIndex(args: {
   cwd: string
   sessionId: string
   providerId: ProviderId
-}, signal?: AbortSignal): Promise<TraceArchiveIndex | null> {
+}, signal?: AbortSignal, options: { metadataOnly?: true } = {}): Promise<TraceArchiveIndex | null> {
   signal?.throwIfAborted()
   const dir = traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   try {
@@ -171,6 +171,10 @@ export async function readValidTraceArchiveIndex(args: {
       const sidecar = await readTraceArchiveMetadataSidecarAsync(args, directory, file, stat, signal)
       if (sidecar) {
         entries.push(sidecar)
+        continue
+      }
+      if (options.metadataOnly) {
+        invalidCount++
         continue
       }
       const inspected = await inspectArchiveFileAsync(args.userDataDir, join(dir, file), args.cwd, args.sessionId, args.providerId, signal)

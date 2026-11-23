@@ -1,57 +1,31 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID, webcrypto } from 'node:crypto'
 import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { INLINE_BODY_MAX_BYTES } from '../host-runtime/orchestration/types'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitRunTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
 function saveEnv() {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -61,13 +35,11 @@ function saveEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
-describe('P4-2 daemon authoritative orchestration integration (SCRY_ORCHESTRATION=on)', () => {
-  it('runs send, >16 KiB durable body, resolveIntent tombstone, replay parity, and async legacy mirror under on mode', async () => {
+describe('P4-2 daemon authoritative orchestration integration', () => {
+  it('runs send, >16 KiB durable body, resolveIntent tombstone, replay parity', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -90,10 +62,8 @@ describe('P4-2 daemon authoritative orchestration integration (SCRY_ORCHESTRATIO
         log: () => undefined
       })
 
-      expect(host.orchestrationShadow).toBeUndefined()
       expect(host.orchestrationAuthority).toBeDefined()
       const authority = host.orchestrationAuthority!
-      expect(authority.mode).toEqual({ requested: 'on', effective: 'on', refused: false })
 
       const device = await enrollLocal(host.service)
       const ca = host.service.caCertificatePEM
@@ -141,19 +111,6 @@ describe('P4-2 daemon authoritative orchestration integration (SCRY_ORCHESTRATIO
 
       expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
 
-      await authority.flushLegacyMirror()
-      const ledgerDir = join(userDataDir, 'remote', 'ledger')
-      expect(existsSync(join(ledgerDir, 'session-ledger.log'))).toBe(true)
-      await host.dispose()
-      host = undefined
-
-      const verifyStore = new SessionLedgerFileStore(ledgerDir)
-      try {
-        const events = verifyStore.loadAll()
-        expect(events.some((e) => e.runId === runId1 && e.kind === 'run_settled')).toBe(true)
-      } finally {
-        verifyStore.close()
-      }
     } finally {
       await host?.dispose()
       restoreEnv()

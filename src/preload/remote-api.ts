@@ -1,6 +1,6 @@
 import { ipcRenderer } from 'electron'
 import type { RemoteStatus, RemotePairingCode, RemoteDevice } from '../shared/remote'
-import type { DesktopRemoteAPI, DesktopHostAccess } from '../shared/desktop-remote'
+import type { DesktopRemoteAPI, DesktopHostAccess, DesktopRemoteUpdate } from '../shared/desktop-remote'
 
 export const remoteApi = {
   desktopRemote: {
@@ -30,13 +30,18 @@ export const remoteApi = {
     submit: (id, input) => ipcRenderer.invoke('desktopRemote:submit', id, input),
     intentStatus: (id, intentId) => ipcRenderer.invoke('desktopRemote:intentStatus', id, intentId),
     resolveIntent: (id, intentId) => ipcRenderer.invoke('desktopRemote:resolveIntent', id, intentId),
-    runStatus: (id, runId, options) => ipcRenderer.invoke('desktopRemote:runStatus', id, runId, { immediate: options?.immediate === true }),
-    liveRun: (id, context, options) => ipcRenderer.invoke('desktopRemote:liveRun', id, context, { immediate: options?.immediate === true }),
+    runStatus: (id, runId) => ipcRenderer.invoke('desktopRemote:runStatus', id, runId),
+    liveRun: (id, context) => ipcRenderer.invoke('desktopRemote:liveRun', id, context),
     stop: (id, runId) => ipcRenderer.invoke('desktopRemote:stop', id, runId),
     answer: (id, runId, response) => ipcRenderer.invoke('desktopRemote:answer', id, runId, response),
     files: (id, context, path, cursor) => ipcRenderer.invoke('desktopRemote:files', id, context, path, cursor),
     file: (id, context, path, offset, snapshot) => ipcRenderer.invoke('desktopRemote:file', id, context, path, offset, snapshot)
   } satisfies DesktopRemoteAPI,
+  onDesktopRemoteUpdate: (cb: (update: DesktopRemoteUpdate) => void): (() => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, update: DesktopRemoteUpdate): void => cb(update)
+    ipcRenderer.on('desktopRemote:update', listener)
+    return () => { ipcRenderer.removeListener('desktopRemote:update', listener) }
+  },
   remoteDesktopHostStatus: (): Promise<DesktopHostAccess> => ipcRenderer.invoke('remote:desktop:status'),
   remoteDesktopHostInvite: (): Promise<string> => ipcRenderer.invoke('remote:desktop:invite'),
   remoteDesktopHostDisable: (): Promise<void> => ipcRenderer.invoke('remote:desktop:disable'),

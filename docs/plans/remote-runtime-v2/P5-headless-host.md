@@ -136,7 +136,7 @@ daemon 模式下这些通道经本机 op 转给后台服务（`src/main/daemon-l
 | 已装服务、后台服务没在跑、App 打开 | 经服务管理器拉起（上表末行），仍按 `ensureDaemon` 等 10 s。**拉起失败**（登录项被关、`bootstrap` 出错、超时）就退回 `spawnDaemonSupervisor` 直接拉起，原因显示在 run 路径与设置页 |
 | 「重启后台服务」 | 不变：身份复核后 SIGTERM daemon → daemon 0 → supervisor 0 → 服务管理器不重启；然后按上一行拉起 |
 | 「退出 Scry 与后台服务」 | 不变；下次登录或下次打开 App 再起 |
-| `SCRY_HOST_DAEMON=0` 的 App | 持有 userData 锁，服务拉起的 daemon exit 4，不重试（[P3-userdata-lock](P3-userdata-lock.md) 3b） |
+| `SCRY_HOST_DAEMON=0` 的 App | S3 后不存在：App 只告警并忽略，不持有 userData 锁（旧行为见 [P3-userdata-lock](P3-userdata-lock.md) 3b） |
 | 另一个 userData 已装服务 | 拒绝覆盖（`login_start_other_userdata`），显示对方路径 |
 
 `daemon.lock` 与 userData 锁的身份核对不变：服务拉起的 daemon 命令行仍是同一个 asar 入口。

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { DESKTOP_ATTACHMENT_CHUNK_BYTES, DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_ORPHAN_TTL_MS, DesktopAttachmentStore, normalizeDesktopAttachment } from './desktop-attachments'
 import { HostController, type RemoteIntentRouting } from './host-controller'
+import { createHostProjectionFixture } from './host-controller-fixtures'
 import type { PairingDependencies, PairingPersistence, PairingState, IssuedPairingCertificate } from './pairing'
 import type { LedgerEvent, LedgerStore } from './session-ledger'
 
@@ -64,7 +65,11 @@ describe('desktop attachment transport storage', () => {
       const reference = await store.commit(peer, metadata.attachmentId)
       await store.read(reference)
       let seen: RemoteIntentRouting | undefined
-      const controller = new HostController({ pairing: pairing(), ledgerStore: new LedgerStoreMemory(), workspace: { authorize: (cwd) => cwd }, attachmentStore: store, runProvider: async ({ routing }) => { seen = routing } })
+      const { projection, onLedgerEvent } = createHostProjectionFixture()
+      const controller = new HostController({
+        pairing: pairing(), ledgerStore: new LedgerStoreMemory(), workspace: { authorize: (cwd) => cwd },
+        attachmentStore: store, onLedgerEvent, runProvider: async ({ routing }) => { seen = routing }
+      })
       const pair = await controller.authority.begin()
       await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM: 'csr', deviceLabel: 'desktop' }, 'b'.repeat(64))
       await controller.authority.confirmLocal(pair.pairingId, 'b'.repeat(64))
@@ -74,8 +79,7 @@ describe('desktop attachment transport storage', () => {
       expect(seen).toBeUndefined()
       const accepted = await controller.submitReceivedIntent(peer, request)
       await controller.idle()
-      const state = controller.runState(peer, { runId: accepted.runId })
-      if (state !== 'settled') throw new Error(JSON.stringify(controller.poll(peer, { cursor: 0 })))
+      expect(projection.getRun(accepted.runId)?.lifecycle, JSON.stringify(projection.listEvents())).toBe('settled')
       expect(Buffer.from(seen!.attachments![0]!.dataBase64, 'base64')).toEqual(bytes)
       await expect(store.read(reference)).rejects.toThrow('attachment_reference_missing')
       await expect(controller.submitReceivedIntent(peer, request)).resolves.toEqual({ runId: accepted.runId, status: 'duplicate', seq: accepted.seq })

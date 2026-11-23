@@ -8,6 +8,24 @@ import { DesktopLanes, type DesktopLaneName } from './remote/desktop-lane'
 import { DESKTOP_HISTORY_MAX_BYTES, REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 import { buildIdOf, sameBuild, type BuildIdentity } from '../shared/build-identity'
 
+// Which App requests to its own daemon answer a whole document, as the in-process IPC
+// handler did with no size bound: a session's history page and a conversation's own
+// reads (its turns, one item, a side chat's snapshot, the previews built from the source
+// prefix). They take the authenticated local history lane, whose reply bound is the IPC
+// page bound, instead of the 4 MiB a paired device's lanes keep. A reply cut at 4 MiB
+// left the lane with an answer it could not read, reported as an unknown outcome.
+
+const FULL_CONVERSATION_READS = new Set([
+  'read', 'readItem', 'readSideChatSnapshot', 'preview', 'previewSideChat', 'previewAdoption', 'previewDeletion'
+])
+
+export function isLocalFullRead(request: unknown): boolean {
+  if (!request || typeof request !== 'object') return false
+  const { op, method } = request as { op?: unknown; method?: unknown }
+  if (op === 'sessionHistory') return true
+  return op === 'conversation' && typeof method === 'string' && FULL_CONVERSATION_READS.has(method)
+}
+
 // Every run-channel frame declares the protocol it speaks; the daemon refuses one that
 // does not (`protocol_mismatch`), which is how an upgraded daemon rejects an old client
 // instead of guessing. `daemonInfo` is answered before the strict path so the App can
@@ -236,7 +254,7 @@ export class DaemonClient {
     const grant = this.#grant
     if (!grant) return Promise.reject(new DaemonClientError('daemon_not_running'))
     // Only the authenticated local history path can return a full IPC page.
-    const isHistory = request && typeof request === 'object' && 'op' in request && request.op === 'sessionHistory'
+    const isHistory = isLocalFullRead(request)
     return this.#lanes.request(isHistory ? 'localHistory' : lane, grant.deviceId, {
       endpoint: {
         path: this.#options.paths.socketPath, caPEM: grant.caPEM, certPEM: grant.certificatePEM, keyPEM: grant.keyPEM,

@@ -3,22 +3,26 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync, symlinkSync, copyFileSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { tmpdir, loadavg, cpus } from 'node:os'
+import { loadavg, cpus } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import electron from 'electron'
-import { stopOwnedApp } from './owned-app-processes.mjs'
 import { nativeUiPointer } from './native-ui-pointer.mjs'
 import { connectConcurrentApp } from './concurrent-performance-cdp.mjs'
-import { summarizeHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
+import { readDaemonHookTrees, assertScopedDelivery } from './concurrent-performance-summary.mjs'
 import { exerciseConcurrentDiffDemand } from './concurrent-diff-demand-ui.mjs'
+import { writeConcurrentAppEntry } from './concurrent-performance-launch.mjs'
+import { requireHookTreeTimer } from './concurrent-performance-timer.mjs'
+import { stopOwnedDaemonApp } from './owned-daemon-app.mjs'
+import { daemonServingEvidence, daemonSupportFiles } from './session-open-bench-daemon.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const count = Number(process.argv[2] ?? 1)
 assert.ok([1, 3, 5].includes(count), 'Expected N=1/3/5')
 const expectedHookStartsPerSession = Number(process.argv[3] ?? 42)
 assert.ok([2, 42].includes(expectedHookStartsPerSession), 'Expected 2 lifecycle-only or 42 full CLI receipts/session')
-const temp = mkdtempSync(join(tmpdir(), `scry-concurrent-n${count}-`))
+await requireHookTreeTimer()
+const temp = realpathSync(mkdtempSync(`/tmp/scry-concurrent-n${count}-`))
 const home = join(temp, 'home')
 const userData = join(temp, 'userData')
 const workspaces = Array.from({ length: count }, (_, index) => join(home, `workspace-${index}`))
@@ -34,7 +38,10 @@ const output = []
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = ['scripts/concurrent-performance.mjs', 'scripts/concurrent-performance-probe.cjs',
   'scripts/concurrent-performance.config.ts', 'scripts/fixtures/concurrent-performance-provider.ts', 'scripts/native-ui-pointer.mjs',
-  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs']
+  'scripts/concurrent-performance-cdp.mjs', 'scripts/concurrent-performance-summary.mjs', 'scripts/concurrent-diff-demand-ui.mjs',
+  'scripts/concurrent-performance-launch.mjs', 'scripts/concurrent-performance-timer.mjs', 'scripts/smoke-app-entries.mjs',
+  'scripts/owned-daemon-app.mjs', 'scripts/owned-app-processes.mjs',
+  'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-bench-mode.mjs', ...daemonSupportFiles]
 const harnessHash = hash(files.map(path => readFileSync(join(root, path))).join('\0'))
 const artifactHash = () => hash(['out', 'packages/turn-recorder-cli/dist'].flatMap(dir =>
   readdirSync(join(root, dir), { recursive: true, withFileTypes: true }).filter(entry => entry.isFile()).map(entry =>
@@ -71,23 +78,13 @@ try {
   // Seed only the temporary App's existing project authority, as other native fixtures do.
   writeFileSync(join(userData, 'recent-folders.json'), JSON.stringify(workspaces))
   const bootstrap = join(temp, 'app')
-  mkdirSync(bootstrap)
-  writeFileSync(join(bootstrap, 'package.json'), JSON.stringify({ name: 'scry-concurrent-measurement', version: '0.0.0', main: 'main.cjs' }))
-  writeFileSync(join(bootstrap, 'main.cjs'), `
-    const { app } = require('electron');
-    app.setAppPath(${JSON.stringify(root)});
-    require(${JSON.stringify(probe)});
-    // Hidden native fixture, but foreground renderer workload (including visibility-gated polling).
-    app.on('browser-window-created', (_event, win) => win.webContents.setBackgroundThrottling(false));
-    require(${JSON.stringify(join(root, 'scripts/hidden-electron-windows.cjs'))})(app);
-    require(${JSON.stringify(join(root, 'out/main/index.js'))});
-  `)
+  writeConcurrentAppEntry(bootstrap, root, probe)
   const server = createServer()
   await new Promise(ready => server.listen(0, '127.0.0.1', ready))
   const port = server.address().port
   await new Promise(ready => server.close(ready))
-  // Timing benchmark (in-process main probe + SMOKE_CONVERSATIONS): pin in-process mode.
-  const env = { ...process.env, HOME: home, SCRY_HOST_DAEMON: '0', SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
+  // The daemon serves the smoke fixture (S3).
+  const env = { ...process.env, HOME: home, SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_TEST_APP: '1', SCRY_PERF_LOG: '1', ELECTRON_ENABLE_LOGGING: '1',
     SCRY_ELECTRON_SMOKE_PROVIDER: '1', SCRY_ELECTRON_SMOKE_CONVERSATIONS: '1', SCRY_DISABLED_PROVIDERS: 'codex,qoder,opencode,pi', SCRY_REMOTE_HOST: '0',
     SCRY_CLI_PATH: cli, SCRY_CONCURRENT_PROBE: probe, SCRY_CONCURRENT_LOG: probeLog, SCRY_CONCURRENT_ROLE: 'main' }
   delete env.NODE_OPTIONS
@@ -198,9 +195,10 @@ try {
     await Promise.race([cdp.tracingDone, new Promise((_, reject) => { traceTimer = setTimeout(() => reject(new Error('Trace completion deadline')), 30000) })])
   } finally { clearTimeout(traceTimer) }
   await evaluate('new Promise(r => setTimeout(r, 3000))')
+  const daemon = daemonServingEvidence(userData)
   const closing = child
   child = null
-  cleanup = await stopOwnedApp(closing)
+  cleanup = await stopOwnedDaemonApp(closing, userData)
   const paintTrace = cdp.trace
   cdp.close(); cdp = null
   writeFileSync(appLog, output.join(''))
@@ -208,8 +206,7 @@ try {
   const main = probes.find(p => p.role === 'main')
   assert.ok(main, 'Missing main probe shutdown receipt')
   assertScopedDelivery(main, result.runs[0].runId, startedAt, settledAt)
-  assert.equal(main.hookTrees.length, count * 42, 'Every shell Hook needs a process-tree receipt')
-  summarizeHookTrees(main.hookTrees)
+  const daemonHookTrees = readDaemonHookTrees(probes, daemon.pid, result.runs.map(run => run.runId))
   const hooks = probes.filter(p => p.role === 'hook')
   assert.equal(hooks.length, count * expectedHookStartsPerSession, 'Missing or extra Hook CLI receipts')
   assert.ok(hooks.every(p => p.argv.includes('--managed')), 'Hooks must use managed CLI')
@@ -260,7 +257,7 @@ try {
     idleBeforeAt,startedAt,terminalAt,settledAt,finishedAt:Date.now(),workload:{toolsPerSession:20,deltasPerSession:400,hookStarts:hooks.length,expectedHookStartsPerSession,sharedRepository:false,sidebar:'activity',activation:'settled-native-pointer'},
     result,cleanup,canonicalRecords:records.length,archiveVerified:true,trace:paintTrace,
     rendererMetrics:Object.fromEntries(['TaskDuration','ScriptDuration','LayoutDuration','RecalcStyleDuration','LayoutCount','RecalcStyleCount'].map(k=>[k,b[k]-a[k]])),
-    main,hooks,
+    main,hooks,daemon,daemonHookTrees,
     limitations:['Isolated hidden window with GPU enabled and backgroundThrottling=false; not visible-window or visual-equivalence acceptance.',
       'CPU/memory of real Provider/MCP excluded by offline adapter.', 'fsync/git counts cover instrumented main and Hook Node processes, not workers or shell internals.',
       'activeRuns bytes are JSON size, not Electron wire bytes; observer serializes each actual response once.',
@@ -277,5 +274,5 @@ try {
   process.exitCode=1
 } finally {
   cdp?.close()
-  if(child) { const closing=child; child=null; const cleanup=await stopOwnedApp(closing); writeFileSync(join(temp,'cleanup.json'),JSON.stringify(cleanup)) }
+  if(child) { const closing=child; child=null; const cleanup=await stopOwnedDaemonApp(closing, userData); writeFileSync(join(temp,'cleanup.json'),JSON.stringify(cleanup)) }
 }

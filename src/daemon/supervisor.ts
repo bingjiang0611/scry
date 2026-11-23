@@ -94,11 +94,51 @@ const FORWARDED_ENV = [
   'SCRY_RUN_CONTROLS', 'SCRY_PROVIDER_MANIFEST_URL',
   'SCRY_DAEMON_SMOKE_PROVIDER',
   'SCRY_RUN_TIMING',
-  'SCRY_ORCHESTRATION',
   'SCRY_ORCHESTRATION_FULLFSYNC',
   'SCRY_ORCHESTRATION_PENDING_TTL_MS',
   'SCRY_EXPERIMENTAL_HOST_CLI'
 ] as const
+
+/**
+ * Acceptance only: the smoke Provider fixture's own inputs (which fixture set, the files it
+ * reads prompts from and records calls to, the native identity, the history reader). The
+ * in-process App used to read them itself; since S3 the fixture runs in the daemon, so an
+ * isolated test App hands them on. Forwarded only when the daemon's fixture was asked for
+ * (`SCRY_DAEMON_SMOKE_PROVIDER=1`) by a test instance (`SCRY_TEST_APP=1`, the App's hop) or
+ * by a supervisor whose environment this function built with the fixture handed on
+ * (SMOKE_FIXTURE_HOP, the supervisor's hop). Every daemon environment carries
+ * `SCRY_DAEMON_STATE_DIR`, so that is no proof of a fixture hop; only the marker is, and
+ * only this function sets it. A normal launch never carries them.
+ */
+export const SMOKE_FIXTURE_ENV = [
+  'SCRY_ELECTRON_SMOKE_CONVERSATIONS',
+  'SCRY_ELECTRON_SMOKE_SIDE_CHAT',
+  'SCRY_ELECTRON_SMOKE_INPUTS',
+  'SCRY_ELECTRON_SMOKE_CALLS',
+  'SCRY_ELECTRON_SMOKE_IDENTITY',
+  'SCRY_ELECTRON_SMOKE_READER',
+  'SCRY_ELECTRON_SMOKE_READS',
+  // The concurrent-performance fixture's measurement inputs: its hook children load the
+  // probe (`--require`) and log to the bench's file, and the managed hook needs the CLI
+  // the bench built. Without them the daemon's hook children got `--require=undefined`.
+  'SCRY_CONCURRENT_PROBE',
+  'SCRY_CONCURRENT_LOG',
+  'SCRY_CONCURRENT_ROLE',
+  'SCRY_CLI_PATH'
+] as const
+
+/** Set by daemonLaunchEnvironment alone, and only on a hop it handed the fixture env to. */
+export const SMOKE_FIXTURE_HOP = 'SCRY_DAEMON_SMOKE_FIXTURE_HOP'
+
+export function smokeFixtureEnvironment(source: NodeJS.ProcessEnv, hop: 'app' | 'supervisor' = 'app'): NodeJS.ProcessEnv {
+  if (source.SCRY_DAEMON_SMOKE_PROVIDER !== '1') return {}
+  // Each hop has its own proof: the App's is a test instance, the supervisor's is the
+  // marker the App's hop set. Neither stands in for the other.
+  if (hop === 'app' ? source.SCRY_TEST_APP !== '1' : source[SMOKE_FIXTURE_HOP] !== '1') return {}
+  const env: NodeJS.ProcessEnv = { [SMOKE_FIXTURE_HOP]: '1' }
+  for (const key of SMOKE_FIXTURE_ENV) if (source[key] !== undefined) env[key] = source[key]
+  return env
+}
 
 export function daemonLaunchEnvironment(input: {
   source?: NodeJS.ProcessEnv
@@ -110,12 +150,15 @@ export function daemonLaunchEnvironment(input: {
   isPackaged: boolean
   startedBy: string
   launchedBy?: DaemonLaunchedBy
+  /** Which launch this is: the App starting a supervisor, or a supervisor its daemon. */
+  hop?: 'app' | 'supervisor'
 }): NodeJS.ProcessEnv {
   const source = input.source ?? process.env
   const env: NodeJS.ProcessEnv = {}
   for (const key of FORWARDED_ENV) if (source[key] !== undefined) env[key] = source[key]
   return {
     ...env,
+    ...smokeFixtureEnvironment(source, input.hop),
     ELECTRON_RUN_AS_NODE: '1',
     SCRY_DAEMON_STATE_DIR: input.stateDirectory,
     SCRY_DAEMON_USER_DATA_DIR: input.userDataDir,

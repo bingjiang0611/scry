@@ -3,10 +3,11 @@ import { normalizeAgentForkSessionRequest } from '../../shared/runtime'
 import type { DaemonLocalOpGroup } from './deps'
 
 export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
-  const { catalog, session, events } = deps
+  const { catalog, session, publishHint } = deps
   const lifecycle = createSessionLifecycle({
     getRuns: deps.runs,
     appSessionStore: catalog.appSessionStore,
+    deleteNativeProjection: deps.links.deleteNativeProjection,
     conversationStore: catalog.conversationStore,
     contextAdmission: session.contextAdmission,
     getStartupManagedRecovery: deps.startupManagedRecovery,
@@ -36,8 +37,8 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
         return deps.links.sideChatCascade.run(scope)
       }
     },
-    publishDataUpdated: (event) => events.append({ kind: 'data', event }),
-    publishDeleteProgress: (progress) => events.append({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
+    publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
+    publishDeleteProgress: (progress) => publishHint({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
   })
   deps.links.deleteOneSession = (request, options) => lifecycle.deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof lifecycle.deleteOneSession>[1])
   deps.links.sessionRefFromRequest = (value) => lifecycle.sessionRefFromRequest(value)

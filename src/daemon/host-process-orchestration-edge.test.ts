@@ -8,51 +8,25 @@ import { createRecentFoldersStore } from '../main/app-store'
 import { openOrchestrationDatabase } from '../host-runtime/orchestration/db'
 import { ORCHESTRATION_SCHEMA_VERSION } from '../host-runtime/orchestration/schema'
 import { SessionLedger } from '../main/remote/session-ledger'
-import { SessionLedgerFileStore } from '../main/remote/session-ledger-file'
+import { SessionLedgerFileStore } from '../main/remote/legacy-ledger-file.fixtures'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitRunTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  ledgerRunId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId: ledgerRunId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
-async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
+async function withSmokeEnv<T>(fn: () => Promise<T>): Promise<T> {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   try {
     return await fn()
@@ -64,13 +38,11 @@ async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): 
     else process.env.SCRY_REMOTE_RELAY_ENABLED = saved.relay
     if (saved.smoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
-describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
-  it('refuses SCRY_ORCHESTRATION=on in P4-1 without creating orchestration.db while keeping live runs working', async () => {
+describe('Authoritative daemon startup and legacy import', () => {
+  it('opens the authoritative database before serving a real run', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -80,7 +52,7 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
     createRecentFoldersStore(userDataDir).push(canonicalWs)
     const logs: string[] = []
 
-    await withSmokeEnv('on', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -92,7 +64,6 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
         log: (line) => logs.push(line)
       })
       try {
-        expect(host.orchestrationShadow).toBeUndefined()
         expect(host.orchestrationAuthority).toBeDefined()
         expect(existsSync(join(userDataDir, 'orchestration', 'orchestration.db'))).toBe(true)
         expect(logs.some((line) => line.includes('daemon.orchestration-on-ready'))).toBe(true)
@@ -119,7 +90,7 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
   })
 
   it.each(['newer_schema', 'corrupt_db', 'locked_db'] as const)(
-    'survives unopenable orchestration.db (%s) and still settles live daemon runs',
+    'refuses to open the App socket with an unusable orchestration database (%s)',
     async (failureKind) => {
       const root = tempDir()
       const userDataDir = join(root, 'userData')
@@ -143,8 +114,8 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       }
 
       try {
-        await withSmokeEnv('shadow', async () => {
-          const host = await createDaemonHostProcess({
+        await withSmokeEnv(async () => {
+          await expect(createDaemonHostProcess({
             userDataDir,
             daemonStateDirectory,
             appPath: process.cwd(),
@@ -153,30 +124,8 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
             isPackaged: false,
             createOutputStore: () => new MemoryOutputStore(),
             log: () => undefined
-          })
-          try {
-            expect(host.orchestrationShadow).toBeDefined()
-            expect(host.orchestrationShadow!.mirror.stats().failedOpen).toBe(true)
-            expect(host.orchestrationShadow!.mirror.stats().failures).toBeGreaterThanOrEqual(1)
-
-            const device = await enrollLocal(host.service)
-            const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-              op: 'submit',
-              intentId: randomUUID(),
-              detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: `live under ${failureKind}` })
-            })
-            expect(sub.error).toBeUndefined()
-            const state = await waitRunTerminal(
-              host.channel.socketPath,
-              host.service.caCertificatePEM,
-              device.certPEM,
-              device.keyPEM,
-              sub.runId
-            )
-            expect(state).toBe('settled')
-          } finally {
-            await host.dispose()
-          }
+          })).rejects.toThrow()
+          expect(existsSync(join(daemonStateDirectory, 'local.sock'))).toBe(false)
         })
       } finally {
         lockHolder?.close()
@@ -184,7 +133,7 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
     }
   )
 
-  it('handles 1.2 MB intent body and shadow -> off -> shadow mixed live+import round-trip cleanly', async () => {
+  it('keeps a 1.2 MB intent body across authoritative restarts and subsequent runs', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -193,8 +142,9 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
+    // Persist the large intent in the authoritative database.
     let run1Id = ''
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -229,20 +179,20 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
           await waitRunTerminal(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, run1Id)
         ).toBe('settled')
 
-        const shadow = host.orchestrationShadow!
-        const r1 = shadow.mirror.sink!.getRun(run1Id)
+        const authority = host.orchestrationAuthority!
+        const r1 = authority.sink.getRun(run1Id)
         expect(r1?.lifecycle).toBe('settled')
         expect(r1?.body?.storage).toBe('external')
         expect(r1?.body?.bytes).toBeGreaterThan(1_000_000)
-        expect(shadow.mirror.sink!.bodyStore.hasExternalBody(r1!.body!.sha256)).toBe(true)
-        expect(shadow.mirror.stats().deviations).toBe(0)
+        expect(authority.sink.bodyStore.hasExternalBody(r1!.body!.sha256)).toBe(true)
       } finally {
         await host.dispose()
       }
     })
 
+    // Settle a second run after a restart while the former setting is absent.
     let run2Id = ''
-    await withSmokeEnv(undefined, async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -254,7 +204,6 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
         log: () => undefined
       })
       try {
-        expect(host.orchestrationShadow).toBeUndefined()
         const device = await enrollLocal(host.service)
         const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'submit',
@@ -271,7 +220,8 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       }
     })
 
-    await withSmokeEnv('shadow', async () => {
+    // Restart again and verify all three runs in the durable projection.
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -283,9 +233,9 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
         log: () => undefined
       })
       try {
-        const shadow = host.orchestrationShadow!
-        expect(shadow.mirror.sink!.getRun(run1Id)?.lifecycle).toBe('settled')
-        expect(shadow.mirror.sink!.getRun(run2Id)?.lifecycle).toBe('settled')
+        const authority = host.orchestrationAuthority!
+        expect(authority.sink.getRun(run1Id)?.lifecycle).toBe('settled')
+        expect(authority.sink.getRun(run2Id)?.lifecycle).toBe('settled')
 
         const device = await enrollLocal(host.service)
         const sub3 = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
@@ -298,19 +248,18 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
           await waitRunTerminal(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, sub3.runId)
         ).toBe('settled')
 
-        expect(shadow.mirror.sink!.getRun(sub3.runId)?.lifecycle).toBe('settled')
-        const intents = shadow.mirror.sink!.listEvents().filter((e) => e.type === 'run.intent_recorded')
+        expect(authority.sink.getRun(sub3.runId)?.lifecycle).toBe('settled')
+        const intents = authority.sink.listEvents().filter((e) => e.type === 'run.intent_recorded')
         expect(intents).toHaveLength(3)
         expect(new Set(intents.map((e) => e.runId)).size).toBe(3)
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         await host.dispose()
       }
     })
   })
 
-  it('trips failedOpen when startup legacy import hits a commit failure while keeping live runs working', async () => {
+  it('fails closed before opening the App socket when legacy import cannot commit', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -336,8 +285,8 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
       seedStore.close()
     }
 
-    await withSmokeEnv('shadow', async () => {
-      const host = await createDaemonHostProcess({
+    await withSmokeEnv(async () => {
+      await expect(createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
         appPath: process.cwd(),
@@ -346,28 +295,11 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
         isPackaged: false,
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined,
-        orchestrationShadowBeforeCommitHook: () => {
+        orchestrationBeforeCommitHook: () => {
           throw Object.assign(new Error('SQLITE_IOERR_WRITE'), { code: 'SQLITE_IOERR_WRITE' })
         }
-      })
-      try {
-        expect(host.orchestrationShadow).toBeDefined()
-        expect(host.orchestrationShadow!.mirror.stats().failedOpen).toBe(true)
-        expect(host.orchestrationShadow!.mirror.stats().failures).toBeGreaterThanOrEqual(1)
-
-        const device = await enrollLocal(host.service)
-        const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
-          op: 'submit',
-          intentId: randomUUID(),
-          detail: JSON.stringify({ providerId: 'codex', cwd: canonicalWs, prompt: 'live after import fence' })
-        })
-        expect(sub.error).toBeUndefined()
-        expect(
-          await waitRunTerminal(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, sub.runId)
-        ).toBe('settled')
-      } finally {
-        await host.dispose()
-      }
+      })).rejects.toThrow()
+      expect(existsSync(join(daemonStateDirectory, 'local.sock'))).toBe(false)
     })
   })
 
@@ -415,7 +347,7 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
     const logs: string[] = []
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -427,9 +359,9 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
         log: (line) => logs.push(line)
       })
       try {
-        expect(logs.some((l) => l.includes('daemon.orchestration-shadow-deferred-import'))).toBe(true)
-        const shadow = host.orchestrationShadow!
-        expect(shadow.mirror.sink!.getRun(orphanId)?.lifecycle).toBe('failed')
+        const authority = host.orchestrationAuthority!
+        // Orphan open run is recovered before the socket opens.
+        expect(authority.sink.getRun(orphanId)?.lifecycle).toBe('interrupted')
 
         const device = await enrollLocal(host.service)
         const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
@@ -442,10 +374,10 @@ describe('P4-1 daemon orchestration negative & round-trip edge cases', () => {
           await waitRunTerminal(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, sub.runId)
         ).toBe('settled')
 
-        await shadow.importComplete
-        expect(shadow.mirror.sink!.getRun(sub.runId)?.lifecycle).toBe('settled')
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        const totalRuns = (shadow.mirror.sink!.handle.db.prepare('SELECT COUNT(*) AS c FROM orch_p_run').get() as { c: number }).c
+        await authority.importComplete
+        expect(logs.some(line => line.includes('daemon.orchestration-on-import-done'))).toBe(true)
+        expect(authority.sink.getRun(sub.runId)?.lifecycle).toBe('settled')
+        const totalRuns = (authority.sink.handle.db.prepare('SELECT COUNT(*) AS c FROM orch_p_run').get() as { c: number }).c
         expect(totalRuns).toBe(2_052)
       } finally {
         await host.dispose()

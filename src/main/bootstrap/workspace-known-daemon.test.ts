@@ -15,7 +15,6 @@ const { HomeFileAccess } = await import('../home-file-access')
 // (workspaceSelection:setCwd) instead of reading the App's own copy of those stores.
 
 const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
-const OFF = {} as NodeJS.ProcessEnv
 type Listener = (event: unknown, ...args: unknown[]) => unknown
 type Forwarded = { op: string; method: string; args: unknown[]; read: boolean }
 const dirs: string[] = []
@@ -35,8 +34,7 @@ describe('known-project channels', () => {
 
   function register(env: NodeJS.ProcessEnv, options: {
     daemon?: (call: Forwarded) => Promise<unknown>
-    appResolve?: (cwd: string) => string
-    window?: string
+        window?: string
   } = {}) {
     if (env === ON) process.env.SCRY_HOST_DAEMON = '1'
     else delete process.env.SCRY_HOST_DAEMON
@@ -44,24 +42,20 @@ describe('known-project channels', () => {
     let selection = options.window
     // Reads the App's own recent folders, projects and session catalog. In daemon mode the
     // daemon owns them, so any call here is a second reader.
-    const resolveKnownProjectDirectory = vi.fn(options.appResolve ?? ((_cwd: string): string => { throw new Error('read the userData the daemon owns') }))
+    const resolveKnownProjectDirectory = vi.fn((_cwd: string): string => { throw new Error('read the userData the daemon owns') })
     const knownProjectDirectories = vi.fn((): Set<string> => { throw new Error('read the userData the daemon owns') })
     const setCurrentCwd = vi.fn((cwd: string | undefined) => { selection = cwd })
-    const invalidateSessionHistoryLoad = vi.fn()
     const openLocalPath = vi.fn(async (_path: string) => undefined)
     const forwarded = vi.fn(options.daemon ?? (async (call: Forwarded) => { throw new Error(`unexpected daemon call ${call.method}`) }))
     if (options.daemon) undo.push(installDaemonChannelForwarder(forwarded))
     registerWorkspaceHandlers({
-      handleTrusted: ((channel: string, listener: Listener) => { handlers.set(channel, gateDaemonChannel(channel, listener as never, env)) }) as never,
-      getCurrentCwd: () => selection, setCurrentCwd, invalidateSessionHistoryLoad,
-      resolveKnownProjectDirectory, homeFileAccess: new HomeFileAccess(tempDir()), knownProjectDirectories, openLocalPath,
+      handleTrusted: ((channel: string, listener: Listener) => { handlers.set(channel, gateDaemonChannel(channel, listener as never)) }) as never,
+      getCurrentCwd: () => selection, setCurrentCwd, homeFileAccess: new HomeFileAccess(tempDir()), openLocalPath,
       shell: {} as never, dialog: {} as never, getWindow: () => null,
-      getTerminalManager: vi.fn(), isShuttingDown: () => false, rendererCanReceive: () => true, assertTrustedIpcEvent: vi.fn(),
-      terminalOutput: {} as never, providerRegistry: { invalidateContext: vi.fn() }, providerContextKey: () => 'k',
-      resetSessionContext: vi.fn(), dockBadge: { view: vi.fn() }
+      isShuttingDown: () => false, rendererCanReceive: () => true, dockBadge: { view: vi.fn() }
     })
     const invoke = async (channel: string, ...args: unknown[]) => await handlers.get(channel)!({}, ...args)
-    return { handlers, invoke, selection: () => selection, resolveKnownProjectDirectory, knownProjectDirectories, setCurrentCwd, invalidateSessionHistoryLoad, openLocalPath, forwarded }
+    return { handlers, invoke, selection: () => selection, resolveKnownProjectDirectory, knownProjectDirectories, setCurrentCwd, openLocalPath, forwarded }
   }
 
   // The daemon's answer for a project it knows: its canonical path, as resolveKnownProjectDirectory returns.
@@ -79,11 +73,9 @@ describe('known-project channels', () => {
     const app = register(ON, { daemon: daemonKnowing({ [link]: project }) })
     await expect(app.invoke('agent:setCwd', link)).resolves.toBe(project)
     expect(app.selection()).toBe(project)
-    expect(app.invalidateSessionHistoryLoad).toHaveBeenCalledExactlyOnceWith('workspace changed')
     expect(app.forwarded).toHaveBeenCalledExactlyOnceWith({ op: 'workspaceSelection', method: 'setCwd', args: [link], read: true })
-    // Selecting it again changes nothing to invalidate.
+    // Selecting it again asks again; the selection stays.
     await expect(app.invoke('agent:setCwd', link)).resolves.toBe(project)
-    expect(app.invalidateSessionHistoryLoad).toHaveBeenCalledOnce()
     expect(app.resolveKnownProjectDirectory).not.toHaveBeenCalled()
     expect(app.knownProjectDirectories).not.toHaveBeenCalled()
   })
@@ -115,7 +107,6 @@ describe('known-project channels', () => {
       const app = register(ON, { window: tempDir(), daemon: daemonKnowing({}) })
       await expect(app.invoke('agent:setCwd', dir)).resolves.toBeNull()
       expect(app.selection()).toBeUndefined()
-      expect(app.invalidateSessionHistoryLoad).toHaveBeenCalledOnce()
       expect(app.forwarded).not.toHaveBeenCalled()
       for (const step of undo.splice(0)) step()
     }
@@ -203,25 +194,5 @@ describe('known-project channels', () => {
     const app = register(ON, { daemon: daemonKnowing({}) })
     await expect(app.invoke('workspace:readKnown', { cwd: 'scry-file:unknown', path: 'a.txt' })).rejects.toThrow()
     expect(app.forwarded).not.toHaveBeenCalled()
-  })
-
-  it('keeps the in-process handlers on the App stores while the switch is off', async () => {
-    const project = tempDir()
-    writeFileSync(join(project, 'a.txt'), 'hello')
-    const app = register(OFF, { appResolve: (cwd) => cwd, daemon: daemonKnowing({}) })
-    // main's handler answers synchronously, as before: no daemon round trip, no queue.
-    const selected = app.handlers.get('agent:setCwd')!({}, project)
-    expect(selected).toBe(project)
-    expect(app.selection()).toBe(project)
-    await expect(app.invoke('workspace:readKnown', { cwd: project, path: 'a.txt' })).resolves.toMatchObject({ content: 'hello' })
-    await expect(app.invoke('workspace:readPageKnown', { cwd: project, path: 'a.txt' })).resolves.toMatchObject({ content: 'hello' })
-    await expect(app.invoke('workspace:resolveFile', { cwd: project, path: 'a.txt' })).resolves.toEqual({ cwd: project, path: 'a.txt', mode: 'text' })
-    await expect(app.invoke('workspace:openKnownExternal', { cwd: project, path: 'a.txt' })).resolves.toBe(true)
-    expect(app.resolveKnownProjectDirectory.mock.calls).toEqual([[project], [project], [project], [project], [project]])
-    expect(app.forwarded).not.toHaveBeenCalled()
-
-    const refusing = register(OFF, { appResolve: () => { throw new Error('工作目录尚未通过 Scry 目录选择器授权') } })
-    expect(() => refusing.handlers.get('agent:setCwd')!({}, project)).toThrow('工作目录尚未通过 Scry 目录选择器授权')
-    expect(refusing.handlers.get('agent:setCwd')!({}, null)).toBeNull()
   })
 })

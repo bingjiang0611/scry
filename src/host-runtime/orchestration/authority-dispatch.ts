@@ -57,6 +57,7 @@ export function buildSubmitCommandForAuthority(options: {
   pendingTtlMs: number
   now: number
   resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
+  sessionKey: string | null
   input: AuthoritySubmitInput
   preparedBody: PreparedBody | undefined
 }): {
@@ -66,15 +67,15 @@ export function buildSubmitCommandForAuthority(options: {
   preparedRealCwd: string | null
   detailBytes: number
 } {
-  const { sink, actor, leaseOwner, pendingTtlMs, now, resolveTurnOrdinal, input, preparedBody } = options
+  const { sink, actor, leaseOwner, pendingTtlMs, now, resolveTurnOrdinal, sessionKey, input, preparedBody } = options
   const fallbackRunId = input.runId ?? randomUUID()
   const routing = parseLedgerIntentRouting(fallbackRunId, input.detail)
   const runId = input.runId ?? routing.canonicalRunId
   const preparedRealCwd = tryRealpath(routing.cwd)
-  const ordinal = routing.sessionKey
+  const ordinal = sessionKey
     ? (routing.ordinal ??
-      (routing.isConversationRun ? resolveTurnOrdinal?.(routing.sessionKey, runId) : undefined) ??
-      sink.getNextTurnOrdinal(routing.sessionKey))
+      (routing.isConversationRun ? resolveTurnOrdinal?.(sessionKey, runId) : undefined) ??
+      sink.getNextTurnOrdinal(sessionKey))
     : undefined
   const detailBytes = input.detail ? Buffer.byteLength(input.detail, 'utf8') : 0
   let claimMode = input.claimMode ?? ('immediate' as const)
@@ -112,7 +113,7 @@ export function buildSubmitCommandForAuthority(options: {
       : undefined)
   const payload = {
     runId,
-    sessionKey: routing.sessionKey,
+    sessionKey,
     ...(ordinal !== undefined ? { ordinal } : {}),
     provider: routing.provider,
     profile: routing.profile,
@@ -143,7 +144,7 @@ export function buildSubmitCommandForAuthority(options: {
       payloadSha256: sha256Hex(canonicalJson(semanticHashPayload))
     },
     runId,
-    sessionKey: routing.sessionKey,
+    sessionKey,
     preparedRealCwd,
     detailBytes
   }

@@ -17,6 +17,7 @@ import { type AgentPermissionMode, type AgentQuestionRequest, type AgentQuestion
 import { DesktopAttachmentStore } from './desktop-attachments'
 import type { OrchestrationAuthorityHooks } from './orchestration-seam'
 import type { HostAdminNotice } from '../../shared/host-admin'
+import type { RemoteExecutionOutcome } from './remote-dispatcher'
 
 // The structured routing a device intent must resolve to before any Provider
 // run. Carried in the intent detail as JSON; malformed detail is denied.
@@ -80,32 +81,11 @@ export interface MacRunView {
 
 export interface MacRunSource {
   list(): MacRunView[]
-  // Change signal for the live-runs long poll: a Mac run appears, disappears,
-  // changes state or gains/loses a pending question. Without it a device waits for
-  // the fallback tick, which is a cost every parked device pays.
-  subscribe?(listener: () => void): () => void
   // Same bounded stop lifecycle as the Mac stop button; true = requested.
   stop(runId: string): boolean
   // Same broker as the Mac question dialog; false = no such pending question.
   answer(response: AgentQuestionResponse): boolean
 }
-
-// One live run visible to the device. `remote` runs were submitted by a paired
-// device and are observed through watch; `mac` runs belong to the Mac UI.
-export interface LiveRunRef {
-  origin: 'remote' | 'mac'
-  runId: string
-  providerId: string
-  agentProfileId?: string
-  cwd: string
-  externalSessionId?: string
-  prompt: string
-  state: 'running' | 'waiting' | 'stopping'
-  // Open questions, so a device can answer a run it is not watching (answers
-  // still go through answerQuestion and its per-origin broker).
-  questions: AgentQuestionRequest[]
-}
-
 
 export interface ToolPanelSources {
   analytics(rangeDays: UsageAnalyticsRangeDays): Promise<UsageAnalytics> | UsageAnalytics
@@ -158,7 +138,7 @@ export interface HostControllerDependencies {
     // this, never the transport: transport says where bytes came from, not who the
     // caller is.
     grantScope?: 'local' | 'remote'
-  }): Promise<void>
+  }): Promise<RemoteExecutionOutcome>
   // The ledger refused a run before it reached the run start (policy, routing or
   // attachments). A daemon conversation send waits on that start, so it learns the
   // refusal here instead of waiting forever.
@@ -172,7 +152,7 @@ export interface HostControllerDependencies {
     event: LedgerEvent,
     meta?: { peerCertSHA256?: string; grantScope?: 'local' | 'remote'; answeredByPeer?: string }
   ): void
-  // Optional P4-2 authoritative orchestration seam (`SCRY_ORCHESTRATION=on`).
+  // Optional P4-2 authoritative orchestration seam.
   orchestration?: OrchestrationAuthorityHooks
   // Snapshot of host-authorized project directories a device may target. Absent
   // => the device sees an honest empty list (never a fabricated one).

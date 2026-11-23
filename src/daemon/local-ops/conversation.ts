@@ -4,7 +4,7 @@ import { deleteConversationHistory } from '../../main/conversation-history'
 import { withoutEvent, type DaemonLocalOpGroup } from './deps'
 
 export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
-  const { catalog, workspace, providers, session, history, conversationSend, events } = deps
+  const { catalog, workspace, providers, session, history, conversationSend, publishHint } = deps
   const table = conversationChannelTable({
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     providerContextKey: session.providerContextKey,
@@ -22,13 +22,14 @@ export const conversationLocalOps: DaemonLocalOpGroup = (deps) => {
     adoptingSessionKeys: session.adoptingSessionKeys,
     dockBadge: session.dockBadge,
     invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
-    publishDataUpdated: (event) => events.append({ kind: 'data', event }),
+    publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
     deleteOneSession: async (request, options) => {
       if (!deps.links.deleteOneSession) throw new Error('daemon_capability_unavailable:session-delete')
       return await deps.links.deleteOneSession(request, options)
     },
     resolveSessionRunIds,
     deleteConversationHistory,
+    deleteConversationProjection: deps.links.deleteConversationProjection,
     appUserDataDir: deps.userDataDir
   })
   deps.links.prepareConversationDeletion = table.prepareConversationDeletion

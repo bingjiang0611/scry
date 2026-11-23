@@ -1,11 +1,10 @@
 import { realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-// Packaged builds, development builds (`npm run dev`), and `SCRY_TEST_APP=1` test
-// instances all default to daemon mode unless `SCRY_HOST_DAEMON` is explicitly set
-// (W15 / P3-s3-plan §1). Explicit `SCRY_HOST_DAEMON=0` remains the in-process escape
-// hatch for one release cycle. This module is imported first by the main entry so every
-// later reader of `daemonModeEnabled` sees the resolved value.
+// Startup guards the main entry runs first (daemon-mode-default-entry.ts). Every App
+// build talks to the background service, which owns runs: S3 removed the in-process
+// runtime from Electron main, and with it the `SCRY_HOST_DAEMON=0` escape hatch. An
+// explicit `SCRY_HOST_DAEMON` other than `1` is now ignored with a one-line warning.
 
 export interface AppUserDataPaths {
   userDataDir: string
@@ -49,9 +48,20 @@ export function assertIsolatedTestUserData(env: NodeJS.ProcessEnv, paths?: AppUs
   }
 }
 
-export function applyDaemonModeDefault(
+/** The retired switch; read only to say that it no longer does anything. */
+export const RETIRED_DAEMON_MODE_ENV = 'SCRY_HOST_DAEMON'
+
+/** The warning for an explicit `SCRY_HOST_DAEMON` other than `1`, or none. */
+export function retiredDaemonModeWarning(env: NodeJS.ProcessEnv): string | undefined {
+  const value = env[RETIRED_DAEMON_MODE_ENV]
+  if (value === undefined || value === '1') return undefined
+  return `[scry] ${RETIRED_DAEMON_MODE_ENV}=${JSON.stringify(value.slice(0, 32))} is ignored: the in-process runtime was removed and the background service always runs Agents`
+}
+
+export function applyAppStartupGuards(
   env: NodeJS.ProcessEnv,
-  input?: { isPackaged?: boolean; userDataDir?: string; appDataDir?: string; appName?: string; platform?: NodeJS.Platform }
+  input?: { userDataDir?: string; appDataDir?: string; appName?: string; platform?: NodeJS.Platform },
+  warn: (line: string) => void = (line) => { console.warn(line) }
 ): void {
   if (input?.userDataDir && input?.appDataDir && input?.appName) {
     assertIsolatedTestUserData(env, {
@@ -61,6 +71,6 @@ export function applyDaemonModeDefault(
       ...(input.platform ? { platform: input.platform } : {})
     })
   }
-  if (env.SCRY_HOST_DAEMON !== undefined) return
-  env.SCRY_HOST_DAEMON = '1'
+  const retired = retiredDaemonModeWarning(env)
+  if (retired) warn(retired)
 }

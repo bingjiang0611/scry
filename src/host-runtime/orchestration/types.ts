@@ -1,4 +1,5 @@
 import type { Evidence } from '../../shared/turn-record-contracts'
+import type { SessionCatalogMetadata } from '../../shared/orchestration-subscribe'
 
 export const MAX_PAYLOAD_BYTES = 16 * 1024
 export const INLINE_BODY_MAX_BYTES = 16 * 1024
@@ -48,6 +49,7 @@ export type OrchestrationEventType =
   | 'run.question_closed'
   | 'run.provider_settled'
   | 'run.finalized'
+  | 'run.transcript_referenced'
   | 'run.settled'
   | 'run.failed'
   | 'run.cancelled'
@@ -62,6 +64,7 @@ export type OrchestrationEventType =
   | 'session.deleted'
   | 'session.forked'
   | 'session.discovered'
+  | 'session.withdrawn'
   | 'session.imported'
   | 'turn.began'
   | 'turn.delivery'
@@ -79,6 +82,7 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'run.question_closed',
   'run.provider_settled',
   'run.finalized',
+  'run.transcript_referenced',
   'run.settled',
   'run.failed',
   'run.cancelled',
@@ -93,6 +97,7 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'session.deleted',
   'session.forked',
   'session.discovered',
+  'session.withdrawn',
   'session.imported',
   'turn.began',
   'turn.delivery',
@@ -201,6 +206,7 @@ export interface SessionProjectionRow {
   pendingQuestions: number
   legacy: boolean
   revSeq: number
+  catalog: SessionCatalogMetadata | null
   parentSessionKey: string | null
   rootSessionKey: string | null
   lineage: SessionLineage | null
@@ -226,6 +232,7 @@ export interface TurnProjectionRow {
 
 export interface RunProjectionRow {
   runId: string
+  appRunId?: string
   sessionKey: string | null
   ownerActor: string
   scope: OrchestrationScope

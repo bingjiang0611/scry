@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto'
 import { lstatSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readLedger, runIdForScryRun, runSummary } from '../b4v/ledger.mjs'
+import { DatabaseSync } from 'node:sqlite'
 
 export const TERMINAL_MARKER = '__SCRY_DAEMON_SMOKE_TERMINAL__'
 
@@ -74,16 +74,25 @@ export function recordingFiles(userDataDir, id) {
 
 /**
  * The run output worker's files for one run: `<sha256(ledger run id)>.jsonl` and `.idx`
- * under userData/remote/output (RunOutputFileStore). The App names the run by its own id;
- * the daemon's ledger links the two with a `bound` event (or the window already holds
- * the ledger id). The text the App streamed must be in the data file, so a settled run
- * with no worker output is a failure.
+ * under userData/remote/output (RunOutputFileStore). Read the persisted App identity
+ * from orchestration.db after the fixture daemon releases its exclusive lock. The text
+ * the App streamed must be in the data file, so a settled run with no worker output fails.
  */
 export function runOutputFiles(userDataDir, appRunId) {
   const directory = join(userDataDir, 'remote', 'output')
-  const ledger = readLedger(userDataDir)
-  const runId = runIdForScryRun(ledger, appRunId) ?? (runSummary(ledger, appRunId).known ? appRunId : null)
-  if (!runId) return { ok: false, reason: 'ledger_run_unlinked', appRunId, ledgerStatus: ledger.status }
+  let runs
+  try {
+    const db = new DatabaseSync(join(userDataDir, 'orchestration', 'orchestration.db'), { readOnly: true })
+    try {
+      runs = db.prepare('SELECT run_id FROM orch_p_run WHERE app_run_id = ?').all(appRunId)
+    } finally {
+      db.close()
+    }
+  } catch (error) {
+    return { ok: false, reason: `run_projection_unreadable:${error?.code ?? error}`, appRunId }
+  }
+  if (runs.length !== 1) return { ok: false, reason: 'run_projection_unlinked', appRunId, matches: runs.length }
+  const runId = runs[0].run_id
   const key = createHash('sha256').update(runId).digest('hex')
   const data = join(directory, `${key}.jsonl`)
   const index = join(directory, `${key}.idx`)

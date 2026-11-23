@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { Evidence } from '../../shared/turn-record'
 import { canonicalJson } from './canonical-json'
 import type { OrchestrationEventRow } from './types'
 
@@ -46,6 +47,7 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
 
 export function applyEventToProjection(db: Database.Database, event: OrchestrationEventRow): void {
   const p = event.payload
+  if (p.redacted === true) return
   switch (event.type) {
     case 'run.intent_recorded': {
       db.prepare(
@@ -143,6 +145,18 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       return
     }
 
+    case 'run.transcript_referenced': {
+      if (event.evidence?.length) {
+        db.prepare(
+          `UPDATE orch_p_turn SET evidence = (
+            SELECT json_group_array(value) FROM (
+              SELECT value FROM json_each(evidence) UNION SELECT value FROM json_each(?)
+            )
+          ), rev_seq = ? WHERE run_id = ?`
+        ).run(canonicalJson(event.evidence), event.seq, event.runId)
+      }
+      return
+    }
     case 'run.finalized': {
       if (typeof p.outputSeq === 'number') {
         db.prepare('UPDATE orch_p_run SET output_seq = ?, rev_seq = ? WHERE run_id = ?').run(
@@ -174,9 +188,9 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       const recoveredAt = p.recoveredAt === undefined ? null : (p.recoveredAt as number | null)
       db.prepare(
         `UPDATE orch_p_run
-         SET lifecycle = ?, settled_at = ?, recovered_at = ?, outcome = ?, rev_seq = ?
+         SET lifecycle = ?, settled_at = ?, recovered_at = ?, outcome = ?, app_run_id = COALESCE(app_run_id, ?), rev_seq = ?
          WHERE run_id = ?`
-      ).run(lifecycle, settledAt, recoveredAt, outcomeJson, event.seq, event.runId)
+      ).run(lifecycle, settledAt, recoveredAt, outcomeJson, typeof p.appRunId === 'string' ? p.appRunId : null, event.seq, event.runId)
       if (event.sessionKey) {
         const histFlag = p.historicalBackfill === true ? 1 : 0
         db.prepare(
@@ -288,13 +302,21 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     }
 
     case 'session.discovered': {
+      // Verified transcript bytes that predate any projected turn are prior history.
+      const transcript = p.transcript as Evidence<string> | undefined
+      const priorHistory = transcript?.status === 'available' && transcript.quality === 'exact' && Boolean(transcript.value)
       db.prepare(
         `INSERT INTO orch_p_session (
-          session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+          session_key, provider, profile, cwd, title, ts, legacy, rev_seq, created_by, catalog, conversation_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
+          conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
           title = COALESCE(excluded.title, orch_p_session.title),
           ts = MAX(orch_p_session.ts, excluded.ts),
+          catalog = COALESCE(excluded.catalog, orch_p_session.catalog),
+          legacy = CASE WHEN excluded.legacy = 1 AND NOT EXISTS (
+            SELECT 1 FROM orch_p_turn WHERE session_key = excluded.session_key
+          ) THEN 1 ELSE orch_p_session.legacy END,
           rev_seq = excluded.rev_seq`
       ).run(
         String(p.sessionKey),
@@ -303,9 +325,27 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         (p.cwd as string | null) ?? null,
         (p.title as string | null) ?? null,
         event.at,
+        priorHistory ? 1 : 0,
         event.seq,
-        event.actor
+        event.actor,
+        p.catalog ? canonicalJson(p.catalog) : null,
+        (p.conversationId as string | null) ?? null
       )
+      if (p.display) {
+        const display = p.display as Record<string, unknown>
+        db.prepare(
+          `UPDATE orch_p_session SET title = ?, pinned_at = ?, archived_at = ?,
+             last_run_id = ?, last_run_outcome = ?
+           WHERE session_key = ?`
+        ).run(
+          display.title,
+          display.pinnedAt,
+          display.archivedAt,
+          display.lastRunId,
+          display.lastRunOutcome ? canonicalJson(display.lastRunOutcome) : null,
+          p.sessionKey
+        )
+      }
       return
     }
 
@@ -315,8 +355,8 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           session_key, conversation_id, provider, profile, cwd, title, ts,
           pinned_at, archived_at, last_run_id, last_run_outcome, active_run_id,
           pending_questions, legacy, rev_seq,
-          parent_session_key, root_session_key, lineage, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1, ?, ?, ?, ?, ?)
+          parent_session_key, root_session_key, lineage, created_by, catalog
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 1, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
           conversation_id = COALESCE(excluded.conversation_id, orch_p_session.conversation_id),
           provider = COALESCE(excluded.provider, orch_p_session.provider),
@@ -328,6 +368,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           archived_at = excluded.archived_at,
           last_run_id = COALESCE(excluded.last_run_id, orch_p_session.last_run_id),
           last_run_outcome = COALESCE(excluded.last_run_outcome, orch_p_session.last_run_outcome),
+          catalog = COALESCE(excluded.catalog, orch_p_session.catalog),
           legacy = 1,
           rev_seq = excluded.rev_seq,
           parent_session_key = COALESCE(excluded.parent_session_key, orch_p_session.parent_session_key),
@@ -349,7 +390,8 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         (p.parentSessionKey as string | null) ?? null,
         (p.rootSessionKey as string | null) ?? null,
         p.lineage ? canonicalJson(p.lineage) : null,
-        event.actor
+        event.actor,
+        p.catalog ? canonicalJson(p.catalog) : null
       )
       return
     }
@@ -387,6 +429,9 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.sessionKey
       )
       return
+    case 'session.withdrawn':
+      db.prepare('DELETE FROM orch_p_session WHERE session_key = ?').run(event.sessionKey)
+      return
     case 'session.deleted':
       if (event.sessionKey) {
         db.prepare('DELETE FROM orch_p_interaction WHERE run_id IN (SELECT run_id FROM orch_p_run WHERE session_key = ?)').run(event.sessionKey)
@@ -396,6 +441,18 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       }
       return
     case 'run.session_bound':
+      if (event.runId) {
+        const sessionKey = p.attachNative === true ? event.sessionKey : null
+        const appRunId = typeof p.appRunId === 'string' ? p.appRunId : null
+        if (sessionKey || appRunId) {
+          db.prepare(`UPDATE orch_p_run SET session_key = COALESCE(?, session_key),
+            app_run_id = COALESCE(app_run_id, ?), rev_seq = ? WHERE run_id = ?`).run(
+            sessionKey, appRunId, event.seq, event.runId
+          )
+        }
+        if (sessionKey) ensureSessionForRun(db, event, p)
+      }
+      return
     case 'run.provider_settled':
     case 'run.content_gap':
     case 'effect.voided':

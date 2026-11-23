@@ -1,3 +1,4 @@
+import { h1DetailDigest } from './authority-dispatch'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
@@ -18,6 +19,7 @@ export interface LegacyRunState {
   intentSeq: number
   intentAt: number
   detail?: string
+  intentDigest?: string
   lifecycle: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'cancelled'
   lastSeq: number
   terminalAt?: number
@@ -28,6 +30,7 @@ const STREAM_CHUNK_SIZE = 500
 
 const LEGACY_LEDGER_WORKER_SOURCE = `
 'use strict';
+const { createHash } = require('node:crypto');
 const { existsSync, readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { parentPort, workerData } = require('node:worker_threads');
@@ -53,6 +56,7 @@ if (existsSync(snapshotPath)) {
           intentSeq: r.intentSeq,
           intentAt: r.intentAt,
           detail: r.intentDetail,
+          intentDigest: r.intentDigest,
           lifecycle: r.lifecycle,
           lastSeq: snap.lastSeq
         });
@@ -81,6 +85,7 @@ if (existsSync(logPath)) {
         intentSeq: evt.seq,
         intentAt: evt.at,
         detail: evt.detail,
+        intentDigest: createHash('sha256').update(evt.detail === undefined ? 'undefined' : 'string\\0' + evt.detail).digest('hex'),
         lifecycle: 'recorded',
         lastSeq: evt.seq
       });
@@ -210,6 +215,7 @@ export function readLegacyLedgerReadOnly(ledgerDir: string): { lastSeq: number; 
             intentSeq: r.intentSeq,
             intentAt: r.intentAt,
             detail: r.intentDetail,
+          intentDigest: r.intentDigest,
             lifecycle: r.lifecycle,
             lastSeq: snap.lastSeq
           })
@@ -240,6 +246,7 @@ export function readLegacyLedgerReadOnly(ledgerDir: string): { lastSeq: number; 
           intentSeq: evt.seq,
           intentAt: evt.at,
           detail: evt.detail,
+          intentDigest: h1DetailDigest(evt.detail),
           lifecycle: 'recorded',
           lastSeq: evt.seq
         })

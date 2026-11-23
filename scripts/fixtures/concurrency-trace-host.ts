@@ -3,8 +3,8 @@
 // It wires the real pieces a paired device would use — one createTraceRuntime for
 // `boundedLiveRun`, one createDesktopHostReader, and 0/1/4 real DesktopRemoteClient
 // peers — and replaces only the wire: desktop evidence requests are a JSON round trip in
-// this process that lands on the same reader, while pairing and run-status polling answer
-// directly. That is not TLS, not SSH and not a security boundary; per-peer CPU and network
+// this process that lands on the same reader, while pairing is answered directly.
+// That is not TLS, not SSH and not a security boundary; per-peer CPU and network
 // cost stay unmeasured, and the CPU counters below are process-wide (see hostReadSamples).
 //
 // Deliberately out of scope: RunRegistry admission, stop lifecycle, renderer/mirroring
@@ -33,7 +33,7 @@ export interface TraceHostPeer {
 
 export interface TraceHostStats {
   readers: number
-  /** Every in-process transport round trip: pairing, run poll, host info and trace reads. */
+  /** Every in-process transport round trip: pairing, host info and trace reads. */
   requests: number
   /** Transport requests that carried one trace read. */
   traceRequests: number
@@ -144,6 +144,8 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
     const reader = createDesktopHostReader({
       userDataDir: join(directory, 'user-data'),
       hostId: () => host.hostId,
+      // Negotiate v3 using the production reader. The trial only drives trace reads.
+      subscribe: 1,
       // Exact fixture path only: this is not a test of production workspace authority.
       authorizeWorkspace: (cwd) => {
         if (cwd !== WORKLOAD_CWD) throw new Error('workspace_not_authorized')
@@ -183,10 +185,6 @@ export async function createTraceHost(input: { runs: Map<string, ActiveRun>; rea
             certificatePEM: grant.certificatePEM, certificateSHA256: grant.certificateSHA256, expiresAt: grant.expiresAt, scope: 'g0_echo_only'
           }
         }
-        // Connection-time attention baseline and run-status polling do not enter
-        // the trace projection workload measured below.
-        if (request.op === 'sessionsPage') return { sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'baseline' } }
-        if (request.op === 'poll') return { cursor: 0, minCursor: 0, events: [] }
         if (request.op !== 'desktop') throw new Error(`unexpected_operation:${String(request.op ?? request.operation)}`)
         const query = parseDesktopHostRead(JSON.parse(JSON.stringify(request.query)))
         if (query.kind === 'trace') {

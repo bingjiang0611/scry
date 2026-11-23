@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { startTestDaemon, type TestDaemon } from './host-process.harness'
@@ -58,26 +58,14 @@ async function settledView(surface: ReturnType<typeof appSurface>, runId: string
   return last
 }
 
-function ledgerRuns(daemon: TestDaemon): Map<string, Array<{ kind: string; detail?: string; intentId?: string }>> {
-  const runs = new Map<string, Array<{ kind: string; detail?: string; intentId?: string }>>()
-  const log = readFileSync(join(daemon.userDataDir, 'remote', 'ledger', 'session-ledger.log'), 'utf8')
-  for (const line of log.split('\n')) {
-    if (!line.trim()) continue
-    const event = JSON.parse(line) as { runId?: string; kind?: string; detail?: string; intentId?: string }
-    if (!event.runId || !event.kind) continue
-    runs.set(event.runId, [...(runs.get(event.runId) ?? []), { kind: event.kind, ...(event.detail ? { detail: event.detail } : {}), ...(event.intentId ? { intentId: event.intentId } : {}) }])
-  }
-  return runs
-}
-
 function runFor(daemon: TestDaemon, prompt: string) {
-  return [...ledgerRuns(daemon).values()].find((events) =>
-    events.some((event) => event.kind === 'intent_recorded' && event.detail?.includes(`"prompt":${JSON.stringify(prompt)}`))) ?? []
+  const sink = daemon.host.orchestrationAuthority!.sink
+  const row = sink.handle.db.prepare('SELECT run_id FROM orch_p_run WHERE prompt_preview = ?').get(prompt) as { run_id: string }
+  return {
+    projection: sink.getRun(row.run_id)!,
+    events: sink.listEvents().filter((event) => event.runId === row.run_id)
+  }
 }
-const markers = (events: ReturnType<typeof runFor>) => events.flatMap((event) => {
-  if (event.kind !== 'run_progress' || !event.detail) return []
-  try { return [String((JSON.parse(event.detail) as { event?: unknown }).event)] } catch { return [] }
-})
 
 describe('daemon trust gate (B4-V trust-gate)', () => {
   it('refuses a start whose repo MCP config fails verification, like the in-process start, and still auto-grants safe configs', async () => {
@@ -89,8 +77,7 @@ describe('daemon trust gate (B4-V trust-gate)', () => {
       const safeView = await settledView(surface, safe.runId)
       expect(safeView).toMatchObject({ done: true })
       expect(safeView?.error).toBeUndefined()
-      await daemon.host.orchestrationAuthority?.flushLegacyMirror()
-      expect(markers(runFor(daemon, 'trust-safe'))).toContain('admitted')
+      expect(runFor(daemon, 'trust-safe').events.map((event) => event.type)).toContain('run.admitted')
 
       writeConfig(daemon, UNSAFE)
       const inProcess = await ensureMcpExecutionAuthorized({ providerId: 'codex', cwd: daemon.workspace }, 'run')
@@ -99,21 +86,21 @@ describe('daemon trust gate (B4-V trust-gate)', () => {
       const refusal = await surface.start({ prompt: 'trust-unsafe', providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID() })
         .then((receipt) => `accepted ${receipt.runId}`, (error: Error) => error.message)
       expect(refusal).toBe(inProcess)
-      await daemon.host.orchestrationAuthority?.flushLegacyMirror()
       const refused = runFor(daemon, 'trust-unsafe')
-      expect(refused.find((event) => event.kind === 'run_failed')?.detail).toBe(inProcess)
-      expect(refused.some((event) => event.kind === 'run_settled')).toBe(false)
-      expect(markers(refused)).not.toContain('admitted')
-      expect(markers(refused)).not.toContain('started')
-      expect(markers(refused)).not.toContain('result')
+      expect(refused.projection).toMatchObject({ lifecycle: 'failed', outputSeq: null })
+      expect(refused.events.find((event) => event.type === 'run.failed')?.payload)
+        .toMatchObject({ reason: 'trust_gate_rejected', detail: inProcess })
+      expect(refused.events.map((event) => event.type)).not.toContain('run.settled')
+      expect(refused.events.map((event) => event.type)).not.toContain('run.admitted')
+      expect(refused.events.map((event) => event.type)).not.toContain('run.dispatched')
+      expect(daemon.output.since(refused.projection.runId, 0).chunks).toEqual([])
 
       writeConfig(daemon, CHANGED_SAFE)
       const changed = await surface.start({ prompt: 'trust-changed', providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID() })
       const changedView = await settledView(surface, changed.runId)
       expect(changedView).toMatchObject({ done: true })
       expect(changedView?.error).toBeUndefined()
-      await daemon.host.orchestrationAuthority?.flushLegacyMirror()
-      expect(markers(runFor(daemon, 'trust-changed'))).toContain('admitted')
+      expect(runFor(daemon, 'trust-changed').events.map((event) => event.type)).toContain('run.admitted')
     } finally {
       surface.dispose()
       await daemon.dispose()

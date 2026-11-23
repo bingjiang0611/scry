@@ -100,13 +100,20 @@ extension G0Transport {
     if mode == "run", useSession, let session = endpoint.session {
       return try await session.exchange(routedRequest, lane: lane, limit: responseLimit ?? 8 * 1_024 * 1_024, replayable: replayable)
     }
+    let wire: Data
+    if mode == "run" {
+      guard routedRequest.first == UInt8(ascii: "{"), routedRequest.count > 2 else { throw ProbeError.invalidArguments }
+      wire = Data("{\"protocol\":\(RelaySession.protocolVersion),".utf8) + routedRequest.dropFirst()
+    } else {
+      wire = routedRequest
+    }
     return try await withRelayChannel(endpoint: endpoint, mode: mode, identity: identity) { channel, innerContext in
       let result = channel.eventLoop.makePromise(of: Data.self)
       do {
         try await channel.eventLoop.submit {
           try channel.pipeline.syncOperations.addHandler(NIOSSLClientHandler(context: innerContext, serverHostname: nil))
           let limit = responseLimit ?? (mode == "run" ? 8 * 1_024 * 1_024 : 65_536)
-          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: routedRequest, result: result, maxResponseBytes: limit))
+          try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: wire, result: result, maxResponseBytes: limit))
         }.get()
       } catch { result.fail(error); throw error }
       return try await result.futureResult.get()

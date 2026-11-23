@@ -7,6 +7,7 @@ import { canonicalJson } from './canonical-json'
 import { migrateOrchestrationDatabase } from './migrations'
 import { applyEventToProjection } from './projection'
 import { ORCHESTRATION_MIGRATIONS } from './schema'
+import { catalogFrontierKey } from './transcript-interval'
 import type { OrchestrationEventRow, OrchestrationScope } from './types'
 
 const require = createRequire(import.meta.url)
@@ -17,6 +18,10 @@ export interface DeleteSessionInput {
   actor: string
   scope: OrchestrationScope
   at: number
+  /** Run IDs verified by the host's deletion scope before an older run had a projected key. */
+  unboundRunIds?: readonly string[]
+  nativeIdentity?: string
+  nativeSource?: string
 }
 
 export type DeleteSessionOutcome =
@@ -24,28 +29,43 @@ export type DeleteSessionOutcome =
   | { status: 'not_present' }
   | { status: 'unavailable'; error: string }
 
+/**
+ * data §4.7: atomically emit `session.deleted` tombstone, drop projections/outbox,
+ * redact historical event preview payloads to `{"redacted":true}`, and return
+ * unreferenced external body sha256s for crash-safe post-commit unlink.
+ */
 export function deleteSessionInDb(
   db: Database.Database,
   input: DeleteSessionInput,
   beforeCommitHook?: () => void
-): { existed: boolean; unreferencedShas: string[]; redactedEvents: number } {
-  let unreferencedShas: string[] = []
+): { existed: boolean; redactedEvents: number } {
   let redactedEvents = 0
   let existed = false
 
   const tx = db.transaction(() => {
     const sessionRow = db
-      .prepare('SELECT 1 FROM orch_p_session WHERE session_key = ?')
-      .get(input.sessionKey)
+      .prepare('SELECT provider, profile, cwd FROM orch_p_session WHERE session_key = ?')
+      .get(input.sessionKey) as { provider: string | null; profile: string | null; cwd: string | null } | undefined
     const eventRow = db
-      .prepare('SELECT 1 FROM orch_event WHERE session_key = ? LIMIT 1')
+      .prepare(`SELECT 1 FROM orch_event WHERE session_key = ? AND type != 'session.deleted'
+                AND json_extract(payload, '$.redacted') IS NOT 1 LIMIT 1`)
       .get(input.sessionKey)
     if (!sessionRow && !eventRow) return
     existed = true
+    db.prepare('DELETE FROM orch_meta WHERE key = ?').run(catalogFrontierKey(input.sessionKey))
+    db.prepare('DELETE FROM orch_meta WHERE key = ?').run(`conversation_catalog:${input.sessionKey}`)
 
     const runRows = db
-      .prepare('SELECT run_id, body FROM orch_p_run WHERE session_key = ?')
-      .all(input.sessionKey) as Array<{ run_id: string; body: string | null }>
+      .prepare(
+        `SELECT run_id, body FROM orch_p_run WHERE session_key = ?
+           OR (session_key IS NULL AND provider IS ? AND profile IS ? AND cwd = ?
+              AND run_id IN (SELECT value FROM json_each(?)))`
+      )
+      .all(
+        input.sessionKey, sessionRow?.provider ?? null, sessionRow?.profile ?? null, sessionRow?.cwd ?? null,
+        canonicalJson(sessionRow ? input.unboundRunIds ?? [] : [])
+      ) as Array<{ run_id: string; body: string | null }>
+    const runIds = canonicalJson(runRows.map((row) => row.run_id))
     const candidateShas = new Set<string>()
     for (const r of runRows) {
       if (!r.body) continue
@@ -53,16 +73,22 @@ export function deleteSessionInDb(
       if (parsed.storage === 'external' && parsed.sha256) candidateShas.add(parsed.sha256)
     }
 
-    const redacted = db
-      .prepare("UPDATE orch_event SET payload = '{\"redacted\":true}' WHERE session_key = ? AND type != 'session.deleted'")
-      .run(input.sessionKey)
+    const redacted = db.prepare(
+      `UPDATE orch_event SET payload = '{"redacted":true}'
+       WHERE type != 'session.deleted' AND (session_key = ? OR run_id IN (SELECT value FROM json_each(?)))`
+    ).run(input.sessionKey, runIds)
     redactedEvents = redacted.changes
 
-    db.prepare(
-      'DELETE FROM orch_outbox WHERE run_id IN (SELECT run_id FROM orch_p_run WHERE session_key = ?)'
-    ).run(input.sessionKey)
+    for (const table of ['orch_outbox', 'orch_p_interaction', 'orch_p_turn', 'orch_p_run']) {
+      db.prepare(`DELETE FROM ${table} WHERE run_id IN (SELECT value FROM json_each(?))`).run(runIds)
+    }
 
-    const tombstonePayload = canonicalJson({ sessionKey: input.sessionKey, cwd: input.cwd })
+    const tombstone = {
+      sessionKey: input.sessionKey, cwd: input.cwd,
+      ...(input.nativeIdentity ? { nativeIdentity: input.nativeIdentity } : {}),
+      ...(input.nativeSource ? { nativeSource: input.nativeSource } : {})
+    }
+    const tombstonePayload = canonicalJson(tombstone)
     const info = db
       .prepare(
         `INSERT INTO orch_event (
@@ -93,7 +119,7 @@ export function deleteSessionInDb(
       commandId: null,
       actor: input.actor,
       scope: input.scope,
-      payload: { sessionKey: input.sessionKey, cwd: input.cwd },
+      payload: tombstone,
       evidence: null,
       principal: input.actor,
       via: null,
@@ -118,12 +144,17 @@ export function deleteSessionInDb(
         }
       }
     }
-    unreferencedShas = [...candidateShas].filter((sha) => !stillReferenced.has(sha))
+    if (candidateShas.size > 0) {
+      const pendingErase = db.prepare('INSERT OR IGNORE INTO orch_body_erase (session_key, sha256) VALUES (?, ?)')
+      for (const sha of candidateShas) {
+        if (!stillReferenced.has(sha)) pendingErase.run(input.sessionKey, sha)
+      }
+    }
     beforeCommitHook?.()
   })
   tx()
 
-  return { existed, unreferencedShas, redactedEvents }
+  return { existed, redactedEvents }
 }
 
 export function pruneEventsInDb(
@@ -215,20 +246,64 @@ export function unlinkUnreferencedExternalBodyInDb(
   db: Database.Database,
   bodyStore: BodyStore,
   sha256: string
-): void {
-  if (bodyStore.isPinned(sha256)) return
+): 'pinned' | 'referenced' | 'erased' {
+  if (bodyStore.isPinned(sha256)) return 'pinned'
   const surviving = db
     .prepare('SELECT body FROM orch_p_run WHERE body IS NOT NULL')
     .all() as Array<{ body: string }>
   for (const row of surviving) {
     const parsed = JSON.parse(row.body) as { storage?: string; sha256?: string }
-    if (parsed.storage === 'external' && parsed.sha256 === sha256) return
+    if (parsed.storage === 'external' && parsed.sha256 === sha256) return 'referenced'
   }
   const activeOutbox = db
     .prepare("SELECT payload FROM orch_outbox WHERE state IN ('pending', 'running')")
     .all() as Array<{ payload: string }>
   for (const row of activeOutbox) {
-    if (row.payload.includes(sha256)) return
+    if (row.payload.includes(sha256)) return 'referenced'
   }
   bodyStore.unlinkBody(sha256)
+  return 'erased'
+}
+
+export function resumeBodyErasure(
+  db: Database.Database,
+  bodyStore: BodyStore,
+  options: { sessionKey?: string; sha256?: string; canWrite?: () => boolean } = {}
+): { completed: number; erased: number; deferred: number; error?: string } {
+  const select = 'SELECT session_key, sha256 FROM orch_body_erase'
+  const rows = (options.sessionKey !== undefined ? db.prepare(`${select} WHERE session_key = ?`).all(options.sessionKey)
+    : options.sha256 !== undefined ? db.prepare(`${select} WHERE sha256 = ?`).all(options.sha256)
+    : db.prepare(select).all()) as Array<{ session_key: string; sha256: string }>
+  const clear = db.prepare('DELETE FROM orch_body_erase WHERE session_key = ? AND sha256 = ?')
+  let completed = 0
+  let erased = 0
+  let deferred = 0
+  let error: string | undefined
+  for (const row of rows) {
+    try {
+      const result = unlinkUnreferencedExternalBodyInDb(db, bodyStore, row.sha256)
+      if (result === 'pinned') {
+        // The deleting session has no remaining references. A concurrent submit
+        // still owns the bytes until commit or abandonment. Retain the durable
+        // erasure queue through that boundary and recheck all surviving owners.
+        bodyStore.eraseAfterUnpin(row.sha256, () => {
+          if (!db.open || options.canWrite?.() === false) return
+          try {
+            const next = resumeBodyErasure(db, bodyStore, { sha256: row.sha256, canWrite: options.canWrite })
+            if (next.error) console.warn('[scry] orchestration body erasure pending:', next.error)
+          } catch (failure) {
+            console.warn('[scry] orchestration body erasure pending:', failure)
+          }
+        })
+        deferred += 1
+        continue
+      }
+      clear.run(row.session_key, row.sha256)
+      completed += 1
+      if (result === 'erased') erased += 1
+    } catch (failure) {
+      error ??= failure instanceof Error ? failure.message : String(failure)
+    }
+  }
+  return { completed, erased, deferred, ...(error ? { error } : {}) }
 }

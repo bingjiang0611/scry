@@ -163,7 +163,7 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
     }
   })
 
-  it('falls back to snapshot on hostId/logId mismatch, seq ahead, pruned_through, >128 events, or >4096 gap', async () => {
+  it('falls back to snapshot on hostId/logId mismatch, seq ahead or >128 events', async () => {
     const dir = makeDir()
     const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 256 })
     const hub = new SubscribeHub()
@@ -215,6 +215,46 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
     }
   })
 
+  it('resets pruned, byte-overflow and scan-gap cursors without omitting projected sessions', async () => {
+    const sink = EventSink.open({ userDataDir: makeDir(), fullfsync: false })
+    const hub = new SubscribeHub()
+    const engine = new SubscribeEngine({ sink, hub, hostId: 'host-snap', authorizePeer: () => undefined, grantScope: () => 'local' })
+    const subscribe = (known?: { hostId: string; logId: string; seq: number }) =>
+      engine.subscribe('c'.repeat(64), { views: ['sessions'], known, waitMs: 0 })
+    const importSession = (commandId: string, sessionKey: string, title: string, at: number) => {
+      const payload = { sessionKey, title, cwd: '/tmp/w18-fixture', provider: 'codex', ts: at }
+      expect(sink.execute({ type: 'session.import', commandId, at, actor: 'system', scope: 'system',
+        payload, payloadSha256: sha256Hex(canonicalJson(payload)) }).kind).toBe('accepted')
+    }
+    try {
+      const base = await subscribe()
+      const largeTitle = '中'.repeat(4_900)
+      // Stay within the 16 KiB durable event limit while crossing 256 KiB in aggregate.
+      for (let index = 1; index <= 19; index++) importSession(`import-large-${index}`, 'large', largeTitle, index)
+      const overflow = await subscribe(base)
+      expect(overflow.seq).toBe(base.seq + 19)
+      expect(overflow).toMatchObject({ mode: 'snapshot', snapshot: { sessions: { rows: [{ sessionKey: 'large', title: largeTitle }] } } })
+
+      const prune = sink.pruneEvents({ olderThanAt: 20 })
+      expect(prune).toEqual({ deletedEvents: 18, prunedThrough: overflow.seq - 1 })
+      expect(await subscribe(base)).toMatchObject({ mode: 'snapshot', snapshot: { sessions: { rows: [{ sessionKey: 'large' }] } } })
+      importSession('rename-large', 'large', 'small title', 20)
+      const contiguous = await subscribe(overflow)
+      expect(contiguous).toMatchObject({ mode: 'events', seq: overflow.seq + 1, events: [{ sessionKey: 'large' }] })
+
+      const beyondScan = contiguous.seq + 4_096 + 1
+      sink.handle.db.prepare("UPDATE sqlite_sequence SET seq = ? WHERE name = 'orch_event'").run(beyondScan - 1)
+      importSession('import-after-gap', 'next', 'after gap', 21)
+      expect(await subscribe(contiguous)).toMatchObject({
+        mode: 'snapshot', seq: beyondScan,
+        snapshot: { sessions: { rows: [{ sessionKey: 'next' }, { sessionKey: 'large' }] } }
+      })
+    } finally {
+      hub.close()
+      sink.close()
+    }
+  })
+
   it('coalesces run output hints with 50ms leading edge while delivering hostNotice immediately without coalescing', async () => {
     const dir = makeDir()
     const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 64 })
@@ -259,7 +299,7 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
     }
   })
 
-  it('paginates sessions via keyset cursor without skipping or duplicating on concurrent insert', async () => {
+  it.each(['local', 'remote'] as const)('paginates %s sessions without dropping a notice or duplicating on concurrent insert', async (scope) => {
     const dir = makeDir()
     const sink = EventSink.open({ userDataDir: dir, fullfsync: false, maxActiveRuns: 64 })
     const hub = new SubscribeHub()
@@ -268,7 +308,9 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       hub,
       hostId: 'host-page',
       authorizePeer: () => undefined,
-      grantScope: () => 'local',
+      grantScope: () => scope,
+      remoteCwdAuthorizer: () => cwd => cwd === '/tmp/p',
+      remoteHostNotices: () => [],
       sessionsPageSize: 2
     })
     try {
@@ -284,6 +326,8 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       expect(page1.snapshot.sessions?.nextCursor).toBeTruthy()
 
       submitRun(sink, { commandId: 'p4', runId: 'r4', sessionKey: 's4', cwd: '/tmp/p', at: 4000 })
+      const notice = { id: 'between-pages', kind: 'cli_approval_enabled' as const, ts: 4500 }
+      hub.emitHostNotice(notice)
       const page2 = await engine.subscribe(peer, {
         views: ['sessions'],
         sessionsCursor: page1.snapshot.sessions!.nextCursor,
@@ -293,6 +337,37 @@ describe('SubscribeEngine + SubscribeHub (P4-3 protocol §5)', () => {
       if (page2.mode !== 'snapshot') throw new Error('expected snapshot')
       expect(page2.snapshot.sessions?.rows.map((r) => r.sessionKey)).toEqual(['s1'])
       expect(page2.snapshot.sessions?.nextCursor).toBeUndefined()
+      expect(page2.hints).toBeUndefined()
+      const tail = await engine.subscribe(peer, { views: ['sessions', 'activeRuns'], waitMs: 0,
+        known: { hostId: page1.hostId, logId: page1.logId, seq: page1.seq }
+      })
+      expect(tail).toMatchObject({ hints: [{ kind: 'hostNotice', notice }] })
+    } finally {
+      hub.close()
+      sink.close()
+    }
+  })
+
+  it('delivers one host notice to both the desktop device and its forwarded subscriber', async () => {
+    const sink = EventSink.open({ userDataDir: makeDir(), fullfsync: false })
+    const hub = new SubscribeHub()
+    const engine = new SubscribeEngine({
+      sink, hub, hostId: 'host', authorizePeer: () => undefined, grantScope: () => 'remote', remoteHostNotices: () => []
+    })
+    try {
+      const request = { views: ['sessions', 'activeRuns'] as const, waitMs: 0 }
+      const frame = { ...request, views: [...request.views] }
+      const forwarded = { ...frame, subscriptionId: 'f'.repeat(32) }
+      const peer = 'b'.repeat(64)
+      const first = await engine.subscribe(peer, frame)
+      await engine.subscribe(peer, forwarded)
+      const known = { hostId: first.hostId, logId: first.logId, seq: first.seq }
+      const notice = { id: 'shared-notice', kind: 'cli_approval_enabled' as const, ts: 1 }
+      hub.emitHostNotice(notice)
+      const desktop = await engine.subscribe(peer, { ...frame, known })
+      const phone = await engine.subscribe(peer, { ...forwarded, known })
+      expect(desktop.hints).toEqual([{ kind: 'hostNotice', notice }])
+      expect(phone.hints).toEqual([{ kind: 'hostNotice', notice }])
     } finally {
       hub.close()
       sink.close()

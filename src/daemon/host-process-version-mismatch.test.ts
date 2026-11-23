@@ -41,7 +41,7 @@ describe('version mismatch prompt against a real daemon', () => {
     const outcomes: DaemonRunModeResult[] = []
     let restarts = 0
     const prompt = createVersionMismatchPrompt({
-      daemonMode: true,
+      
       ask: async (value) => { asked.push(value); return MISMATCH_LATER_BUTTON },
       restart: async () => { restarts += 1; return { status: 'done' } },
       reportFailure: async () => undefined,

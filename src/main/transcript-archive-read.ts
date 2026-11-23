@@ -201,7 +201,7 @@ export function traceArchiveRunIds(args: {
   return [...ids]
 }
 
-export async function readTraceArchiveTurnForHistory(args: {
+interface TraceArchiveTurnRead {
   cwd: string
   sessionId: string
   userDataDir: string
@@ -209,46 +209,75 @@ export async function readTraceArchiveTurnForHistory(args: {
   runId: string
   providerTurnId?: string
   maxBytes: number
-}): Promise<{ turn: TraceArchiveTurn; bytesRead: number }> {
+}
+
+/** Exact, bounded history read. A corrupt canonical turn never falls back to an older copy. */
+export async function readTraceArchiveTurnForHistory(args: TraceArchiveTurnRead): Promise<{ turn: TraceArchiveTurn; bytesRead: number }> {
   const paths = [
     traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, args),
     traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   ]
   for (const path of paths) {
-    let handle: Awaited<ReturnType<typeof openFile>>
-    try {
-      trustedOwnedParent(args.userDataDir, path, false)
-      const info = await lstat(path)
-      if (!info.isFile() || info.isSymbolicLink()) throw new Error('交接源归档不是受控普通文件')
-      handle = await openFile(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
-      throw error
-    }
-    try {
-      const info = await handle.stat()
-      if (!info.isFile() || info.size > args.maxBytes) throw new Error('交接源归档超出读取预算或不是普通文件')
-      const buffer = Buffer.alloc(info.size + 1)
-      let length = 0
-      while (length < buffer.length) {
-        const result = await handle.read(buffer, length, buffer.length - length, length)
-        if (!result.bytesRead) break
-        length += result.bytesRead
-      }
-      if (length !== info.size) throw new Error('读取交接源归档时文件发生变化')
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
-      const inspected = validateArchive(JSON.parse(text), args.cwd, args.sessionId, args.providerId)
-      if (inspected.status !== 'valid') throw new Error('交接源归档损坏或身份不匹配')
-      const turns = inspected.archive.turns.filter((turn) => turn.runId === args.runId)
-      if (turns.length !== 1 || (args.providerTurnId && turns[0].providerTurnId !== args.providerTurnId)) {
-        throw new Error('交接源归档缺少唯一匹配的原生轮次')
-      }
-      return { turn: turns[0], bytesRead: length }
-    } finally {
-      await handle.close()
-    }
+    const result = await readHistoryArchiveTurnFile(path, args)
+    if (result) return result
   }
   throw new Error('交接源归档不存在')
+}
+
+/** Terminal recovery reads only a matching segmented body, including when a legacy monolith exists. */
+export async function readTraceArchiveRunSegment(args: TraceArchiveTurnRead): Promise<TraceArchiveTurn | null> {
+  const index = await readValidTraceArchiveIndex(args, undefined, { metadataOnly: true }) ??
+    await readSegmentedMetadataIndexAsync(args)
+  const entries = index?.entries.filter(entry => entry.runId === args.runId) ?? []
+  if (entries.length === 0) return null
+  if (entries.length !== 1) throw new Error('history_ambiguous_run')
+  const path = join(traceArchiveTurnDir(args.userDataDir, args.cwd, args.sessionId, args.providerId), entries[0].file)
+  const result = await readHistoryArchiveTurnFile(path, args, true)
+  if (!result) return null
+  if (path !== traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, result.turn)) {
+    throw new Error('history_run_identity_mismatch')
+  }
+  return result.turn
+}
+
+async function readHistoryArchiveTurnFile(path: string, args: TraceArchiveTurnRead, segmented = false): Promise<{
+  turn: TraceArchiveTurn; bytesRead: number
+} | null> {
+  let handle: Awaited<ReturnType<typeof openFile>>
+  try {
+    trustedOwnedParent(args.userDataDir, path, false)
+    const info = await lstat(path)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('交接源归档不是受控普通文件')
+    handle = await openFile(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  try {
+    const info = await handle.stat()
+    if (!info.isFile() || info.size > args.maxBytes) throw new Error('交接源归档超出读取预算或不是普通文件')
+    // Published archives are atomically replaced. Bound allocation even if a file is edited in place.
+    const buffer = Buffer.alloc(info.size + 1)
+    let length = 0
+    while (length < buffer.length) {
+      const result = await handle.read(buffer, length, buffer.length - length, length)
+      if (!result.bytesRead) break
+      length += result.bytesRead
+    }
+    if (length !== info.size) throw new Error('读取交接源归档时文件发生变化')
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length))
+    const inspected = validateArchive(JSON.parse(text), args.cwd, args.sessionId, args.providerId)
+    if (inspected.status !== 'valid' || (segmented && inspected.archive.turns.length !== 1)) {
+      throw new Error('交接源归档损坏或身份不匹配')
+    }
+    const turns = inspected.archive.turns.filter((turn) => turn.runId === args.runId)
+    if (turns.length !== 1 || (args.providerTurnId && turns[0].providerTurnId !== args.providerTurnId)) {
+      throw new Error('交接源归档缺少唯一匹配的原生轮次')
+    }
+    return { turn: turns[0], bytesRead: length }
+  } finally {
+    await handle.close()
+  }
 }
 
 export async function findTraceArchiveTurnMatches(args: {

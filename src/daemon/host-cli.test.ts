@@ -214,7 +214,7 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     const startViaService = vi.fn(async () => ({ ok: true as const }))
     const loginStart = {
       ...createLoginStartManager({
-        daemonMode: true,
+        
         target: loginStartTargetFromBundle('/Applications/Scry.app/Contents/MacOS/Scry', userDataDir, 'darwin'),
         platform: 'darwin',
         homeDir: root,
@@ -250,7 +250,7 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
     }
   })
 
-  it('reports feature disabled (not daemon_not_running) when daemon holds daemon.lock with flag off, strips C0/C1 control chars in deviceLabel, and respects SCRY_HOST_DAEMON=0 in login-start (W11 review #7 + small items)', async () => {
+  it('reports feature disabled (not daemon_not_running) when daemon holds daemon.lock with flag off and strips C0/C1 control chars in deviceLabel (W11 review #7 + small items)', async () => {
     const root = makeShortRoot()
     const userDataDir = join(root, 'userData')
     const stateDir = join(userDataDir, 'daemon')
@@ -300,16 +300,6 @@ describe('W11 P5-6: scry-host CLI commands, security gates, restart & login-star
       error: 'host_admin_socket_unavailable',
       daemonLogPath: join(userDataDir, 'logs', 'daemon.log')
     })
-
-    const lsOff = makeIo({
-      userDataDir,
-      executable: '/Applications/Scry.app/Contents/MacOS/Scry',
-      platform: 'darwin',
-      homeDir: root,
-      env: { SCRY_HOST_DAEMON: '0' }
-    })
-    expect(await runHostCli(['login-start', 'status'], lsOff.io)).toBe(0)
-    expect(JSON.parse(lsOff.out())).toEqual({ state: 'unavailable', reason: 'daemon_mode_disabled' })
 
     const { formatDeviceList, formatPendingList } = await import('./host-cli-format')
     const dirtyLabel = 'Phone\x1b[31mRed\u009b2J\r\nFake'

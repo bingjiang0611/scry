@@ -1,80 +1,63 @@
 import { shell, dialog } from 'electron'
 import { basename, join } from 'node:path'
-import type { IpcMainInvokeEvent } from 'electron'
 import type { BrowserWindow } from 'electron'
-import type { WorkspaceCreateRequest, WorkspaceFilePageRequest, WorkspaceListRequest, WorkspaceMoveRequest, WorkspacePathRequest, WorkspaceRenameRequest, WorkspaceWriteRequest } from '../../shared/workspace'
-import type { ProviderContext } from '../../shared/provider'
-import { resetProviderSession, viewNothingAfterDaemonNewSession } from './startup-channels'
-import { callDaemonChannel, daemonModeEnabled } from '../daemon-channel-gate'
+import type { WorkspaceFilePageRequest, WorkspacePathRequest } from '../../shared/workspace'
+import { callDaemonChannel } from '../daemon-channel-gate'
+import { viewNothingAfterDaemonNewSession } from './new-session-daemon'
 import { installWorkbenchWindowCwd } from '../daemon-local-ops/workbench'
-import { terminalChannelHandlers } from './terminal-channels'
 import { installTerminalDaemonWindow } from './terminal-daemon'
 import { daemonKnownProjectDirectory, daemonSetCwdHandler } from './known-project-daemon'
-import { authorizedWorkspaceRequest, knownProjectDirectory, knownProjectDirectoryIfPresent } from '../workspace-authorization'
-import { createWorkspaceEntry, listWorkspace, moveWorkspaceEntry, openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, renameWorkspaceEntry, trashWorkspaceEntry, writeWorkspaceFile } from '../workspace-files'
+import { authorizedWorkspaceRequest, knownProjectDirectory } from '../workspace-authorization'
+import { openWorkspaceFileExternally, readWorkspaceFile, readWorkspaceFilePage, resolveWorkspaceFileOpenTarget, trashWorkspaceEntry } from '../workspace-files'
 import type { HomeFileAccess } from '../home-file-access'
-import type { TerminalManager } from '../terminal-manager'
-import type { TerminalOutputBridge } from '../terminal-output'
+import type { TrustedRegistrar } from './agent-runtime-ipc'
 
 export interface WorkspaceBootstrapDependencies {
-  handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
+  handleTrusted: TrustedRegistrar
   getCurrentCwd: () => string | undefined
   setCurrentCwd: (cwd: string | undefined) => void
-  invalidateSessionHistoryLoad: (reason: string) => void
-  resolveKnownProjectDirectory: (cwd: string) => string
   homeFileAccess: HomeFileAccess
-  knownProjectDirectories: () => Set<string>
   openLocalPath: (path: string) => Promise<void>
   shell: typeof shell
   dialog: typeof dialog
   getWindow: () => BrowserWindow | null
-  getTerminalManager: () => Promise<TerminalManager>
   isShuttingDown: () => boolean
   rendererCanReceive: () => boolean
-  assertTrustedIpcEvent: (event: IpcMainInvokeEvent) => void
-  terminalOutput: TerminalOutputBridge
-  providerRegistry: { invalidateContext: (context: ProviderContext) => void | Promise<void> }
-  providerContextKey: (providerId: ProviderContext['providerId'], cwd: string, agentProfileId?: string) => string
-  resetSessionContext: (key: string) => void
   dockBadge: { view: (key: string | null, focused: boolean) => void }
 }
 
+/**
+ * The workspace channels that stay in the App: the window's selection (agent:setCwd),
+ * main's read-only file references (scry-file: and ~), and the two that need this App's
+ * shell (openExternal, trash). Whether a directory is a known project is the daemon's
+ * answer, asked on every call (known-project-daemon.ts); the App keeps no copy of those
+ * stores. The rest of workspace:*, sourceControl:* and terminal:* are the daemon's
+ * (daemon-local-ops/workbench.ts, terminal.ts), bound here to this window's selection.
+ */
 export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies): void {
-  const { handleTrusted, getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad, resolveKnownProjectDirectory, homeFileAccess, knownProjectDirectories, openLocalPath, shell, dialog, getWindow, getTerminalManager, isShuttingDown, rendererCanReceive, assertTrustedIpcEvent, terminalOutput, providerRegistry, providerContextKey, resetSessionContext, dockBadge } = deps
-  // Daemon mode: the known projects are the daemon's stores, so these channels ask the
-  // daemon each call (known-project-daemon.ts) and never read the App's copy of them.
-  const daemonKnownProjects = daemonModeEnabled()
-  const knownDirectory: (cwd: string) => string | Promise<string> = daemonKnownProjects ? daemonKnownProjectDirectory : resolveKnownProjectDirectory
-  handleTrusted('workspace:list', (_event, request: WorkspaceListRequest) =>
-    listWorkspace(authorizedWorkspaceRequest(getCurrentCwd(), request)))
+  const { handleTrusted, getCurrentCwd, setCurrentCwd, homeFileAccess, openLocalPath, shell, dialog, getWindow, isShuttingDown, rendererCanReceive, dockBadge } = deps
   handleTrusted('workspace:resolveFile', async (_event, request: WorkspacePathRequest) =>
     resolveWorkspaceFileOpenTarget(request.cwd === '~'
       ? request
-      : { ...request, cwd: await knownDirectory(request.cwd) }, homeFileAccess))
-  handleTrusted('workspace:read', (_event, request: WorkspacePathRequest) =>
-    readWorkspaceFile(authorizedWorkspaceRequest(getCurrentCwd(), request)))
-  handleTrusted('workspace:readPage', (_event, request: WorkspaceFilePageRequest) =>
-    readWorkspaceFilePage(authorizedWorkspaceRequest(getCurrentCwd(), request)))
+      : { ...request, cwd: await daemonKnownProjectDirectory(request.cwd) }, homeFileAccess))
   handleTrusted('workspace:readKnown', async (_event, request: WorkspacePathRequest) =>
     readWorkspaceFile(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
-      : { ...request, cwd: await knownDirectory(request.cwd) }))
+      : { ...request, cwd: await daemonKnownProjectDirectory(request.cwd) }))
   handleTrusted('workspace:readPageKnown', async (_event, request: WorkspaceFilePageRequest) =>
     readWorkspaceFilePage(homeFileAccess.isReadOnlyTarget(request.cwd)
       ? await homeFileAccess.authorize(request)
-      : { ...request, cwd: await knownDirectory(request.cwd) }))
-  // Runs in the App in daemon mode too (the daemon has no shell), bound to this window's
-  // selection as always. Only the cross-project fallback differs: the known projects are
-  // the daemon's stores then, asked for when the window's workspace lacks the file.
+      : { ...request, cwd: await daemonKnownProjectDirectory(request.cwd) }))
+  // Bound to this window's selection; the daemon has no shell. Only the cross-project
+  // fallback asks the daemon, for its known projects, when the workspace lacks the file.
   handleTrusted('workspace:openExternal', (_event, request: WorkspacePathRequest) => {
     const authorized = authorizedWorkspaceRequest(getCurrentCwd(), request)
     let daemonRoots: readonly string[] = []
-    const resolveChosen = (cwd: string): string => daemonKnownProjects ? knownProjectDirectory(cwd, daemonRoots) : resolveKnownProjectDirectory(cwd)
     return openWorkspaceFileExternally(
       authorized,
       openLocalPath,
       {
-        roots: daemonKnownProjects ? async () => (daemonRoots = await daemonKnownProjectDirectories()) : [...knownProjectDirectories()],
+        roots: async () => (daemonRoots = await daemonKnownProjectDirectories()),
         choose: async (candidates) => {
           const selectable = candidates.length > 0 && candidates.length <= 5
           const options = {
@@ -93,7 +76,7 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
             ? await dialog.showMessageBox(getWindow()!, options)
             : await dialog.showMessageBox(options)
           const selected = selectable ? candidates[result.response - 1] : undefined
-          return selected ? { ...selected, cwd: resolveChosen(selected.cwd) } : null
+          return selected ? { ...selected, cwd: knownProjectDirectory(selected.cwd, daemonRoots) } : null
         }
       }
     )
@@ -102,59 +85,29 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
     openWorkspaceFileExternally(
       homeFileAccess.isReadOnlyTarget(request.cwd)
         ? await homeFileAccess.authorize(request)
-        : { ...request, cwd: await knownDirectory(request.cwd) },
+        : { ...request, cwd: await daemonKnownProjectDirectory(request.cwd) },
       openLocalPath
     ))
-  handleTrusted('workspace:write', (_event, request: WorkspaceWriteRequest) =>
-    writeWorkspaceFile(authorizedWorkspaceRequest(getCurrentCwd(), request)))
-  handleTrusted('workspace:create', (_event, request: WorkspaceCreateRequest) =>
-    createWorkspaceEntry(authorizedWorkspaceRequest(getCurrentCwd(), request)))
-  handleTrusted('workspace:rename', (_event, request: WorkspaceRenameRequest) =>
-    renameWorkspaceEntry(authorizedWorkspaceRequest(getCurrentCwd(), request)))
-  handleTrusted('workspace:move', (_event, request: WorkspaceMoveRequest) =>
-    moveWorkspaceEntry(authorizedWorkspaceRequest(getCurrentCwd(), request)))
   handleTrusted('workspace:trash', (_event, request: WorkspacePathRequest) =>
     trashWorkspaceEntry(authorizedWorkspaceRequest(getCurrentCwd(), request), (path) => shell.trashItem(path)))
 
-  const terminal = terminalChannelHandlers<IpcMainInvokeEvent>({ getTerminalManager, terminalOutput, isShuttingDown, rendererCanReceive, assertCaller: assertTrustedIpcEvent, getCurrentCwd })
-  for (const [channel, listener] of Object.entries(terminal)) handleTrusted(channel, listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown)
+  // The selection stays this window's; the daemon validates the directory. The App keeps
+  // no history cache to invalidate: every page is the daemon's.
+  handleTrusted('agent:setCwd', daemonSetCwdHandler({ getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad: () => undefined }))
 
-  // The selection stays this window's; in daemon mode the daemon validates the directory.
-  const setCwd: (event: IpcMainInvokeEvent, dir: string | null, clearIfMissing?: boolean) => string | null | Promise<string | null> = daemonKnownProjects
-    ? daemonSetCwdHandler({ getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad })
-    : (_e, dir, clearIfMissing) => {
-      const selected = typeof dir === 'string' && dir.trim()
-        ? clearIfMissing === true ? knownProjectDirectoryIfPresent(resolveKnownProjectDirectory, dir) : resolveKnownProjectDirectory(dir)
-        : null
-      const cwd = selected ?? undefined
-      if (cwd !== getCurrentCwd()) invalidateSessionHistoryLoad('workspace changed')
-      setCurrentCwd(cwd)
-      return cwd ?? null
-    }
-  handleTrusted('agent:setCwd', setCwd)
-
-  handleTrusted('agent:newSession', async (_event, context: ProviderContext) => {
-    dockBadge.view(null, Boolean(getWindow()?.isFocused()))
-    return await resetProviderSession({ providerRegistry, providerContextKey, resetSessionContext, currentCwd: getCurrentCwd }, context)
-  })
-  // Daemon mode: the daemon resets the context it runs; the badge part stays here.
-  if (daemonModeEnabled()) viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
-  // Daemon mode: the forwarded workspace channels stay bound to this window's selection,
-  // as the handlers above are; the daemon checks the request against it.
-  if (daemonModeEnabled()) {
-    installWorkbenchWindowCwd(getCurrentCwd)
-    // The terminal runs in the daemon; this window names its workspace and its state.
-    installTerminalDaemonWindow({ windowCwd: getCurrentCwd, rendererCanReceive, isShuttingDown })
-  }
-
+  // The daemon resets the context it runs; the badge part stays here.
+  viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
+  // The forwarded workspace channels stay bound to this window's selection; the daemon
+  // checks the request against it.
+  installWorkbenchWindowCwd(getCurrentCwd)
+  // The terminal runs in the daemon; this window names its workspace and its state.
+  installTerminalDaemonWindow({ windowCwd: getCurrentCwd, rendererCanReceive, isShuttingDown })
 }
 
 /**
- * What the in-process knownProjectDirectories() reads from the App's own stores (recent
- * folders, project records, session catalog), asked of the daemon that owns them: its
- * project list (records and session projects, removed ones left out) and its recent
- * folders. Narrower than in process at most (sessions of a removed project, managed
- * worktrees), which only offers fewer candidates. An answer of the wrong shape refuses.
+ * The known projects (recent folders, project records, session cwds), asked of the
+ * daemon that owns them: its project list (records and session projects, removed ones
+ * left out) and its recent folders. An answer of the wrong shape refuses.
  */
 async function daemonKnownProjectDirectories(): Promise<string[]> {
   const [projects, recent] = await Promise.all([callDaemonChannel('agent:listProjects', []), callDaemonChannel('agent:recentFolders', [])])

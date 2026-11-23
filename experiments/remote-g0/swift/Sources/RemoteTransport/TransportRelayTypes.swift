@@ -33,9 +33,23 @@ extension G0Transport {
     public let hostId: String
     public let label: String
     public let state: String
+    public let subscribe: Int?
 
-    public init(id: String, binding: String, hostId: String, label: String, state: String) {
+    public init(id: String, binding: String, hostId: String, label: String, state: String, subscribe: Int? = nil) {
       self.id = id; self.binding = binding; self.hostId = hostId; self.label = label; self.state = state
+      self.subscribe = subscribe
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, binding, hostId, label, state, subscribe }
+
+    public init(from decoder: Decoder) throws {
+      let values = try decoder.container(keyedBy: CodingKeys.self)
+      id = try values.decode(String.self, forKey: .id)
+      binding = try values.decode(String.self, forKey: .binding)
+      hostId = try values.decode(String.self, forKey: .hostId)
+      label = try values.decode(String.self, forKey: .label)
+      state = try values.decode(String.self, forKey: .state)
+      subscribe = try? values.decode(Int.self, forKey: .subscribe)
     }
   }
 

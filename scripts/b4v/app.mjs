@@ -17,17 +17,15 @@ export function electronExecutable(root, platform = process.platform) {
 }
 
 /**
- * The only difference between a scenario and its control. Off is spelled out ('0'), so
- * a shell that exported SCRY_HOST_DAEMON=1 cannot turn the control into daemon mode.
- * SCRY_REMOTE_HOST=0: an App that is itself the remote lease owner makes the daemon
- * refuse to start (remote_lease_owner_alive), which is correct and not under test here.
+ * The App's environment for a scenario. Every App talks to the daemon: S3 removed the
+ * in-process runtime, so the switch-off control (SCRY_HOST_DAEMON=0) no longer exists and
+ * is refused by name instead of silently running daemon mode twice.
+ * SCRY_REMOTE_HOST=0: the daemon's remote host is not under test here.
  */
 export function modeEnv(mode, extra = {}) {
-  const base = mode === 'daemon'
-    ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0' }
-    : mode === 'switch-off' ? { SCRY_HOST_DAEMON: '0', SCRY_REMOTE_HOST: '0' } : null
-  if (!base) throw new Error(`unknown mode: ${mode}`)
-  return { ...base, ...extra }
+  if (mode === 'switch-off') throw new Error('switch_off_control_retired: S3 removed the in-process App; there is no control to compare with')
+  if (mode !== 'daemon') throw new Error(`unknown mode: ${mode}`)
+  return { SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1', SCRY_REMOTE_HOST: '0', ...extra }
 }
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))

@@ -62,20 +62,28 @@ describe('daemon known projects', () => {
   }, 30_000)
 
   it('pages archived history for a missing catalog workspace without granting or resuming it', async () => {
-    const daemon = await startTestDaemon()
+    // The sidebar and history read the authority's projection, which imports the
+    // session catalog at startup: seed the catalog and archive, then restart.
+    const seed = await startTestDaemon()
+    const externalSessionId = 'archived-workspace-session'
+    const context = { providerId: 'pi', agentProfileId: 'pi:rotom', externalSessionId, cwd: seed.workspace } satisfies import('../shared/provider').ProviderContext
     try {
-      const { workspace: cwd, userDataDir } = daemon
-      const externalSessionId = 'archived-workspace-session'
-      const context = { providerId: 'pi', agentProfileId: 'pi:rotom', externalSessionId, cwd } satisfies import('../shared/provider').ProviderContext
-      createAppSessionStore(userDataDir).record({
+      createAppSessionStore(seed.userDataDir).record({
         ...context, runtimeProvider: 'pi_rpc', prompt: 'archived prompt'
       })
       for (const ts of [1, 2]) {
         expect(upsertTraceArchiveTurn({
-          cwd, sessionId: externalSessionId, providerId: 'pi', runtimeProvider: 'pi_rpc', userDataDir,
+          cwd: seed.workspace, sessionId: externalSessionId, providerId: 'pi', runtimeProvider: 'pi_rpc', userDataDir: seed.userDataDir,
           turn: { runId: `run-${ts}`, userText: `prompt ${ts}`, ts, done: true, items: [] }
         })).toBe(true)
       }
+    } finally {
+      await seed.dispose()
+    }
+    const daemon = await startTestDaemon({ root: seed.root })
+    try {
+      const cwd = daemon.workspace
+      expect(cwd).toBe(seed.workspace)
       rmdirSync(cwd)
       const select = (...args: unknown[]) => daemon.localOp('workspaceSelection', 'setCwd', args)
       const load = (options = context) => daemon.localOp('sessionHistory', 'loadSession', [options, { limit: 1 }])

@@ -7,7 +7,8 @@ import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
 import type { DesktopRemoteIntent } from '@shared/desktop-remote'
 import type { DetectedAgent } from '../env'
 import { attachmentsAfterSuccessfulSubmit, inputAttachments, type ComposerDraftAttachment } from '../composer-drafts'
-import { QUEUE_COPY, REMOTE_ATTACHMENTS_COPY } from '../constants/copy'
+import { REMOTE_ATTACHMENTS_COPY } from '../constants/copy'
+import { QUEUE_COPY } from '../constants/queue-copy'
 import { refreshDesktopConnections } from '../hooks/useDesktopConnections'
 import { refreshRemoteCatalog } from '../hooks/useRemoteCatalogs'
 import { historyTurns, shouldQueryUnknownIntent } from './DesktopRemote'
@@ -26,10 +27,9 @@ import { useRemoteWorktreeSetup } from './RemoteChatWorktreeSetup'
 // runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
-const POLL_MS = 1500
 
 export function useRemoteChatExecution(foundation: FoundationState, presentation: PresentationState, { connectionId, draftStore, queueStore }: Pick<RemoteChatProps, 'connectionId' | 'draftStore' | 'queueStore'>) {
-  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, setTurns, historyEvidence, setHistoryEvidence, setPollInterval, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, pendingWorktreeRef, setPendingWorktree, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
+  const { api, connectionRefreshing, readError, connection, connected, host, catalogEntry, catalog, catalogReady, providerSelection, sessionId, pollRef, setTurns, historyEvidence, setHistoryEvidence, intents, setIntents, status, setStatus, error, setError, pollError, pollFresh, historyError, setHistoryError, historyOlderLoading, setHistoryOlderLoading, submitting, setSubmitting, pendingWorktreeRef, setPendingWorktree, connecting, setConnecting, resolvingIntentId, setResolvingIntentId, unknownReceiptError, setUnknownReceiptError, generation, followLatest, provider, context, contextGeneration, draftKey, releaseAttachments, updateDraft, queueKey, queue, editingMessageId, setEditingMessageId, movedMessageId, setMovedMessageId, submissionInFlight } = foundation
   const { chosenModel, validEffort, validPermissionMode, displayTurns, chatNavigation, currentIntent, unknownReceiptBlocked, currentRunStatus, runActive, controlRunId, projectAvailable, contextAvailable } = presentation
   const submission = (text: string, attachments: AgentInputAttachment[] = [], workspace?: WorkspaceDraftSelection) => ({
     context, prompt: text,
@@ -46,7 +46,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     const submittedKey = draftKey
     chatNavigation.cancel()
     followLatest.current = true
-    setSubmitting(true); setError(null); setStatus(null); setPollInterval(POLL_MS)
+    setSubmitting(true); setError(null); setStatus(null)
     const isNewWorktree = !queued && request.workspace?.intent.kind === 'newWorktree'
     if (isNewWorktree && request.workspace) {
       setPendingWorktree({
@@ -116,7 +116,11 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
         setError(detail.includes('desktop_remote_attachments_unsupported') ? REMOTE_ATTACHMENTS_COPY.unsupported : detail)
         setStatus(null)
       }
-    } finally { submissionInFlight.current = false; setSubmitting(false) }
+    } finally {
+      submissionInFlight.current = false
+      setSubmitting(false)
+      void pollRef.current?.()
+    }
   }
   const attachmentBytes = (attachment: AgentInputAttachment): number => attachment.size ?? Math.floor(attachment.dataBase64.length * 3 / 4)
   const attachmentError = (attachments: readonly AgentInputAttachment[]): string | null => {
@@ -208,13 +212,11 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
   const stop = async (): Promise<void> => {
     const runId = controlRunId
     if (!runId) { setError('当前没有可停止的远端运行。'); return }
-    setPollInterval(POLL_MS)
     try { await api.stop(connectionId, runId); setStatus('已请求停止，等待远端确认。') } catch (reason) { setError(errorText(reason)) }
   }
   const answer = async (response: AgentQuestionResponse): Promise<void> => {
     const runId = controlRunId
     if (!connected || !runId) { const reason = new Error('远端未连接或问题所属运行已不可用。'); setError(reason.message); throw reason }
-    setPollInterval(POLL_MS)
     try { await api.answer(connectionId, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
   // 取页请求自身的递增令牌：切换会话/Provider 会让 generation 失效，但「谁在途」只由
@@ -260,7 +262,7 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     ...(missingAgentId ? [missingAgentId] : [])
   ]), [catalog, missingAgentId])
   const selectedAgentId = provider ? remoteAgentId(provider) : missingAgentId ?? ''
-  const workspaceSetup = useRemoteWorktreeSetup(foundation, connectionId, controlRunId, currentRunStatus, POLL_MS)
+  const workspaceSetup = useRemoteWorktreeSetup(foundation, connectionId, controlRunId, currentRunStatus)
 
   const unknownIntent = intents.find((intent) => intent.status === 'unknown')
   const noticeError = error ?? pollError ?? (historyError && displayTurns.length > 0 ? REMOTE_SESSION_COPY.refreshHistoryFailed : null) ?? catalogEntry?.error

@@ -1,7 +1,6 @@
 import { createTraceRuntime, type RunRendererSink } from '../main/bootstrap/trace-runtime'
 import type { ActiveRun } from '../shared/trace'
 import type { DockBadgeState } from '../main/dock-badge'
-import { CommandReceipts } from '../main/command-receipts'
 import { LlmNetworkConfigurationCache } from '../main/llm-network-configuration'
 import { startRun } from '../main/bootstrap/run-execution'
 import { startWorkspaceRun, type RemoteWorkspaceRunStart } from '../main/bootstrap/workspace-start'
@@ -48,6 +47,7 @@ export interface RunPipelineInputs {
   remoteRunIds: Set<string>
   remoteRunLedgerIds: Map<string, string>
   mirrorSessionTranscript: Parameters<typeof startRun>[2]['mirrorSessionTranscript']
+  observeNativeTranscript?: Parameters<typeof startRun>[2]['observeNativeTranscript']
   execution?: 'in-process' | 'daemon'
 }
 
@@ -83,7 +83,7 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
         : {
           ...options,
           onWorkspaceProgress: (progress) => {
-            try { renderer.send('workspaceSelection:progress', progress) } catch {}
+            try { renderer.send('workspaceSelection:progress', progress) } catch {   }
           }
         }
       return workspaceStart(payload, workspaceOptions, {
@@ -105,10 +105,9 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
       isShuttingDown: inputs.isShuttingDown,
       getCurrentCwd: inputs.getCurrentCwd,
       getStartupManagedRecovery: inputs.getStartupManagedRecovery,
-      nextRunSequence: inputs.nextRunSequence
+      nextRunSequence: inputs.nextRunSequence,
+      observeNativeTranscript: inputs.observeNativeTranscript
     })
   }
-  const remoteStartReceipts = new CommandReceipts<RemoteRunCompletion>()
-
-    return { ...traceRuntime, startAppRun, remoteStartReceipts, llmNetworkConfiguration }
+    return { ...traceRuntime, startAppRun, llmNetworkConfiguration }
 }

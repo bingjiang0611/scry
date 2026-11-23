@@ -1,4 +1,26 @@
 import type { RendererPerformanceSample } from '@shared/performance'
+import type { SessionHistoryPage } from '@shared/session-history'
+import type { TraceEvent } from '@shared/trace'
+
+const historyOutputMark = 'scry:history-snapshot-output'
+let lastMarkedRun: string | null = null
+let diagnosticsEnabled = false
+
+export function hasProjectedOutput(page: SessionHistoryPage | null, runId: string): boolean {
+  if (!page?.projection) return false
+  const hasOutput = (items: TraceEvent[]): boolean => items.some((item) => item.runId === runId &&
+    item.kind === 'model' && (item.stage === 'text' || item.stage === 'text_delta') && Boolean(item.text))
+  const active = page.projection.activeRun
+  return (active?.runId === runId && hasOutput(active.items)) ||
+    page.turns.some((turn) => turn.runId === runId && hasOutput(turn.items))
+}
+
+export function markProjectedOutputReceipt(page: SessionHistoryPage | null, runId: string): void {
+  if (!diagnosticsEnabled || lastMarkedRun === runId || !hasProjectedOutput(page, runId)) return
+  performance.clearMarks(historyOutputMark)
+  performance.mark(historyOutputMark, { detail: { runId } })
+  lastMarkedRun = runId
+}
 
 export class RendererPerformanceAccumulator {
   private frameCount = 0
@@ -47,6 +69,7 @@ export function installRendererPerformanceMonitor(
   report: (sample: RendererPerformanceSample) => void,
   windowMs = 5_000
 ): () => void {
+  diagnosticsEnabled = true
   const accumulator = new RendererPerformanceAccumulator()
   let stopped = false
   let lastFrame = performance.now()
@@ -91,6 +114,9 @@ export function installRendererPerformanceMonitor(
   }, windowMs)
 
   return () => {
+    diagnosticsEnabled = false
+    lastMarkedRun = null
+    performance.clearMarks(historyOutputMark)
     stopped = true
     cancelAnimationFrame(frameId)
     window.clearInterval(timerId)

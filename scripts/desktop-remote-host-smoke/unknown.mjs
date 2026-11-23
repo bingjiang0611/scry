@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
-import { detail, progressMarkers, submitWithUnknownTransport, tlsRequest, waitForRun } from './harness.mjs'
+import { detail, submitWithUnknownTransport, tlsRequest, waitForRun } from './harness.mjs'
 
 // The exactly-once/unknown branch: a dropped receipt is resolved through
 // intentStatus or an explicit recovery fence, never by resending the prompt.
@@ -15,13 +15,13 @@ export async function verifyUnknownReceipt({ transport, evaluate, submit, invita
   let unknown
   const unknownDeadline = Date.now() + 10_000
   while (Date.now() < unknownDeadline) {
-    unknown = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'intentStatus', intentId: unknownIntentId })
+    unknown = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'intentStatusAtLog', intentId: unknownIntentId })
     if (unknown.intent?.runId) break
     await new Promise((resolveWait) => setTimeout(resolveWait, 100))
   }
   assert.ok(unknown?.intent?.runId, `unknown intent was not durably recorded: ${JSON.stringify(unknown)}`)
   const unknownRunId = unknown.intent.runId
-  const unknownAgain = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'intentStatus', intentId: unknownIntentId })
+  const unknownAgain = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'intentStatusAtLog', intentId: unknownIntentId })
   assert.equal(unknownAgain.intent.runId, unknownRunId)
   await waitForRun({ transport, runPort: invitation.runPort, caPEM: invitation.anchorPEM, certPEM: deviceCertPEM, keyPEM: identity.keyPEM, runId: unknownRunId, expect: 'settled' })
 

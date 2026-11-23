@@ -1,7 +1,7 @@
 import { REMOTE_PROTOCOL_VERSION } from '../../shared/desktop-remote'
 import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { setup, ssh } from './desktop-client-fixtures'
+import { setup, ssh, statusSnapshot } from './desktop-client-fixtures'
 
 // The catalog wire shape: one snapshot round trip, its unchanged path, and the
 // capability it carries for Provider controls.
@@ -14,14 +14,12 @@ describe('DesktopRemoteClient catalog snapshot', () => {
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       fixture.tlsRequest.mockClear()
-      // One round trip carries info, projects, provider metadata and the first
-      // session page; the negotiated capability rides in the same reply.
+      // Metadata and Provider capabilities come in one round trip.
       fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: {
         revision: 'r1',
         info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', ...(supported ? { providerDiscovery: 2 } : {}) },
         projects: [],
         providers: [{ id: 'claude', label: 'Claude', available: true }],
-        sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture' }
       } })
       expect(await fixture.client.catalog(id)).toMatchObject({ providerEvidence: supported ? 'host_snapshot' : 'legacy_host' })
       expect(fixture.tlsRequest.mock.calls.map(([value]) => value.request)).toEqual([{ protocol: REMOTE_PROTOCOL_VERSION, op: 'catalogSnapshot' }])
@@ -39,25 +37,23 @@ describe('DesktopRemoteClient catalog snapshot', () => {
       }
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
-  it('validates terminal session evidence instead of accepting invented outcomes', async () => {
-    const fixture = await setup()
+  it.each(['completed', 'invented'])('validates terminal session evidence %s in the subscription', async (lastRunOutcome) => {
+    const parked = new Promise<never>(() => {})
+    const session = { sessionId: 's1', externalSessionId: 'native', providerId: 'pi', cwd: '/repo', label: 'Done', ts: 20, lastRunId: 'run-1', lastRunOutcome }
+    const fixture = await setup({ subscribeResponse: request => request.known ? parked :
+      statusSnapshot(fixture.host.hostId, { sessions: [{
+        sessionKey: session.sessionId, provider: session.providerId, cwd: session.cwd, title: session.label, ts: session.ts,
+        pinnedAt: null, archivedAt: null, pendingQuestions: 0, revSeq: 1, lastRunId: session.lastRunId,
+        lastRunOutcome: { value: lastRunOutcome }, catalog: { nativeSessionId: session.externalSessionId }
+      }] })
+    })
     try {
       const pending = await fixture.client.pair({ label: 'Terminal catalog', ssh, invitation: fixture.invitation })
       const id = pending.connection.id
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
-      const session = { sessionId: 's1', externalSessionId: 'native', providerId: 'pi', cwd: '/repo', label: 'Done', ts: 20,
-        lastRunId: 'run-1', lastRunOutcome: 'completed' }
-      for (const lastRunOutcome of ['completed', 'invented']) {
-        fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: {
-          revision: `r-${lastRunOutcome}`,
-          info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2 },
-          projects: [], providers: [],
-          sessionsPage: { sessions: [{ ...session, lastRunOutcome }], cursor: 1, total: 1, hasMore: false, snapshot: 'fixture' }
-        } })
-        if (lastRunOutcome === 'completed') expect((await fixture.client.catalog(id)).sessions).toEqual([session])
-        else await expect(fixture.client.catalog(id)).rejects.toThrow('invalid_catalog_response')
-      }
+      if (lastRunOutcome === 'completed') expect((await fixture.client.catalog(id)).sessions).toMatchObject([session])
+      else await expect(fixture.client.catalog(id)).rejects.toThrow('invalid_catalog_response')
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
 
@@ -113,7 +109,6 @@ describe('DesktopRemoteClient catalog snapshot', () => {
         info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2, hostAdminNotices: 1 },
         projects: [{ path: '/repo', label: 'repo' }],
         providers: [{ id: 'claude', label: 'Claude', available: true }],
-        sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture' },
         hostAdminNoticeItems: mixed
       } })
       const cat = await fixture.client.catalog(id)
@@ -128,7 +123,6 @@ describe('DesktopRemoteClient catalog snapshot', () => {
         info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2, hostAdminNotices: 1 },
         projects: [{ path: '/repo', label: 'repo' }],
         providers: [],
-        sessionsPage: { sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 'fixture' },
         hostAdminNoticeItems: 'unexpected-future-envelope'
       } })
       const cat2 = await fixture.client.catalog(id)

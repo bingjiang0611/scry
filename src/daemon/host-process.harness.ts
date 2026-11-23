@@ -15,6 +15,8 @@ export interface TestDaemon {
   root: string
   userDataDir: string
   workspace: string
+  device: Awaited<ReturnType<typeof enrollLocal>>
+  output: MemoryOutputStore
   host: Awaited<ReturnType<typeof createDaemonHostProcess>>
   endpoint: DesktopLaneEndpoint
   localOp(op: string, method: string, args: unknown[], absent?: number[]): Promise<Record<string, any>>
@@ -25,11 +27,13 @@ export interface TestDaemon {
 const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1', ELECTRON_ENABLE_LOGGING: '1' }
 const DEBUG_PORT = '--remote-debugging-port=0'
 
-export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log'> & { root?: string } = {}): Promise<TestDaemon> {
-  const { root: previous, ...hostOptions } = options
+export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log' | 'orchestrationBeforeCommitHook'> & {
+  root?: string
+  device?: TestDaemon['device']
+} = {}): Promise<TestDaemon> {
+  const { root: previous, device: enrolled, ...hostOptions } = options
   const root = previous ?? tempDir()
   const userDataDir = join(root, 'userData')
-  mkdirSync(join(userDataDir, 'remote', 'ledger'), { recursive: true, mode: 0o700 })
   mkdirSync(join(root, 'workspace'), { recursive: true, mode: 0o700 })
   const workspace = realpathSync(join(root, 'workspace'))
   createRecentFoldersStore(userDataDir).push(workspace)
@@ -44,6 +48,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
       else process.env[key] = value
     }
   }
+  const output = new MemoryOutputStore()
   let host: TestDaemon['host']
   try {
     host = await createDaemonHostProcess({
@@ -53,7 +58,7 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
       resourcesPath: join(process.cwd(), 'resources'),
       appVersion: 'test',
       isPackaged: false,
-      createOutputStore: () => new MemoryOutputStore(),
+      createOutputStore: () => output,
       log: () => undefined,
       ...hostOptions
     })
@@ -61,12 +66,12 @@ export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 't
     restore()
     throw error
   }
-  const device = await enrollLocal(host.service)
+  const device = enrolled ?? await enrollLocal(host.service)
   const request = (body: Record<string, unknown>) =>
     call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, body)
   let disposed = false
   return {
-    root, userDataDir, workspace, host, request,
+    root, userDataDir, workspace, device, output, host, request,
     endpoint: { path: host.channel.socketPath, caPEM: host.service.caCertificatePEM, ...device },
     localOp: (op, method, args, absent) => request({ op, method, args, ...(absent ? { absent } : {}) }),
     async dispose() {

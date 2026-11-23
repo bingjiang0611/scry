@@ -1,4 +1,4 @@
-import { SessionLedger } from './session-ledger'
+import { SessionLedger, type RunLifecycle } from './session-ledger'
 import { recordRunStage } from '../run-stage-timing'
 
 // G1->G2 bridge: turns a durably-recorded remote intent into exactly one
@@ -14,7 +14,7 @@ import { recordRunStage } from '../run-stage-timing'
 //   - The dispatch record is durable BEFORE the executor side effect. If the
 //     process dies mid-execution the run stays 'dispatched' (ambiguous) and is
 //     never silently re-run or marked settled — unknown is not success.
-//   - The executor's observed outcome, not the client, drives settled/failed.
+//   - The executor's observed outcome, not the client, drives the terminal state.
 
 // The content channel: the assistant's REAL trace output (raw, bounded) is
 // streamed here for the device to render, distinct from the opaque lifecycle
@@ -35,10 +35,13 @@ export interface RemoteExecutorInput {
   output(chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void
 }
 
+export type RemoteExecutionOutcome = 'cancelled' | void
+type TerminalRunLifecycle = Exclude<RunLifecycle, 'recorded' | 'dispatched'>
+
 export interface RemoteExecutor {
-  // Resolve on observed success, reject on observed failure. Must be idempotent
+  // Resolve on observed completion or cancellation, reject on observed failure. Must be idempotent
   // per runId in case a retry policy calls it again after an ambiguous crash.
-  execute(input: RemoteExecutorInput): Promise<void>
+  execute(input: RemoteExecutorInput): Promise<RemoteExecutionOutcome>
 }
 
 export interface RemoteDispatcherDependencies {
@@ -55,7 +58,7 @@ export interface RemoteDispatcherDependencies {
     | { ok: false; action: 'fail'; reason: string; detail?: string }
     | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
   /** P4-2 authoritative terminal settlement hook after executor finishes. */
-  onSettled?(runId: string, ok: boolean, detail?: string): void
+  onSettled?(runId: string, lifecycle: TerminalRunLifecycle, detail?: string): void
 }
 
 export class RemoteDispatcher {
@@ -161,30 +164,32 @@ export class RemoteDispatcher {
     }
     // Invoke synchronously so the dispatch is observably in flight when pump()
     // returns; a synchronous throw is mapped to failure like a rejection.
-    let pending: Promise<void>
+    let pending: Promise<RemoteExecutionOutcome>
     recordRunStage(runId, 'dispatch')
     try {
       pending = this.#executor.execute({ runId, detail, progress, output })
     } catch (error) {
       void flushOutput().finally(() => {
-        this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096))
+        this.#settle(runId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096))
       })
       return
     }
     void Promise.resolve(pending).then(
-      async () => { await flushOutput(); this.#settle(runId, true) },
-      async (error) => { await flushOutput(); this.#settle(runId, false, String((error as Error)?.message ?? error).slice(0, 4096)) }
+      async (outcome) => { await flushOutput(); this.#settle(runId, outcome ?? 'settled') },
+      async (error) => { await flushOutput(); this.#settle(runId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096)) }
     )
   }
 
-  #settle(runId: string, ok: boolean, detail?: string): void {
+  #settle(runId: string, lifecycle: TerminalRunLifecycle, detail?: string): void {
     this.#inflight.delete(runId)
     try {
-      this.#onSettled?.(runId, ok, detail)
+      this.#onSettled?.(runId, lifecycle, detail)
     } catch { /* preserve ledger update */ }
     try {
-      if (ok) this.#ledger.markSettled(runId)
-      else this.#ledger.markFailed(runId, detail)
+      // The v2 Desktop watch maps the H1 cancellation event to a failed run.
+      // Keep the existing settlement and status progress marker on that wire.
+      if (lifecycle === 'failed') this.#ledger.markFailed(runId, detail)
+      else this.#ledger.markSettled(runId)
     } catch { /* already terminal (e.g. cancelled by the host) */ }
   }
 

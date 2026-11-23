@@ -11,20 +11,37 @@ function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
   return run(dir).finally(() => rmSync(dir, { recursive: true, force: true }))
 }
 
-describe('S3 prep: scripts/main-import-boundary static ratchet and negative controls', () => {
-  it('passes on current src/main/index.ts against ratchet baseline with zero orchestration violations', async () => {
+describe('S3: scripts/main-import-boundary strict gate and negative controls', () => {
+  it('passes strict (no baseline) on src/main/index.ts after S3, with an empty baseline', async () => {
     const baseline = JSON.parse(
       readFileSync(join(REPO_ROOT, 'scripts/main-import-boundary-baseline.json'), 'utf8')
     )
+    for (const key of ['forbiddenPackages', 'forbiddenModules', 'nonWhitelistedChildProcess']) expect(baseline[key]).toEqual([])
     const report = await scanMainImportBoundary('src/main/index.ts')
     expect(report.orchestrationImporters).toEqual([])
-    const evaluation = evaluateBoundaryReport(report, baseline)
+    // The App reaches about 190 modules; the in-process runtime made it 639.
+    expect(report.totalReachableModules).toBeLessThanOrEqual(baseline.totalReachableModules)
+    const evaluation = evaluateBoundaryReport(report, null)
     expect(evaluation.ok).toBe(true)
     expect(evaluation.newViolations).toEqual({
       orchestrationImporters: [],
       forbiddenPackages: [],
       forbiddenModules: [],
-      nonWhitelistedChildProcess: []
+      nonWhitelistedChildProcess: [],
+      testOnlySymbols: []
+    })
+  })
+
+  it('negative control: hard-fails when an App module calls the test-only trust registrar', async () => {
+    await withTempDir(async (dir) => {
+      const entry = join(dir, 'inject-trust-checked.ts')
+      const ipcTrust = join(REPO_ROOT, 'src/main/ipc-trust.ts')
+      writeFileSync(entry, `import { registerTrustCheckedListener } from ${JSON.stringify(ipcTrust)}\nexport const register = registerTrustCheckedListener\n`)
+      const report = await scanMainImportBoundary(entry)
+      const baseline = JSON.parse(readFileSync(join(REPO_ROOT, 'scripts/main-import-boundary-baseline.json'), 'utf8'))
+      const evaluation = evaluateBoundaryReport(report, baseline)
+      expect(evaluation.ok).toBe(false)
+      expect(evaluation.newViolations.testOnlySymbols).toEqual([expect.stringContaining('-> registerTrustCheckedListener')])
     })
   })
 

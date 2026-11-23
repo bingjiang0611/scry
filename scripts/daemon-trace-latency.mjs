@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // L2 timing: what the daemon hop costs the App's run view.
 //
-// The App's pump issues two frames per cycle: one `watch` window and one trace read.
+// The App's pump issues two frames per cycle: one `subscribe` window and one trace read.
 // This measures the added cost of that hop over the real unix socket against a real
 // daemon, next to the same frames answered in memory, on this machine, serially:
 //
@@ -15,17 +15,22 @@
 //   * no Provider runs, so nothing here is a claim about Provider time.
 // Exit 2 when the daemon cannot be reached at all: a missing measurement is not a
 // fast one.
+import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { enrollLocalDevice, frame, waitForSocket } from './daemon-fixture.mjs'
 
 const SAMPLES = Number(process.env.SCRY_LATENCY_SAMPLES ?? 40)
-const root = mkdtempSync(join(tmpdir(), 'scry-daemon-latency-'))
+const root = realpathSync(mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'scry-lat-')))
 const userDataDir = join(root, 'userData')
 const stateDirectory = join(root, 'state')
+const home = join(root, 'home')
+mkdirSync(home)
+mkdirSync(userDataDir)
+writeFileSync(join(userDataDir, 'recent-folders.json'), JSON.stringify([root]))
 
 function cleanup() { rmSync(root, { recursive: true, force: true }) }
 process.on('exit', cleanup)
@@ -40,6 +45,7 @@ const child = spawn(process.execPath, [resolve('out/main/daemon.js')], {
   // the harness must not inherit the caller's Provider or relay settings.
   env: {
     PATH: process.env.PATH,
+    HOME: home,
     ELECTRON_RUN_AS_NODE: '1',
     SCRY_DAEMON_STATE_DIR: stateDirectory,
     SCRY_DAEMON_USER_DATA_DIR: userDataDir,
@@ -61,24 +67,34 @@ try {
   }
   const credentials = await enrollLocalDevice(stateDirectory, 'latency fixture')
 
-  const watch = { op: 'watch', runId: 'run-latency-1', cursor: 0, outputCursor: 0, waitMs: 0, output: false }
-  const trace = { op: 'desktop', query: { kind: 'trace', context: { cwd: '/tmp', providerId: 'claude' }, runId: 'run-latency-1', images: true, byteChunks: true } }
+  const request = { op: 'subscribe', views: ['activeRuns'], waitMs: 0 }
+  const trace = { op: 'desktop', query: { kind: 'trace', context: { cwd: root, providerId: 'codex' }, runId: 'run-latency-1', images: true, byteChunks: true } }
+  const baseline = await frame(stateDirectory, credentials, request)
+  assert.equal(baseline.subscribe?.mode, 'snapshot', JSON.stringify(baseline))
+  const { hostId, logId, seq } = baseline.subscribe
+  const subscribe = { ...request, known: { hostId, logId, seq } }
 
-  // Warm both paths once so TLS and JIT costs are not counted as hop latency.
-  await frame(stateDirectory, credentials, watch)
-  await frame(stateDirectory, credentials, trace)
+  async function read() {
+    const status = await frame(stateDirectory, credentials, subscribe)
+    assert.equal(status.subscribe?.mode, 'idle', JSON.stringify(status))
+    const evidence = await frame(stateDirectory, credentials, trace)
+    assert.equal(evidence.desktop?.kind, 'trace', JSON.stringify(evidence))
+    assert.equal(evidence.desktop.run, null)
+  }
+
+  // Warm both paths once to limit first-connection and JIT costs.
+  await read()
 
   const socketTimes = []
   for (let index = 0; index < SAMPLES; index++) {
     const started = performance.now()
-    await frame(stateDirectory, credentials, watch)
-    await frame(stateDirectory, credentials, trace)
+    await read()
     socketTimes.push(performance.now() - started)
   }
 
   // The same two frames answered in memory: the in-process floor for this view.
   const memoryTimes = []
-  const reply = JSON.stringify({ watch: { state: 'dispatched', poll: { cursor: 1, events: [] } } })
+  const reply = JSON.stringify({ subscribe: { hostId, logId, seq, mode: 'idle' } })
   for (let index = 0; index < SAMPLES; index++) {
     const started = performance.now()
     JSON.parse(reply)

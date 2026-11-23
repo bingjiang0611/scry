@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { TraceEvent } from '../shared/trace'
 import { DaemonRunRuntime } from './daemon-run-runtime'
 import { DaemonRunTransport } from './daemon-run-transport'
+import { announceRun } from './daemon-run-subscription.fixtures'
 import { TraceOutputBridge } from './trace-output'
 
 // F1: a read that already carries text must reach the window in the same step.
@@ -24,20 +25,7 @@ function fixture(trace: unknown[]) {
   const timers: Array<() => void> = []
   let traceCall = 0
   const request = async (payload: Record<string, unknown>): Promise<unknown> => {
-    if (payload.op === 'watch') {
-      return {
-        watch: {
-          state: 'dispatched',
-          poll: {
-            cursor: 1,
-            events: [{ runId: RUN, kind: 'run_progress', detail: JSON.stringify({ event: 'bound', ledgerRunId: RUN, scryRunId: CANONICAL, providerId: 'codex', cwd: '/w' }) }]
-          },
-          output: { chunks: [], cursor: 0, count: 1 }
-        }
-      }
-    }
     if (payload.op === 'desktop') return { desktop: trace[traceCall++] ?? { kind: 'trace', run: null } }
-    if (payload.op === 'questions') return { questions: [] }
     return { error: 'unknown_op' }
   }
   const runtime = new DaemonRunRuntime({
@@ -49,8 +37,7 @@ function fixture(trace: unknown[]) {
       // The timer is captured, never run: anything that arrives here arrived from the
       // step itself, not from a later timer.
       schedule: (fn) => { timers.push(fn); return () => { timers.splice(timers.indexOf(fn), 1) } }
-    }),
-    waitMs: 0
+    })
   })
   return { runtime, sent, timers }
 }
@@ -66,7 +53,7 @@ describe('daemon run first text (F1: held text is handed over inside the step)',
     const { runtime, sent, timers } = fixture([
       { kind: 'trace', run: { runId: CANONICAL, providerId: 'codex', cwd: '/w', userText: 'hi', items: [textItem('first words\n')], done: false, providerSettled: false }, cursor: { revision: 'r1', count: 1 } }
     ])
-    await runtime.adopt(RUN)
+    await announceRun(runtime, RUN, { scryRunId: CANONICAL })
     // The batched flush timer was never allowed to fire, so this text can only have been
     // delivered by the step that read it.
     expect(timers.length).toBeGreaterThanOrEqual(0)
@@ -85,7 +72,7 @@ describe('daemon run first text (F1: held text is handed over inside the step)',
         cursor: { revision: 'r1', count: 2 }
       }
     ])
-    await runtime.adopt(RUN)
+    await announceRun(runtime, RUN, { scryRunId: CANONICAL })
     const batches = sent.filter((entry) => entry.channel === 'agent:trace')
     // Two items, one step: still a single batch, so batching itself is not what changed.
     expect(batches).toHaveLength(1)

@@ -12,7 +12,7 @@ struct SessionTranscriptView: View {
   @State var showHistoryDetails = false
   @State var olderReadRequest = 0
   @State private var latestReadRequest = 0
-  @State private var splitPlans: [String: [Int: ConversationSplitPlan]] = [:]
+  @State var splitPlans: [String: [Int: ConversationSplitPlan]] = [:]
   @State private var followingLatest = true
   @State private var showLiveQuestion = false
   @State private var stopTarget: StopTarget?
@@ -25,7 +25,7 @@ struct SessionTranscriptView: View {
   private var attachments: [DraftAttachment] { composer.wrappedValue.attachments }
 
   var session: OpenedSession? { model.openedSession }
-  private var hasLiveTurn: Bool { run.prompt != nil }
+  var hasLiveTurn: Bool { run.prompt != nil }
   var sessionIdentity: RemoteRunStore.SessionIdentity? {
     guard let s = session else { return nil }
     return s.identity
@@ -151,66 +151,9 @@ struct SessionTranscriptView: View {
       // reported while the reader was browsing older messages.
       await run.refreshHistory(providerId: s.providerId, cwd: s.cwd, externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId)
     }
-    .task(id: sessionIdentity) {
-      guard let s = session else { return }
-      // The Mac can start another turn after this screen opens. Keep checking
-      // while it is visible, including after a terminal/archive transition.
-      while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        guard !Task.isCancelled else { return }
-        // The live-run long-poll already delivers this session's changes.
-        if run.historyIsWatched(sessionIdentity) { continue }
-        await run.refreshHistory(providerId: s.providerId, cwd: s.cwd,
-                                 externalSessionId: s.externalSessionId, agentProfileId: s.agentProfileId)
-      }
-    }
-  }
-
-  // Cheap identity for the background split task: revision counters only.
-  private var splitRevision: String {
-    "\(historyReadyForDisplay)-\(run.historyRevision)-\(completedTurns.count)-\(run.output.count)-\(run.output.last?.id ?? -1)-\(run.lifecycle)-\(run.detachedOutput.count)-\(run.detachedOutput.last?.id ?? -1)"
-  }
-
-  private func refreshSplitBlocks() async {
-    var turns: [(String, ConversationTurn)] = []
-    switch run.history {
-    case let .partial(page), let .loaded(page):
-      let first = run.historyPageOffset
-      turns += page.enumerated().map { index, turn in
-        ("history-\(first + index)",
-         ConversationTurn(prompt: turn.userText.isEmpty ? nil : turn.userText, runId: turn.runId,
-                         entries: ConversationEntry.group(turn.items, kind: \.kind, text: \.text), archived: true))
-      }
-    default:
-      break
-    }
-    turns += completedTurns.map { ($0.id, ConversationTurn.completed($0)) }
-    if hasLiveTurn && !run.liveTurnInHistory { turns.append(("focused", ConversationTurn.focused(run))) }
-    if let live = detachedLive {
-      turns.append((live.runId, ConversationTurn(prompt: live.prompt.isEmpty ? nil : live.prompt, runId: live.runId,
-        running: live.state == "running", usagePending: true,
-        entries: ConversationEntry.group(run.detachedOutput, kind: \.kind, text: \.text), notice: ConversationCopy.liveCache)))
-    }
-    var plans: [String: [Int: ConversationSplitPlan]] = [:]
-    for (id, turn) in turns {
-      var hit: [Int: ConversationSplitPlan] = [:]
-      for candidate in turn.splitCandidates {
-        if let blocks = ConversationMarkdownSplitter.ready(turnID: id, candidate: candidate), blocks.count > 1 {
-          hit[candidate.index] = ConversationSplitPlan(token: candidate.token, blocks: blocks,
-            sourceLength: candidate.text.utf16.count, tailStart: blocks[blocks.count - 1].start,
-            crlfFree: !candidate.text.contains("\r\n"))
-        }
-      }
-      plans[id] = hit
-    }
-    splitPlans = plans
-    for (id, turn) in turns {
-      for candidate in turn.splitCandidates where plans[id]?[candidate.index]?.token != candidate.token {
-        guard let parsed = await ConversationMarkdownSplitter.parse(turnID: id, candidate: candidate) else { continue }
-        guard !Task.isCancelled else { return }
-        plans[id, default: [:]][candidate.index] = parsed
-        splitPlans = plans
-      }
+    .task(id: readOnly && scenePhase == .active ? sessionIdentity : nil) {
+      guard readOnly, scenePhase == .active, let identity = sessionIdentity else { return }
+      await run.observeReadOnlyHistory(identity)
     }
   }
 

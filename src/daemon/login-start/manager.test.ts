@@ -19,7 +19,6 @@ const fail = (exitCode = 1, stdout = ''): CommandResult => ({ exitCode, stdout, 
 function setup(options: {
   platform?: NodeJS.Platform
   isPackaged?: boolean
-  daemonMode?: boolean
   env?: NodeJS.ProcessEnv
   allowLinux?: boolean
   systemctlAvailable?: boolean
@@ -45,7 +44,6 @@ function setup(options: {
     platform: options.platform ?? 'darwin',
     uid: 501,
     homeDir,
-    daemonMode: options.daemonMode ?? true,
     target: { executable, appPath, resourcesPath, userDataDir, isPackaged: options.isPackaged ?? true },
     env: options.env ?? {},
     runner,
@@ -56,8 +54,7 @@ function setup(options: {
 }
 
 describe('login-start manager', () => {
-  it('enforces platform, packaged, daemon-mode, and test-instance gating', async () => {
-    expect(await setup({ daemonMode: false }).manager.status()).toEqual({ state: 'unavailable', reason: 'daemon_mode_disabled' })
+  it('enforces platform, packaged, and test-instance gating', async () => {
     expect(await setup({ isPackaged: false }).manager.status()).toEqual({ state: 'unavailable', reason: 'unpackaged_build' })
     expect(await setup({ env: { SCRY_TEST_APP: '1' } }).manager.status()).toEqual({ state: 'unavailable', reason: 'test_instance' })
     expect(await setup({ platform: 'linux' }).manager.status()).toEqual({ state: 'unavailable', reason: 'linux_unverified' })

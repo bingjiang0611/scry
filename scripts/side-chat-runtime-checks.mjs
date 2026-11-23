@@ -65,7 +65,9 @@ export async function exerciseSideChatRuntime({ cdp, evaluate, check, ipcCountsP
   await selectProvider('codex')
   const childTurnsBefore = (await conversation(childId)).turns.length
   await send(CHILD_COMPOSER, 'side chat hold child-only')
-  await wait(`document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null`)
+  // Wait for both surfaces while the fixture holds the same run.
+  await wait(`document.querySelector('${CHILD_PANEL} .runtime-composer .run-status') != null &&
+    document.querySelector('${childTab} [data-side-chat-tab-status]')?.textContent === '运行中'`)
   const whileChildRuns = { main: await mainBusy(), child: await childBusy(), status: await tabStatus(), activeRunId: await activeChildRun() }
   check(whileChildRuns.activeRunId != null, `the child run never became active: ${json(whileChildRuns)}`)
   check(whileChildRuns.main === false, `a child run must not put the parent composer into a running state: ${json(whileChildRuns)}`)

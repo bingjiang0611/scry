@@ -27,6 +27,7 @@ async function setup() {
   const cleaned: Array<{ conversationId: unknown; externalSessionId: unknown }> = []
   const live = new Set<string>()
   const failing = new Set<string>()
+  const unavailable = new Set<string>()
   const registered = registerConversationDeletionHandlers((channel, listener) => { handlers.set(channel, listener as Handler) }, {
     providerContextKey: (providerId, cwd, agentProfileId) => JSON.stringify([providerId, cwd, agentProfileId ?? null]),
     contextAdmission: new ContextAdmission(),
@@ -40,6 +41,9 @@ async function setup() {
       // The production path re-checks the persisted authorization of this exact owner.
       const owner = await current.store.read(String(options.conversationId))
       if (owner?.deletion?.status !== 'pending') throw new Error('没有已持久化的统一对话删除授权')
+      if (unavailable.has(String(options.conversationId))) {
+        return { ok: false, reason: 'unavailable', deleted: [], retained: [], failed: [{ store: 'database', error: 'SQLite unavailable' }] }
+      }
       if (failing.has(String(options.conversationId))) {
         return { ok: false, deleted: [], retained: [], failed: [{ store: 'database', error: 'SQLite unavailable' }] }
       }
@@ -68,10 +72,32 @@ async function setup() {
     await current.service.update(id, (await current.store.read(id))!.revision, { kind: 'archive', archived: true })
   }
   const status = async (id: string) => (await current.store.read(id))?.deletion?.status ?? null
-  return { current, invoke, child, archivedParent, archive, status, cleaned, live, failing, ...registered }
+  return { current, invoke, child, archivedParent, archive, status, cleaned, live, failing, unavailable, ...registered }
 }
 
 describe('deleting a conversation takes its side chats along', () => {
+  it.each(['parent', 'side chat'])('preserves an unavailable database receipt from the %s', async (source) => {
+    const { current, invoke, child, archivedParent, archive, status, unavailable } = await setup()
+    const parent = await archivedParent()
+    const affected = source === 'parent'
+      ? parent
+      : await child({ kind: 'conversation', conversationId: parent.id }, 'unavailable-child')
+    if (source === 'side chat') await sendTurn(current, affected.id, 'unavailable-child-turn', 'child question')
+    unavailable.add(affected.id)
+    await archive(parent.id)
+
+    const preview = await invoke<ConversationDeletionPreview>('conversation:previewDeletion', parent.id)
+    const result = await invoke<ConversationDeletionResult>('conversation:delete', parent.id, preview.fingerprint)
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'unavailable',
+      failed: [{ store: expect.stringMatching(/: database$/), error: 'SQLite unavailable', reason: 'unavailable' }]
+    })
+    expect(await status(parent.id)).toBe('pending')
+    expect(await status(affected.id)).toBe('pending')
+    expect((await current.store.read(parent.id))?.deletion?.result).toEqual(result)
+  })
+
   it('previews every side chat and deletes them with the parent, including one that never sent', async () => {
     const { current, invoke, child, archivedParent, archive, status, cleaned } = await setup()
     const parent = await archivedParent()

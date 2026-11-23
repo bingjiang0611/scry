@@ -1,9 +1,11 @@
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { listFiles, syncDirectory, withDirectoryLock, writeTextAtomic } from './io.js'
 
 export const ATTENTION_PROVIDERS = ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const
+// Marker suffixes use the same readable prefix and 12-character digest as safeKey(sessionId).
+const SESSION_KEY_PATTERN = /^[A-Za-z0-9._-]{1,40}-[0-9a-f]{12}$/
 
 export function attentionRoot(dataRoot: string): string {
   return join(dataRoot, 'runtime', 'attention')
@@ -68,8 +70,18 @@ export async function markedSessions(dataRoot: string): Promise<MarkedSession[]>
     if (separator < 0) continue
     const provider = name.slice(0, separator) as ProviderId
     const sessionKey = name.slice(separator + 2)
-    if (!(ATTENTION_PROVIDERS as readonly string[]).includes(provider) || !sessionKey) continue
-    result.push({ provider, sessionKey, sessionDir: join(dataRoot, 'runtime', provider, sessionKey) })
+    if (!(ATTENTION_PROVIDERS as readonly string[]).includes(provider) || !sessionKey || sessionKey === '.' || sessionKey === '..') continue
+    const sessionDir = join(dataRoot, 'runtime', provider, sessionKey)
+    if (!SESSION_KEY_PATTERN.test(sessionKey)) {
+      // A legacy marker may name a real directory or be stale. Leave missing directories to
+      // locked rechecks, and reject files misindexed by earlier full scans.
+      const entry = await lstat(sessionDir).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return null
+        throw error
+      })
+      if (entry && !entry.isDirectory()) continue
+    }
+    result.push({ provider, sessionKey, sessionDir })
   }
   return result
 }

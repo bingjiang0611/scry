@@ -9,6 +9,7 @@ import { Pkcs10CertificateRequestGenerator } from '@peculiar/x509'
 import type { createDaemonHostProcess } from './host-process'
 import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
+import type { SubscribeKnownCursor } from '../shared/orchestration-subscribe'
 
 
 const dirs: string[] = []
@@ -57,4 +58,36 @@ export async function call(socketPath: string, ca: string, cert: string, key: st
   for await (const chunk of socket) { buffer += (chunk as Buffer).toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy()
   return JSON.parse(buffer.split('\n')[0]) as Record<string, any>
+}
+
+export function localSubscription(known?: SubscribeKnownCursor, waitMs = 0): Record<string, unknown> {
+  return {
+    op: 'subscribe', views: ['activeRuns', 'sessions'], waitMs,
+    ...(known ? { known: { hostId: known.hostId, logId: known.logId, seq: known.seq } } : {})
+  }
+}
+
+/** Observe one real daemon run using the v3 projection and cursor. */
+export async function waitForProjectedRun(
+  socketPath: string, ca: string, cert: string, key: string, runId: string, waitMs = 5_000
+): Promise<string> {
+  const read = (input: Record<string, unknown>) => call(socketPath, ca, cert, key, {
+    op: 'subscribe', views: ['activeRuns'], ...input
+  })
+  let reply = await read({ waitMs: 0 })
+  let state = 'dispatched'
+  const deadline = Date.now() + 15_000
+  const terminal = new Set(['settled', 'failed', 'cancelled', 'interrupted'])
+  for (;;) {
+    if (reply.error || !reply.subscribe) throw new Error(`subscribe failed: ${JSON.stringify(reply)}`)
+    const { hostId, logId, seq, snapshot, events } = reply.subscribe
+    const row = snapshot?.activeRuns?.rows?.find((item: { runId: string }) => item.runId === runId) ??
+      events?.findLast((item: { runId?: string; runRow?: unknown }) => item.runId === runId && item.runRow)?.runRow
+    if (row) state = row.lifecycle
+    const lifecycleEvent = events?.findLast((item: { runId?: string; type: string }) =>
+      item.runId === runId && item.type.startsWith('run.') && terminal.has(item.type.slice(4)))
+    if (lifecycleEvent) state = lifecycleEvent.type.slice(4)
+    if (terminal.has(state) || Date.now() >= deadline) return state
+    reply = await read({ waitMs, known: { hostId, logId, seq } })
+  }
 }

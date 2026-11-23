@@ -13,17 +13,17 @@ export async function runSidebarActivity({ driver, options }) {
   check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Idle remote session appeared active')
   if (options.scenario === 'activity') {
     // Host-side activity changes while the user stays in the local composer.
-    // No explicit refresh: the shared loader must observe starts and stops itself.
-    await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000')
+    // Publish the remote catalog and run changes while the local composer stays open.
+    await read('window.desktopRemoteFixture.sessionActive = true; window.desktopRemoteFixture.sessionTs = 1700000002000; window.publishFixtureRemoteUpdate({ catalog: true, runs: true })')
     await wait('document.querySelector(".sb-remote-proj .sb-sess.running .sb-running") != null', 'background remote session shows a running spinner')
     check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Project A', 'Recent local', 'Older local', 'Project B']), 'Remote activity did not move its project up while preserving local pins')
     check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "sb-running-spin"'), 'Remote activity did not reuse the local spinner animation')
     // A run blocked on a question is active but not progressing: the row must say so
     // and stop spinning, otherwise the status contradicts the open question panel.
-    await read('window.desktopRemoteFixture.sessionPendingQuestions = 2')
+    await read('window.desktopRemoteFixture.sessionPendingQuestions = 2; window.publishFixtureRemoteUpdate({ catalog: true, runs: true })')
     await wait('document.querySelector(".sb-remote-proj .sb-sess.waiting .sb-running")?.getAttribute("aria-label") === "需回答 2 个问题"', 'remote session blocked on questions shows the waiting-answer status')
     check(await read('getComputedStyle(document.querySelector(".sb-remote-proj .sb-running")).animationName === "none"'), 'Blocked remote run kept spinning')
-    await read('window.desktopRemoteFixture.sessionPendingQuestions = 0')
+    await read('window.desktopRemoteFixture.sessionPendingQuestions = 0; window.publishFixtureRemoteUpdate({ catalog: true, runs: true })')
     await wait('document.querySelector(".sb-remote-proj .sb-sess.waiting") == null', 'Answered remote run stayed in the waiting state')
     await capture('remote-sidebar-running')
     await click('.sb-view-tabs [role=tab]', '动态')
@@ -41,15 +41,15 @@ export async function runSidebarActivity({ driver, options }) {
     await wait('document.querySelector(".chat-transcript")?.textContent.includes("host ui continue")', 'host-started run streams into the opened remote session')
     check((await fixture()).intentsCalls > 0 && (await fixture()).liveRunCalls > 0, 'Foreign run was not discovered through the host live set')
     await capture('remote-activity-tab')
-    await read('window.desktopRemoteFixture.catalogFailure = true')
+    await read('window.desktopRemoteFixture.catalogFailure = true; window.publishFixtureRemoteUpdate({ catalog: true })')
     await wait('!document.querySelector(".sb-activity [data-remote-session=old-native]")', 'failed catalog removes cached live activity')
     await click('.sb-view-tabs [role=tab]', '项目')
     await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "unknown"', 'failed catalog read invalidates live activity')
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Stale catalog still claimed a running remote session')
     check(await read('document.querySelector(".sb-remote-proj [data-remote-session=old-native]") != null'), 'Catalog failure discarded remote history')
     const historyReads = (await fixture()).historyCalls.length
-    await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false; window.desktopRemoteFixture.hostRunArchived = true')
-    await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog polling recovers')
+    await read('window.desktopRemoteFixture.catalogFailure = false; window.desktopRemoteFixture.sessionActive = false; window.desktopRemoteFixture.hostRunArchived = true; window.publishFixtureRemoteUpdate({ catalog: true, runs: true, history: true })')
+    await wait('document.querySelector(".sb-remote-proj .sb-host-tag")?.dataset.state === "connected"', 'catalog projection recovers')
     await wait(`window.desktopRemoteFixture.historyCalls.length > ${historyReads} && document.querySelector(".chat-transcript")?.textContent.includes("host ui continue")`, 'ended host run is re-read as history')
     check(!(await read('document.querySelector(".sb-remote-proj .sb-running")')), 'Settled background session retained its spinner')
     await click('.sb-view-tabs [role=tab]', '动态')

@@ -102,7 +102,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
         providerId: 'claude'
       },
       {
-        prepareRunFocus: (runId) => calls.push(`prepare:${runId}`),
+        prepareRunFocus: (runId) => { calls.push(`prepare:${runId}`) },
         adoptActiveRun: async (runId) => {
           calls.push(`adopt:${runId}`)
           return activeRun
@@ -243,7 +243,7 @@ describe('App turnDone 集成契约：session 完成后刷新派生状态', () =
     let replacement: { sessionId: string; parsed: ParsedTurn[]; activeRun: ActiveRun } | undefined
 
     const restoring = restoreFocusedRunSelection(activeRun, {
-      prepareRunFocus: (runId) => calls.push(`prepare:${runId}`),
+      prepareRunFocus: (runId) => { calls.push(`prepare:${runId}`) },
       selectContext: (context) => calls.push(`select:${context.providerId}:${context.cwd}:${context.sessionId}`),
       loadSession: async () => new Promise<SessionHistoryPage>((resolve) => {
         calls.push('load')

@@ -89,13 +89,14 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
   /** Type like a user, prove the send is not blocked, then really click it. */
   const sendChildPrompt = async (prompt) => {
     await type(CHILD_COMPOSER, prompt)
-    const gate = await evaluate(`(() => ({
-      disabled: document.querySelector('${CHILD_PANEL} .send')?.disabled ?? null,
-      status: document.querySelector('${CHILD_PANEL} .runtime-composer')?.textContent ?? ''
-    }))()`)
-    check(!gate.status.includes('跨 Agent 接续'),
-      `a registered Provider was refused as unsupported: ${json({ prompt, gate })}`)
-    check(gate.disabled === false, `the send stayed disabled for a registered Provider: ${json({ prompt, gate })}`)
+    // The persisted turn can settle before its change notification reaches the composer.
+    await wait(`document.querySelector('${CHILD_PANEL} .send')?.disabled === false`).catch(async (error) => {
+      const status = await evaluate(`document.querySelector('${CHILD_PANEL} .runtime-composer')?.textContent ?? ''`)
+      throw new Error(`the send stayed disabled for a registered Provider: ${json({ prompt, status })}`, { cause: error })
+    })
+    const status = await evaluate(`document.querySelector('${CHILD_PANEL} .runtime-composer')?.textContent ?? ''`)
+    check(!status.includes('跨 Agent 接续'),
+      `a registered Provider was refused as unsupported: ${json({ prompt, status })}`)
     turns += 1
     const before = readJsonLines(inputsPath).length
     await click(`${CHILD_PANEL} .send`)

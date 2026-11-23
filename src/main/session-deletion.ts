@@ -20,6 +20,7 @@ export interface SessionDeletionDependencies {
   }
   deleteAttachments(runId: string): { failed?: string }
   deleteTranscripts(): { failed: Array<{ path: string; error: string }> }
+  deleteProjection?(runIds: ReadonlySet<string>): { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
   deleteCatalog(): void
 }
 
@@ -42,7 +43,7 @@ export async function deleteOwnedSessionData(
   const resolution = dependencies.resolveRunIds(candidates)
   if (resolution.status === 'unavailable') {
     result.failed.push({ store: 'database', error: resolution.error ?? 'SQLite unavailable' })
-    result.reason = 'partial_failure'
+    result.reason = 'unavailable'
     return result
   }
   if (resolution.conflicts && resolution.conflicts.length > 0) {
@@ -108,8 +109,17 @@ export async function deleteOwnedSessionData(
     const database = dependencies.deleteDatabase(runIds)
     if (database.status === 'unavailable') {
       result.failed.push({ store: 'database', error: database.error ?? 'SQLite unavailable' })
+      result.reason = 'unavailable'
     } else {
       result.deleted.push('database')
+    }
+  }
+
+  if (result.failed.length === 0 && dependencies.deleteProjection) {
+    const projection = dependencies.deleteProjection(runIds)
+    if (projection.status === 'unavailable') {
+      result.failed.push({ store: 'orchestration', error: projection.error ?? 'SQLite unavailable' })
+      result.reason = 'unavailable'
     }
   }
 
@@ -123,6 +133,6 @@ export async function deleteOwnedSessionData(
       result.failed.push({ store: 'catalog', error: error instanceof Error ? error.message : String(error) })
     }
   }
-  if (!result.ok) result.reason = 'partial_failure'
+  if (!result.ok) result.reason ??= 'partial_failure'
   return result
 }

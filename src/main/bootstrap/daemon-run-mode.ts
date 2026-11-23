@@ -14,18 +14,13 @@ import { isDefaultAppUserDataDir } from '../daemon-mode-default'
 
 export { appDaemonModeDeps } from './app-daemon-mode-deps'
 
-// Daemon mode for the App's own run surface. One switch, one decision: either the
-// App talks to the daemon that owns the ledger and the runs, or it does not start
-// this path at all and the caller keeps the in-process pipeline.
+// The App's own run surface: the App talks to the daemon that owns the ledger and the
+// runs; there is no in-process pipeline to fall back to (S3).
 //
 // Nothing here retries, replaces, or hides a daemon. A version mismatch is the
 // user's decision (restart the background service); a missing secret or a grant
 // the daemon revoked is reported as such; unsafe credential storage refuses before
 // a credential is written.
-
-// The switch itself lives beside the IPC gate, which must not import this assembly.
-import { DAEMON_MODE_ENV, daemonModeEnabled } from '../daemon-channel-gate'
-export { DAEMON_MODE_ENV, daemonModeEnabled }
 
 /**
  * Whether a failed request may be retried after the daemon is relaunched. A read the
@@ -39,7 +34,7 @@ export function retryAfterReconnect(error: unknown, replayable: boolean): boolea
 }
 
 export interface DaemonRunModeResult {
-  status: 'disabled' | 'ready' | 'version-mismatch' | 'unavailable' | 'credential-unavailable' | 'device-not-authorized'
+  status: 'ready' | 'version-mismatch' | 'unavailable' | 'credential-unavailable' | 'device-not-authorized'
   surface?: DaemonRunSurface
   version?: string
   running?: string
@@ -101,21 +96,17 @@ const REFUSALS: ReadonlySet<string> = new Set([
   'daemon_version_mismatch', 'daemon_device_not_authorized', 'daemon_local_grant_corrupt', 'daemon_enrollment_unavailable'
 ])
 
-/**
- * The App picks its run path once, at connect: the P4-3 subscribe path only when the
- * daemon it reached advertises `subscribe: 1` (SCRY_ORCHESTRATION=on); every other
- * daemon keeps the watch / liveRuns path unchanged.
- */
+/** The App requires the daemon’s authoritative subscription before entering run mode. */
 export async function connectForRunMode(
   client: { connect(): Promise<{ version: string }>; readonly subscribeSupported: boolean }
-): Promise<{ version: string; subscribeMode: boolean }> {
-  const { version } = await client.connect()
-  return { version, subscribeMode: client.subscribeSupported === true }
+): Promise<{ version: string }> {
+  const connected = await client.connect()
+  if (!client.subscribeSupported) throw new Error('daemon_subscribe_unavailable')
+  return connected
 }
 
 export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<DaemonRunModeResult> {
   const env = deps.env ?? process.env
-  if (!daemonModeEnabled(env)) return { status: 'disabled' }
   if (env.SCRY_TEST_APP === '1' && deps.appDataDir && deps.appName &&
       isDefaultAppUserDataDir({ userDataDir: deps.userDataDir, appDataDir: deps.appDataDir, appName: deps.appName })) {
     return { status: 'unavailable', reason: 'test_app_requires_isolated_user_data' }
@@ -207,11 +198,9 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   // The supervisor only adopted what it probed; this second connect is what loads
   // the stored grant and refuses a daemon built from other sources.
   let version: string
-  let subscribeMode = false
   try {
     const connected = await connectForRunMode(client)
     version = connected.version
-    subscribeMode = connected.subscribeMode
   } catch (error) {
     client.close()
     if (error instanceof DaemonClientError && error.reason === 'daemon_version_mismatch') {
@@ -234,7 +223,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
       if (again.status === 'unavailable' || again.status === 'version-mismatch') {
         throw new DaemonClientError('daemon_not_running')
       }
-      await client.connect()
+      await connectForRunMode(client)
     })()
     try { await reconnecting } finally { reconnecting = undefined }
   }
@@ -254,17 +243,18 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const runtime = new DaemonRunRuntime({
     transport,
     send: deps.send,
-    ...(subscribeMode ? { subscribeMode: true } : {}),
-    ...(deps.waitMs === undefined ? {} : { waitMs: deps.waitMs }),
     ...(deps.onWarn ? { onWarn: deps.onWarn } : {}),
     ...(deps.runTraces ? { runTraces: deps.runTraces } : {})
   })
   const detachRuns = deps.runTraces?.attachRuns({
     get: (runId) => { const run = runtime.runView(runId); return run ? { state: run } : undefined }
   })
-  const surface = createDaemonRunSurface({ transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), currentCwd: deps.currentCwd, send: deps.send })
+  const surface = createDaemonRunSurface({
+    transport, runtime, currentCwd: deps.currentCwd, send: deps.send,
+    watchDetail: (key) => events.watchDetail(key)
+  })
   const events = startDaemonRunEvents({
-    transport, runtime, ...(subscribeMode ? { subscribeMode: true } : {}), send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
+    transport, runtime, send: deps.send, focusedRun: () => surface.focusedRunSnapshot(),
     ...(deps.dockBadge ? { dockBadge: deps.dockBadge } : {}),
     ...(deps.isWindowFocused ? { isWindowFocused: deps.isWindowFocused } : {}),
     ...(deps.rendererCanReceive ? { rendererCanReceive: deps.rendererCanReceive } : {}),

@@ -3,7 +3,6 @@ import { DAEMON_LOCAL_OP_CHANNELS } from '../daemon-channel-gate'
 import { handleLocalOp, localOpCaller, localOpHandlersFor, type LocalOpHandler } from './host-local-ops'
 import { dispatchRemoteRequest } from './inner-mtls-dispatch'
 import type { HostController } from './host-controller'
-import { AppEventFeed } from './app-event-feed'
 
 const PEER = 'b'.repeat(64)
 const everyChannel = (handler: LocalOpHandler) =>
@@ -67,44 +66,33 @@ describe('local ops on the App endpoint', () => {
 
   it('answers unsupported_op on an endpoint without local handlers, such as the network endpoint', async () => {
     const controller = {} as HostController
-    await expect(dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 2, op: 'sessionStore', method: 'listSessions', args: [] }))
+    await expect(dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 3, op: 'sessionStore', method: 'listSessions', args: [] }))
       .resolves.toEqual({ error: 'unsupported_op' })
     const handlers = localOpHandlersFor(everyChannel(() => 'ok'))
-    await expect(dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 2, op: 'sessionStore', method: 'listSessions', args: [] }, undefined, { localOps: handlers }))
+    await expect(dispatchRemoteRequest(controller, 'a'.repeat(64), { protocol: 3, op: 'sessionStore', method: 'listSessions', args: [] }, undefined, { localOps: handlers }))
       .resolves.toEqual({ result: 'ok' })
   })
 
-  it('serves the App event feed on the local endpoint only, and validates the request', async () => {
+  it('rejects the retired App event op on both endpoints', async () => {
     const controller = {} as HostController
     const peer = 'a'.repeat(64)
-    await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'appEvents', cursor: 0, waitMs: 0 }))
-      .resolves.toEqual({ error: 'unsupported_op' })
-    const events = new AppEventFeed({ epoch: 'e1' })
-    const local = { events }
-    events.append({ kind: 'data', event: { kind: 'catalog_recovered' } })
-    await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'appEvents', epoch: 'e1', cursor: 0, waitMs: 0 }, undefined, local))
-      .resolves.toEqual({ events: { epoch: 'e1', cursor: 1, items: [{ kind: 'data', event: { kind: 'catalog_recovered' } }] } })
-    for (const bad of [
-      { cursor: -1, waitMs: 0 }, { cursor: 0, waitMs: 1.5 }, { cursor: 0, waitMs: 0, epoch: 7 },
-      { cursor: 0, waitMs: 0, epoch: 'x'.repeat(65) }, { cursor: 0, waitMs: 0, extra: true }
-    ]) {
-      await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'appEvents', ...bad }, undefined, local))
-        .resolves.toEqual({ error: 'invalid_request' })
-    }
+    const request = { protocol: 3, op: 'appEvents', cursor: 0, waitMs: 0 }
+    await expect(dispatchRemoteRequest(controller, peer, request)).resolves.toEqual({ error: 'unknown_op' })
+    await expect(dispatchRemoteRequest(controller, peer, request, undefined, {})).resolves.toEqual({ error: 'unknown_op' })
   })
 
   it('lets the App mark a daemon session viewed on the local endpoint only', async () => {
     const controller = {} as HostController
     const peer = 'a'.repeat(64)
-    await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'attentionViewed', sessionKey: 'k' }))
+    await expect(dispatchRemoteRequest(controller, peer, { protocol: 3, op: 'attentionViewed', sessionKey: 'k' }))
       .resolves.toEqual({ error: 'unsupported_op' })
     const viewed = vi.fn()
     const local = { attention: { viewed } }
-    await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'attentionViewed', sessionKey: 'claude\u0000\u0000/w\u0000s1' }, undefined, local))
+    await expect(dispatchRemoteRequest(controller, peer, { protocol: 3, op: 'attentionViewed', sessionKey: 'claude\u0000\u0000/w\u0000s1' }, undefined, local))
       .resolves.toEqual({ viewed: true })
     expect(viewed).toHaveBeenCalledWith('claude\u0000\u0000/w\u0000s1')
     for (const bad of [{}, { sessionKey: '' }, { sessionKey: 7 }, { sessionKey: 'x'.repeat(4097) }, { sessionKey: 'k', extra: 1 }]) {
-      await expect(dispatchRemoteRequest(controller, peer, { protocol: 2, op: 'attentionViewed', ...bad }, undefined, local))
+      await expect(dispatchRemoteRequest(controller, peer, { protocol: 3, op: 'attentionViewed', ...bad }, undefined, local))
         .resolves.toEqual({ error: 'invalid_request' })
     }
     expect(viewed).toHaveBeenCalledTimes(1)

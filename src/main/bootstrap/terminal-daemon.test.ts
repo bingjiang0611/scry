@@ -6,7 +6,6 @@ import { detachDaemonTerminalRenderer, installTerminalDaemonWindow, shutdownDaem
 // this window names its workspace on every call and refuses where main's handler did
 // while it cannot receive output.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
 function wire(state: { cwd?: string; canReceive?: boolean; shuttingDown?: boolean }, reply: (call: Call) => unknown = () => true) {
@@ -20,7 +19,7 @@ function wire(state: { cwd?: string; canReceive?: boolean; shuttingDown?: boolea
   undo.push(installDaemonChannelForwarder(forwarder))
   const requests = vi.fn(async (_request: Record<string, unknown>, _read: boolean) => ({ terminal: true }))
   undo.push(installDaemonRequestForwarder(requests))
-  const channel = (name: string) => gateDaemonChannel(name, vi.fn(), ON) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
+  const channel = (name: string) => gateDaemonChannel(name, vi.fn()) as unknown as (event: unknown, ...args: unknown[]) => Promise<unknown>
   return { forwarder, requests, channel, dispose: () => { for (const step of undo.splice(0)) step() } }
 }
 

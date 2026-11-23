@@ -111,6 +111,7 @@ App 的「编辑并重发」是 `forkLastTurn` / `restartLastTurn`，`workspace`
 
 - turn 边界：只在 App 提交（`cwdOptional`）时接受，并且**复用** `shared/runtime-provider.normalizeAgentStartRequest` 校验与规范化，不写第二套 schema；结果原样进 `RemoteIntentRouting`，再由 `remote-run-binding` 放进 `AgentStartRequest`。测试：`scope-policy.test.ts`（submit 层）、`remote-run-binding-canonical.test.ts`（绑定层）。
 - `workspace` 准备：需要 commandId 与明确的新会话，这一帧带不了，按名字拒绝（`unsupported_local_request:workspace`），不静默降级成普通 turn。
+  - 后续（S3 之后 daemon 成为唯一运行时）：App 的 `routingDetail` 现在携带 `workspace`，daemon 按设备同一条准备流程处理（commandId 取 ledger run id，新会话由 binding 置 `expectedExternalSessionId: null`），按 App 已知项目解析源目录；只有未写明源目录的 App 提交仍按名字拒绝。窗口项目切换的检查留在 App，准备结果从 daemon 的 `workspaceSelection.inspectStart` 读回。
 
 ## 真实拉起 + 入网（L3 剩余第 4 条）
 

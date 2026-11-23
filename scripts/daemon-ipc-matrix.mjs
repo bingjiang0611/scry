@@ -83,7 +83,30 @@ export function collectChannels(dir = MAIN_DIR) {
       for (const method of expand()) add(`${match[1]}:${method}`, file)
     }
   }
+  // The App main entry registers every channel the daemon answers straight from the gate's
+  // tables (bootstrap/daemon-owned-channels.ts), without an in-process implementation. A
+  // channel only those tables name is registered there; one also registered above keeps
+  // that file.
+  for (const [channel, file] of gateTableChannels(dir)) if (!found.has(channel)) found.set(channel, file)
   return [...found.entries()].map(([channel, file]) => ({ channel, file: relative(root, file) })).sort((a, b) => a.channel.localeCompare(b.channel))
+}
+
+/** Channel keys of the daemon gate's local-op and forward tables (src/main/daemon-local-ops). */
+export function gateTableChannels(dir = MAIN_DIR) {
+  const tables = join(dir, 'daemon-local-ops')
+  const channels = new Map()
+  let files = []
+  try { files = sourceFiles(tables) } catch { return channels }
+  for (const file of files) {
+    const source = readFileSync(file, 'utf8')
+    for (const table of source.matchAll(/^export const \w+: Daemon(?:LocalOp|Forward)Table = \{([\s\S]*?)^\}/gm)) {
+      for (const key of table[1].matchAll(/^\s{2}'([a-zA-Z]+:[a-zA-Z:]+)':/gm)) {
+        if (channels.has(key[1])) throw new Error(`gate table channel ${key[1]} listed twice`)
+        channels.set(key[1], file)
+      }
+    }
+  }
+  return channels
 }
 
 const PRELOAD_DIR = join(root, 'src/preload')

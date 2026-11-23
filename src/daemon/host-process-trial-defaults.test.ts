@@ -1,18 +1,17 @@
 import 'reflect-metadata'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 
-const savedMode = process.env.SCRY_ORCHESTRATION
+// The former switch cannot turn off the authoritative event log.
 afterEach(() => {
-  if (savedMode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = savedMode
+  vi.unstubAllEnvs()
   cleanupTempDirs()
 })
 
-describe('branch trial defaults', () => {
-  it('unset SCRY_ORCHESTRATION runs the daemon in on mode (subscribe advertised)', async () => {
-    delete process.env.SCRY_ORCHESTRATION
+describe('authoritative daemon defaults', () => {
+  it('advertises subscriptions by default when the former switch is unset', async () => {
+    vi.stubEnv('SCRY_ORCHESTRATION', undefined)
     const daemon = await startTestDaemon()
     try {
       const info = await daemon.request({ op: 'daemonInfo' })
@@ -22,12 +21,12 @@ describe('branch trial defaults', () => {
     }
   }, 30_000)
 
-  it('explicit SCRY_ORCHESTRATION=off keeps the legacy path', async () => {
-    process.env.SCRY_ORCHESTRATION = 'off'
+  it('a stale off value does not turn off subscriptions', async () => {
+    vi.stubEnv('SCRY_ORCHESTRATION', 'off')
     const daemon = await startTestDaemon()
     try {
       const info = await daemon.request({ op: 'daemonInfo' })
-      expect(info.subscribe).toBeUndefined()
+      expect(info.subscribe).toBe(1)
     } finally {
       await daemon.dispose()
     }

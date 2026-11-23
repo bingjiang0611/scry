@@ -52,11 +52,8 @@ import type {
   SkillMeta
 } from '../shared/provider'
 import type { DetectedAgent as LocatedAgent } from '../main/claude-locate'
-import type {
-  LoadedSessionTurn,
-  SessionHistoryPage,
-  SessionHistoryPageRequest
-} from '../main/session-history'
+import type { LoadedSessionTurn, SessionHistoryPage } from '../shared/session-history'
+import type { SessionHistoryPageRequest } from '../main/session-history'
 import type { TraceBacklogState, TraceBatchReceipt } from '../main/trace-output'
 import type {
   WorkspaceCreateRequest,
@@ -264,9 +261,10 @@ const api = {
   setSessionArchived: (context: SessionRef, archived: boolean): Promise<boolean> =>
     ipcRenderer.invoke('agent:setSessionArchived', context, archived),
   deleteArchivedSessions: (): Promise<DeleteArchivedSessionsResult> => ipcRenderer.invoke('agent:deleteArchivedSessions'),
-  start: (request: AgentStartRequest): Promise<AgentStartResult & { commandStatus?: 'executed' | 'duplicate'; commandSequence?: number }> =>
+  start: (request: AgentStartRequest): Promise<AgentStartResult> =>
     ipcRenderer.invoke('agent:start', request),
   activeRun: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:activeRun'),
+  watchSessionDetail: (key: string | null): Promise<boolean> => ipcRenderer.invoke('agent:watchSessionDetail', key),
   unreadSessions: (): Promise<SessionAttentionSnapshot> => ipcRenderer.invoke('agent:unreadSessions'),
   viewSessions: (request: { viewId: string; main: boolean; sessionKeys: string[] }): Promise<boolean> => ipcRenderer.invoke('agent:viewSessions', request),
   focusedRunSnapshot: (): Promise<ActiveRun | null> => ipcRenderer.invoke('agent:focusedRunSnapshot'),

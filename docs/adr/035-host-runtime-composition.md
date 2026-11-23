@@ -2,7 +2,7 @@
 
 **Status:** Accepted (documents existing behavior)
 
-Electron main and the daemon assemble the same run pipeline. Main supplies values and callbacks for App-owned paths, shell environment, history, and tool panels; the shared assembly does not import Electron at runtime. A headless host omits outbound desktop execution rather than advertising an unusable target. The App retains read-side registry and trace views in daemon mode, but its pipeline refuses both direct and workspace starts: a local fallback would run outside the daemon ledger. Loss of a renderer during workspace progress delivery does not fail the launch.
+Since S3, only the daemon assembles and runs the Provider pipeline. Electron main uses the daemon's local channel for control and keeps App-owned projections; a local execution fallback would run outside the daemon ledger. The shared assembly does not import Electron at runtime. A headless host omits outbound desktop execution rather than advertising an unusable target. Loss of a renderer during workspace progress delivery does not fail the launch.
 
 Keep daemon-local controls off the device endpoint. If submitter scope cannot be proven, keep device semantics. Main can confirm deletion of an unarchived session for the App's local grant; a device grant still requires it to be archived. A settled run's evidence normally comes from the archive. Only the App's local settled-tail read can use the recently departed registry entry, since removal can precede the ledger's settlement notice.
 
@@ -10,7 +10,7 @@ Key remote start receipts and workspace reservations by ledger run ID, not by lo
 
 Before opening the daemon's local channel, finish reconciliation of recorder, outbox and conversation evidence. Window notices use the App event feed; trace and questions use run reads so they are not sent twice. Unread attention is state: include it in the initial or resynchronized view. The output and terminal-recording workers are packaged beside the daemon entry; resolve their URLs there rather than from a shared chunk. App and daemon performance marks share a timestamp basis so one run can be observed across processes. Shutdown wakes parked readers, finishes terminal recordings and closes orchestration storage before bounded Provider disposal so a slow Provider cannot hold the SQLite writer open.
 
-App-only operations use the same handler factories as Electron main. Steering and background-task stop address the daemon's live registry and cannot be replayed in another process. The App reports which items its window viewed; the daemon cannot infer that from delivery.
+The daemon's local channel reuses handler factories for App-only operations. Steering and background-task stop address the daemon's live registry and cannot be replayed in another process. The App reports which items its window viewed; the daemon cannot infer that from delivery.
 
 Cache history pages in the daemon for older-page reads, but return the suggested selection to the App rather than setting it in the daemon. The App supplies its window's working directory for a native fork when needed, and the daemon resolves it again. Reuse the daemon session lifecycle and native fork operations for remote actions without replacing the remote authority checks.
 
@@ -18,6 +18,6 @@ A daemon admission refusal must reach the App as a refusal, not a successful sta
 
 Use temporary user data, a fixture Provider, and real local enrollment for host integration tests. Load `reflect-metadata` before the daemon harness. Keep Darwin fixture socket paths short. Dispose the daemon before removing its directories. Billing tests do not call live admin sync; attachment tests verify transport and the host receipt rather than pixel decoding. A Provider with no MCP facet still returns the App's explicit unavailable result. Test Antigravity startup with an empty MCP config placeholder and distinguish a successful direct submit from a unified conversation send that must refuse unsupported input. A stalled Provider shutdown must not keep orchestration storage locked.
 
-Test runtime imports with a graph that traverses more than the entry and with Electron main as a positive control. Erased type-only imports are not runtime edges, nor are comments that mention imports. A graph check is not a substitute for constructing the pipeline without Electron. Test execution refusal in both branches even when the read views remain available.
+Test runtime imports with a graph that traverses more than the entry and with Electron main as a positive control. Erased type-only imports are not runtime edges, nor are comments that mention imports. A graph check is not a substitute for constructing the pipeline without Electron. Enforce the App boundary with the [strict import graph check](../../scripts/main-import-boundary.mjs).
 
 See [host composition](../../src/host-runtime/host-runtime.ts), [execution ownership tests](../../src/host-runtime/run-pipeline-execution.test.ts), and [import-graph follow-up #163](https://github.com/bingjiang0611/scry/issues/163).

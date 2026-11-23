@@ -61,7 +61,7 @@ it('sends a large local image through the daemon socket without putting base64 i
 
     seen.length = 0
     await expect(surface.start(payload)).resolves.toEqual(result)
-    expect(seen.map((request) => request.op)).toEqual(['intentStatus', 'submit'])
+    expect(seen.map((request) => request.op)).toEqual(['intentStatusAtLog', 'submit'])
     expect(seen[1]).toEqual(submit)
     expect((await readFile(inputs, 'utf8')).trim().split('\n')).toHaveLength(1)
   } finally {
@@ -88,7 +88,7 @@ it.each(['inline', 'chunked'] as const)('rejects changed content when retrying a
     seen.length = 0
     const changed = first === 'inline' ? images.chunked : images.inline
     await expect(surface.start({ ...payload, attachments: [changed] })).rejects.toMatchObject({ reason: 'command_payload_conflict' })
-    expect(seen.map((request) => request.op)).toEqual(first === 'inline' ? ['intentStatus', 'submit'] : ['submit'])
+    expect(seen.map((request) => request.op)).toEqual(first === 'inline' ? ['intentStatusAtLog', 'submit'] : ['submit'])
     expect(seen.at(-1)?.intentId).toBe(originalSubmit.intentId)
     expect((await readFile(inputs, 'utf8')).trim().split('\n')).toHaveLength(1)
   } finally {

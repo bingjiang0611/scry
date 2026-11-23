@@ -1,44 +1,30 @@
 import { clipboard, dialog, nativeTheme } from 'electron'
 import type { BrowserWindow } from 'electron'
-import type { IpcMainInvokeEvent } from 'electron'
 import type { AgentInputAttachment } from '../../shared/runtime'
 import { writeClipboardText } from '../clipboard-text'
 import { isRendererPerformanceSample } from '../../shared/performance'
 import { performanceRecordingEnabled } from '../performance-timing'
 import { recordRendererPerformance } from '../performance-recording'
 import { windowBackgroundColor } from '../window-chrome'
-import type { createPiAgentProfileStore, PiAgentProfile } from '../pi-agent-profiles'
-import type { DetectedAgent } from '../claude-locate'
-import type { ProviderRegistry } from '../providers/registry'
-import type { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
-import { daemonModeEnabled } from '../daemon-channel-gate'
-import { providerDetectionChannelHandlers, registerChannelHandlers } from './startup-channels'
-import { addPiProfileFromLauncher, piProfileChannelHandlers, recentFolderChannelHandlers, rememberChosenFolder } from './project-channels'
 import { installProjectDaemonWindow } from './project-daemon'
+import type { TrustedRegistrar } from './agent-runtime-ipc'
 
 export interface AppAgentBootstrapDependencies {
-  handleTrusted: <TArgs extends unknown[], TResult>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: TArgs) => TResult) => void
+  handleTrusted: TrustedRegistrar
   getWindow: () => BrowserWindow | null
-  smokeProviderEnabled: boolean
-  smokeDetectedAgents: DetectedAgent[]
-  storedPiProfiles: () => PiAgentProfile[]
-  providerCompatibility: ProviderCompatibilityStore
-  detectInstalledAgents: () => Promise<DetectedAgent[]>
-  providerRegistry: ProviderRegistry
   dialog: typeof dialog
-  piProfileStore: () => ReturnType<typeof createPiAgentProfileStore>
-  invalidateRemoteProviderMetadata: (providerId: 'pi') => void
-  recentStore: () => { load: () => string[]; remove: (cwd: string) => string[] }
-  canonicalExistingDirectory: (cwd: string) => string
-  invalidateSessionHistoryLoad: (reason: string) => void
-  rememberProject: (cwd: string) => void
   setCurrentCwd: (cwd: string | undefined) => void
-  resolveKnownProjectDirectory: (cwd: string) => string
   getCurrentCwd: () => string | undefined
 }
 
+/**
+ * The App's own window channels (theme, clipboard, renderer performance) and the window
+ * parts of the folder and Pi launcher pickers. The work after a picker (validating and
+ * remembering the folder, the Pi handshake and profile store) is the daemon's
+ * (project-channels.ts, served as local ops); project-daemon.ts runs the picker first.
+ */
 export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): void {
-  const { handleTrusted, getWindow, smokeProviderEnabled, smokeDetectedAgents, storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry, dialog, piProfileStore, invalidateRemoteProviderMetadata, recentStore, canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject, setCurrentCwd, getCurrentCwd } = deps
+  const { handleTrusted, getWindow, dialog, setCurrentCwd, getCurrentCwd } = deps
   handleTrusted('app:setTheme', (_event, theme: unknown) => {
     if (theme !== 'dark' && theme !== 'light') throw new Error('无效的界面主题')
     nativeTheme.themeSource = theme
@@ -55,13 +41,6 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     return true
   })
 
-  registerChannelHandlers(handleTrusted, providerDetectionChannelHandlers({
-    smokeProviderEnabled, smokeDetectedAgents, storedPiProfiles, providerCompatibility, detectInstalledAgents, providerRegistry
-  }))
-
-  // The pickers and dialogs are this window's; the work after them is shared with the
-  // daemon (project-channels.ts). In daemon mode the daemon does that work and the App
-  // keeps only the window parts (project-daemon.ts).
   const pickFolder = async (): Promise<string | null> => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
     return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
@@ -75,36 +54,9 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
     if (getWindow() && !getWindow()!.isDestroyed()) await dialog.showMessageBox(getWindow()!, options)
     else await dialog.showMessageBox(options)
   }
-  if (daemonModeEnabled()) {
-    installProjectDaemonWindow({
-      pickFolder, pickPiLauncher, notifyPiFailure, windowCwd: getCurrentCwd,
-      applyChosenFolder: (dir) => {
-        invalidateSessionHistoryLoad('workspace selection changed')
-        setCurrentCwd(dir)
-      }
-    })
-  }
-
-  handleTrusted('agent:addPiProfile', async () => {
-    const launcher = await pickPiLauncher()
-    if (launcher === null) return null
-    try {
-      return await addPiProfileFromLauncher({ piProfileStore, providerRegistry, invalidateRemoteProviderMetadata }, launcher, getCurrentCwd())
-    } catch (error) {
-      await notifyPiFailure(String((error as Error).message))
-      return null
-    }
-  })
-
-  registerChannelHandlers(handleTrusted, piProfileChannelHandlers({ piProfileStore, invalidateRemoteProviderMetadata }))
-  registerChannelHandlers(handleTrusted, recentFolderChannelHandlers({ recentStore }))
-
-  handleTrusted('agent:chooseFolder', async () => {
-    const picked = await pickFolder()
-    if (picked === null) return null
-    const dir = rememberChosenFolder({ canonicalExistingDirectory, invalidateSessionHistoryLoad, rememberProject }, picked)
-    setCurrentCwd(dir)
-    return dir
+  installProjectDaemonWindow({
+    pickFolder, pickPiLauncher, notifyPiFailure, windowCwd: getCurrentCwd,
+    applyChosenFolder: (dir) => { setCurrentCwd(dir) }
   })
 
   handleTrusted('agent:clipboardImage', () => {
@@ -122,6 +74,4 @@ export function registerAppAgentHandlers(deps: AppAgentBootstrapDependencies): v
       height: size.height
     } satisfies AgentInputAttachment
   })
-
-
 }

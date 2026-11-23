@@ -51,17 +51,12 @@ describe('W11 P5-7: App & paired device host-admin notifications', () => {
 
   it('forwards hostAdmin notices through DaemonEventPump', async () => {
     const received: HostAdminNotice[] = []
-    let served = false
     const pump = new DaemonEventPump({
       source: {
-        appEvents: async () => {
-          if (!served) {
-            served = true
-            return { epoch: 'e1', cursor: 1, items: [{ kind: 'hostAdmin', notice: sampleNotice }], reset: false }
-          }
-          await new Promise((r) => setTimeout(r, 50))
-          return { epoch: 'e1', cursor: 1, items: [], reset: false }
-        }
+        subscribe: async () => ({
+          hostId: 'host', logId: 'log', seq: 1, mode: 'snapshot', snapshot: {},
+          hints: [{ kind: 'hostNotice', notice: sampleNotice }]
+        })
       },
       send: () => undefined,
       onHostAdmin: (notice) => { received.push(notice); pump.dispose() }
@@ -71,8 +66,8 @@ describe('W11 P5-7: App & paired device host-admin notifications', () => {
     pump.dispose()
   })
 
-  it('negotiates hostAdminNotices capability without changing REMOTE_PROTOCOL_VERSION and includes notices in catalogSnapshot', async () => {
-    expect(REMOTE_PROTOCOL_VERSION).toBe(2)
+  it('negotiates hostAdminNotices independently of the v3 version and includes notices in catalogSnapshot', async () => {
+    expect(REMOTE_PROTOCOL_VERSION).toBe(3)
     const info = validateInfo({
       desktop: {
         kind: 'info',
@@ -97,7 +92,6 @@ describe('W11 P5-7: App & paired device host-admin notifications', () => {
       }),
       listProjects: () => [],
       listProviders: () => [],
-      listSessionsPage: () => ({ sessions: [], cursor: 0, total: 0, hasMore: false, snapshot: 's1' }),
       listHostAdminNotices: () => [sampleNotice]
     }, 'peer-1', {})
     expect('unchanged' in snap).toBe(false)

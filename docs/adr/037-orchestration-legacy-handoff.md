@@ -1,6 +1,8 @@
 # 037: Hand off legacy runs without replaying their effects
 
-**Status:** Accepted (documents existing behavior)
+**Status:** Historical for mode switching and the compatibility mirror; one-time import remains current.
+
+After P4-6, the daemon uses the event log as its only authority. It does not run shadow/off modes or write a downstream mirror. At startup it imports legacy H1 evidence once, reconciling open runs first and serving catalog rows while large terminal histories backfill. An already authoritative database skips H1 import; its old mirror is not new evidence. See [authority startup](../../src/daemon/orchestration-authority-startup.ts). The mode and mirror mechanics below describe the earlier rollout.
 
 Unset orchestration mode selects the event log as authority. Explicit `shadow` observes the legacy ledger without replacing it; `off` (also the fallback for an unknown setting) keeps the legacy path. Cap pending intent lifetime at 60 seconds even with an override. Keep orchestration migrations independent of App database repairs.
 
@@ -18,4 +20,4 @@ The shadow transition regression uses a large but valid intent with attachments,
 
 Test compaction by both byte and event thresholds. Commit the next authoritative run before emitting its legacy event to check that routine compaction does not read it prematurely from SQLite. At the durable reservation boundary, a failed reservation write must leave the emitted sequence and persisted ceiling unchanged. A shadow-only DB must not overwrite the legacy ledger just because it has more events.
 
-See [legacy import](../../src/host-runtime/orchestration/legacy-import.ts), [legacy mirror](../../src/host-runtime/orchestration/legacy-mirror.ts) and [import recovery tests](../../src/host-runtime/orchestration/legacy-import-edge.test.ts).
+See [legacy import](../../src/host-runtime/orchestration/legacy-import.ts) and [import recovery tests](../../src/host-runtime/orchestration/legacy-import-edge.test.ts).

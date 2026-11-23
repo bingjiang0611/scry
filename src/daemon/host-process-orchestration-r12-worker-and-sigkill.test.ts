@@ -25,13 +25,11 @@ function withOrchOnEnv() {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
   return () => {
     process.argv.length = saved.argvLen
@@ -41,12 +39,10 @@ function withOrchOnEnv() {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
-describe('W9 Round-4: worker-thread WAL checkpoint proof, SIGKILL block-reservation seq non-reuse, and PATH cache invalidation', () => {
+describe('W9 Round-4: worker-thread WAL checkpoint proof, durable SIGKILL replay, and PATH cache invalidation', () => {
   it('executes backfill WAL checkpoints on a worker thread (0 main-thread wal_checkpoint pragmas, threadId > 0)', async () => {
     const root = tempDir()
     const ledgerDir = join(root, 'remote', 'ledger')
@@ -106,7 +102,7 @@ describe('W9 Round-4: worker-thread WAL checkpoint proof, SIGKILL block-reservat
     }
   }, 30_000)
 
-  it('real SIGKILL after submit under Decision H never reuses seqs and resets stale device cursors to R', async () => {
+  it('real SIGKILL after submit replays committed events after a real restart', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonDir = join(userDataDir, 'daemon')
@@ -134,7 +130,6 @@ async function main() {
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   process.argv.push('--remote-debugging-port=0')
 
   const [userDataDir, daemonDir] = process.argv.slice(2)
@@ -184,6 +179,10 @@ main().catch((err) => { console.error(err); process.exit(1) })
       ])) as [{ ready: boolean; socketPath: string; ca: string; cert: string; key: string }]
       expect(msg.ready).toBe(true)
 
+      const initial = await call(msg.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], waitMs: 0
+      })
+      const known = { hostId: initial.subscribe.hostId, logId: initial.subscribe.logId, seq: initial.subscribe.seq }
       const intentId = randomUUID()
       const submitted = await call(msg.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'submit',
@@ -192,7 +191,7 @@ main().catch((err) => { console.error(err); process.exit(1) })
       })
       const runId = submitted.runId as string
       const submitSeq = submitted.seq as number
-      expect(submitSeq).toBe(1)
+      expect(submitSeq).toBeGreaterThan(known.seq)
 
       child.kill('SIGKILL')
       const [, signal] = await exited
@@ -208,36 +207,31 @@ main().catch((err) => { console.error(err); process.exit(1) })
         createOutputStore: () => new MemoryOutputStore(),
         log: () => undefined
       })
-      const reservedAfterRestart = Number(host2.orchestrationAuthority!.sink.getMeta('h1_seq_reserved_until'))
-      expect(reservedAfterRestart).toBe(2048)
-
-      const polled = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, { op: 'poll', cursor: 1 })
-      expect(polled.poll.events).toEqual([])
-      expect(polled.poll.cursor).toBe(1024)
-      expect(polled.poll.reset).toEqual({ requested: 1, availableFrom: 1024 })
-
-      const watched = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
-        op: 'watch',
-        runId,
-        cursor: 1,
-        outputCursor: 0,
-        waitMs: 1_000
+      const replayed = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], known, waitMs: 0
       })
-      expect(watched.error).toBeUndefined()
-      expect(['settled', 'cancelled']).toContain(watched.watch.state)
+      expect(replayed.subscribe).toMatchObject({ mode: 'events', logId: known.logId })
+      expect(replayed.subscribe.seq).toBeGreaterThanOrEqual(submitSeq)
+      expect(replayed.subscribe.events).toContainEqual(expect.objectContaining({ type: 'run.intent_recorded', runId }))
+
+      const observed = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
+        op: 'subscribe', views: ['activeRuns'], trackedRunIds: [runId], waitMs: 0
+      })
+      const run = observed.subscribe.snapshot.activeRuns.rows.find((row: { runId: string }) => row.runId === runId)
+      expect(['settled', 'interrupted']).toContain(run?.lifecycle)
 
       const resolved = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'resolveIntent',
         intentId
       })
-      expect(resolved.intent).toEqual({ runId, state: watched.watch.state })
+      expect(resolved.intent).toEqual({ runId, state: run.lifecycle === 'interrupted' ? 'cancelled' : 'settled' })
 
       const nextSub = await call(host2.channel.socketPath, msg.ca, msg.cert, msg.key, {
         op: 'submit',
         intentId: randomUUID(),
         detail: JSON.stringify({ cwd: canonicalWs, providerId: 'codex', prompt: 'r12 after sigkill' })
       })
-      expect(nextSub.seq).toBe(1025)
+      expect(nextSub.seq).toBeGreaterThan(replayed.subscribe.seq)
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL')

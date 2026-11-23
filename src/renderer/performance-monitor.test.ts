@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { RendererPerformanceAccumulator } from './performance-monitor'
+import { hasProjectedOutput, RendererPerformanceAccumulator } from './performance-monitor'
+import type { SessionHistoryPage } from '@shared/session-history'
 
 describe('renderer performance accumulator', () => {
   it('aggregates frame gaps and long tasks by bounded windows, then resets', () => {
@@ -24,4 +25,18 @@ describe('renderer performance accumulator', () => {
       maxFrameGapMs: 0
     })
   })
+})
+
+it('attributes snapshot output only to the currently received run', () => {
+  const event = { id: 'text', runId: 'new-run', ts: '2026-01-01T00:00:00Z', kind: 'model' as const, stage: 'text' as const, text: 'Visible reply' }
+  const archived = { runId: 'archived-run', userText: 'prompt', items: [{ ...event, runId: 'archived-run' }] }
+  const page: SessionHistoryPage = {
+    turns: [archived], offset: 0, totalTurns: 1, hasOlder: false, completeness: 'complete',
+    projection: { sessionKey: 'session', activeRun: { runId: 'new-run', userText: 'prompt', items: [event], done: false } }
+  }
+  expect(hasProjectedOutput(page, 'new-run')).toBe(true)
+  expect(hasProjectedOutput(page, 'archived-run')).toBe(true)
+  expect(hasProjectedOutput(page, 'unrelated')).toBe(false)
+  expect(hasProjectedOutput({ ...page, projection: undefined }, 'archived-run')).toBe(false)
+  expect(hasProjectedOutput({ ...page, projection: { sessionKey: 'session', activeRun: null } }, 'new-run')).toBe(false)
 })

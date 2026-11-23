@@ -17,7 +17,7 @@ import { assertDaemonSocketFits, benchAppEnv, benchEvidenceSources, benchTempBas
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
 // Measures local history plus button/render/settlement acceptance, not real Provider latency.
-// `--daemon` drives the same App with SCRY_HOST_DAEMON=1 (see session-open-bench-mode.mjs).
+// The App always runs Agents in its daemon (S3; see session-open-bench-mode.mjs).
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const { scenario, mode } = parseBenchArguments(process.argv.slice(2), nativeWorkloads)
 const daemon = mode === 'daemon' ? await import('./session-open-bench-daemon.mjs') : null
@@ -231,7 +231,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   assert.equal(nativeBuildArtifacts(root).sha256, artifactSha256, 'build artifacts changed during measurement')
   assert.equal(benchmarkCodeHash(), benchmarkSha256, 'benchmark changed during measurement')
-  console.log(JSON.stringify({ measurementVersion: 7, mode, runtime, evidenceSources: evidence, startupDriverReadyMs, startupCheckpoints, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, artifactFiles, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
+  console.log(JSON.stringify({ measurementVersion: 8, mode, runtime, evidenceSources: evidence, startupDriverReadyMs, startupCheckpoints, nativeInput, composerSamples, lifecycleSamples, sqliteStats, artifactSha256, artifactFiles, benchmarkSha256, scenario, turnCount, sections, warmups: 2, iterations, firstOpens,
     counterSensitivity: { baseline: sensitivityBase, extra: sensitivityExtra, mutationControl, passed: sensitivityRaised },
     version: packageJson.version ?? null, platform: `${process.platform}/${process.arch}`, node: process.version,
     electron: JSON.parse(readFileSync(join(root, 'node_modules/electron/package.json'), 'utf8')).version,

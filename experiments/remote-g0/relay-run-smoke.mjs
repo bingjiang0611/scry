@@ -1,6 +1,6 @@
 import 'reflect-metadata'
 import assert from 'node:assert/strict'
-import { mkdtempSync, chmodSync, rmSync, writeFileSync, accessSync, constants as fsConstants } from 'node:fs'
+import { mkdirSync, mkdtempSync, chmodSync, realpathSync, rmSync, writeFileSync, accessSync, constants as fsConstants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -15,6 +15,10 @@ import { PairingTransport } from '../../src/main/remote/pairing-transport.ts'
 import { InnerMtlsHost } from '../../src/main/remote/inner-mtls-host.ts'
 import { RelayClient, ReverseTunnelTransport } from '../../src/main/remote/relay-client.ts'
 import { createRelayConnect } from '../../src/main/remote/relay-connect.ts'
+import { attachDaemonOrchestrationAuthority } from '../../src/daemon/orchestration-authority.ts'
+import { ConversationStore } from '../../src/main/conversation-store.ts'
+import { RunRegistry } from '../../src/main/run-registry.ts'
+import { REMOTE_PROTOCOL_VERSION } from '../../src/shared/desktop-remote.ts'
 import { ProviderOperationGate } from '../../src/main/provider-operation-gate.ts'
 import { createRelayServer } from './relay-server.mjs'
 
@@ -23,7 +27,7 @@ const exec = promisify(execFile)
 const HOST_TOKEN = 'relay-run-smoke-token'
 
 // End-to-end RUN-channel smoke: the ACTUAL Swift iOS run client (RemoteRunClient
-// / G0Transport.relayRun*) drives submit/poll/runState through the production
+// / G0Transport.relayRun*) drives fenced submit and subscribe through the production
 // relay-server, reverse tunnel, InnerMtlsHost and HostController (gateway +
 // dispatcher + gated executor). There is NO iPhone, NO human and NO Provider:
 // local confirmation is synthetic and startRun is an in-smoke STUB, so this
@@ -39,9 +43,12 @@ accessSync(generator, fsConstants.X_OK)
 
 const deviceDir = mkdtempSync(join(tmpdir(), 'scry-g0-relay-run-'))
 chmodSync(deviceDir, 0o700)
-const hostDir = mkdtempSync(join(tmpdir(), 'scry-relay-run-host-'))
+const hostDir = realpathSync(mkdtempSync(join(tmpdir(), 'scry-relay-run-host-')))
 const cleanups = []
 const authorizedCwd = join(hostDir, 'authorized-project')
+const deniedCwd = join(hostDir, 'denied-project')
+mkdirSync(authorizedCwd)
+mkdirSync(deniedCwd)
 try {
   const { stdout: fingerprintLine } = await exec(generator, [deviceDir], { timeout: 30_000, maxBuffer: 1 << 20 })
   const devicePublicKeySHA256 = fingerprintLine.trim()
@@ -49,15 +56,28 @@ try {
   const keyPath = join(deviceDir, 'swift-device.key')
   const bootstrapPath = join(deviceDir, 'swift-device-bootstrap.pem')
 
-  const identity = await ensureHostIdentity(join(hostDir, 'identity'))
+  const stateDirectory = join(hostDir, 'remote')
+  const identity = await ensureHostIdentity(join(stateDirectory, 'identity'))
+  const conversations = new ConversationStore(hostDir)
+  const orchestration = await attachDaemonOrchestrationAuthority({
+    userDataDir: hostDir, env: process.env, conversationStore: () => conversations,
+    runs: new RunRegistry(), requestRunStop: () => false, log: () => {}
+  })
+  cleanups.push(() => orchestration.close())
 
   // The dispatcher's leaf executor. NOT a Provider: for an authorized cwd it
   // resolves (=> settled); the workspace authorizer fails closed for anything
   // else (=> failed) BEFORE this is reached. Zero token cost either way.
   const started = []
   const binding = await createHostController({
-    stateDirectory: hostDir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
+    stateDirectory, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
+    orchestration: orchestration.hooks,
+    readDesktop: async query => {
+      assert.equal(query.kind, 'info')
+      return { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, execution: 'canonical', hostId: identity.hostId, subscribe: 1 }
+    },
+    onRunActivity: runId => orchestration.publishHint({ kind: 'run', runId }),
     authorizeWorkspace: (cwd) => {
       if (cwd === authorizedCwd) return cwd
       const error = new Error('invalid_target'); error.code = 'invalid_target'; throw error
@@ -94,12 +114,21 @@ try {
       { path: '/Projects/storefront', label: 'storefront' }
     ]
   })
-  cleanups.push(() => binding.close())
+  cleanups.unshift(() => binding.close())
+  orchestration.startImport()
 
   const server = await identity.issueHostServer()
   const pairingTransport = new PairingTransport({ authority: binding.controller.authority, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM })
   cleanups.push(() => pairingTransport.close())
-  const runHost = new InnerMtlsHost({ controller: binding.controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
+  const controller = binding.controller
+  const networkSubscribe = orchestration.createSubscribeHandler({
+    hostId: () => identity.hostId,
+    authorizePeer: (peer) => controller.authorizeDevicePeer(peer),
+    grantScope: (peer) => controller.authority.grantScope(peer),
+    remoteCwdAuthorizer: () => cwd => cwd === authorizedCwd
+  })
+  const runHost = new InnerMtlsHost({ controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM,
+    caPEM: identity.caCertificatePEM, networkSubscribe })
   cleanups.push(() => runHost.close())
 
   const relay = createRelayServer({ authorizeHost: ({ hostId, token }) => hostId === identity.hostId && token === HOST_TOKEN })
@@ -131,32 +160,25 @@ try {
   writeFileSync(grantedCertPath, grant.certificatePEM, { mode: 0o600 })
 
   const cases = []
-  const pollTerminal = async (runId, want) => {
-    let cursor = 0
-    for (let i = 0; i < 40; i++) {
-      const lines = (await runProbe(runArgs('poll', String(cursor)))).trim().split('\n')
-      for (const line of lines) {
-        if (line.startsWith('poll-cursor ')) cursor = Number(line.slice('poll-cursor '.length))
-        else if (line.startsWith('event ') && line.endsWith(' ' + runId)) {
-          const kind = line.split(' ')[1]
-          if (kind === want) return true
-          if (kind === 'run_settled' || kind === 'run_failed' || kind === 'run_cancelled') return kind
-        }
-      }
-      await new Promise(r => setTimeout(r, 100))
+  const waitForState = async (runId, wanted) => {
+    const deadline = Date.now() + 10_000
+    let state
+    while (Date.now() < deadline) {
+      state = (await runProbe(runArgs('state', runId))).trim()
+      if (['state settled', 'state failed', 'state cancelled'].includes(state)) break
     }
-    return false
+    assert.equal(state, `state ${wanted}`)
   }
 
   // 1. Authorized cwd: the granted device submits a durable intent and the host
   //    drives it to a terminal SETTLED lifecycle (recorded -> dispatched ->
-  //    settled), observed purely by polling the ledger from the Swift client.
+  //    settled), observed from the Swift client's v3 subscription.
   const okDetailPath = join(deviceDir, 'ok-detail.json')
   writeFileSync(okDetailPath, JSON.stringify({ cwd: authorizedCwd, providerId: 'claude', prompt: 'smoke' }))
   const okSubmit = (await runProbe(runArgs('submit', okDetailPath))).trim()
   assert.match(okSubmit, /^submit [0-9a-f-]{36} recorded$/, okSubmit)
   const okRunId = okSubmit.split(' ')[1]
-  assert.equal(await pollTerminal(okRunId, 'run_settled'), true, 'authorized run must settle')
+  await waitForState(okRunId, 'settled')
   assert.ok(started.some(s => s.runId === okRunId && s.cwd === authorizedCwd), 'executor received the authorized run')
   const okState = (await runProbe(runArgs('state', okRunId))).trim()
   assert.equal(okState, 'state settled', okState)
@@ -166,11 +188,13 @@ try {
   //    any executor/Provider runs (recorded -> dispatched -> failed). The device
   //    sees an honest terminal failure, never a fabricated success.
   const badDetailPath = join(deviceDir, 'bad-detail.json')
-  writeFileSync(badDetailPath, JSON.stringify({ cwd: '/scry-run-smoke-unauthorized', providerId: 'claude', prompt: 'smoke' }))
+  writeFileSync(badDetailPath, JSON.stringify({ cwd: deniedCwd, providerId: 'claude', prompt: 'smoke' }))
   const badSubmit = (await runProbe(runArgs('submit', badDetailPath))).trim()
   assert.match(badSubmit, /^submit [0-9a-f-]{36} recorded$/, badSubmit)
   const badRunId = badSubmit.split(' ')[1]
-  assert.equal(await pollTerminal(badRunId, 'run_failed'), true, 'unauthorized run must fail closed')
+  assert.equal(orchestration.sink.getRun(badRunId)?.lifecycle, 'failed', 'unauthorized run must fail closed')
+  const deniedState = (await runProbe(runArgs('state', badRunId))).trim()
+  assert.equal(deniedState, 'state none', 'subscription must not disclose an unauthorized workspace')
   assert.ok(!started.some(s => s.runId === badRunId), 'executor never ran the unauthorized run')
   cases.push({ name: 'Swift run client -> unauthorized cwd fails closed at workspace authorizer (no executor)', passed: true })
 

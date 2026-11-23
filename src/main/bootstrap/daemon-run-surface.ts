@@ -5,12 +5,14 @@ import type { ActiveRun } from '../../shared/trace'
 import type { ProviderId } from '../../shared/provider'
 import { REMOTE_PROTOCOL_VERSION, type DesktopRemoteContext } from '../../shared/desktop-remote'
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES, normalizeDesktopAttachment } from '../remote/desktop-attachments'
-import { MAX_REMOTE_DETAIL_CHARS } from '../remote/host-controller-routing'
+import { MAX_REMOTE_DETAIL_CHARS } from '../remote/desktop-attachments'
 import { DEFAULT_MAX_FRAME } from '../remote/inner-mtls-protocol'
-import { desktopImageReference } from '../remote/stage-desktop-image'
+import { desktopImageReference } from '../remote/desktop-attachments'
 import { DaemonRunRuntime } from '../daemon-run-runtime'
 import { DaemonRunError, type DaemonRunTransport } from '../daemon-run-transport'
 import type { TraceBatchReceipt } from '../trace-output'
+import type { PreparedWorkspace } from '../../shared/workspace-selection'
+import { canonicalExistingDirectory } from '../workspace-authorization'
 
 // The run half of the daemon-mode App: the renderer keeps sending the same IPC
 // payloads, and this surface turns them into daemon frames. Nothing here decides
@@ -20,8 +22,6 @@ import type { TraceBatchReceipt } from '../trace-output'
 export interface DaemonRunSurfaceDeps {
   transport: DaemonRunTransport
   runtime: DaemonRunRuntime
-  /** P4-3: read activeRuns from subscribed state instead of calling `liveRuns`. */
-  subscribeMode?: boolean
   // The workspace the App currently shows. A run started without a directory uses
   // it, exactly like the in-process App does.
   currentCwd: () => string | undefined
@@ -29,6 +29,7 @@ export interface DaemonRunSurfaceDeps {
   // (run-startup.ts) so the window selects its project and session; a daemon run is
   // announced the same way from here.
   send?: (channel: string, payload: unknown) => void
+  watchDetail?: (key: string | null) => boolean
 }
 
 export interface DaemonRunSurface {
@@ -41,6 +42,7 @@ export interface DaemonRunSurface {
   activeRuns(): Promise<ActiveRun[]>
   focusedRunSnapshot(): Promise<ActiveRun | null>
   focusRun(runId: string | null): Promise<boolean>
+  watchDetail?: (key: string | null) => boolean
   stop(runId: string): Promise<boolean>
   answerQuestion(response: AgentQuestionResponse): Promise<boolean>
   ack(receipt: TraceBatchReceipt): Promise<boolean>
@@ -74,7 +76,10 @@ export function routingDetail(payload: AgentStartRequest, currentCwd: string | u
     ...(payload.effort ? { effort: payload.effort } : {}),
     ...(payload.permissionMode ? { permissionMode: payload.permissionMode } : {}),
     ...(payload.expectedExternalSessionId ? { resume: payload.expectedExternalSessionId } : {}),
-    ...(attachments?.length ? { attachments } : {})
+    ...(attachments?.length ? { attachments } : {}),
+    // The workspace selection is the request: dropping it would run a plain turn in the
+    // source checkout, a request the user did not make. The daemon prepares or refuses it.
+    ...(payload.workspace ? { workspace: payload.workspace } : {})
   })
 }
 
@@ -145,6 +150,47 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+// The App half of a first send that prepares its workspace (switch a branch, create or
+// reuse a worktree). The daemon prepares the workspace and refuses a stale selection with
+// the same source-control checks an in-process start ran; what only the App knows - which
+// project its window shows - is checked here, and the prepared workspace is read back
+// from the daemon's own journal instead of being guessed.
+
+type LocalOp = (call: { op: string; method: string; args: unknown[]; read: boolean }) => Promise<unknown>
+
+/** In process the same check ran against the window's selection (workspace-start.ts). */
+export function assertWorkspaceSourceSelected(payload: AgentStartRequest, currentCwd: string | undefined): void {
+  if (!payload.workspace || !payload.cwd || !currentCwd) return
+  if (canonicalExistingDirectory(payload.cwd) !== canonicalExistingDirectory(currentCwd))
+    throw new Error('发送前项目已切换；请确认保留的草稿后再发送')
+}
+
+function preparedWorkspace(value: unknown): PreparedWorkspace | undefined {
+  if (!record(value)) return undefined
+  const { operationId, repositoryId, cwd, worktreeId, branchRef, head } = value
+  if (typeof operationId !== 'string' || typeof repositoryId !== 'string' || typeof cwd !== 'string' ||
+    typeof worktreeId !== 'string' || (branchRef !== null && typeof branchRef !== 'string') ||
+    (head !== null && typeof head !== 'string')) return undefined
+  return { operationId, repositoryId, cwd, worktreeId, branchRef, head }
+}
+
+/**
+ * The workspace the daemon prepared and registered `runId` in, from its journal. A start
+ * the journal does not show as registered for this run is reported, never shown in the
+ * submitted directory as if no workspace had been prepared.
+ */
+export async function registeredWorkspace(localOp: LocalOp, payload: AgentStartRequest, runId: string): Promise<PreparedWorkspace> {
+  const selection = payload.workspace!
+  const status = await localOp({
+    op: 'workspaceSelection', method: 'inspectStart', read: false,
+    args: [{ repositoryId: selection.intent.repositoryId, operationId: selection.operationId }]
+  })
+  const data = record(status) && status.status === 'available' && record(status.data) ? status.data : undefined
+  const workspace = data && data.phase === 'registered' && data.runId === runId ? preparedWorkspace(data.workspace) : undefined
+  if (!workspace || workspace.operationId !== selection.operationId) throw new Error('daemon_workspace_unconfirmed')
+  return workspace
+}
+
 export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSurface {
   let focusedRunId: string | null = null
   const { runtime } = deps
@@ -165,18 +211,30 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     }
   }
   return {
+    watchDetail: deps.watchDetail,
     async start(payload, intentId) {
       const context = runContext(payload, deps.currentCwd())
       if (!context) throw new Error('daemon_run_workspace_required')
+      assertWorkspaceSourceSelected(payload, deps.currentCwd())
       // The App's commandId wins over the fallback key kept across a daemon reconnect.
+      // A lost submit reply is reconciled inside runtime.start from the recorded receipt,
+      // then bound and admitted like any other start; it is never submitted again.
       const prepared = await prepareSubmit(deps.transport, payload, context.cwd, payload.commandId?.trim() || intentId || randomUUID())
       const receipt = await runtime.start({ ...prepared, context, userText: payload.prompt })
       // `bound: false` means the trace will not carry this id yet. Say so instead
       // of handing the view an id it cannot match.
       if (!receipt.bound) throw new Error('daemon_run_not_bound')
+      // A prepared workspace runs where it was prepared; the window follows it there.
+      const workspace = payload.workspace ? await registeredWorkspace(deps.transport.localOp.bind(deps.transport), payload, receipt.runId) : undefined
       focusedRunId = receipt.runId
-      announceFocusedRun(receipt.runId, context, payload.prompt)
-      return { runId: receipt.runId, ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}) }
+      announceFocusedRun(receipt.runId, workspace ? { ...context, cwd: workspace.cwd } : context, payload.prompt)
+      return {
+        runId: receipt.runId,
+        ...(receipt.status ? { commandStatus: receipt.status === 'duplicate' ? 'duplicate' as const : 'executed' as const } : {}),
+        ...(receipt.seq !== undefined ? { commandSequence: receipt.seq } : {}),
+        ...(context.externalSessionId ? { externalSessionId: context.externalSessionId } : {}),
+        ...(workspace ? { workspace } : {})
+      }
     },
     async activeRun() {
       const runs = runtime.activeRuns()
@@ -184,14 +242,6 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       return runs.find((run) => run.runId === focusedRunId) ?? null
     },
     async activeRuns() {
-      if (deps.subscribeMode) return runtime.activeRuns()
-      // A run this window did not start still belongs on screen: the daemon is the
-      // one authority on what is live, so its list decides, not our bookkeeping.
-      const live = await deps.transport.liveRuns({ waitMs: 0 })
-      for (const entry of live.runs) {
-        if (runtime.isTracking(entry.runId)) continue
-        await runtime.adopt(entry.runId)
-      }
       return runtime.activeRuns()
     },
     // Ignores `done`, exactly like the in-process handler: the renderer uses this to

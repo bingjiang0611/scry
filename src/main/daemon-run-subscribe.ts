@@ -1,4 +1,4 @@
-import type { AgentStopState } from '../shared/runtime'
+import type { AgentQuestionRequest, AgentStopState } from '../shared/runtime'
 import type { DesktopRemoteContext, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type {
   SubscribeActiveRunRow,
@@ -19,12 +19,14 @@ export interface SubscribeRuntimeContext {
   send: (channel: string, payload: unknown) => void
   isDisposed?: () => boolean
   onWarn?: (message: string, detail?: unknown) => void
+  /** Receives each run's detached terminal delivery so a caller can await it. */
+  trackTerminal?: (runId: string, delivery: Promise<void>) => void
   onSessionBound?: (payload: Record<string, unknown>) => void
   publishStopState?: (state: AgentStopState) => void
   settleRunTrace?: (runId: string) => void
   flushBridge: () => void
   scheduleTraceRead: (runId: string, options?: { terminal?: boolean }) => Promise<void>
-  syncQuestions: (cursor: RunCursor) => Promise<void>
+  syncQuestions: (cursor: RunCursor, questions: AgentQuestionRequest[]) => Promise<void>
   /** One-shot lifecycle probe for a run a snapshot no longer lists; null = unknown run. */
   probeRunState?: (runId: string) => Promise<string | null>
 }
@@ -43,13 +45,11 @@ function makeCursor(runId: string, init: {
     ...(init.scryRunId ? { scryRunId: init.scryRunId } : {}),
     ...(init.admitted ? { admitted: true } : {}),
     ...(init.userText !== undefined ? { userText: init.userText } : {}),
-    watch: 0,
     output: 0,
     pushed: [],
     askedQuestions: new Set(),
     answerIds: new Map(),
     resyncRequired: false,
-    pumping: false,
     stopped: false,
     sawText: false
   }
@@ -111,7 +111,7 @@ async function finalizeTerminalCursor(
   if (cursor.settledNotified) return
   cursor.settledNotified = true
 
-  // Read any remaining trace items (from live registry or archive fallback, zero settledTail)
+  // Read any remaining trace items (from live registry or archive fallback)
   // BEFORE marking `done` / emitting `agent:turnDone`, matching legacy in-process ordering.
   if (cursor.context && admitted) {
     await ctx.scheduleTraceRead(cursor.runId, { terminal: true })
@@ -190,6 +190,8 @@ export async function applySubscribeSnapshotToRuntime(
       }
     }
 
+    cursor.scopedDelivery = cursor.scopedDelivery === true || row.isConversationRun === true
+    await ctx.syncQuestions(cursor, row.questions ?? [])
     if (row.externalSessionId) emitSessionBoundOnce(ctx, cursor, row.externalSessionId)
     ctx.wakes.wake(cursor.runId)
 
@@ -242,8 +244,8 @@ export async function applySubscribeEventToRuntime(
 
   let cursor = ctx.cursorFor(runId)
   if (event.type === 'run.intent_recorded') {
+    const p = event.payload
     if (!cursor) {
-      const p = event.payload
       const cwd = event.cwd ?? (typeof p.cwd === 'string' ? p.cwd : undefined)
       const providerId = typeof p.provider === 'string' ? p.provider : undefined
       const agentProfileId = typeof p.profile === 'string' ? p.profile : undefined
@@ -254,6 +256,7 @@ export async function applySubscribeEventToRuntime(
       })
       ctx.runs.set(runId, cursor)
     }
+    cursor.scopedDelivery = cursor.scopedDelivery === true || p.isConversationRun === true
     ctx.wakes.wake(cursor.runId)
     return
   }
@@ -300,7 +303,9 @@ export async function applySubscribeEventToRuntime(
   }
 
   if (event.type === 'run.question_opened' || event.type === 'run.question_answered' || event.type === 'run.question_closed') {
-    void ctx.syncQuestions(cursor)
+    cursor.scopedDelivery = cursor.scopedDelivery === true || event.runRow?.isConversationRun === true
+    if (event.runRow?.admitted) cursor.admitted = true
+    await ctx.syncQuestions(cursor, event.runRow?.questions ?? [])
     return
   }
 
@@ -314,9 +319,10 @@ export async function applySubscribeEventToRuntime(
           : undefined
     // The final read is serialized behind this run's trace reads, not behind the
     // global event feed. Other runs can now receive their bind and admission hints.
-    void finalizeTerminalCursor(ctx, cursor, lifecycle, reason).catch((error) => {
+    const delivery = finalizeTerminalCursor(ctx, cursor, lifecycle, reason).catch((error) => {
       ctx.onWarn?.('daemon subscribe terminal delivery failed', error)
     })
+    ctx.trackTerminal?.(cursor.runId, delivery)
   }
 }
 
@@ -324,7 +330,7 @@ export async function applySubscribeEventToRuntime(
 export function applyRunHintToRuntime(
   ctx: SubscribeRuntimeContext,
   hint: Extract<SubscribeHint, { kind: 'run' }>
-): void {
+): Promise<void> | undefined {
   let cursor = ctx.cursorFor(hint.runId) ?? (hint.scryRunId ? ctx.cursorFor(hint.scryRunId) : undefined)
   if (!cursor) {
     cursor = makeCursor(hint.runId, {
@@ -355,11 +361,11 @@ export function applyRunHintToRuntime(
     (hint.outputSeq > cursor.output || cursor.latest === undefined)
   if (shouldReadTrace) {
     cursor.output = Math.max(cursor.output, hint.outputSeq)
-    void ctx.scheduleTraceRead(cursor.runId)
+    return ctx.scheduleTraceRead(cursor.runId)
   }
 }
 
-/** Event-driven admission wait for `subscribeMode`: zero `watch` polls, wakes on hint or terminal event. */
+/** Waits for an admission or terminal event from the subscription. */
 export async function awaitSubscribeAdmission(input: {
   runId: string
   cursor: () => RunCursor | undefined
@@ -387,7 +393,7 @@ export async function awaitSubscribeAdmission(input: {
   }
 }
 
-/** Reads a run's live trace without `settledTail`, falling back to the trace archive once terminal. */
+/** Reads a run's live trace and falls back to the trace archive once terminal. */
 export async function readSubscribeTraceOnce(input: {
   cursor: RunCursor | undefined
   runId: string
@@ -395,7 +401,6 @@ export async function readSubscribeTraceOnce(input: {
   terminal?: boolean
   transport: Pick<DaemonRunTransport, 'trace' | 'archivedRunTrace'>
   apply: (read: DesktopRemoteTraceRead, cursor: RunCursor) => boolean
-  syncQuestions: (cursor: RunCursor) => Promise<void>
   flush: () => void
   onWarn?: (message: string, detail?: unknown) => void
 }): Promise<void> {
@@ -404,18 +409,23 @@ export async function readSubscribeTraceOnce(input: {
   const targetId = cursor.scryRunId ?? runId
   try {
     let read = await input.transport.trace({
-      context: cursor.context, runId: targetId, settledTail: false,
+      context: cursor.context, runId: targetId,
       ...(cursor.after ? { after: cursor.after } : {})
     })
+    if (read.run) cursor.scopedDelivery = cursor.scopedDelivery === true || Boolean(read.run.conversationId)
     if (read.kind === 'snapshot' && read.run === null) {
-      const alreadyHasResult = cursor.pushed.some((e) => e.kind === 'harness' && e.stage === 'result')
-      if (input.terminal && cursor.context.externalSessionId && !alreadyHasResult) {
+      // A Provider result precedes the daemon's finalization. Diff and other
+      // evidence may have reached the archive after the last live read.
+      if (input.terminal && cursor.context.externalSessionId) {
         const archived = await input.transport.archivedRunTrace({ context: cursor.context, runId: targetId })
         if (archived) {
           // Deduplicate by event id so archive-formatted turns never re-emit already-pushed events.
           const pushedIds = new Set(cursor.pushed.map((e) => e.id))
           const missing = archived.items.filter((item) => !pushedIds.has(item.id))
           if (missing.length > 0) {
+            // The legacy archive omits conversation scope. After reconnect,
+            // an unclassified run can only reach its own run view.
+            cursor.scopedDelivery ??= true
             read = { kind: 'snapshot', run: { ...archived, items: [...cursor.pushed, ...missing] } }
           }
         }
@@ -425,7 +435,6 @@ export async function readSubscribeTraceOnce(input: {
     }
     if (cursor.stamp && cursor.latest === undefined && read.kind === 'snapshot' && read.run) cursor.stamp.mark('firstTrace')
     const changed = input.apply(read, cursor)
-    if (!input.terminal) await input.syncQuestions(cursor)
     if (changed) input.flush()
   } catch (error) {
     input.onWarn?.('daemon subscribe trace read failed', error)

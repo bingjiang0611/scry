@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerGitDiffIpc } from './git'
-import { registerTrustedIpcHandler } from './ipc-trust'
+import { registerTrustCheckedListener } from './ipc-trust'
 import { knownProjectDirectory } from './workspace-authorization'
 import { readDiffCommits, readDiffCommitSnapshot } from '../core/turn-recorder/git-diff-history'
 
@@ -25,7 +25,7 @@ async function boundary(channel: string) {
   let handler!: (event: IpcMainInvokeEvent, request: unknown) => unknown
   registerGitDiffIpc((registeredChannel, listener) => {
     if (channel !== registeredChannel) return
-    registerTrustedIpcHandler({ handle: (_name, registered) => { handler = registered } }, channel, () => win, frame.url, listener)
+    registerTrustCheckedListener({ handle: (_name, registered) => { handler = registered } }, channel, () => win, frame.url, listener)
   }, authorize)
   const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent
   return { approved, outside, alias, escape, frame, event, authorize,

@@ -1,12 +1,11 @@
 import { realpathSync } from 'node:fs'
 import type { ProviderId } from '../../shared/provider'
-import type { ActiveRun } from '../../shared/trace'
-import { conversationAttentionKey, sessionAttentionKey, type SessionAttentionSnapshot } from '../../shared/session-attention'
-import { DockBadgeState } from '../dock-badge'
+import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 import { SessionDiffBaselineRegistry } from '../session-diff'
 import { ContextAdmission } from '../context-admission'
 import { ProviderOperationGate, providerOperationKey } from '../provider-operation-gate'
 import { mirrorTranscript } from '../transcript-archive'
+import { activeRunSessionKey, createDockBadge, providerContextKey, providerSessionKey } from './attention-state'
 
 export function createMirrorSessionTranscript(userDataDir: string) {
   return async (providerId: ProviderId, cwd: string | undefined, sessionId: string | undefined): Promise<void> => {
@@ -41,8 +40,6 @@ export function createSessionState({
   const recordingRecoveryHint = '不要开始下一轮；保留 userData/trace-turn-progress、managed-turn-progress、managed-turn-commits 与 workspace/.scry 后重试恢复'
   const deletingSessions = new Set<string>()
   const adoptingSessionKeys = new Set<string>()
-  const providerContextKey = (providerId: ProviderId, cwd: string, agentProfileId?: string): string =>
-    `${providerId}\0${agentProfileId ?? ''}\0${cwd}`
   const withProviderOperation = async <T>(
     providerId: ProviderId,
     operation: () => T | Promise<T>,
@@ -63,31 +60,7 @@ export function createSessionState({
       return cwd ?? process.cwd()
     }
   }
-  const providerSessionKey = (providerId: ProviderId, cwd: string, sessionId: string, agentProfileId?: string): string =>
-    sessionAttentionKey({ providerId, agentProfileId, cwd, sessionId })
-  let badgePermissionWarningShown = false
-  const dockBadge = new DockBadgeState((count) => {
-    if (setBadgeCount(count) || process.platform !== 'darwin' || badgePermissionWarningShown) return
-    badgePermissionWarningShown = true
-    console.warn('[scry] macOS Dock badge permission is unavailable')
-  }, (snapshot) => {
-    try {
-      publishUnreadSessions(snapshot)
-    } catch (error) {
-      console.warn('[scry] unread session notification failed:', error)
-    }
-  })
-  const activeRunSessionKey = (run: ActiveRun): string | null => {
-    if (run.attentionKey) return run.attentionKey
-    if (run.conversationId) return conversationAttentionKey(run.conversationId)
-    if (!run.providerId) return null
-    return providerSessionKey(
-      run.providerId,
-      run.cwd ?? '',
-      run.externalSessionId ?? run.sessionId ?? run.runId,
-      run.agentProfileId
-    )
-  }
+  const dockBadge = createDockBadge({ setBadgeCount, publishUnreadSessions })
 
 
   function bumpSessionRevision(key: string): void {

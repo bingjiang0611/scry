@@ -1,22 +1,23 @@
 import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { HOST_RESTARTED_DETAIL, type RemoteIntentRouting } from './host-controller'
-import { AUTHORIZED, CERT, MemoryLedgerStore, grantedController, routing } from './host-controller-fixtures'
+import { AUTHORIZED, CERT, MemoryLedgerStore, grantedController, grantedProjectedController, routing } from './host-controller-fixtures'
 
 describe('HostController intent execution (routing, workspaces, providers, projects)', () => {
   it('runs a routed intent end-to-end through the real modules and reflects settlement', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting; progress(d?: string): void }) => { seen.push(routing) })
-    const { controller } = await grantedController(runProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider)
 
     const submit = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'ship it' }) })
     expect(submit.status).toBe('recorded')
     await controller.idle()
 
     expect(seen).toEqual([{ cwd: AUTHORIZED, providerId: 'claude', prompt: 'ship it' }])
-    expect(controller.runState(CERT, { runId: submit.runId })).toBe('settled')
-    const feed = controller.poll(CERT, { cursor: 0 })
-    expect(feed.events.map((e) => e.kind)).toEqual(['intent_recorded', 'run_dispatched', 'run_settled'])
+    expect(projection.getRun(submit.runId)?.lifecycle).toBe('settled')
+    const lifecycle = projection.listEvents().filter((event) =>
+      event.runId === submit.runId && ['run.intent_recorded', 'run.dispatched', 'run.settled'].includes(event.type))
+    expect(lifecycle.map((event) => event.type)).toEqual(['run.intent_recorded', 'run.dispatched', 'run.settled'])
   })
 
   it('on restart closes runs orphaned mid-execution as failed with an honest reason and never re-runs them', async () => {
@@ -30,64 +31,64 @@ describe('HostController intent execution (routing, workspaces, providers, proje
       { seq: 4, at: 4, runId: recorded, kind: 'intent_recorded', intentId: randomUUID(), detail: routing({ prompt: 'never dispatched' }) }
     ]
     const runProvider = vi.fn(async (_input: { routing: RemoteIntentRouting }) => {})
-    const { controller } = await grantedController(runProvider, undefined, { ledgerStore })
+    const { controller, projection } = await grantedProjectedController(runProvider, { ledgerStore })
     controller.recover()
     await controller.idle()
 
-    expect(controller.runState(CERT, { runId: orphan })).toBe('failed')
+    expect(projection.getRun(orphan)?.lifecycle).toBe('failed')
     const failed = ledgerStore.log.find((event) => event.runId === orphan && event.kind === 'run_failed')
     expect(failed?.detail).toBe(HOST_RESTARTED_DETAIL)
     expect(runProvider.mock.calls.map(([input]) => input.routing.prompt)).toEqual(['never dispatched'])
-    expect(controller.runState(CERT, { runId: recorded })).toBe('settled')
+    expect(projection.getRun(recorded)?.lifecycle).toBe('settled')
   })
 
   it('accepts bounded explicit run controls and rejects invalid permission modes', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
-    const { controller } = await grantedController(runProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider)
     const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({
       prompt: 'go', modelId: 'gpt-5.4', modelProviderId: 'openai', effort: 'high', permissionMode: 'full_access'
     }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(projection.getRun(accepted.runId)?.lifecycle).toBe('settled')
     expect(seen[0]).toMatchObject({ modelId: 'gpt-5.4', modelProviderId: 'openai', effort: 'high', permissionMode: 'full_access' })
 
     const rejected = controller.submitIntent(CERT, { intentId: randomUUID(), detail: JSON.stringify({
       cwd: AUTHORIZED, providerId: 'claude', prompt: 'go', permissionMode: 'invented'
     }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: rejected.runId })).toBe('failed')
+    expect(projection.getRun(rejected.runId)?.lifecycle).toBe('failed')
     expect(runProvider).toHaveBeenCalledTimes(1)
   })
 
   it('accepts only structurally valid managed-worktree selections in the durable intent detail', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
-    const { controller } = await grantedController(runProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider)
     const workspace = { operationId: '11111111-1111-4111-8111-111111111111', intent: {
       kind: 'current' as const, repositoryId: 'a'.repeat(64), expectedRevision: 'b'.repeat(64)
     } }
     const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'go', workspace }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(projection.getRun(accepted.runId)?.lifecycle).toBe('settled')
     expect(seen[0]?.workspace).toEqual(workspace)
     const rejected = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({
       prompt: 'go', workspace: { ...workspace, operationId: '../escape' } as unknown as RemoteIntentRouting['workspace']
     }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: rejected.runId })).toBe('failed')
+    expect(projection.getRun(rejected.runId)?.lifecycle).toBe('failed')
     expect(runProvider).toHaveBeenCalledTimes(1)
   })
 
   it('accepts bounded encrypted image/text attachments and rejects malformed payloads before Provider execution', async () => {
     const seen: RemoteIntentRouting[] = []
     const runProvider = vi.fn(async ({ routing }: { routing: RemoteIntentRouting }) => { seen.push(routing) })
-    const { controller } = await grantedController(runProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider)
     const image = { kind: 'image' as const, name: 'screen.jpg', mimeType: 'image/jpeg', dataBase64: '/9j/', size: 3 }
     const text = { kind: 'text' as const, name: 'error.log', mimeType: 'text/plain', dataBase64: 'Ym9vbQ==', size: 4 }
     const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ prompt: 'inspect', attachments: [image, text] }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(projection.getRun(accepted.runId)?.lifecycle).toBe('settled')
     expect(seen[0].attachments).toEqual([image, text])
 
     const fourKiB = Buffer.alloc(4 * 1024, 0x61)
@@ -103,32 +104,32 @@ describe('HostController intent execution (routing, workspaces, providers, proje
       detail: routing({ prompt: 'inspect context', attachments: [realSizedText] })
     })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: realSized.runId })).toBe('settled')
+    expect(projection.getRun(realSized.runId)?.lifecycle).toBe('settled')
     expect(seen[1].attachments).toEqual([realSizedText])
 
     const malformed = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ attachments: [{ ...image, size: 99 }] }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: malformed.runId })).toBe('failed')
+    expect(projection.getRun(malformed.runId)?.lifecycle).toBe('failed')
     expect(runProvider).toHaveBeenCalledTimes(2)
   })
 
   it('records the intent but fails the run for an unauthorized workspace (never reaching the provider)', async () => {
     const runProvider = vi.fn(async () => {})
-    const { controller } = await grantedController(runProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider)
     const submit = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ cwd: '/tmp/smuggled' }) })
     await controller.idle()
     expect(runProvider).not.toHaveBeenCalled()
-    expect(controller.runState(CERT, { runId: submit.runId })).toBe('failed')
-    const failed = controller.poll(CERT, { cursor: 0 }).events.find((e) => e.kind === 'run_failed')
-    expect(failed?.detail).toContain('workspace_not_authorized')
+    expect(projection.getRun(submit.runId)?.lifecycle).toBe('failed')
+    const failed = projection.listEvents().find((event) => event.runId === submit.runId && event.type === 'run.failed')
+    expect(failed?.payload.reason).toContain('workspace_not_authorized')
   })
 
   it('fails the run truthfully when the provider throws', async () => {
     const runProvider = vi.fn(async () => { throw new Error('provider exploded') })
-    const { controller } = await grantedController(runProvider)
+    const { controller, projection } = await grantedProjectedController(runProvider)
     const submit = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing() })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: submit.runId })).toBe('failed')
+    expect(projection.getRun(submit.runId)?.lifecycle).toBe('failed')
   })
 
   it('is idempotent on intentId: a retry does not re-run the provider', async () => {

@@ -172,27 +172,13 @@ describe('RunRegistry', () => {
     expect(registry.unsettledControls().map((control) => control.runId)).toEqual(['run-live'])
   })
 
-  it('keeps a removed run\'s final state readable apart from the live set, bounded by count and age', () => {
+  it('removes a completed run from all live and unsettled views', () => {
     const registry = new RunRegistry<{ runId: string; done: boolean }, { runId: string }>()
     const settled = { runId: 'run-done', done: true }
     registry.register(settled, { runId: 'run-done' })
-    registry.remove('run-done', 1_000)
+    registry.remove('run-done')
     expect(registry.get('run-done')).toBeUndefined()
     expect(registry.activeStates()).toEqual([])
     expect(registry.unsettledStates()).toEqual([])
-    expect(registry.departedState('run-done', 1_000)).toBe(settled)
-    // Age: a minute later it is gone.
-    expect(registry.departedState('run-done', 61_000)).toBeUndefined()
-    // Count: only the eight most recent removals stay.
-    for (let index = 0; index < 9; index++) {
-      registry.register({ runId: `run-${index}`, done: true }, { runId: `run-${index}` })
-      registry.remove(`run-${index}`, 100_000)
-    }
-    expect(registry.departedState('run-0', 100_000)).toBeUndefined()
-    expect(registry.departedState('run-1', 100_000)?.runId).toBe('run-1')
-    expect(registry.departedState('run-8', 100_000)?.runId).toBe('run-8')
-    // Registered again under the same id: the live entry is the answer, not the old one.
-    registry.register({ runId: 'run-8', done: false }, { runId: 'run-8' })
-    expect(registry.departedState('run-8', 100_000)).toBeUndefined()
   })
 })

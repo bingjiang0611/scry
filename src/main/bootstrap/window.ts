@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import { configureRendererPermissions, isAllowedRendererRequest, isSafeExternalUrl, isTrustedRendererUrl, rendererContentSecurityPolicy } from '../renderer-security'
 import { windowBackgroundColor, windowTitleBarOptions } from '../window-chrome'
 import { shouldShowEditContextMenu, shouldShowImageContextMenu, editContextMenuTemplate, imageContextMenuTemplate } from '../edit-context-menu'
-import type { TerminalOutputBridge } from '../terminal-output'
 import type { TraceOutputBridge } from '../trace-output'
 import type { RunTraceRouter } from '../run-trace-router'
 import type { DockBadgeState } from '../dock-badge'
@@ -17,7 +16,6 @@ export interface WindowBootstrapDependencies {
   isOwnedTestApp: boolean
   getWindow: () => BrowserWindow | null
   setWindow: (window: BrowserWindow | null) => void
-  terminalOutput: TerminalOutputBridge
   traceOutput: TraceOutputBridge
   runTraces: RunTraceRouter
   dockBadge: DockBadgeState
@@ -30,7 +28,7 @@ export interface WindowBootstrapDependencies {
 export function createWindow(deps: WindowBootstrapDependencies): void {
   const {
     __dirname, rendererEntryUrl, useDevelopmentRenderer, isOwnedTestApp, getWindow, setWindow,
-    terminalOutput, traceOutput, runTraces, dockBadge, resetSessionAttention, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
+    traceOutput, runTraces, dockBadge, resetSessionAttention, isShuttingDown, rendererAutoReloadCooldownMs, rendererRestart
   } = deps
   setWindow(new BrowserWindow({
     width: 1280,
@@ -58,7 +56,6 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   })
   createdWindow.on('closed', () => {
     resetSessionAttention()
-    terminalOutput.detachRenderer()
     void detachDaemonTerminalRenderer()
     // renderer 消失后没人再 ACK 在途 trace 字节；不清零会让下一个窗口永久卡在 high-water。
     traceOutput.reset()
@@ -68,7 +65,6 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   createdWindow.webContents.on('did-start-navigation', (details) => {
     if (!details.isMainFrame || details.isSameDocument) return
     resetSessionAttention()
-    terminalOutput.detachRenderer()
     void detachDaemonTerminalRenderer()
     traceOutput.reset()
     runTraces.reset()
@@ -78,7 +74,6 @@ export function createWindow(deps: WindowBootstrapDependencies): void {
   let lastRendererAutoReloadAt = Number.NEGATIVE_INFINITY
   createdWindow.webContents.on('render-process-gone', (_event, details) => {
     resetSessionAttention()
-    terminalOutput.detachRenderer()
     void detachDaemonTerminalRenderer()
     traceOutput.reset()
     runTraces.reset()

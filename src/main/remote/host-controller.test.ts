@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { AUTHORIZED, CERT, MemoryLedgerStore, grantedController, routing } from './host-controller-fixtures'
+import { AUTHORIZED, CERT, MemoryLedgerStore, grantedController, grantedProjectedController, routing } from './host-controller-fixtures'
 
 describe('HostController (composition root)', () => {
   it('never reaches the Provider when recovering a crash between fencing an intent and cancelling it', async () => {
@@ -11,10 +11,10 @@ describe('HostController (composition root)', () => {
     // This reserved id has no routing payload, including after a host restart.
     ledgerStore.log = [{ seq: 1, at: 1, runId, intentId, kind: 'intent_recorded' }]
     const runProvider = vi.fn(async () => {})
-    const { controller } = await grantedController(runProvider, undefined, { ledgerStore })
+    const { controller, projection } = await grantedProjectedController(runProvider, { ledgerStore })
     controller.recover()
     await controller.idle()
-    expect(controller.runState(CERT, { runId })).toBe('failed')
+    expect(projection.getRun(runId)?.lifecycle).toBe('failed')
     expect(ledgerStore.log.at(-1)).toMatchObject({ kind: 'run_failed', runId, detail: 'invalid_target' })
     expect(runProvider).not.toHaveBeenCalled()
   })
@@ -25,7 +25,7 @@ describe('HostController (composition root)', () => {
     const list = vi.fn(() => ({ current: project, directories: [], cursor: 0, total: 0, hasMore: false, snapshot: 'a'.repeat(64) }))
     const select = vi.fn((path: string) => { known.add(path); return project })
     const runProvider = vi.fn(async () => {})
-    const { controller, deviceId } = await grantedController(runProvider, undefined, {
+    const { controller, deviceId, projection } = await grantedProjectedController(runProvider, {
       workspace: { authorize: (path) => { if (!known.has(path)) throw new Error('not authorized'); return path } },
       desktopDirectories: { list, select },
       readDesktop: async () => ({ kind: 'info', protocol: 1, hostId: 'test', execution: 'canonical' })
@@ -39,14 +39,14 @@ describe('HostController (composition root)', () => {
     await expect(controller.readDesktop(CERT, { kind: 'info' })).resolves.toMatchObject({ directorySelection: true })
     const denied = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ cwd: project.path, prompt: 'not yet authorized' }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: denied.runId })).toBe('failed')
+    expect(projection.getRun(denied.runId)?.lifecycle).toBe('failed')
     expect(runProvider).not.toHaveBeenCalled()
     expect(controller.desktopDirectory(CERT, { action: 'select', path: project.path })).toEqual({ action: 'select', project })
     expect(select).toHaveBeenCalledExactlyOnceWith(project.path)
     expect(runProvider).not.toHaveBeenCalled()
     const accepted = controller.submitIntent(CERT, { intentId: randomUUID(), detail: routing({ cwd: project.path, prompt: 'explicit send' }) })
     await controller.idle()
-    expect(controller.runState(CERT, { runId: accepted.runId })).toBe('settled')
+    expect(projection.getRun(accepted.runId)?.lifecycle).toBe('settled')
     expect(runProvider).toHaveBeenCalledTimes(1)
     await controller.authority.revoke(deviceId)
     expect(() => controller.desktopDirectory(CERT, { action: 'list' })).toThrow('device_not_authorized')

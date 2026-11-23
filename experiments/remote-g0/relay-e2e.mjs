@@ -10,11 +10,13 @@ import { WebSocket, createWebSocketStream } from 'ws'
 import { Pkcs10CertificateRequestGenerator, X509CertificateGenerator, cryptoProvider } from '@peculiar/x509'
 import { ensureHostIdentity } from '../../src/main/remote/host-identity.ts'
 import { createHostController } from '../../src/main/remote/host-controller-factory.ts'
+import { RunOutputFileStore } from '../../src/main/remote/run-output-file.ts'
 import { InnerMtlsHost } from '../../src/main/remote/inner-mtls-host.ts'
 import { PairingTransport } from '../../src/main/remote/pairing-transport.ts'
 import { RelayClient, ReverseTunnelTransport } from '../../src/main/remote/relay-client.ts'
 import { createRelayConnect } from '../../src/main/remote/relay-connect.ts'
 import { ProviderOperationGate } from '../../src/main/provider-operation-gate.ts'
+import { REMOTE_PROTOCOL_VERSION } from '../../src/shared/desktop-remote.ts'
 import { createRelayServer } from './relay-server.mjs'
 
 // Full outer-relay end-to-end WITHOUT the cloud: a device runs inner TLS 1.3
@@ -44,7 +46,7 @@ async function deviceCall(devicePort, hostId, caPEM, certPEM, keyPEM, request, m
   const duplex = createWebSocketStream(ws)
   const socket = tlsConnect({ socket: duplex, ca: caPEM, cert: certPEM, key: keyPEM, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
   await once(socket, 'secureConnect')
-  socket.write(JSON.stringify(request) + '\n')
+  socket.write(JSON.stringify(mode === 'run' ? { protocol: REMOTE_PROTOCOL_VERSION, ...request } : request) + '\n')
   let buffer = ''
   for await (const chunk of socket) { buffer += chunk.toString('utf8'); if (buffer.includes('\n')) break }
   socket.destroy(); ws.close()
@@ -55,11 +57,13 @@ async function main() {
   const dir = mkdtempSync(join(tmpdir(), 'scry-relay-e2e-'))
   const seen = []
   const identity = await ensureHostIdentity(join(dir, 'identity'))
-  const binding = createHostController({
+  const binding = await createHostController({
     stateDirectory: dir, hostId: identity.hostId, anchorSHA256: identity.anchorSHA256,
     verifyCSR: identity.verifyCSR, issue: identity.issue,
     authorizeWorkspace: (cwd) => { if (cwd !== AUTHORIZED) throw new Error('no'); return cwd },
-    startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate()
+    startRun: async ({ routing }) => { seen.push(routing) }, gate: new ProviderOperationGate(),
+    // This source-level smoke has no bundled worker entry. Use the same file store directly.
+    createOutputStore: (directory) => new RunOutputFileStore(directory)
   })
   const controller = binding.controller
   const server = await identity.issueHostServer()
@@ -92,9 +96,14 @@ async function main() {
   await controller.idle()
   assert.deepEqual(seen, [{ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }])
 
-  // A second session reuses the warm pool, and the ledger feed is observable.
-  const feed = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, grant.certificatePEM, keyPEM, { op: 'poll', cursor: 0 })
-  assert.deepEqual(feed.poll.events.map((e) => e.kind), ['intent_recorded', 'run_dispatched', 'run_settled'])
+  // A second session reuses the warm pool. Check the execution evidence at
+  // the host because this relay fixture does not own a subscription projection.
+  const projects = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, grant.certificatePEM, keyPEM, { op: 'projects' })
+  assert.deepEqual(projects.projects, [])
+  const peer = controller.authority.inspectLocal().grants.find(item => item.deviceId === grant.deviceId)
+  assert.ok(peer)
+  assert.deepEqual(controller.poll(peer.certificateSHA256, { cursor: 0 }).events.map(event => event.kind),
+    ['intent_recorded', 'run_dispatched', 'run_settled'])
 
   // An unpaired (CA-trusted but never granted) device is refused across the relay.
   const stranger = await deviceKeyAndCSR()
@@ -103,7 +112,7 @@ async function main() {
   const refused = await deviceCall(devicePort, identity.hostId, identity.caCertificatePEM, strangerCert.certificatePEM, stranger.keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude' }) })
   assert.equal(refused.error, 'device_not_authorized')
 
-  await runClient.close(); await pairClient.close(); await relay.close(); binding.close()
+  await runClient.close(); await pairClient.close(); await relay.close(); await binding.close()
   rmSync(dir, { recursive: true, force: true })
   console.log('relay-e2e OK: pair over relay (self-signed prove) + run over relay (mTLS) -> HostController (routed run, warm-pool reuse, unpaired refused)')
 }

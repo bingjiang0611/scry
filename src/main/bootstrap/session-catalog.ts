@@ -1,6 +1,6 @@
 import type { ActiveRun } from '../../shared/trace'
 import type { AgentDataUpdated, AgentStartRequest } from '../../shared/runtime'
-import { createAppSessionStore, mergeProjectMetas, type ProjectMeta } from '../app-store'
+import { createAppSessionStore, mergeProjectMetas, type AppSession, type ProjectMeta } from '../app-store'
 import { ConversationStore, type NativeSessionScope } from '../conversation-store'
 import { ConversationService, type ConversationServiceDeps } from '../conversation-service'
 import type { ProviderRegistry } from '../providers/registry'
@@ -12,6 +12,7 @@ import type { RemoteRunCompletion } from '../remote/remote-run-binding'
 import type { AppRunStartOptions } from './run-frontdoor'
 import type { createWorkspaceRuntime } from './workspace-runtime'
 import type { Conversation, ConversationTurn } from '../../shared/conversation'
+import type { ReadConversationProjection } from '../conversation-service-deps'
 
 /**
  * 该轮是否就是旧入口要写的那个原生 session：run、归档与绑定三种身份都算。
@@ -26,7 +27,7 @@ function ownsNativeSession(conversation: Conversation, turn: ConversationTurn, s
 
 export function createSessionCatalog({
   recentStore, projectStore, userDataDir, publishDataUpdated, unsettledRuns, getProviderRegistry,
-  forkManagedConversation, startAppRun, homeDir, resolveKnownProjectDirectory
+  forkManagedConversation, startAppRun, homeDir, resolveKnownProjectDirectory, projection
 }: {
   recentStore: ReturnType<typeof createWorkspaceRuntime>['recentStore']
   projectStore: ReturnType<typeof createWorkspaceRuntime>['projectStore']
@@ -39,6 +40,12 @@ export function createSessionCatalog({
   homeDir: string
   /** Known-project authority; a read-only native source still needs an authorized cwd. */
   resolveKnownProjectDirectory: (cwd: string) => string
+  projection?: {
+    read(): AppSession[] | undefined
+    beforeMirrorWrite(previous: readonly AppSession[], next: readonly AppSession[]): void
+    readConversation: ReadConversationProjection
+    recordConversation(conversation: Conversation): void
+  }
 }) {
   let traceCatalogRecovery: Promise<void> | null = null
   // Runs in the background: the project list must not wait for an archive scan. The catalog is only a
@@ -56,8 +63,9 @@ export function createSessionCatalog({
     return traceCatalogRecovery
   }
   const listProjectCatalog = async (): Promise<ProjectMeta[]> => {
-    void recoverTraceCatalogOnce()
-    const sessionProjects = appSessionStore().listProjects()
+    const projected = projection?.read()
+    if (!projected) void recoverTraceCatalogOnce()
+    const sessionProjects = appSessionStore().listProjects(projected)
     const now = Date.now()
     const observed = new Map<string, number>()
     recentStore().load().forEach((cwd, index) => observed.set(cwd, now - index))
@@ -86,9 +94,9 @@ export function createSessionCatalog({
     }))
   }
   let appSessionStoreInstance: ReturnType<typeof createAppSessionStore> | undefined
-  const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(userDataDir)
+  const appSessionStore = () => appSessionStoreInstance ??= createAppSessionStore(userDataDir, projection?.beforeMirrorWrite)
   let conversationStoreInstance: ConversationStore | undefined
-  const conversationStore = () => conversationStoreInstance ??= new ConversationStore(userDataDir)
+  const conversationStore = () => conversationStoreInstance ??= new ConversationStore(userDataDir, projection?.recordConversation)
   async function assertLegacyConversationWriteAllowed(scope: NativeSessionScope, deletion?: { ownerId?: string }): Promise<void> {
     const activeIds = new Set(unsettledRuns().filter((run) => run.providerId === scope.providerId &&
       run.agentProfileId === scope.agentProfileId && (run.cwd ?? '') === scope.cwd).map((run) => run.runId))
@@ -104,6 +112,7 @@ export function createSessionCatalog({
   let conversationServiceInstance: ConversationService | undefined
   const conversationService = (): ConversationService => conversationServiceInstance ??= new ConversationService({
     store: conversationStore(),
+    readProjection: projection?.readConversation,
     resolveContinuationKey: (context) => getProviderRegistry().continuationKey(context),
     forkNative: forkManagedConversation,
     supportsHistoricalInput: (providerId) => getProviderRegistry().get(providerId).historicalContext === true,

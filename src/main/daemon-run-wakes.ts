@@ -1,25 +1,10 @@
-// P3f E2: which daemon runs changed, as the App event feed reports it. While the feed is
-// live, a run's pump reads (without waiting at the daemon) only when woken, so no run
-// holds the shared watch lane for a long poll and one quiet run cannot delay another.
-// Without the feed every pump goes back to its own long poll.
-//
-// Keyed by ledger run id, the id the daemon's ledger and output log use.
+// Wakes admission waits when a subscription updates the corresponding run.
 
 export class RunWakes {
-  #live = false
   // Woken since the run's last read began. Kept until consumed, so a wake that lands
   // during a read is seen by the wait after it.
   readonly #pending = new Set<string>()
   readonly #waiters = new Map<string, Set<() => void>>()
-
-  get live(): boolean { return this.#live }
-
-  setLive(live: boolean): void {
-    if (this.#live === live) return
-    this.#live = live
-    // Leaving live mode: waiting pumps return now and fall back to long polling.
-    if (!live) this.wakeAll()
-  }
 
   wake(runId: string): void {
     this.#pending.add(runId)

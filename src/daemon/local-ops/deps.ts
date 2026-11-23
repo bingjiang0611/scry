@@ -1,4 +1,4 @@
-import type { AppEventFeed } from '../../main/remote/app-event-feed'
+import type { AppHint } from '../orchestration-authority-subscribe'
 import type { LocalOpHandler } from '../../main/remote/host-local-ops'
 import type { RunRegistry } from '../../main/run-registry'
 import type { RunControl } from '../../main/bootstrap/run-control'
@@ -30,7 +30,7 @@ export interface DaemonLocalEndpointDeps {
   history: ReturnType<typeof createHistoryRuntime>
   historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>
   conversationSend: ReturnType<typeof createDaemonConversationSend>
-  events: AppEventFeed
+  publishHint: (hint: AppHint) => void
   terminal: ReturnType<typeof createDaemonTerminalService>
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>
@@ -44,6 +44,7 @@ export interface DaemonLocalEndpointDeps {
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   hostAdmin?: import('../host-admin-store').HostAdminStore
+  // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
@@ -51,6 +52,8 @@ export interface DaemonLocalEndpointDeps {
 }
 
 export interface DaemonSessionLinks {
+  deleteNativeProjection?: import('../../main/bootstrap/session-lifecycle').SessionLifecycleDependencies['deleteNativeProjection']
+  deleteConversationProjection?: import('../../main/bootstrap/conversation').ConversationTableDependencies['deleteConversationProjection']
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   sessionRefFromRequest?: (value: unknown) => import('../../main/app-store').AppSessionRef | null
   changeLegacySessionMetadata?: (ref: import('../../main/app-store').AppSessionRef, change: () => boolean) => Promise<boolean>

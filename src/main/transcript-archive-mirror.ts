@@ -108,14 +108,23 @@ async function copyToOwnedFileAtomically(userDataDir: string, source: string, fi
   }
 }
 
+export function resolveNativeTranscriptPath(args: {
+  cwd: string
+  sessionId: string
+  home?: string
+}): string | null {
+  const primary = transcriptPath(args.cwd, args.sessionId, args.home)
+  return inspectTranscriptIdentity(primary, args.cwd, args.sessionId).status === 'match' ? primary : null
+}
+
 export function resolveTranscriptPath(args: {
   cwd: string
   sessionId: string
   userDataDir: string
   home?: string
 }): string | null {
-  const primary = transcriptPath(args.cwd, args.sessionId, args.home)
-  if (inspectTranscriptIdentity(primary, args.cwd, args.sessionId).status === 'match') return primary
+  const primary = resolveNativeTranscriptPath(args)
+  if (primary) return primary
   const archived = archivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
   if (trustedOwnedFile(args.userDataDir, archived)) return archived
   return null

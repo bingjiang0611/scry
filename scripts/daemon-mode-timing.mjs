@@ -3,11 +3,10 @@
 //
 //   node scripts/daemon-mode-timing.mjs --samples 30 --mode daemon
 //
-// Same App build, same packaged Provider fixture, same workspace, one mode per run:
-// `in-process` explicitly sets SCRY_HOST_DAEMON=0 (App's own pipeline), `daemon` sets
-// SCRY_HOST_DAEMON=1 so the daemon executes the run. Both are measured from the renderer, through
-// the shipped preload API, so a difference is the transport and ownership change and
-// not a second instrument.
+// Same App build, same packaged Provider fixture, same workspace; the daemon executes the
+// run, measured from the renderer through the shipped preload API. The `in-process`
+// comparison arm was removed with S3 (the App no longer has an in-process runtime); compare
+// against a saved report of an older build instead.
 //
 // Reported per mode, over N serial samples of the same fixture prompt:
 //   submit -> first text      the wait before anything appears
@@ -36,7 +35,8 @@ const mode = option('mode', 'daemon')
 const multiTurn = args.includes('--multi-turn')
 const largeBody = args.includes('--large-body')
 const withMcp = args.includes('--with-mcp')
-if (!['daemon', 'in-process'].includes(mode)) throw new Error(`unknown mode: ${mode}`)
+if (mode === 'in-process') throw new Error('in-process mode was removed with S3: the App always runs Agents in its daemon')
+if (mode !== 'daemon') throw new Error(`unknown mode: ${mode}`)
 
 // 20 deltas 150 ms apart: a stream whose steady state is observable in both modes,
 // instead of one burst that any path can only deliver as a single lump.
@@ -137,7 +137,7 @@ const results = {
   withMcp,
   prompt: PROMPT,
   orchestration: {
-    mode: process.env.SCRY_ORCHESTRATION ?? 'on (default)',
+    mode: 'authoritative',
     fullfsync: process.env.SCRY_ORCHESTRATION_FULLFSYNC ?? 'default'
   },
   loadBefore: load(),
@@ -157,12 +157,8 @@ const measure = async (count, chunkIndex) => {
     child = launch({
       spawn, executable: electron, devApp: true, root, port, userDataDir, home,
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
-        // An isolated instance for either mode; spell out the daemon switch in both modes so
-        // the default-daemon flip cannot turn the `in-process` control into daemon mode.
-        ...(mode === 'daemon'
-          ? { SCRY_HOST_DAEMON: '1', SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1' }
-          : { SCRY_HOST_DAEMON: '0' }),
-        ...(process.env.SCRY_ORCHESTRATION !== undefined ? { SCRY_ORCHESTRATION: process.env.SCRY_ORCHESTRATION } : {}),
+        // An isolated instance whose daemon serves the packaged smoke fixture.
+        SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
         ...(process.env.SCRY_ORCHESTRATION_FULLFSYNC !== undefined ? { SCRY_ORCHESTRATION_FULLFSYNC: process.env.SCRY_ORCHESTRATION_FULLFSYNC } : {}),
         SCRY_REMOTE_HOST: '0',
         // Stage marks from the App's own main process; off by default everywhere else.

@@ -3,17 +3,11 @@ import type { ActiveRun } from '../../shared/trace'
 import { DockBadgeState } from '../dock-badge'
 import type { DaemonRunSurface } from './daemon-run-surface'
 
-vi.mock('electron', () => ({ app: { getPath: () => '/tmp' } }))
-vi.mock('../db', () => ({
-  billingStateQuery: vi.fn(), importBillingFixture: vi.fn(), statsQuery: vi.fn(), syncBillingAdmin: vi.fn(),
-  usageAnalyticsQuery: vi.fn(), usageAnalyticsWithCreditsQuery: vi.fn()
-}))
-
 const { registerAgentRuntimeHandlers } = await import('./agent-runtime-ipc')
 
-// E1b: in process, focusing or adopting a run views its session and clears its unread
-// mark. In daemon mode the run lives in the daemon, and this window must still say so,
-// or a session the user is looking at stays unread on the daemon's side.
+// E1b: focusing or adopting a run views its session and clears its unread mark. The run
+// lives in the daemon, and this window must still say so, or a session the user is
+// looking at stays unread on the daemon's side.
 
 const RUN = { runId: 'turn-1', providerId: 'codex', cwd: '/w', externalSessionId: 'native-1', userText: '', items: [], done: false } as unknown as ActiveRun
 
@@ -30,12 +24,10 @@ function register(focused: boolean) {
   } as unknown as DaemonRunSurface
   registerAgentRuntimeHandlers({
     handleTrusted: ((channel: string, listener: (event: unknown, ...args: unknown[]) => unknown) => { handlers.set(channel, listener) }) as never,
-    startAppRun: vi.fn(), runs: {} as never, boundedLiveRun: (run) => run, dockBadge: badge,
+    runs: {} as never, dockBadge: badge,
     activeRunSessionKey: (run) => `key:${run.externalSessionId}`,
     getWindow: () => ({ isFocused: () => focused, webContents: { send: vi.fn() } }) as never,
-    getRemoteRunLedgerId: () => undefined, getRemoteHostService: () => null, userQuestionBroker: {} as never,
-    resolveKnownProjectDirectory: (cwd) => cwd, getCurrentCwd: () => '/w', traceOutput: {} as never,
-    requestRunStop: () => true, runTraces: {} as never, daemon
+    getCurrentCwd: () => '/w', runTraces: {} as never, daemon
   })
   return { handlers, viewed, badge }
 }
@@ -59,6 +51,17 @@ describe('daemon mode: showing a run views its session', () => {
     await handlers.get('agent:focusRun')!({}, 'turn-1')
     expect(viewed).not.toHaveBeenCalled()
     expect(badge.count).toBe(1)
+  })
+
+  it('keeps later attention unread after the window leaves its focused run', async () => {
+    const { handlers, viewed, badge } = register(true)
+    const focus = handlers.get('agent:focusRun')!
+    await focus({}, 'turn-1')
+    expect(badge.count).toBe(0)
+    await focus({}, null)
+    badge.setDaemon({ revision: 2, unreadSessionKeys: ['key:native-1'] }, true)
+    expect(viewed).toHaveBeenCalledTimes(1)
+    expect(badge.snapshot().unreadSessionKeys).toEqual(['key:native-1'])
   })
 })
 

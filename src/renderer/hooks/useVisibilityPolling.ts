@@ -87,7 +87,8 @@ export function useVisibilityPolling(
   key: string,
   refresh: () => Promise<void> | void,
   intervalMs: number,
-  invalidate: () => void = () => {}
+  invalidate: () => void = () => {},
+  enabled = true
 ): (intervalMs: number) => void {
   const refreshRef = useRef(refresh)
   const invalidateRef = useRef(invalidate)
@@ -97,9 +98,10 @@ export function useVisibilityPolling(
   controllerRef.current ??= createVisibilityPollingController(() => refreshRef.current(), intervalMs, undefined, () => invalidateRef.current())
   const controller = controllerRef.current
   useEffect(() => {
+    if (!enabled) return
     controller.setIntervalMs(intervalMs)
     controller.start()
     return () => controller.stop()
-  }, [controller, intervalMs, key])
+  }, [controller, intervalMs, key, enabled])
   return controller.setIntervalMs
 }

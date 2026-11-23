@@ -16,7 +16,9 @@ composer = (root / 'MessageComposer.swift').read_text()
 transcript = (root / 'SessionTranscriptView.swift').read_text()
 chat = (root / 'ChatView.swift').read_text()
 popover = (root / 'Sheets/ModelEffortPopover.swift').read_text()
-store = (root / 'RemoteRunStore.swift').read_text()
+store = (root / 'RunStore/RemoteRunStoreProviderControls.swift').read_text()
+preview = (root / 'RunStore/RemoteRunStorePreview.swift').read_text()
+preview_providers = preview.split('let availableProviders = [', 1)[1].split('providers = .loaded(availableProviders)', 1)[0]
 
 def at(source: str, needle: str) -> int:
     return source.find(needle)
@@ -62,6 +64,16 @@ checks.append(('model-list-has-bounded-height', re.search(r'\.frame\(height: mod
 checks.append(('model-list-has-no-fixed-ideal-height', '.fixedSize(horizontal: false, vertical: true)' not in popover))
 checks.append(('effort-list-has-bounded-height', '.frame(height: effortListHeight)' in popover))
 checks.append(('model-rows-are-not-lazy', 'LazyVStack(spacing: 2)' not in popover))
+
+# The preview demonstrates model choices with plain synthetic IDs and labels.
+preview_ids = re.findall(r'modelId: "([^"]+)"', preview_providers)
+preview_models = re.findall(r'RunModelOption\(id: "([^"]+)"[^\n]+?label: "([^"]+)"', preview_providers)
+checks.append(('preview-default-models-are-placeholders',
+               len(preview_ids) == 3 and all(re.fullmatch(r'example-model-[a-d]', value) for value in preview_ids)))
+checks.append(('preview-model-options-are-placeholders',
+               len(preview_models) == 4 and all(re.fullmatch(r'example-model-[a-d]', key)
+                                                and re.fullmatch(r'示例模型 [A-D]', label)
+                                                for key, label in preview_models)))
 
 failures = [name for name, passed in checks if not passed]
 for name, passed in checks:

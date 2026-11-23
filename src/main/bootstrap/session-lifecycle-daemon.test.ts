@@ -5,7 +5,6 @@ import { installSessionLifecycleDialogs } from './session-lifecycle-daemon'
 // Daemon mode: dialogs stay in this window (B4 D2). The App asks before it sends; a "no"
 // never reaches the daemon, and an archived purge carries the count the user saw.
 
-const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
 function wire(answers: { confirm: boolean; confirmSingle?: boolean; windowCwd?: string }, reply: (call: Call) => unknown) {
@@ -14,7 +13,7 @@ function wire(answers: { confirm: boolean; confirmSingle?: boolean; windowCwd?: 
   undo.push(installSessionLifecycleDialogs(dialogs))
   const forwarder = vi.fn(async (call: Call) => reply(call))
   undo.push(installDaemonChannelForwarder(forwarder))
-  const channel = (name: string) => gateDaemonChannel(name, vi.fn(), ON) as unknown as (event: unknown, ...args: unknown[]) => Promise<any>
+  const channel = (name: string) => gateDaemonChannel(name, vi.fn()) as unknown as (event: unknown, ...args: unknown[]) => Promise<any>
   return { dialogs, forwarder, channel, dispose: () => { for (const step of undo.splice(0)) step() } }
 }
 

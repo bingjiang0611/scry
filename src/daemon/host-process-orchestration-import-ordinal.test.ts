@@ -7,49 +7,23 @@ import { cryptoProvider } from '@peculiar/x509'
 import { createRecentFoldersStore } from '../main/app-store'
 import { ConversationStore } from '../main/conversation-store'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun as waitRunTerminal } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
 afterEach(cleanupTempDirs)
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  ledgerRunId: string
-): Promise<string> {
-  let state = 'dispatched'
-  let cursor = 0
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId: ledgerRunId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 5_000
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
 
-async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): Promise<T> {
+async function withSmokeEnv<T>(fn: () => Promise<T>): Promise<T> {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  if (mode === undefined) delete process.env.SCRY_ORCHESTRATION
-  else process.env.SCRY_ORCHESTRATION = mode
   process.argv.push('--remote-debugging-port=0')
   try {
     return await fn()
@@ -61,8 +35,6 @@ async function withSmokeEnv<T>(mode: string | undefined, fn: () => Promise<T>): 
     else process.env.SCRY_REMOTE_RELAY_ENABLED = saved.relay
     if (saved.smoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
   }
 }
 
@@ -170,7 +142,7 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
       { mode: 0o600 }
     )
 
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,
@@ -182,11 +154,10 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
         log: () => undefined
       })
       try {
-        const shadow = host.orchestrationShadow!
-        expect(shadow.mirror.sink!.getTurn(adopted.id, 1)).toBeUndefined()
-        expect(shadow.mirror.sink!.getTurn(adopted.id, 3)?.runId).toBe(turn3RunId)
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        const authority = host.orchestrationAuthority!
+        expect(authority.sink.getTurn(adopted.id, 1)).toBeUndefined()
+        expect(authority.sink.getTurn(adopted.id, 3)?.runId).toBe(turn3RunId)
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         await host.dispose()
       }
@@ -268,7 +239,7 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
     }
     writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`, { mode: 0o600 })
 
-    await withSmokeEnv('shadow', async () => {
+    await withSmokeEnv(async () => {
       let releaseBackfill: (() => void) | undefined
       const pauseBackfill = new Promise<void>((resolve) => {
         releaseBackfill = resolve
@@ -281,35 +252,34 @@ describe('P4-1 B1: legacy sync import and deferred backfill resolve true H3 ordi
         appVersion: 'test',
         isPackaged: false,
         createOutputStore: () => new MemoryOutputStore(),
-        orchestrationShadowPauseBackfill: pauseBackfill,
+        orchestrationPauseBackfill: pauseBackfill,
         log: () => undefined
       })
       try {
-        const shadow = host.orchestrationShadow!
+        const authority = host.orchestrationAuthority!
         const device = await enrollLocal(host.service)
 
         const turn4 = await sendConversationTurn(host, device, conv.id, 'live turn 4 during backfill', true)
         expect(turn4.state).toBe('settled')
-        expect(shadow.mirror.sink!.getTurn(conv.id, 1)).toBeUndefined()
-        expect(shadow.mirror.sink!.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
+        expect(authority.sink.getTurn(conv.id, 1)).toBeUndefined()
+        expect(authority.sink.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
 
         releaseBackfill?.()
-        await shadow.importComplete
+        await authority.importComplete
 
-        expect(shadow.mirror.sink!.getSession(conv.id)?.lastRunId).toBe(turn4.canonicalRunId)
+        expect(authority.sink.getSession(conv.id)?.lastRunId).toBe(turn4.canonicalRunId)
 
         const turn5 = await sendConversationTurn(host, device, conv.id, 'live turn 5 after backfill', false)
         expect(turn5.state).toBe('settled')
 
-        expect(shadow.mirror.stats().failedOpen).toBe(false)
-        expect(shadow.mirror.stats().deviations).toBe(0)
-        expect(shadow.mirror.sink!.getTurn(conv.id, 1)?.runId).toBe(oldRunIds[0])
-        expect(shadow.mirror.sink!.getTurn(conv.id, 2)?.runId).toBe(oldRunIds[1])
-        expect(shadow.mirror.sink!.getTurn(conv.id, 3)?.runId).toBe(oldRunIds[2])
-        expect(shadow.mirror.sink!.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
-        expect(shadow.mirror.sink!.getTurn(conv.id, 5)?.runId).toBe(turn5.canonicalRunId)
-        expect(shadow.mirror.sink!.getSession(conv.id)?.lastRunId).toBe(turn5.canonicalRunId)
-        expect(shadow.mirror.sink!.verifyReplayConsistency()).toEqual({ matches: true })
+        expect(authority.sink.isWriteIndeterminate()).toBe(false)
+        expect(authority.sink.getTurn(conv.id, 1)?.runId).toBe(oldRunIds[0])
+        expect(authority.sink.getTurn(conv.id, 2)?.runId).toBe(oldRunIds[1])
+        expect(authority.sink.getTurn(conv.id, 3)?.runId).toBe(oldRunIds[2])
+        expect(authority.sink.getTurn(conv.id, 4)?.runId).toBe(turn4.canonicalRunId)
+        expect(authority.sink.getTurn(conv.id, 5)?.runId).toBe(turn5.canonicalRunId)
+        expect(authority.sink.getSession(conv.id)?.lastRunId).toBe(turn5.canonicalRunId)
+        expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
       } finally {
         releaseBackfill?.()
         await host.dispose()

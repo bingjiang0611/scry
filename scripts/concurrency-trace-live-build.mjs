@@ -44,6 +44,22 @@ export function liveWindowOptions(preloadPath) {
 // Several entries may target the same file; all of them are applied, in order.
 export const LIVE_INSTRUMENTATION = [
   {
+    id: 'controls-isolate-driver-poll',
+    file: 'src/renderer/components/RemoteChatControls.tsx',
+    kind: 'replace',
+    anchor: '    const poll = (): Promise<void> => {\n',
+    // Count automatic mount, visibility and subscription triggers. The rounds
+    // alone invoke the same production read implementation through registration.
+    insertion: [
+      '    const poll = (): Promise<void> => {',
+      '      window.__scryTraceLive?.autoPoll?.()',
+      '      return Promise.resolve()',
+      '    }',
+      '    const pollForFixture = (): Promise<void> => {',
+      ''
+    ].join('\n')
+  },
+  {
     id: 'controls-register-poll',
     file: 'src/renderer/components/RemoteChatControls.tsx',
     kind: 'append',
@@ -53,7 +69,7 @@ export const LIVE_INSTRUMENTATION = [
     // of a poll that quietly read nothing.
     insertion: [
       '    window.__scryTraceLive?.registerPoll?.({',
-      '      poll, context, contextKey, connectionId, connected, catalogReady,',
+      '      poll: pollForFixture, context, contextKey, connectionId, connected, catalogReady,',
       '      sessionActive, traceDelta,',
       '      diagnostics: {',
       '        catalogTraceDelta: typeof catalog?.traceDelta === \'number\' ? catalog.traceDelta : null,',
@@ -73,14 +89,7 @@ export const LIVE_INSTRUMENTATION = [
     file: 'src/renderer/components/RemoteChatControls.tsx',
     kind: 'append',
     anchor: '      if (pollRef.current === poll) pollRef.current = undefined\n',
-    insertion: '      window.__scryTraceLive?.unregisterPoll?.(poll)\n'
-  },
-  {
-    id: 'controls-suppress-auto-poll',
-    file: 'src/renderer/components/RemoteChatControls.tsx',
-    kind: 'replace',
-    anchor: '() => pollRef.current?.()',
-    insertion: '() => { window.__scryTraceLive?.autoPoll?.() }'
+    insertion: '      window.__scryTraceLive?.unregisterPoll?.(pollForFixture)\n'
   },
   {
     id: 'foundation-commit-hook-alias',

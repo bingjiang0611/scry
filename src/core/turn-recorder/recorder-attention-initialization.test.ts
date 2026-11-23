@@ -89,6 +89,32 @@ it('does not create locks for unmarked completed sessions during initialization'
   expect(await attentionIndexPresent(f.dataRoot)).toBe(true)
 })
 
+it('recovers pending work when a provider directory contains a Finder metadata file', async () => {
+  const f = await fixture()
+  const providerRoot = join(f.dataRoot, 'runtime', 'codex')
+  await mkdir(providerRoot, { recursive: true })
+  await writeFile(join(providerRoot, '.DS_Store'), 'Finder metadata')
+
+  await recoverRecorder(f.root, f.env)
+
+  expect(await attentionIndexPresent(f.dataRoot)).toBe(true)
+  expect(await recorderInboxEntries(f.sessionDir)).toHaveLength(0)
+  expect((await readJson<{ prompt: string }>(join(f.sessionDir, 'open.json')))?.prompt).toBe('legacy queued prompt')
+})
+
+it('reads an initialized attention index that contains a stale Finder metadata marker', async () => {
+  const f = await fixture()
+  await reconcileAttentionIndex(f.dataRoot)
+  const providerRoot = join(f.dataRoot, 'runtime', 'codex')
+  await mkdir(providerRoot, { recursive: true })
+  await writeFile(join(providerRoot, '.DS_Store'), 'Finder metadata')
+  await markSessionAttention(f.dataRoot, 'codex', '.DS_Store')
+
+  await expect(recorderPendingHealth(f.dataRoot)).resolves.toMatchObject({ pendingCount: 1 })
+  await recoverRecorder(f.root, f.env)
+  expect(await recorderInboxEntries(f.sessionDir)).toHaveLength(0)
+})
+
 it('does not publish initialization after an interrupted full scan and rebuilds on the next recovery', async () => {
   const f = await fixture()
   fault.directory = join(f.dataRoot, 'runtime', 'codex')

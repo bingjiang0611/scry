@@ -15,7 +15,7 @@ import { Pkcs10CertificateRequestGenerator, cryptoProvider } from '@peculiar/x50
 cryptoProvider.set(webcrypto)
 
 // Same constant the App sends; imported from source would drag the TS graph in.
-export const PROTOCOL = 2
+export const PROTOCOL = 3
 
 export async function waitForSocket(path, timeoutMs, alive) {
   const deadline = Date.now() + timeoutMs

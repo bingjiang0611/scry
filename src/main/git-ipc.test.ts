@@ -5,7 +5,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readWorkspaceNumstat, registerGitDiffIpc } from './git'
 import { readWorkspaceDiffSnapshot } from '../core/turn-recorder/git-workspace-snapshot'
-import { registerTrustedIpcHandler } from './ipc-trust'
+import { registerTrustCheckedListener } from './ipc-trust'
 import { knownProjectDirectory } from './workspace-authorization'
 
 vi.mock('../core/turn-recorder/git.js', () => ({ readWorkspaceNumstat: vi.fn() }))
@@ -80,7 +80,7 @@ describe('registered workspace Git diff boundary', () => {
     let handler!: (event: IpcMainInvokeEvent, cwd: unknown, scope?: unknown) => unknown
     registerGitDiffIpc((registeredChannel, listener) => {
       if (registeredChannel !== channel) return
-      registerTrustedIpcHandler({ handle: (_channel, registered) => { handler = registered } }, channel, () => win, frame.url, listener)
+      registerTrustCheckedListener({ handle: (_channel, registered) => { handler = registered } }, channel, () => win, frame.url, listener)
     }, (cwd) => knownProjectDirectory(cwd, [approved]))
     const event = { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent
     const invoke = async (cwd: unknown, sender = event, scope?: unknown): Promise<unknown> => handler(sender, cwd, scope)

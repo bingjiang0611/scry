@@ -1,5 +1,26 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+
+export function seedFileHistorySource(home) {
+  const cwd = join(home, '历史回放项目')
+  const filePath = join(cwd, 'designs', 'scry-unified-remote', 'brief.md')
+  mkdirSync(dirname(filePath), { recursive: true })
+  writeFileSync(filePath, '# 归档文件链接\n\nThis text is read from the fixture workspace.\n')
+  const sessionId = 'file-link-smoke-session'
+  const runId = 'file-link-smoke-run'
+  const ts = Date.now()
+  return {
+    version: 3, cwd, sessionId, externalSessionId: sessionId, providerId: 'codex', runtimeProvider: 'codex_cli',
+    turns: [{
+      runId, ts, done: true, userText: 'Show the design brief',
+      items: [{
+        id: `${runId}-text`, runId, ts: new Date(ts).toISOString(), kind: 'model', stage: 'text',
+        text: 'Design brief: [brief.md](designs/scry-unified-remote/brief.md)', filePath
+      }]
+    }]
+  }
+}
 
 export async function exerciseFileHistory(smokeContext) {
   const { sourceFileHistory, evaluate, cdp, workspace } = smokeContext
@@ -35,7 +56,9 @@ export async function exerciseFileHistory(smokeContext) {
     assert.ok(title.includes('designs/scry-unified-remote/brief.md'), `wrong archived target: ${title}`)
     await click(brief)
     await wait(`document.querySelector('.workspace-title b')?.textContent.includes('brief.md')`)
-    await click(`Array.from(document.querySelectorAll('.workspace-editorbar button')).find(button => button.textContent === '展开源码')`)
+    const expandSource = `Array.from(document.querySelectorAll('.workspace-editorbar button')).find(button => button.textContent === '展开源码')`
+    await wait(`Boolean(${expandSource})`)
+    await click(expandSource)
     await wait(`document.querySelector('.workspace-editor textarea')?.value === ${JSON.stringify(expected)}`)
     assert.ok(!await evaluate(`document.body.textContent.includes('文件不存在：brief.md')`))
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])

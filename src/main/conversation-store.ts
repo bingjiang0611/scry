@@ -1,7 +1,8 @@
-import { open, readdir } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { ContextAdmission } from './context-admission'
+import { conversationLedgerPath, readConversationLedger } from './conversation-ledger-read'
 import { writeFileAtomicExclusive, writeJsonAtomic } from '../core/turn-recorder/io'
 import type { ConversationMetadataChange } from '../shared/conversation-api'
 import { sameConversationTarget, type Conversation, type ConversationBinding,
@@ -10,7 +11,6 @@ import { sameConversationTarget, type Conversation, type ConversationBinding,
 import {
   MAX_CONVERSATION_BYTES,
   checkNativeOwners,
-  conversationIdPattern,
   decodeConversation,
   requireValue,
   type NativeSessionScope
@@ -127,33 +127,17 @@ export class ConversationStore implements ConversationLedger {
     this.onTurnSettled = observer
   }
 
-  constructor(readonly userData: string) {
+  constructor(readonly userData: string, private readonly projectMetadata?: (conversation: Conversation) => void) {
     requireValue(isAbsolute(userData), 'userData 必须是绝对路径')
     this.directory = join(userData, 'conversations')
   }
 
   private path(id: string): string {
-    requireValue(conversationIdPattern.test(id), '对话 ID 无效')
-    return join(this.directory, `${id}.json`)
+    return conversationLedgerPath(this.directory, id)
   }
 
   async read(id: string): Promise<Conversation | null> {
-    let handle
-    try {
-      handle = await open(this.path(id), 'r')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-    try {
-      // Store files are immutable after publication; all writes replace them atomically.
-      requireValue((await handle.stat()).size <= MAX_CONVERSATION_BYTES, '对话索引超过 16 MiB 上限')
-      const conversation = decodeConversation(JSON.parse(await handle.readFile('utf8')))
-      requireValue(conversation.id === id, '对话文件与内容身份不一致')
-      return conversation
-    } finally {
-      await handle.close()
-    }
+    return readConversationLedger(this.directory, id)
   }
 
   checked(value: Conversation): Conversation {
@@ -217,6 +201,7 @@ export class ConversationStore implements ConversationLedger {
       this.ownershipGeneration += 1
       throw error
     }
+    this.projectMetadata?.(conversation)
   }
 
   /** Main holds context admission and rechecks before effects. Deletion uses the

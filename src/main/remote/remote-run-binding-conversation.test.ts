@@ -43,6 +43,20 @@ describe('remote run binding: conversation runs', () => {
     expect(progress).toHaveBeenCalledWith(expect.stringContaining(`"scryRunId":"${marker.runId}"`))
   })
 
+  it('announces the verified profile so the App can read a profiled conversation run', async () => {
+    const profile = 'pi:0123456789abcdef'
+    const prepared = launch({ providerId: 'pi', agentProfileId: profile })
+    const progress = vi.fn()
+    const startAppRun = vi.fn(async () => ({ status: 'completed' as const, recording: 'committed' as const }))
+    await createRemoteRunBinding({ startAppRun, managedLaunch: () => prepared })({
+      runId: 'ledger-profile', routing: { ...routing, providerId: 'pi', agentProfileId: profile },
+      progress, output: vi.fn(), grantScope: 'local'
+    })
+    expect(JSON.parse(progress.mock.calls[0]![0])).toMatchObject({
+      event: 'bound', scryRunId: marker.runId, providerId: 'pi', agentProfileId: profile
+    })
+  })
+
   it('fails before any Provider when the launch is gone, as after a daemon restart', async () => {
     const startAppRun = vi.fn()
     const start = createRemoteRunBinding({ startAppRun, managedLaunch: () => undefined })

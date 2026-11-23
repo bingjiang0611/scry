@@ -20,7 +20,7 @@ describe('remote run binding (live seam; no Provider process is spawned)', () =>
     const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
     expect(markers[0]).toEqual({ event: 'bound', ledgerRunId: 'ledger-1', scryRunId: 'scry-1', providerId: 'claude', cwd: '/w' })
     expect(markers.filter(marker => marker.event === 'started')).toEqual([{ event: 'started' }])
-    expect(markers).toContainEqual({ event: 'result', isError: false, tokensIn: 11, tokensOut: 22, costUsd: 0.5 })
+    expect(markers).toContainEqual({ event: 'result', isError: false })
     expect(markers.at(-1)).toEqual({ event: 'settled', status: 'completed' })
   })
 

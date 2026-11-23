@@ -1,52 +1,8 @@
 {
   "schema": 1,
   "entry": "src/main/index.ts",
-  "totalReachableModules": 639,
-  "forbiddenPackages": [
-    "src/main/agent-runner.ts -> @anthropic-ai/claude-agent-sdk",
-    "src/main/db-connection.ts -> better-sqlite3",
-    "src/main/providers/claude.ts -> @anthropic-ai/claude-agent-sdk",
-    "src/main/providers/opencode-server.ts -> @opencode-ai/sdk/v2",
-    "src/main/providers/qoder-controls.ts -> @qoder-ai/qoder-agent-sdk",
-    "src/main/providers/qoder-launch.ts -> @qoder-ai/qoder-agent-sdk",
-    "src/main/providers/qoder-mcp.ts -> @qoder-ai/qoder-agent-sdk",
-    "src/main/providers/qoder-plugin-reload.ts -> @qoder-ai/qoder-agent-sdk",
-    "src/main/providers/qoder-run.ts -> @qoder-ai/qoder-agent-sdk",
-    "src/main/providers/qoder.ts -> @qoder-ai/qoder-agent-sdk",
-    "src/main/terminal-manager.ts -> node-pty"
-  ],
-  "forbiddenModules": [
-    "src/host-runtime/create-run-pipeline.ts",
-    "src/host-runtime/host-runtime.ts",
-    "src/main/agent-runner.ts",
-    "src/main/db.ts",
-    "src/main/providers/antigravity-launch.ts",
-    "src/main/providers/claude.ts",
-    "src/main/providers/codex-app-server.ts",
-    "src/main/providers/opencode-server.ts",
-    "src/main/providers/pi-rpc.ts",
-    "src/main/providers/qoder-launch.ts",
-    "src/main/remote/remote-host-service.ts",
-    "src/main/remote/session-ledger-file.ts",
-    "src/main/remote/session-ledger.ts",
-    "src/main/source-control/service.ts",
-    "src/main/terminal-manager.ts"
-  ],
-  "nonWhitelistedChildProcess": [
-    "src/core/turn-recorder/commit-hook-process.ts",
-    "src/core/turn-recorder/git-command.ts",
-    "src/core/turn-recorder/host-process.ts",
-    "src/main/agent-runner.ts",
-    "src/main/login-shell-env.ts",
-    "src/main/mcp-config.ts",
-    "src/main/pi-agent-profiles.ts",
-    "src/main/providers/antigravity-launch.ts",
-    "src/main/providers/claude.ts",
-    "src/main/providers/codex-app-server.ts",
-    "src/main/providers/opencode-server.ts",
-    "src/main/providers/pi-rpc.ts",
-    "src/main/providers/qoder-launch.ts",
-    "src/main/recorder-cli-runtime.ts",
-    "src/main/source-control/process.ts"
-  ]
+  "totalReachableModules": 192,
+  "forbiddenPackages": [],
+  "forbiddenModules": [],
+  "nonWhitelistedChildProcess": []
 }

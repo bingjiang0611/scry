@@ -11,7 +11,7 @@
     "smoke:enrollment": "node enrollment-smoke.mjs",
     "smoke:pair": "node pair-smoke.mjs",
     "smoke:g1": "node --experimental-transform-types --import ./ts-relative-resolve.mjs g1-smoke.mjs",
-    "smoke:relay": "node --import ./ts-relative-resolve.mjs relay-e2e.mjs",
+    "smoke:relay": "node --experimental-transform-types --import ./ts-relative-resolve.mjs relay-e2e.mjs",
     "smoke:relay-pair": "node --import ./ts-relative-resolve.mjs relay-pair-smoke.mjs",
     "smoke:relay-run": "swift build --package-path swift && node --experimental-transform-types --import ./ts-relative-resolve.mjs relay-run-smoke.mjs",
     "smoke:cf": "node cf-relay-smoke.mjs && node cf-relay-lifecycle-smoke.mjs",

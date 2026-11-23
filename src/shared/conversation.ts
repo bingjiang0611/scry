@@ -125,6 +125,7 @@ export type ConversationTurn = ImportedConversationTurn | DispatchedConversation
 
 export interface ConversationDeletionResult extends Omit<DeleteSessionResult, 'deleted'> {
   deleted: string[]
+  failed: Array<DeleteSessionResult['failed'][number] & { reason?: DeleteSessionResult['reason'] }>
 }
 
 export interface ConversationFork {

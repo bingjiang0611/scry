@@ -1,7 +1,7 @@
 import type { LedgerStore, RunLifecycle } from './session-ledger'
 
 /**
- * Pure interface seam for P4-2 authoritative orchestration (`SCRY_ORCHESTRATION=on`).
+ * Pure interface seam for P4-2 authoritative orchestration.
  * Kept in `src/main/remote/` with zero imports from `src/host-runtime/orchestration/`
  * so Electron main preserves the Layer 3 single-writer static import boundary (core §2.9).
  */
@@ -12,11 +12,9 @@ export interface OrchestrationImmediateDispatchChecks {
 }
 
 export interface OrchestrationAuthorityHooks {
-  /**
-   * Returns an in-memory-backed `LedgerStore` whose appends mirror asynchronously to H1
-   * off the pre-first-token critical path (zero synchronous H1 file fsync on hot path).
-   */
-  createLedgerStore(ledgerDirectory: string): { store: LedgerStore; close(): Promise<void> }
+  currentLogId?(): string | undefined
+  /** Rebuilds the transient dispatcher state from the durable log. */
+  createLedgerStore(): LedgerStore
   /** Authoritative async submit (durable >16 KiB body written BEFORE SQLite commit). */
   submitAsync(input: {
     peerCertSHA256: string
@@ -33,7 +31,9 @@ export interface OrchestrationAuthorityHooks {
     detail?: string
     immediateDispatch?: OrchestrationImmediateDispatchChecks
   }): { runId: string; status: 'recorded' | 'duplicate'; seq: number }
-  /** Compensates a committed orchestration submit when the subsequent H1 mirror side-effect throws. */
+  hasSubmitReceipt(peerCertSHA256: string, scopedIntentId: string): boolean
+  intentStatus(peerCertSHA256: string, scopedIntentId: string): { runId: string; state: RunLifecycle }
+  /** Compensates a committed submit when the dispatcher could not accept it. */
   compensateSubmitFailure(runId: string, reason: string): void
   /** Startup recovery outcome for a previously dispatched run so H1 matches orchestration.db. */
   recoveredRunLifecycle?(runId: string): 'settled' | 'failed' | 'cancelled' | 'interrupted' | undefined

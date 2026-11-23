@@ -1,17 +1,14 @@
 import type { TLSSocket } from 'node:tls'
-import type { HostController } from './host-controller'
-import { INNER_IDLE_TIMEOUT_MS, isMuxId, MAX_MUX_INFLIGHT, MAX_STREAMS_PER_LANE, WATCH_STREAM_MAX_MS, WATCH_STREAM_WAIT_MS } from './inner-mtls-protocol'
+import { INNER_IDLE_TIMEOUT_MS, isMuxId, MAX_MUX_INFLIGHT } from './inner-mtls-protocol'
 
-// Framing, lane modes and pushed streams for ONE authenticated phone
+// Framing and lane modes for ONE authenticated phone
 // connection. The caller has already verified the TLS 1.3 peer certificate and
 // derived `fingerprint` from it; every request is still authorized by the
 // controller against that fingerprint.
 export interface InnerConnectionContext {
-  controller: HostController
-  fingerprint: string
   certificateExpiresAt: number
   maxFrame: number
-  // Checked for every frame, pushed-stream ops included, before anything runs: a reply
+  // Checked for every frame before anything runs: a reply
   // here (a transport-scope denial, a protocol refusal, `daemonInfo`) is sent as is.
   preflight?(request: Record<string, unknown> | undefined): Record<string, unknown> | undefined
   dispatch(request: Record<string, unknown> | undefined): Promise<unknown>
@@ -26,7 +23,7 @@ export interface RequestTiming {
 }
 
 export function serveInnerConnection(socket: TLSSocket, context: InnerConnectionContext): void {
-  const { controller, fingerprint, certificateExpiresAt } = context
+  const { certificateExpiresAt } = context
   let buffer: Buffer = Buffer.alloc(0)
   let busy = false
   let kept = false
@@ -52,67 +49,10 @@ export function serveInnerConnection(socket: TLSSocket, context: InnerConnection
   socket.on('timeout', () => abort('idle_timeout'))
   const armIdleTimeout = (): void => { socket.setTimeout(INNER_IDLE_TIMEOUT_MS) }
   armIdleTimeout()
-  const streams = new Map<number, { cancelled: boolean }>()
   const writeLine = (value: unknown): void => { if (!socket.destroyed) socket.write(JSON.stringify(value) + '\n') }
-  const errorCode = (error: unknown): string =>
-    String((error as { code?: string })?.code ?? (error as Error)?.message ?? 'error').slice(0, 64)
-  const runWatchStream = async (id: number, input: { runId: string; cursor: number; outputCursor: number }): Promise<void> => {
-    const state = { cancelled: false }
-    streams.set(id, state)
-    const startedAt = Date.now()
-    let { cursor, outputCursor } = input
-    try {
-      while (!state.cancelled && !socket.destroyed) {
-        let watch: Awaited<ReturnType<HostController['watchRun']>>
-        // Every pass re-authorizes the verified peer inside the controller.
-        try { watch = await controller.watchRun(fingerprint, { runId: input.runId, cursor, outputCursor, waitMs: WATCH_STREAM_WAIT_MS }) }
-        catch (error) { writeLine({ keepAlive: true, id, error: errorCode(error) }); return }
-        if (state.cancelled || socket.destroyed) return
-        const terminal = watch.state === 'settled' || watch.state === 'failed' || watch.state === 'cancelled'
-        const more = !terminal && Date.now() - startedAt < WATCH_STREAM_MAX_MS
-        // keepAlive, id, more: clients match this prefix to keep the id open.
-        writeLine({ keepAlive: true, id, more, watch })
-        if (!more) return
-        cursor = watch.poll.cursor
-        outputCursor = watch.output.cursor
-      }
-    } finally {
-      streams.delete(id)
-    }
-  }
   const dispatchMux = (id: number, request: Record<string, unknown>): void => {
     const early = context.preflight?.(request)
     if (early) { writeLine({ keepAlive: true, id, ...early }); return }
-    if (request.op === 'cancel') {
-      // Stops a pushed stream this lane opened; nothing else can be cancelled.
-      const target = request.target
-      if (Object.keys(request).some((key) => !['op', 'target', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) || !isMuxId(target)) {
-        writeLine({ keepAlive: true, id, error: 'invalid_request' })
-        return
-      }
-      const stream = streams.get(target)
-      if (stream) stream.cancelled = true
-      writeLine({ keepAlive: true, id, cancelled: stream !== undefined })
-      return
-    }
-    if (request.op === 'watchStream') {
-      const { runId, cursor, outputCursor } = request
-      if (Object.keys(request).some((key) => !['op', 'runId', 'cursor', 'outputCursor', 'keepAlive', 'deviceLabel', 'protocol'].includes(key)) ||
-          typeof runId !== 'string' || !Number.isSafeInteger(cursor) || !Number.isSafeInteger(outputCursor)) {
-        writeLine({ keepAlive: true, id, error: 'invalid_request' })
-        return
-      }
-      if (streams.size >= MAX_STREAMS_PER_LANE || inflight >= MAX_MUX_INFLIGHT) {
-        writeLine({ keepAlive: true, id, error: 'mux_busy' })
-        return
-      }
-      inflight++
-      socket.setTimeout(0)
-      void runWatchStream(id, { runId, cursor: cursor as number, outputCursor: outputCursor as number })
-        .catch((error) => abort(`stream_threw:${String((error as Error)?.message ?? error).slice(0, 200)}`))
-        .finally(() => { inflight--; if (inflight === 0 && !socket.destroyed) armIdleTimeout() })
-      return
-    }
     if (inflight >= MAX_MUX_INFLIGHT) {
       socket.write(JSON.stringify({ keepAlive: true, id, error: 'mux_busy' }) + '\n')
       return

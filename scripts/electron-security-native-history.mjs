@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { exerciseActivityHistory } from './electron-security-activity-history.mjs'
+import { creditSessionId, exerciseActivityHistory } from './electron-security-activity-history.mjs'
+import { exerciseMissingWorkspaceHistory } from './electron-security-missing-workspace.mjs'
 
 export async function exerciseNativeHistory(smokeContext) {
   const { evaluate, cdp, canonicalWorkspace, home, userDataDir, nativeHistoryPerformanceOnly, nativeSessionId } = smokeContext
@@ -127,7 +128,6 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.equal(oldest.turns.length, 1)
     assert.equal(oldest.turns[0].userText, '手机发起的真实格式消息')
     // Separate small session: never shrink the existing >64 MiB history workload for metering.
-    const creditSessionId = '11111111-1111-4111-8111-111111111111'
     const creditContext = { ...context, externalSessionId: creditSessionId }
     const creditNativePath = nativePath.replace(`2026-10-13_${nativeSessionId}`, `2026-10-13_${creditSessionId}`)
     writeFileSync(creditNativePath, [
@@ -145,10 +145,6 @@ export async function exerciseNativeHistory(smokeContext) {
       turns: [{ runId: 'credit-run', providerTurnId: 'credit-user', userText: 'credit history', done: true, status: 'completed', ts: Date.now(),
         items: [{ id: 'credit-result', runId: 'credit-run', kind: 'harness', stage: 'result', upstreamProvider: 'qoder', ts: new Date().toISOString() }] }]
     }))
-    const creditCatalog = JSON.parse(readFileSync(join(userDataDir, 'app-sessions.json'), 'utf8'))
-    creditCatalog.push({ sessionId: creditSessionId, externalSessionId: creditSessionId, runId: 'credit-run', providerId: 'pi',
-      agentProfileId: 'pi:rotom', runtimeProvider: 'pi_rpc', cwd: canonicalWorkspace, preview: 'credit history', ts: Date.now() })
-    writeFileSync(join(userDataDir, 'app-sessions.json'), JSON.stringify(creditCatalog))
     const creditHistory = await evaluate(`window.scry.loadSession(${JSON.stringify(creditContext)}, { limit: 1 })`)
     assert.equal(creditOf(creditHistory.turns[0]).value.amount, 2.5, JSON.stringify(creditOf(creditHistory.turns[0])))
     assert.deepEqual(creditOf(creditHistory.turns[0]).source, ['pi_qoder_credit_observation'])
@@ -253,31 +249,7 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.equal(savedTurns.filter(turn => turn.agentProfileId === 'pi:default').length, 23)
     assert.equal(savedTurns.filter(turn => turn.agentProfileId === 'pi:rotom').length, 23)
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
-    // Return to a native-only fixture and delete its worktree, not its transcript.
-    rmSync(segmentDir, { recursive: true })
-    writeFileSync(nativePath, [
-      { type: 'session', version: 3, id: nativeSessionId, cwd: canonicalWorkspace },
-      { type: 'message', id: 'missing-user', parentId: null, timestamp: '2026-10-13T06:00:00Z', message: { role: 'user', content: 'missing worktree native prompt' } },
-      { type: 'message', id: 'missing-reply', parentId: 'missing-user', timestamp: '2026-10-13T06:00:01Z', message: { role: 'assistant', content: [{ type: 'text', text: 'missing worktree native reply' }] } }
-    ].map(row => JSON.stringify(row)).join('\n') + '\n')
-    rmSync(canonicalWorkspace, { recursive: true })
-    const missingPage = await evaluate(`window.scry.loadSession(${JSON.stringify(context)}, { limit: 1 })`)
-    assert.equal(missingPage.workspaceMissing, true)
-    assert.ok(missingPage.turns[0].items.some(item => item.text === 'missing worktree native reply'))
-    const reopenFromSidebar = () => evaluate(`Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('手机会话恢复测试')).click()`)
-    await reopenFromSidebar()
-    await wait(`document.body.textContent.includes('missing worktree native reply') && document.body.textContent.includes('原工作目录已不存在')`)
-    await evaluate(`document.querySelector('textarea').focus()`)
-    await cdp.send('Input.insertText', { text: 'draft in missing worktree' })
-    await wait(`document.querySelector('textarea')?.value === 'draft in missing worktree'`)
-    const readOnly = await evaluate(`({
-      sendDisabled: document.querySelector('button.send')?.disabled,
-      workspacePanel: !!document.querySelector('button[aria-label="右侧工作区"]')
-    })`)
-    assert.deepEqual(readOnly, { sendDisabled: true, workspacePanel: false })
-    mkdirSync(canonicalWorkspace)
-    await reopenFromSidebar()
-    await wait(`!document.body.textContent.includes('原工作目录已不存在') && !!document.querySelector('button[aria-label="右侧工作区"]')`)
+    await exerciseMissingWorkspaceHistory({ evaluate, cdp, wait, segmentDir, nativePath, nativeSessionId, canonicalWorkspace, context })
     assert.deepEqual(await evaluate('window.scry.activeRuns()'), [])
     console.log('Pi native history: verified regular and missing-workspace UI/IPC reopening, native history, archive paging and restoration without Provider execution')
     cdp.close()

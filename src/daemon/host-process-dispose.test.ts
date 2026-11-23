@@ -127,7 +127,7 @@ describe('daemon graceful dispose cleans up pooled provider private env director
     }
   })
 
-  it('closes orchestrationShadow before providerRegistry.dispose() and bounds a hanging provider shutdown', async () => {
+  it('closes orchestration before providerRegistry.dispose() and bounds a hanging provider shutdown', async () => {
     const root = tempDir()
     const userDataDir = join(root, 'userData')
     const daemonStateDirectory = join(userDataDir, 'daemon')
@@ -145,10 +145,8 @@ describe('daemon graceful dispose cleans up pooled provider private env director
 
     const savedRelay = process.env.SCRY_REMOTE_RELAY_ENABLED
     const savedSmoke = process.env.SCRY_ELECTRON_SMOKE_PROVIDER
-    const savedOrch = process.env.SCRY_ORCHESTRATION
     process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
     delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
-    process.env.SCRY_ORCHESTRATION = 'shadow'
 
     const logs: string[] = []
     let host: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
@@ -179,6 +177,7 @@ describe('daemon graceful dispose cleans up pooled provider private env director
 
       expect(elapsedMs).toBeLessThan(2_000)
       expect(logs.some((line) => line.includes('daemon.provider-dispose-timeout'))).toBe(true)
+      // The orchestration DB EXCLUSIVE lock must already be released even though provider shutdown timed out
       const reopened = EventSink.open({ userDataDir })
       reopened.close()
     } finally {
@@ -187,8 +186,6 @@ describe('daemon graceful dispose cleans up pooled provider private env director
       else process.env.SCRY_REMOTE_RELAY_ENABLED = savedRelay
       if (savedSmoke === undefined) delete process.env.SCRY_ELECTRON_SMOKE_PROVIDER
       else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = savedSmoke
-      if (savedOrch === undefined) delete process.env.SCRY_ORCHESTRATION
-      else process.env.SCRY_ORCHESTRATION = savedOrch
     }
   })
 })

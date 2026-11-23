@@ -85,7 +85,7 @@ describe('an App that lost its stored grant, facing a live daemon (A6)', () => {
     const holder = { pid: 4242, startedAt: 's', identityKey: '4242:s', startedBy: 'test' }
     const confirmations: string[] = []
     const deps: BackgroundServiceActionDeps = {
-      daemonMode: true,
+      
       connection: async () => connectionFromMode(await app.ready(), 'test'),
       activeRuns: async () => undefined,
       prepareStop: async () => ({ status: 'running', holder }),
@@ -127,7 +127,7 @@ describe('an App that lost its stored grant, facing a live daemon (A6)', () => {
     const holder = { pid: 4242, startedAt: 's', identityKey: '4242:s', startedBy: 'test' }
     const confirmations: string[] = []
     const deps: BackgroundServiceActionDeps = {
-      daemonMode: true,
+      
       connection: async () => connectionFromMode(await app.ready(), 'test'),
       activeRuns: async () => undefined,
       prepareStop: async () => ({ status: 'running', holder }),

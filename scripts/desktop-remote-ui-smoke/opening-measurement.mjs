@@ -123,6 +123,26 @@ export async function runOpeningMeasurement({ driver, options }) {
       await read('window.scry.desktopRemote.history = window.openingHistory; true')
       await click('[data-remote-session="old-native"]')
       await wait('document.querySelector(".chat").textContent.includes("Remote history paragraph 79") && !document.querySelector(".chat-state-slot > .empty-state[data-status=error]")', 'explicit selection retries failed history')
+      await read(`(() => {
+        let held = false
+        window.scry.desktopRemote.history = async (...args) => {
+          const page = await window.openingHistory(...args)
+          if (args[1].externalSessionId !== 'other-native') return page
+          const title = held ? 'Update after opening' : 'Snapshot before update'
+          if (!held) {
+            held = true
+            await new Promise(resolve => { window.releaseOutdatedOpening = resolve })
+          }
+          return { ...page, turns: [{ ...page.turns[0], userText: title }] }
+        }
+      })()`)
+      await click('[data-remote-session="other-native"]')
+      await wait('typeof window.releaseOutdatedOpening === "function" && document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true"', 'original open pending for the same session')
+      await read('window.publishFixtureRemoteUpdate({ history: true })')
+      await wait('document.querySelector(".chat").textContent.includes("Update after opening")', 'subscribed history arrives before the held opening reply')
+      await read('window.releaseOutdatedOpening(); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      check(await read('document.querySelector(".chat").textContent.includes("Update after opening") && !document.querySelector(".chat").textContent.includes("Snapshot before update")'), 'Delayed opening snapshot replaced a newer subscription page')
+      await read('window.scry.desktopRemote.history = window.openingHistory; true')
     }
     if (options.openingOnly) await verifyOpeningWithoutArchive({ read, wait, check, click })
     return { remoteSessionOpening: { samples, nativeSelection: true, nativeScroll: true, bottomChecked: options.openingOnly, atomicSelection: options.openingOnly, pendingSupersession: options.openingOnly, preparedFailureVisible: options.openingOnly,
@@ -134,7 +154,7 @@ async function verifyOpeningWithoutArchive({ read, wait, check, click }) {
   await wait('document.querySelector("[data-remote-session=other-native]")?.getAttribute("aria-current") === "true" && document.querySelector(".chat")?.textContent.includes("Remote history paragraph 79")', 'idle session selected before live reopen')
   await read(`Object.assign(window.desktopRemoteFixture, {
     openingWithoutArchive: true, sessionActive: true, holdOpeningLive: true, holdOpeningTrace: true
-  }); true`)
+  }); window.publishFixtureRemoteUpdate({ catalog: true }); true`)
   await wait('document.querySelector("[data-remote-session=old-native].running") !== null', 'catalog reports the live session')
   // Record the UI across the entire open, not just after live evidence has arrived.
   await read(`window.openingGapShown = false; window.openingGapObserver = new MutationObserver(() => {
@@ -144,7 +164,6 @@ async function verifyOpeningWithoutArchive({ read, wait, check, click }) {
   await wait('typeof window.releaseOpeningLive === "function"', 'live lookup held while archive read resolves')
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   check(await read('document.querySelector(".chat").getAttribute("aria-busy") === "true" && !window.openingGapShown'), 'Archive miss was reported while live lookup was pending')
-  check(await read('window.desktopRemoteFixture.openingLiveImmediate'), 'Opening waited for the next host change rather than requesting a snapshot')
   await read('window.desktopRemoteFixture.holdOpeningLive = false; window.releaseOpeningLive(); true')
   await wait('typeof window.releaseOpeningTrace === "function"', 'live trace is held after the run is found')
   check(await read('document.querySelector(".chat").getAttribute("aria-busy") === "true" && !window.openingGapShown'), 'Archive miss was reported while live trace was pending')

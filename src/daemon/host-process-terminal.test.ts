@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { cleanupTempDirs } from './host-process.fixtures'
+import { cleanupTempDirs, localSubscription } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import type { TerminalPtyFactory, TerminalPtyProcess } from '../main/terminal-manager'
 
@@ -38,7 +38,7 @@ describe('daemon App terminal', () => {
     const pty = echoPty()
     const daemon = await startTestDaemon({ terminal: { pty: pty.factory, inlineRecording: true, environment: async () => ({ SHELL: '/bin/sh' }) } })
     try {
-      const handshake = await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
+      const handshake = await daemon.request(localSubscription())
       const elsewhere = join(daemon.root, 'elsewhere')
       mkdirSync(elsewhere)
       const outside = await daemon.localOp('terminal', 'start', [{ cwd: elsewhere, cols: 80, rows: 24 }, elsewhere])
@@ -52,8 +52,8 @@ describe('daemon App terminal', () => {
       expect((await daemon.localOp('terminal', 'write', [{ id, ownershipEpoch, data: 'echo hi' }, daemon.workspace])).result).toBe(true)
       expect((await daemon.localOp('terminal', 'write', [{ id, ownershipEpoch: ownershipEpoch + 7, data: 'x' }, daemon.workspace])).result).toBe(false)
 
-      const notice = await daemon.request({ op: 'appEvents', epoch: handshake.events.epoch, cursor: handshake.events.cursor, waitMs: 1_000 })
-      expect(notice.events.items).toContainEqual({ kind: 'terminal' })
+      const notice = await daemon.request(localSubscription(handshake.subscribe, 1_000))
+      expect(notice.subscribe.hints).toContainEqual({ kind: 'terminal' })
       let text = ''
       let cursor: string | undefined
       for (let attempt = 0; attempt < 20 && !text.includes('echo hi'); attempt += 1) {
@@ -78,14 +78,14 @@ describe('daemon App terminal', () => {
     const pty = echoPty()
     const daemon = await startTestDaemon({ terminal: { pty: pty.factory, inlineRecording: true, environment: async () => ({ SHELL: '/bin/sh' }), reclaimAfterMs: 150, checkEveryMs: 25 } })
     try {
-      await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
+      await daemon.request(localSubscription())
       const first = await daemon.localOp('terminal', 'start', [{ cwd: daemon.workspace, cols: 80, rows: 24 }, daemon.workspace])
       expect((await daemon.request({ op: 'terminalFeed', method: 'shutdown' })).terminal).toBe(true)
       expect(pty.killed).toHaveLength(1)
       expect((await daemon.localOp('terminal', 'active', [daemon.workspace])).result).toEqual([])
       expect(first.result).toBeTruthy()
 
-      await daemon.request({ op: 'appEvents', cursor: 0, waitMs: 0 })
+      await daemon.request(localSubscription())
       await daemon.localOp('terminal', 'start', [{ cwd: daemon.workspace, cols: 80, rows: 24 }, daemon.workspace])
       await new Promise((resolve) => setTimeout(resolve, 400))
       expect(pty.killed).toHaveLength(2)

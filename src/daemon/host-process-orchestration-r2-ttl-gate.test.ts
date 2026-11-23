@@ -9,7 +9,7 @@ import { providerOperationKey } from '../main/provider-operation-gate'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createDaemonHostProcess } from './host-process'
-import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir } from './host-process.fixtures'
+import { MemoryOutputStore, call, cleanupTempDirs, enrollLocal, tempDir, waitForProjectedRun } from './host-process.fixtures'
 
 cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>[0])
 
@@ -20,14 +20,12 @@ function setOnEnv(pendingTtlMs?: number) {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
-    orch: process.env.SCRY_ORCHESTRATION,
     ttl: process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
   process.env.ELECTRON_ENABLE_LOGGING = '1'
-  process.env.SCRY_ORCHESTRATION = 'on'
   if (pendingTtlMs !== undefined) process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS = String(pendingTtlMs)
   else delete process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS
   process.argv.push('--remote-debugging-port=0')
@@ -39,37 +37,13 @@ function setOnEnv(pendingTtlMs?: number) {
     else process.env.SCRY_ELECTRON_SMOKE_PROVIDER = saved.smoke
     if (saved.logging === undefined) delete process.env.ELECTRON_ENABLE_LOGGING
     else process.env.ELECTRON_ENABLE_LOGGING = saved.logging
-    if (saved.orch === undefined) delete process.env.SCRY_ORCHESTRATION
-    else process.env.SCRY_ORCHESTRATION = saved.orch
     if (saved.ttl === undefined) delete process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS
     else process.env.SCRY_ORCHESTRATION_PENDING_TTL_MS = saved.ttl
   }
 }
 
-async function waitRunTerminal(
-  socketPath: string,
-  ca: string,
-  cert: string,
-  key: string,
-  runId: string,
-  timeoutMs = 10_000
-): Promise<string> {
-  let state = 'recorded'
-  let cursor = 0
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline && !['settled', 'failed', 'cancelled'].includes(state)) {
-    const watched = await call(socketPath, ca, cert, key, {
-      op: 'watch',
-      runId,
-      cursor,
-      outputCursor: 0,
-      waitMs: 500
-    })
-    state = watched.watch.state
-    cursor = watched.watch.poll.cursor
-  }
-  return state
-}
+const waitRunTerminal = (socketPath: string, ca: string, cert: string, key: string, runId: string) =>
+  waitForProjectedRun(socketPath, ca, cert, key, runId, 500)
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs

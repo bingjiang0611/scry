@@ -1,6 +1,6 @@
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { registerTrustedIpcHandler } from '../ipc-trust'
+import { registerTrustCheckedListener } from '../ipc-trust'
 import { registerConversationHandlers } from './conversation'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
@@ -15,7 +15,7 @@ function fixture(getStartupManagedRecovery: () => Promise<void>) {
   const dispatched = new Error('privileged dispatch reached')
   const conversationService = vi.fn((): never => { throw dispatched })
   registerConversationHandlers({
-    handleTrusted: (channel, listener) => registerTrustedIpcHandler(
+    handleTrusted: (channel, listener) => registerTrustCheckedListener(
       { handle: (name, handler) => { handlers.set(name, handler) } },
       channel, () => window, mainFrame.url, listener
     ),

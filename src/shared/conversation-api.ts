@@ -63,6 +63,7 @@ export interface ConversationSummary {
 
 export interface ConversationPage {
   summary: ConversationSummary
+  projection?: { sessionKey: string; revSeq: number; legacyBefore?: true }
   bindings: ConversationBinding[]
   sideChat?: SideChatSnapshotPage
   turns: Array<{

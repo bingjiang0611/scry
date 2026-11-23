@@ -1,7 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { DesktopRemoteCatalog, DesktopRemoteConnection, DesktopRemoteContext, RemoteSessionRef } from '@shared/desktop-remote'
 import { remoteSessionAttentionKey } from '@shared/remote-session-attention'
-import { useVisibilityPolling } from './useVisibilityPolling'
 
 // One host catalog per saved connection, shared by the sidebar, location picker,
 // hosts page and remote conversation. The catalog is a host snapshot: it is kept
@@ -119,16 +118,39 @@ export function useRemoteCatalogs(): Snapshot {
 }
 
 // Keep host session activity fresh even when its conversation is not open.
-// Catalog reads use host snapshots, not Provider discovery. One App-owned poll
-// per connected host, at most every 3s; slow reads are never stacked.
+// Read host metadata once on connect and apply session updates from main.
 // A failed read retains history, but its error invalidates live activity badges.
 export function useConnectedCatalogLoader(connections: readonly DesktopRemoteConnection[], readError: string | null, refreshing = false): void {
-  const connectedIds = readError || refreshing ? '' : connections.filter(connection => connection.state === 'connected').map(connection => connection.id).join('\u0000')
-  const ids = connectedIds ? connectedIds.split('\u0000') : []
-  useVisibilityPolling(`remote-catalogs:${connectedIds}`, () => Promise.all(ids.map(refreshRemoteCatalog)).then(() => {}), 3000, () => {
-    for (const id of ids) {
-      revisions.set(id, (revisions.get(id) ?? 0) + 1)
-      publish(id, { ...snapshot.get(id), loading: true, stale: true })
+  const connected = readError || refreshing ? [] : connections.filter(connection => connection.state === 'connected')
+  const subscribedIds = connected.map(connection => connection.id).join('\u0000')
+  useEffect(() => {
+    if (!subscribedIds) return
+    const ids = new Set(subscribedIds.split('\u0000'))
+    const unsubscribe = window.scry.onDesktopRemoteUpdate?.((update) => {
+      const id = update.connectionId
+      if (!ids.has(id)) return
+      if (update.catalog || update.stale) revisions.set(id, (revisions.get(id) ?? 0) + 1)
+      if (update.catalog) {
+        const unreadSessionKeys = remoteCatalogUnread(update.catalog, viewedSessionKey)
+        publish(id, { catalog: update.catalog, loading: false, stale: false, unreadSessionKeys })
+      } else if (update.stale) {
+        publish(id, { ...snapshot.get(id), loading: false, stale: true })
+      }
+    })
+    const refreshVisible = (): void => {
+      for (const id of ids) {
+        if (document.hidden) {
+          revisions.set(id, (revisions.get(id) ?? 0) + 1)
+          const retained = snapshot.get(id)
+          if (retained) publish(id, { ...retained, stale: true })
+        } else void refreshRemoteCatalog(id)
+      }
     }
-  })
+    refreshVisible()
+    document.addEventListener('visibilitychange', refreshVisible)
+    return () => {
+      unsubscribe?.()
+      document.removeEventListener('visibilitychange', refreshVisible)
+    }
+  }, [subscribedIds])
 }

@@ -1,9 +1,10 @@
-// One App startup sample for S0-6 (b4s-startup-timing.mjs). Three cases share one code
+// One App startup sample for S0-6 (b4s-startup-timing.mjs). Two cases share one code
 // path and differ only in what exists before the App is spawned:
 //
-//   daemon-cold     switch on, no daemon for this userData (stopped and verified gone)
-//   daemon-running  switch on, the daemon a previous App started is still running
-//   switch-off      control: the in-process App
+//   daemon-cold     no daemon for this userData (stopped and verified gone)
+//   daemon-running  the daemon a previous App started is still running
+//
+// The switch-off control (the in-process App) was retired with S3.
 //
 // Times are wall-clock epoch milliseconds from one machine: the spawn is stamped here,
 // navigation start and run-surface readiness are stamped in the renderer
@@ -14,8 +15,8 @@ import { attempt, openApp, quitApp, sleep } from './app.mjs'
 import { collectLiveIsolation, daemonHolder, fixtureDaemonProcesses, stopFixtureDaemon } from './fixture.mjs'
 import { readIdentity, readLockRecord } from './process-identity.mjs'
 
-export const CASES = Object.freeze(['daemon-cold', 'daemon-running', 'switch-off'])
-export const caseMode = (name) => name === 'switch-off' ? 'switch-off' : 'daemon'
+export const CASES = Object.freeze(['daemon-cold', 'daemon-running'])
+export const caseMode = () => 'daemon'
 
 // Retries only while the App itself reports the daemon is not ready yet (the lazy
 // surface's unavailable rule): that wait is part of what the user sees.

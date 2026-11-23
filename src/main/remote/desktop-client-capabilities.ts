@@ -9,7 +9,7 @@ import { protocolFailure } from './remote-protocol'
 /** Host capabilities negotiated by `desktop info`, reused by the catalog snapshot. */
 export type DesktopCapabilities = ReturnType<typeof validateInfo>
 
-export function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; attachments?: DesktopAttachmentCapability } {
+export function validateInfo(response: unknown, hostId: string): { providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; subscribe?: 1; attachments?: DesktopAttachmentCapability } {
   if (!record(response) || !record(response.desktop) || response.desktop.kind !== 'info') fail('invalid_desktop_response')
   // The host states its run-channel version in `info`. A missing or different one
   // is a refusal, not a degraded mode; the code names the end that is behind.
@@ -42,6 +42,7 @@ export function validateInfo(response: unknown, hostId: string): { providerDisco
     ...(response.desktop.sessionFork === true ? { sessionFork: true as const } : {}),
     ...(response.desktop.sessionDelete === true ? { sessionDelete: true as const } : {}),
     ...(response.desktop.traceDelta === 1 ? { traceDelta: 1 as const } : {}),
+    ...(response.desktop.subscribe === 1 ? { subscribe: 1 as const } : {}),
     ...(response.desktop.hostAdminNotices === 1 ? { hostAdminNotices: 1 as const } : {}),
     ...(attachmentInfo ? { attachments: attachmentInfo as unknown as DesktopAttachmentCapability } : {})
   }

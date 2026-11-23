@@ -5,8 +5,21 @@ extension ConnectionCopy {
   static let targetGatewayOffline = "在这台 Mac 上打开 Scry 后才能使用其他主机"
   static let targetsUnavailable = "当前主机暂未启用其他主机转发"
 
+  static let updatePhoneProtocol = "请更新 iPhone 上的 Scry，再连接这台 Mac。"
+  static let updateMacProtocol = "请更新并重新打开 Mac 上的 Scry，再连接。"
+  static let updateBothProtocols = "iPhone 和 Mac 上的 Scry 协议版本不同。请更新两端的 Scry 后重试。"
+  static let subscriptionUnavailable = "Mac 未提供所需的会话订阅。请更新并重新打开 Mac 上的 Scry。"
+
+  static func isProtocolFailure(_ code: String) -> Bool {
+    ["protocol_upgrade_client", "protocol_upgrade_host", "protocol_mismatch", "subscribe_unsupported", "unknown_op"].contains(code)
+  }
+
   static func describeKnownHostError(_ code: String) -> String? {
     switch code {
+    case "protocol_upgrade_client": return updatePhoneProtocol
+    case "protocol_upgrade_host": return updateMacProtocol
+    case "protocol_mismatch": return updateBothProtocols
+    case "subscribe_unsupported": return subscriptionUnavailable
     case "history_profile_unavailable": return historyProfileUnavailable
     case "history_profile_required": return historyProfileUnverified
     case "execution_target_gateway_offline": return targetGatewayOffline

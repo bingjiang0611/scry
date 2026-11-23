@@ -5,6 +5,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
+// LibreSSL may generate explicit EC parameters. TLS and enrollment require the named P-256 curve.
+const ecRequest = ['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-pkeyopt', 'ec_param_enc:named_curve', '-nodes', '-sha256']
 
 // Test-only, preissued identities. This is not onboarding or a production CA.
 // Keys are scoped to an OS temporary directory and removed by the caller.
@@ -17,7 +19,7 @@ export async function certificates() {
   }
   try {
     for (const name of ['outer-ca', 'inner-ca', 'wrong-ca']) {
-      await openssl(['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-noenc', '-days', '1',
+      await openssl(['req', '-x509', ...ecRequest, '-days', '1',
         '-subj', '/CN=Scry G0 ' + name, '-keyout', name + '.key', '-out', name + '.pem',
         '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign'])
       await chmod(path(name + '.key'), 0o600)
@@ -28,11 +30,11 @@ export async function certificates() {
       ['device', 'inner-ca', 'clientAuth', 'scry-device.test'],
       ['impostor', 'wrong-ca', 'clientAuth', 'scry-device.test']
     ]) {
-      await openssl(['req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-noenc',
+      await openssl(['req', '-new', ...ecRequest,
         '-subj', '/CN=' + hostname, '-keyout', name + '.key', '-out', name + '.csr'])
       await chmod(path(name + '.key'), 0o600)
       await writeFile(path(name + '.ext'), `basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=${usage}\nsubjectAltName=DNS:${hostname}\n`)
-      await openssl(['x509', '-req', '-in', name + '.csr', '-CA', ca + '.pem', '-CAkey', ca + '.key',
+      await openssl(['x509', '-req', '-sha256', '-in', name + '.csr', '-CA', ca + '.pem', '-CAkey', ca + '.key',
         '-CAcreateserial', '-days', '1', '-extfile', name + '.ext', '-out', name + '.pem'])
     }
     return { path, read: name => readFile(path(name)), cleanup: () => rm(directory, { recursive: true, force: true }) }

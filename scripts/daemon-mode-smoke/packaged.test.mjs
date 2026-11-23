@@ -1,6 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { finished } from 'node:stream/promises'
 import { createPackage } from '@electron/asar'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PACKAGED_MAIN_ENTRIES, parseSmokeArguments, privateCliEvidence, resolvePackagedApp } from './packaged.mjs'
@@ -28,7 +29,10 @@ async function fakeApp(root, { name = 'scry', version = '9.9.9', entries = PACKA
     mkdirSync(join(source, 'out', 'main'), { recursive: true })
     writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'scry', version }))
     for (const entry of entries) writeFileSync(join(source, 'out', 'main', entry), '// entry\n')
-    await createPackage(source, join(appPath, 'resources', 'app.asar'))
+    const archive = await createPackage(source, join(appPath, 'resources', 'app.asar'))
+    // The ASAR helper ends the stream before all fixture bytes have landed.
+    await finished(archive)
+    expect(archive.writableFinished).toBe(true)
   }
   return { appPath, executable: join(appPath, name) }
 }

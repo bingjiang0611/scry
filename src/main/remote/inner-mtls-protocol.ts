@@ -13,18 +13,7 @@ export const INNER_IDLE_TIMEOUT_MS = 75_000
 
 // Transport features this host offers, reported by `ping` so a phone can use
 // them without guessing from errors. Values are added as each one ships.
-export const HOST_TRANSPORT_CAPABILITIES: readonly string[] = ['ping', 'mux', 'watchStream', 'sessionsKnown', 'historyDeflate']
-
-// Pushed run observation on a multiplexed lane. One request, many replies with
-// the same id: `more: true` until the run is terminal or the stream expires,
-// then a final `more: false`. Each pass waits at most this long, so an idle run
-// still sends a heartbeat that keeps the phone's deadline and cursors current.
-export const WATCH_STREAM_WAIT_MS = 15_000
-// A stream ends (more: false, not terminal) after this long; the phone simply
-// subscribes again with its cursors. Bounds a stream abandoned by a phone that
-// vanished without closing the tunnel.
-export const WATCH_STREAM_MAX_MS = 10 * 60_000
-export const MAX_STREAMS_PER_LANE = 8
+export const HOST_TRANSPORT_CAPABILITIES: readonly string[] = ['ping', 'mux', 'sessionsKnown', 'historyDeflate']
 
 // Concurrent requests one multiplexed lane may run. Superseded long-polls stay
 // on the host until their own wait ends, so leave room for several of them.

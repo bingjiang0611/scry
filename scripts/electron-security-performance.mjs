@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { verifyNativeModalExit, waitForNativeModalEntrance } from './electron-security-modal-exit.mjs'
 
 export async function exerciseProductionPerformance(smokeContext) {
   const { evaluate, cdp, workspace, secondWorkspace } = smokeContext
@@ -73,10 +74,9 @@ export async function exerciseProductionPerformance(smokeContext) {
       }))
     })()`)
 
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-    assert.equal(await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(!document.querySelector('.llm-perf-modal') && document.activeElement?.title === 'LLM 性能'))))`), true)
-    console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal }))
+    await waitForNativeModalEntrance(cdp, evaluate, '.llm-perf-modal')
+    const exit = await verifyNativeModalExit(cdp, evaluate, '.llm-perf-modal', '.sb-navitem[title="LLM 性能"]')
+    console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal: { ...modal, exit } }))
     cdp.close()
     return
 }

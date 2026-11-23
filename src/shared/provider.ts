@@ -59,7 +59,7 @@ export interface CatalogHealth {
 export interface DeleteSessionResult {
   ok: boolean
   cancelled?: boolean
-  reason?: 'invalid_request' | 'active_session' | 'user_cancelled' | 'partial_failure'
+  reason?: 'invalid_request' | 'active_session' | 'user_cancelled' | 'partial_failure' | 'unavailable'
   deleted: Array<'recovery journals' | 'database turn outbox' | 'usage' | 'database' | 'attachments' | 'transcripts' | 'catalog'>
   retained: string[]
   failed: Array<{ store: string; error: string }>

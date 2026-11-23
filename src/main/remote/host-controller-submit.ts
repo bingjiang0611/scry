@@ -35,26 +35,27 @@ export function submitIntent(deps: SubmitDeps, peerCertSHA256: string, input: { 
       detail: input.detail,
       ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
     })
-    let result: SubmitResult
+    if (auth.status === 'duplicate') return auth
     try {
-      result = deps.gateway.submitIntent(peerCertSHA256, { ...input, runId: auth.runId })
+      deps.gateway.submitIntent(peerCertSHA256, { ...input, runId: auth.runId })
     } catch (error) {
-      if (auth.status === 'recorded') {
-        try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
-      }
+      try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
       throw error
     }
-    if (auth.status === 'recorded') deps.dispatcher.pump()
-    return { runId: result.runId, status: auth.status, seq: result.seq }
+    deps.dispatcher.pump()
+    return auth
   }
   return recordIntent(deps, peerCertSHA256, input)
 }
 
-export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string }): Promise<SubmitResult> {
+export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string; knownLogId?: string }): Promise<SubmitResult> {
   deps.authorizeDevice(peer)
+  assertExpectedLog(deps.orchestration, input.knownLogId)
   const { detail, referenced } = stampAttachmentPeer(peer, input.detail)
   const scoped = deps.scopedIntentId(peer, input.intentId)
-  if (referenced && !deps.ledger.intentRun(scoped)) {
+  if (referenced && !(deps.orchestration
+    ? deps.orchestration.hasSubmitReceipt(peer, scoped)
+    : deps.ledger.intentRun(scoped))) {
     const routing = parseRouting(detail)
     if (!deps.attachmentStore) throw new Error('desktop_remote_attachments_unsupported')
     const references = (routing.attachments ?? []).map((item) => ({ ...item, peer })) as DesktopAttachmentReference[]
@@ -63,6 +64,7 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
   // Existing receipts are compared by the ledger, even after terminal cleanup
   // removed their blobs. A lost acknowledgement must remain idempotent.
   deps.authorizeDevice(peer)
+  assertExpectedLog(deps.orchestration, input.knownLogId)
   if (deps.orchestration) {
     const auth = await deps.orchestration.submitAsync({
       peerCertSHA256: peer,
@@ -71,19 +73,23 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
       detail,
       ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
     })
-    let result: SubmitResult
+    if (auth.status === 'duplicate') return auth
     try {
-      result = deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
+      deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
     } catch (error) {
-      if (auth.status === 'recorded') {
-        try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
-      }
+      try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
       throw error
     }
-    if (auth.status === 'recorded') deps.dispatcher.pump()
-    return { runId: result.runId, status: auth.status, seq: result.seq }
+    deps.dispatcher.pump()
+    return auth
   }
   return recordIntent(deps, peer, { ...input, detail })
+}
+
+export function assertExpectedLog(orchestration: OrchestrationAuthorityHooks | undefined, knownLogId?: string): void {
+  if (knownLogId !== undefined && orchestration?.currentLogId?.() !== knownLogId) {
+    throw new Error('orchestration_log_changed')
+  }
 }
 
 function recordIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string }): SubmitResult {

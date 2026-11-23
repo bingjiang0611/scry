@@ -35,6 +35,9 @@ import {
 import { checkWorkspaceCaptureLimits, WorkspaceReadUnavailable } from './git-workspace-limits.js'
 import { sampleGitRepositoryLocation, type GitRepositoryHead, type GitRepositoryLocation } from './git-repository-location.js'
 
+// Match contents of .scry directories at every depth, including the Git root.
+export const SCRY_DATA_EXCLUSION = ':(top,exclude,glob)**/.scry/**'
+
 export interface GitTurnDiffCapture {
   beforeAt: string
   captureMs: number
@@ -176,7 +179,8 @@ export async function beginGitTurnDiff(
   captureRoot?: string,
   excludedPaths: string[] = [],
   workspaceSnapshot = false,
-  baseline?: GitTurnDiffBaseline
+  baseline?: GitTurnDiffBaseline,
+  options: { excludeScryData?: true } = {}
 ): Promise<GitTurnDiffCapture> {
   const started = Date.now()
   const beforeAt = new Date(started).toISOString()
@@ -186,6 +190,9 @@ export async function beginGitTurnDiff(
   try {
     const canonicalCwd = await realpath(cwd)
     const readEnv = workspaceSnapshot ? { ...process.env, GIT_NO_LAZY_FETCH: '1' } : undefined
+    // The recursive glob also matches the root .scry directory's contents.
+    // Git add treats a literal excluded ignored directory as an explicit path.
+    const dataPathspec = options.excludeScryData ? [SCRY_DATA_EXCLUSION] : []
     const cwdLocation = workspaceSnapshot ? undefined : sampleGitRepositoryLocation(canonicalCwd, true)
     const [layoutResult, statusResult] = await Promise.allSettled([
       gitCommand(
@@ -195,7 +202,7 @@ export async function beginGitTurnDiff(
         ],
         { cwd: canonicalCwd, env: readEnv, deadline }
       ),
-      gitCommand(snapshotGitArgs([], ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.']), {
+      gitCommand(snapshotGitArgs([], ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--', '.', ...dataPathspec]), {
         cwd: canonicalCwd,
         env: readEnv,
         deadline
@@ -238,10 +245,13 @@ export async function beginGitTurnDiff(
       if (fromRepo.startsWith('..') || isAbsolute(fromRepo)) return undefined
       return await ignoredByGit(repoRoot, path, deadline) ? undefined : path
     }))).filter((path): path is string => path != null)
-    const pathspec = capturePathspec(repoRoot, scope, explicitExcludedPaths)
+    const pathspec = [...capturePathspec(repoRoot, scope, explicitExcludedPaths), ...dataPathspec]
+    const snapshotExcludedPaths = options.excludeScryData
+      ? [...canonicalExcludedPaths, join(canonicalCwd, '.scry')]
+      : canonicalExcludedPaths
     if (workspaceSnapshot) await checkWorkspaceCaptureLimits({
       repoRoot, cwd: canonicalCwd, head, records: statusRecords, pathspec,
-      excludedPaths: canonicalExcludedPaths, deadline
+      excludedPaths: snapshotExcludedPaths, deadline
     })
     const baselineClean = explicitExcludedPaths.length === 0
       ? statusRecords.every((record) => record.startsWith('# '))
@@ -285,7 +295,7 @@ export async function beginGitTurnDiff(
         objectDir,
         alternateObjectDirs,
         pathspec,
-        excludedPaths: canonicalExcludedPaths
+        excludedPaths: snapshotExcludedPaths
       }
     }
     const [indexState, sparseCheckout] = await Promise.all([
@@ -314,7 +324,7 @@ export async function beginGitTurnDiff(
         objectDir,
         alternateObjectDirs,
         pathspec,
-        excludedPaths: canonicalExcludedPaths
+        excludedPaths: snapshotExcludedPaths
       }
     }
     const filterOverrides = await loadSnapshotOverrides(canonicalCwd, tempDir, deadline)
@@ -354,7 +364,7 @@ export async function beginGitTurnDiff(
       alternateObjectDirs,
       filterOverrides,
       pathspec,
-      excludedPaths: canonicalExcludedPaths
+      excludedPaths: snapshotExcludedPaths
     }
   } catch (error) {
     if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)

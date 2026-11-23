@@ -16,6 +16,7 @@ import { useChatNavigation } from './useChatNavigation'
 import { useDiffInspector } from './useDiffInspector'
 import type { DiffReviewSelection } from './useDiffReviewSelection'
 import { contextKey, fallbackRunControlCatalog, readRunControlCatalogCache } from './integration-model'
+import { focusComposerWhenReady } from '../composer-focus'
 
 type ChatProps = ConversationHostChatProps
 type Availability = 'available' | 'unavailable' | 'reading'
@@ -153,14 +154,12 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
     mounted.current = true
     const reader = catalogReader.current
     if (autoFocusComposer) {
-      // Only a fresh creation moves focus here; switching tabs leaves focus on the tab.
-      const frame = requestAnimationFrame(() => {
-        const textarea = textareaRef.current
-        if (textarea && !textarea.disabled) textarea.focus({ preventScroll: true })
-      })
+      // Only a fresh creation moves focus here; switching tabs leaves focus on the tab. The
+      // composer renders once the child's page arrives, which may be frames after mount.
+      const cancelFocus = focusComposerWhenReady(textareaRef, document.activeElement)
       return () => {
         mounted.current = false
-        cancelAnimationFrame(frame)
+        cancelFocus()
         reader?.cancel()
       }
     }

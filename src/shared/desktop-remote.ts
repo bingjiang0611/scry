@@ -108,6 +108,7 @@ export interface DesktopRemoteConnection {
   anchorSHA256: string
   ssh: DesktopSshTarget
   state: 'disconnected' | 'connected' | 'pairing'
+  subscribe?: 1
   expiresAt: number
 }
 export interface DesktopPairingResult {
@@ -144,9 +145,18 @@ export interface DesktopRemoteCatalog {
   sessionDelete?: true
   traceDelta?: 1
   hostAdminNotices?: 1
+  subscribe?: 1
   hostAdminNoticeItems?: HostAdminNotice[]
   unreadSessionKeys?: string[]
 }
+export interface DesktopRemoteUpdate {
+  connectionId: string
+  catalog?: DesktopRemoteCatalog
+  runs?: true
+  history?: true
+  stale?: true
+}
+
 export interface DesktopRemoteHistory {
   historyScope?: 'session'
   imageCounts?: Record<string, number>
@@ -161,17 +171,17 @@ export interface DesktopRemoteHistory {
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
 export const DESKTOP_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 
-export const REMOTE_PROTOCOL_VERSION = 2
+export const REMOTE_PROTOCOL_VERSION = 3
 
 export type DesktopHostRead =
   | { kind: 'info' }
   | { kind: 'workspaceChoices'; request: WorkspaceChoicesRequest }
   | { kind: 'validateWorkspaceBranch'; request: { cwd: string; repositoryId: string; name: string } }
   | { kind: 'history'; context: DesktopRemoteContext; historyScope?: 'session'; before?: number; snapshot?: string; byteChunks?: true; images?: true; chunk?: { id: string; offset: number } }
-  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number }; settledTail?: true }
+  | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number }; archive?: true }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; subscribe?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'workspaceChoices'; value: ScRead<WorkspaceChoices> }
   | { kind: 'validateWorkspaceBranch'; value: ScRead<{ name: string }> }
   | { kind: 'history'; history: DesktopRemoteHistory }
@@ -225,6 +235,7 @@ export interface DesktopRemoteIntent {
 export interface DesktopRemoteRunStatus {
   state: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'unknown'
   scryRunId?: string
+  outputSeq?: number
   externalSessionId?: string
   cwd?: string
   detail?: string
@@ -236,6 +247,7 @@ export interface DesktopRemoteLiveRun {
   origin: 'remote' | 'mac'
   state: 'running' | 'waiting' | 'stopping'
   scryRunId?: string
+  outputSeq?: number
 }
 export interface ExecutionTargetRef {
   id: string
@@ -243,6 +255,7 @@ export interface ExecutionTargetRef {
   hostId: string
   label: string
   state: 'connected' | 'disconnected'
+  subscribe?: 1
 }
 export interface DesktopMobileTargetSubmit {
   target: { id: string; binding: string }
@@ -253,9 +266,9 @@ export interface DesktopMobileTargetSubmit {
 }
 export interface DesktopRemoteTargetAPI {
   executionTargets(): Promise<ExecutionTargetRef[]>
-  mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void): Promise<unknown>
+  mobileRequest(target: { id: string; binding: string }, request: Record<string, unknown>, authorizePeer?: () => void, signal?: AbortSignal): Promise<unknown>
   mobileSubmit(input: DesktopMobileTargetSubmit & { authorizePeer?: () => void }): Promise<unknown>
-  mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; authorizePeer?: () => void }): Promise<unknown>
+  mobileIntentStatus(input: { target: { id: string; binding: string }; phonePeerFingerprint: string; phoneIntentId: string; knownLogId?: string; authorizePeer?: () => void }): Promise<unknown>
 }
 export interface DesktopRemoteAPI {
   workbench<Request extends DesktopWorkbenchRequest>(connectionId: string, request: Request): Promise<DesktopWorkbenchResult<Request>>
@@ -284,8 +297,8 @@ export interface DesktopRemoteAPI {
   submit(connectionId: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent>
   intentStatus(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
   resolveIntent(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
-  runStatus(connectionId: string, runId: string, options?: { immediate?: boolean }): Promise<DesktopRemoteRunStatus>
-  liveRun(connectionId: string, context: DesktopRemoteContext, options?: { immediate?: boolean }): Promise<DesktopRemoteLiveRun | null>
+  runStatus(connectionId: string, runId: string): Promise<DesktopRemoteRunStatus>
+  liveRun(connectionId: string, context: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null>
   stop(connectionId: string, runId: string): Promise<void>
   answer(connectionId: string, runId: string, response: AgentQuestionResponse): Promise<void>
   files(connectionId: string, context: DesktopRemoteContext, path: string, cursor?: string): Promise<WorkspaceListResult>

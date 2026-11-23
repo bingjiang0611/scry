@@ -7,7 +7,7 @@ import { readTraceArchiveAsync, readTraceArchivePageAsync, resolveTranscriptPath
 import { readCachedTranscript } from '../transcript-parser'
 import { mergeSessionTurns } from '../session-history'
 import { flattenTraceItems, previewTraceItems } from '../remote/trace-output'
-import type { RemoteHostRuntime } from './remote-host'
+import type { RemoteHostRuntime } from '../../host-runtime/host-runtime-types'
 
 type HistoryRequest = Parameters<typeof bindRemoteHistoryContext>[0]
 type HistoryPageRequest = HistoryRequest & { before?: number; limit?: number; snapshot?: string }

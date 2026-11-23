@@ -10,6 +10,7 @@ import { DesktopRemoteClient } from './desktop-client'
 import { connectDesktopLane } from './desktop-lane'
 import { faultyLaneConnector } from './desktop-lane-fixtures'
 import { createHostController } from './host-controller-factory'
+import { createHostProjectionFixture } from './host-controller-fixtures'
 import { InnerMtlsHost } from './inner-mtls-host'
 import type { MacRunView } from './host-controller'
 import { PairingTransport } from './pairing-transport'
@@ -21,6 +22,7 @@ import type { ActiveRun } from '../../shared/trace'
 import { prepareRunAttachments, storeAttachmentReference } from '../attachment-store'
 import { upsertTraceArchiveTurn } from '../transcript-archive'
 import { decrypt, encrypt, ssh } from './desktop-client-fixtures'
+import { fixtureSubscription } from './desktop-client-real-host.fixtures'
 
 describe('DesktopRemoteClient over real host TLS', () => {
   it.each([false, true])('completes production wire lifecycle independently of output capture failure (%s)', async (captureFailure) => {
@@ -34,6 +36,8 @@ describe('DesktopRemoteClient over real host TLS', () => {
     let hostUiRuns: MacRunView[] = []
     let outputReads: MockInstance | undefined
     let providerStarts = 0
+    const projection = fixtureSubscription(identity.hostId, () => binding.controller, () => hostUiRuns)
+    const persisted = createHostProjectionFixture()
     const binding = await createHostController({
       stateDirectory: directory,
       attachmentDirectory: join(directory, 'upload-staging'),
@@ -57,6 +61,10 @@ describe('DesktopRemoteClient over real host TLS', () => {
         }
       },
       gate: new ProviderOperationGate(),
+      onLedgerEvent: (event, meta) => {
+        projection.onLedgerEvent(event)
+        persisted.onLedgerEvent(event, meta)
+      },
       createOutputStore: (path) => {
         const store = new RunOutputFileStore(path)
         outputReads = vi.spyOn(store, 'since')
@@ -77,12 +85,12 @@ describe('DesktopRemoteClient over real host TLS', () => {
             || context.cwd === directory && context.providerId === 'pi' && context.externalSessionId === 'large-session'
           if (!known) throw new Error('history_session_not_found')
         },
-        getRun: () => liveRun
+        getRun: () => liveRun, subscribe: 1
       })
     })
     const server = await identity.issueHostServer()
     const pairingTransport = new PairingTransport({ authority: binding.controller.authority, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM })
-    const innerHost = new InnerMtlsHost({ controller: binding.controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM })
+    const innerHost = new InnerMtlsHost({ controller: binding.controller, serverCertPEM: server.certificatePEM, serverKeyPEM: server.privateKeyPEM, caPEM: identity.caCertificatePEM, networkSubscribe: projection.read })
     const pairAddress = await pairingTransport.listen()
     const runAddress = await innerHost.listen()
     const wire: unknown[] = []
@@ -133,14 +141,16 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(wire.filter((request) => (request as { operation?: string }).operation?.startsWith('pair.'))).toHaveLength(pairingRequests)
       await expect(client.history(pending.connection.id, { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' })).resolves.toMatchObject({ turns: [] })
       const sessionContext = { cwd: '/workspace', providerId: 'claude', externalSessionId: 'session-real' }
-      await expect(client.liveRun(pending.connection.id, sessionContext, { waitMs: 0 })).resolves.toBeNull()
+      await expect(client.liveRun(pending.connection.id, sessionContext)).resolves.toBeNull()
       hostUiRuns = [
         { runId: 'run-other-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-other', prompt: 'other', questions: [], stopping: false },
         { runId: 'run-hostui-1', providerId: 'claude', cwd: '/workspace', externalSessionId: 'session-real', prompt: '继续', questions: [], stopping: false }
       ]
-      await expect(client.liveRun(pending.connection.id, sessionContext, { waitMs: 0 })).resolves.toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
-      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' }, { waitMs: 0 })).resolves.toBeNull()
+      projection.wake()
+      await expect.poll(() => client.liveRun(pending.connection.id, sessionContext)).toEqual({ runId: 'run-hostui-1', origin: 'mac', state: 'running', scryRunId: 'run-hostui-1' })
+      await expect(client.liveRun(pending.connection.id, { ...sessionContext, agentProfileId: 'other-profile' })).resolves.toBeNull()
       hostUiRuns = []
+      projection.wake()
       if (!captureFailure) {
         const context = { cwd: directory, providerId: 'pi' as const, externalSessionId: 'large-session' }
         const text = '中文🙂\"\n'.repeat(400_000)
@@ -195,20 +205,14 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const imageHistory = await client.history(pending.connection.id, imageContext)
       expect(Buffer.from(imageHistory.turns[0].attachments![0].dataBase64, 'base64').equals(imageBytes)).toBe(true)
       const expectedState = captureFailure ? 'failed' : 'settled'
-      await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
+      await expect.poll(() => client.runStatus(pending.connection.id, intent.runId!)).toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
       await expect(client.runStatus(pending.connection.id, intent.runId!)).resolves.toMatchObject({ state: expectedState, scryRunId: 'run-real-1', externalSessionId: 'session-real' })
       await expect(client.intents(pending.connection.id)).resolves.toEqual([])
       expect(outputReads).not.toHaveBeenCalled()
-      // The lifecycle long poll never reads the shadow output spool: that is what
-      // `output: false` buys, and the only watch shape this client may send.
-      const watches = wire.filter((request) => (request as { op?: string }).op === 'watch')
-      expect(watches.length).toBeGreaterThan(0)
-      expect(watches.every((request) => (request as { output?: unknown }).output === false)).toBe(true)
-      // The ledger cursor advances across the long polls: the device never re-reads
-      // events it already applied.
-      const cursors = watches.map((request) => (request as { cursor: number }).cursor)
-      expect(cursors[0]).toBe(0)
-      expect(cursors.at(-1)).toBeGreaterThan(0)
+      const subscriptions = wire.filter((request) => (request as { op?: string }).op === 'subscribe')
+      expect(subscriptions[0]).not.toHaveProperty('known')
+      expect(subscriptions.at(-1)).toHaveProperty('known.seq', expect.any(Number))
+      expect(wire.some((request) => ['watch', 'liveRuns', 'output'].includes((request as { op: string }).op))).toBe(false)
       const grant = binding.controller.authority.inspectLocal().grants[0]
       expect(providerStarts).toBe(1)
       dropBeforeDelivery = true
@@ -222,9 +226,9 @@ describe('DesktopRemoteClient over real host TLS', () => {
       expect(providerStarts).toBe(1)
       expect(wire.some(request => (request as { op?: string }).op === 'stop')).toBe(false)
       if (captureFailure) {
-        const events = binding.controller.poll(grant.certificateSHA256, { cursor: 0 }).events
-        expect(events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)
-        expect(events.find((event) => event.kind === 'run_failed')?.detail).toBe('403 model access restricted')
+        expect(persisted.events.filter((event) => event.detail === 'output_capture_failed')).toHaveLength(1)
+        expect(persisted.projection.listEvents().find((event) => event.type === 'run.failed')?.payload.reason)
+          .toBe('403 model access restricted')
       }
       expect(wire.some((request) => (request as { op?: string }).op === 'desktop')).toBe(true)
       const wrongIdentity = await ensureHostIdentity(join(directory, 'wrong-anchor'))
@@ -234,7 +238,10 @@ describe('DesktopRemoteClient over real host TLS', () => {
       const wrongCaInvitation = `scry-desktop1:${Buffer.from(JSON.stringify({ version: 1, hostId: wrongPairing.hostId, anchorPEM: wrongPairing.caCertificatePEM, pairPort: pairAddress.port, runPort: runAddress.port, pairingId: randomUUID(), secret: Buffer.from('wrong-secret').toString('base64url'), expiresAt: Date.now() + 60_000 })).toString('base64url')}`
       await expect(client.pair({ label: 'wrong CA', ssh, invitation: wrongCaInvitation })).rejects.toThrow()
       await binding.controller.authority.revoke(grant.deviceId)
-      await expect(client.runStatus(pending.connection.id, intent.runId!)).rejects.toThrow('desktop_remote_device_not_authorized')
+      projection.wake()
+      await expect.poll(() => client.runStatus(pending.connection.id, intent.runId!).then(
+        () => undefined, (error: Error) => error.message
+      )).toBe('desktop_remote_device_not_authorized')
       await expect(client.directories(pending.connection.id, directory)).rejects.toThrow()
       await expect(client.selectDirectory(pending.connection.id, directory)).rejects.toThrow()
       expect(rememberDirectory).toHaveBeenCalledTimes(1)

@@ -21,7 +21,7 @@ export interface SubscribePumpDeps {
   retry: { initialMs: number; maxMs: number }
   sleep: (ms: number) => Promise<void>
   signal: AbortSignal
-  setLive: (live: boolean) => void
+  detailFocus?: () => { sessionKey: string | null; signal: AbortSignal }
   onWarn?: (message: string, detail?: unknown) => void
   onSnapshot?: (snapshot: SubscribeSnapshot, meta: { isReset: boolean; logIdChanged: boolean }) => Promise<void> | void
   onSubscribeEvent?: (event: SubscribeEventItem) => Promise<void> | void
@@ -37,49 +37,50 @@ export interface SubscribePumpDeps {
 
 /**
  * P4-3 local `subscribe` loop for `DaemonEventPump` (active ONLY when daemon reports `subscribe: 1`).
- * Maintains `(hostId, logId, seq)` across reconnects, falls back to snapshot on unknown event types
- * or `logId` changes, and delivers volatile hints (`run`, `terminal`, `oauth`, W11 `hostNotice`, etc.).
+ * Maintains the cursor while connected. A reconnect or changed event set opens a new snapshot.
  */
 export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
   let known: SubscribeKnownCursor | undefined
   let lastLogId: string | undefined
   let pause = deps.retry.initialMs
   let missed = false
+  let subscribedFocus: AbortSignal | undefined
 
   while (!deps.signal.aborted) {
+    const focus = deps.detailFocus?.()
+    const session = focus?.sessionKey ? { sessionKey: focus.sessionKey } : undefined
     let reply: SubscribeReply
     try {
       reply = await deps.subscribe(
         {
-          // The App reads only activeRuns until the P4-4 renderer projection; asking
-          // for sessions would make every snapshot scan the whole session table.
-          views: ['activeRuns'],
+          views: session ? ['activeRuns', 'sessions', 'detail'] : ['activeRuns', 'sessions'],
+          ...(session ? { session, detailWatch: focus?.signal === subscribedFocus && known ? 'continue' : 'open' } : {}),
           ...(known ? { known } : {}),
           waitMs: deps.waitMs,
           eventSet: 1
         },
-        deps.signal
+        focus ? AbortSignal.any([deps.signal, focus.signal]) : deps.signal
       )
     } catch (error) {
       if (deps.signal.aborted) return
+      if (focus?.signal.aborted) continue
       if (error instanceof DaemonRunError && error.reason === 'daemon_run_control_unavailable') {
-        // The daemon restarted without SCRY_ORCHESTRATION=on. The App chose its run
-        // mode at connect, so it must be restarted to return to the watch path.
-        deps.onWarn?.('daemon subscribe unavailable (orchestration mode changed; restart Scry)', error)
-        deps.setLive(false)
+        deps.onWarn?.('daemon subscribe unavailable', error)
         return
       }
-      deps.setLive(false)
-      if (known !== undefined) missed = true
+      if (known !== undefined) {
+        missed = true
+        known = undefined
+      }
       await deps.sleep(pause)
       pause = Math.min(pause * 2, deps.retry.maxMs)
       continue
     }
 
     if (deps.signal.aborted) return
+    subscribedFocus = focus?.signal
     let unknownEvents = false
     pause = deps.retry.initialMs
-    deps.setLive(true)
 
     const logIdChanged = lastLogId !== undefined && lastLogId !== reply.logId
     if (logIdChanged) {
@@ -118,6 +119,10 @@ export async function runSubscribeLoop(deps: SubscribePumpDeps): Promise<void> {
         }
         for (const ev of reply.events) {
           await deps.onSubscribeEvent?.(ev)
+        }
+        if (reply.events.some((event) => event.type.startsWith('session.')) &&
+            !reply.hints?.some((hint) => hint.kind === 'data')) {
+          deps.send('agent:dataUpdated', { kind: 'catalog_recovered' })
         }
       }
     } else if (missed) {

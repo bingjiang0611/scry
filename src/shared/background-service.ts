@@ -63,8 +63,6 @@ export type BackgroundServiceDevices =
 export interface BackgroundServiceOrchestrationStatus {
   mode: 'on'
   writeIndeterminate?: boolean
-  h1FallbackUnavailable: boolean
-  h1FallbackReason?: string
 }
 
 export interface BackgroundServiceSelfReport {
@@ -77,11 +75,11 @@ export interface BackgroundServiceSelfReport {
   supervisorPid?: number
   remoteConfig?: BackgroundServiceRemoteConfig
   cliApproval?: HostCliApprovalSelfReport
+  /** Authoritative orchestration status when reported by the running daemon. */
   orchestration?: BackgroundServiceOrchestrationStatus
 }
 
 export type BackgroundServiceStatus =
-  | { mode: 'in-process'; userDataDir: string }
   | {
     mode: 'daemon'
     userDataDir: string
@@ -96,6 +94,7 @@ export type BackgroundServiceStatus =
     remoteConfig?: BackgroundServiceRemoteConfig | null
     loginStart?: LoginStartStatus
     cliApproval?: CliApprovalStatus
+    /** Authoritative orchestration status when reported by the running daemon. */
     orchestration?: BackgroundServiceOrchestrationStatus
     runtimeNotice?: BackgroundServiceRuntimeNotice
     checkedAt: number

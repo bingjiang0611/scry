@@ -12,7 +12,7 @@ describe('DesktopRemoteClient session write acknowledgements', () => {
       const original = fixture.tlsRequest.getMockImplementation()!
       fixture.tlsRequest.mockImplementation(async (options) => {
         const request = options.request as { op?: string }
-        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', sessionFork: true, sessionDelete: true } }
+        if (request.op === 'desktop') return { desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', subscribe: 1, sessionFork: true, sessionDelete: true } }
         if (request.op === 'sessionFork' || request.op === 'sessionDelete') return {}
         return original(options)
       })
