@@ -54,7 +54,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "analytics.usage-mixed-append/io.read.bytes": {
@@ -68,7 +69,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 0
+        "darwin-arm64": 0,
+        "linux-x64": 0
       }
     },
     "analytics.stats/json.stringify.calls": {
@@ -82,7 +84,8 @@
       "ceiling": null,
       "tolerance": 0,
       "baselines": {
-        "darwin-arm64": 1
+        "darwin-arm64": 1,
+        "linux-x64": 1
       }
     },
     "analytics.sqlite/sqlite.prepare": {
