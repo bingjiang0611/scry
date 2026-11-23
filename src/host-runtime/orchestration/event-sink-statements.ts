@@ -31,8 +31,8 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
     insertOutbox: db.prepare(
       `INSERT INTO orch_outbox (
         effect_id, kind, policy, run_id, causation_seq, payload, state,
-        expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL)`
+        expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error, session_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, ?)`
     ),
     insertCommand: db.prepare(
       `INSERT INTO orch_command (

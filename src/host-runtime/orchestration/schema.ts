@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 8
+export const ORCHESTRATION_SCHEMA_VERSION = 9
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -324,6 +324,17 @@ const ORCH_DDL_V8: readonly string[] = [
   "UPDATE orch_meta SET value = '6' WHERE key = 'projection_schema_version'"
 ]
 
+/** B1: the outbox needs its own session key to enforce per-session FIFO without reading the log. */
+const ORCH_DDL_V9: readonly string[] = [
+  'ALTER TABLE orch_outbox ADD COLUMN session_key TEXT',
+  `UPDATE orch_outbox SET session_key = COALESCE(
+     json_extract(payload, '$.sessionKey'),
+     (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = orch_outbox.run_id)
+   )`,
+  'CREATE INDEX IF NOT EXISTS idx_orch_outbox_fifo ON orch_outbox(session_key, state, causation_seq, effect_id)'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
-  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
+  ORCH_DDL_V9
 ]

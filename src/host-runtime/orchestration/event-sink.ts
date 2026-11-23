@@ -418,7 +418,10 @@ export class EventSink {
             effect.expiresAt,
             effect.leaseOwner,
             effect.claimedAt,
-            effect.state === 'done' ? decision.receipt.acceptedAt : null
+            effect.state === 'done' ? decision.receipt.acceptedAt : null,
+            typeof (effect.payload as { sessionKey?: unknown }).sessionKey === 'string'
+              ? (effect.payload as { sessionKey: string }).sessionKey
+              : null
           )
         }
       }
