@@ -1,9 +1,5 @@
 import type { ChannelHandlers } from './startup-channels'
 
-// The three billing channels as main has always answered them, shared with the daemon,
-// which owns scry.db (B4-L4). The shell environment is warmed first because the admin
-// keys a sync uses come from it. The functions are injected so a test never reaches a
-// real billing API: a sync with real keys costs money and needs explicit authorization.
 
 export interface BillingChannelDependencies<State, Sync, Fixture> {
   warmShellEnv: () => Promise<unknown>

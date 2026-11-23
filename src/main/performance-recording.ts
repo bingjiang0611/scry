@@ -7,7 +7,6 @@ import { setPerformanceRecordingSink, type PerformanceSample } from './performan
 declare const __SCRY_BUILD_ID__: string
 let journal: PerformanceJournal | null = null
 
-/** Default-on, local-only. SCRY_PERF_RECORD=0 disables disk recording; PERF_LOG remains opt-in. */
 export async function startPerformanceRecording(userData: string, version: string, packaged: boolean, liveRenderer: boolean): Promise<void> {
   if (process.env.SCRY_PERF_RECORD === '0') return
   const onError = (): void => { console.warn('[scry:performance] local recording unavailable; application continues') }

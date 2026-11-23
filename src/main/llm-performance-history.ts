@@ -26,7 +26,6 @@ async function withAntigravityModel(userDataDir: string, entry: HistoryEntry): P
     const model = await observeAntigravityTranscriptModel({ sessionId, startedAt: turn.startedAt, result, outputTokens })
     return model ? { ...sample, model, modelSource: 'antigravity_transcript' } : sample
   } catch {
-    // An absent, oversized or unreadable sidecar cannot change the recorded performance sample.
     return sample
   }
 }
@@ -63,7 +62,6 @@ function isSample(value: unknown): value is LlmPerformanceHistoryRow {
       .every(key => sample[key] === undefined || number(key))
 }
 
-/** Bounded IPC payload and streaming scan; no new store or deletion ownership model. */
 async function scanLlmPerformanceHistory(userDataDir: string, file: string, now: number): Promise<LlmPerformanceHistory> {
   const history: LlmPerformanceHistory = { rows: [], invalidLines: 0, truncated: false }
   const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity })
@@ -74,7 +72,6 @@ async function scanLlmPerformanceHistory(userDataDir: string, file: string, now:
     try { parsed = JSON.parse(line) } catch { history.invalidLines++; continue }
     if (!parsed || typeof parsed !== 'object') { history.invalidLines++; continue }
     const { performanceSample: value, cwd, externalSessionId } = parsed as Record<string, unknown>
-    // Old usage rows have no measurement; never invent zero speed for them.
     if (value === undefined) continue
     if (!isSample(value)) { history.invalidLines++; continue }
     if (Date.parse(value.ts) < now - 30 * 86400_000) continue
@@ -103,7 +100,6 @@ async function scanLlmPerformanceHistory(userDataDir: string, file: string, now:
 
 let historyCache: { file: string; signature: string; expiresAt: number; value: Promise<LlmPerformanceHistory> } | undefined
 
-/** File identity invalidates both appends and atomic session deletions; concurrent readers share scans. */
 export async function readLlmPerformanceHistory(userDataDir: string, now = Date.now()): Promise<LlmPerformanceHistory> {
   const file = usageJsonlPath(userDataDir)
   let info: Awaited<ReturnType<typeof stat>>
@@ -120,7 +116,6 @@ export async function readLlmPerformanceHistory(userDataDir: string, now = Date.
   try {
     const history = await entry.value
     entry.expiresAt = Math.min(...history.rows.map(row => Date.parse(row.ts) + 30 * 86400_000 + 1))
-    // The usage row can become visible before the terminal archive. Retry recent unresolved turns on the next cache window.
     if (history.rows.some(row => row.providerId === 'antigravity' && !row.failed && !row.modelSource &&
       (row.model === '未知模型' || row.model.startsWith('所选：')) && Date.parse(row.ts) > now - RECENT_ARCHIVE_WINDOW_MS)) {
       entry.expiresAt = Math.min(entry.expiresAt, now + 1_000)

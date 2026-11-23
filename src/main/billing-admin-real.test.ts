@@ -1,9 +1,3 @@
-// P1 真实 Admin 对账验证。默认跳过，只有显式打开时才会调用官方 Admin API。
-// 运行示例：
-//   BILLING_ADMIN_REAL=1 OPENAI_ADMIN_API_KEY=... npm test -- src/main/billing-admin-real.test.ts
-//   BILLING_ADMIN_REAL=1 ANTHROPIC_ADMIN_API_KEY=... npm test -- src/main/billing-admin-real.test.ts
-// 本测试不打印、不落盘、不快照 key；只把官方响应写入临时内存 SQLite，验证 raw usage、usage_ledger、
-// SDK estimate 与官方来源 reconciliation 路径都能跑通。
 import { describe, expect, it } from 'vitest'
 import { fetchAnthropicAdminUsageAndCosts, fetchOpenAiAdminUsageAndCosts } from './billing-admin'
 import { billingRowsFromItems, reconcileUsageLedger } from './billing-ledger'

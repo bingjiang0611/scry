@@ -36,7 +36,6 @@ export interface PerformanceRecord extends PerformanceEnvironment {
 export function performanceEnvironment(version: string, build: string, packaged: boolean): PerformanceEnvironment {
   return {
     version,
-    // Embedded at build time from all source surfaces + lockfile/config. No startup hashing.
     build,
     mode: packaged ? 'packaged' : 'development',
     platform: process.platform,
@@ -47,15 +46,10 @@ export function performanceEnvironment(version: string, build: string, packaged:
   }
 }
 
-// Active records append to performance-0.jsonl. A full (or crash-truncated) active file is
-// renamed to a timestamped archive and gzip-compressed off the write path; JSONL journals
-// compress ~20x, so a small byte cap keeps weeks of daily use instead of a few hours.
-// performance-[1-3].jsonl are the pre-archive layout and are compressed on the next open.
 const ACTIVE_FILE = 'performance-0.jsonl'
 const ARCHIVE_RE = /^performance-(?:[1-3]|\d{8}T\d{9}Z-[0-9a-f]{8})\.jsonl(?:\.gz)?$/
 const archiveStamp = (date: Date): string => `${date.toISOString().replace(/[-:.]/g, '')}-${randomUUID().slice(0, 8)}`
 
-/** Local diagnostics only: bounded queue + one active file + byte-capped compressed archives; no DB, content or network. */
 export class PerformanceJournal {
   private readonly session = randomUUID()
   private readonly pending: string[] = []
@@ -67,7 +61,6 @@ export class PerformanceJournal {
   private closed = false
   private failed = false
   private dropped = 0
-  // Archive compression/pruning runs serially and never blocks appends to the active file.
   private archiving: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: {
@@ -89,13 +82,11 @@ export class PerformanceJournal {
         const file = await open(this.activeFile, 'r')
         const last = Buffer.alloc(1)
         try { await file.read(last, 0, 1, this.size - 1) } finally { await file.close() }
-        // Preserve a crash-truncated tail for reporting, but never concatenate a new record to it.
         if (last[0] !== 10 || this.size > this.maxFileBytes) await this.rotate()
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
-    // Finishes archives left by a crash mid-compression, including renamed legacy files.
     this.scheduleArchiving()
     this.timer = setInterval(() => { void this.flush() }, this.options.intervalMs ?? 5_000)
     this.timer.unref()
@@ -135,9 +126,6 @@ export class PerformanceJournal {
       .map(async name => ({ name, time: Math.floor((await stat(join(directory, name))).mtimeMs) })))
     const legacyBase = Math.min(...legacy.map(file => file.time))
     for (const { name } of legacy) {
-      // The old layout's index, not tied/rewound mtimes, proves 3 → 2 → 1.
-      // Fixed slots also preserve order after a crash between these renames:
-      // the minimum remaining mtime can only move forward on the next open.
       const time = legacyBase + 3 - Number(name.slice('performance-'.length, -'.jsonl'.length))
       const target = `performance-${archiveStamp(new Date(time))}.jsonl`
       await rename(join(directory, name), join(directory, target))
@@ -152,8 +140,6 @@ export class PerformanceJournal {
   }
 
   private async rotate(): Promise<void> {
-    // Filenames are ordering watermarks. recordedAt remains the real wall clock.
-    // UUIDs avoid name collisions; they must never determine append order.
     this.lastArchiveTime = Math.max(Date.now(), this.lastArchiveTime + 1)
     try {
       await rename(this.activeFile, join(this.options.directory, `performance-${archiveStamp(new Date(this.lastArchiveTime))}.jsonl`))
@@ -180,7 +166,6 @@ export class PerformanceJournal {
       await rename(partial, target)
       await rm(source, { force: true })
     }
-    // Oldest archives go first; the ordering watermark is monotonic across restarts.
     const archives = (await readdir(directory)).filter(name => ARCHIVE_RE.test(name)).sort()
     const sizes = await Promise.all(archives.map(async name => (await stat(join(directory, name))).size))
     let total = sizes.reduce((sum, size) => sum + size, 0)
@@ -203,7 +188,6 @@ export class PerformanceJournal {
     if (this.failed || this.pending.length === 0) return Promise.resolve()
     const lines = this.pending.splice(0)
     this.pendingBytes = 0
-    // Observation must fail open. Report a fixed message once, never filesystem error contents.
     this.writing = (async () => {
       for (const line of lines) {
         const bytes = Buffer.byteLength(line)
@@ -222,7 +206,6 @@ export class PerformanceJournal {
     this.timer = null
     await this.writing
     await this.flush()
-    // Preserve loss evidence even when shutdown occurs before the next resource sample.
     this.closed = false
     this.record({ kind: 'health', sample: { droppedRecords: this.dropped, closed: true } })
     this.closed = true

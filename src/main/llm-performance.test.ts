@@ -88,7 +88,6 @@ describe('local LLM performance observation', () => {
     expect(first).toMatchObject({ outputTokens: 100, apiDurationMs: 4000, apiTokensPerSecond: 25, tokenTimingSource: 'observed_calls', llmCalls: 1, model: 'ultimate' })
     emit(1500, { kind: 'harness', stage: 'runtime:llm_call', parentToolUseId: 'agent', llmCall: { outputTokens: 900, durationMs: 1000 } })
     emit(2000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 1000 } })
-    // Turn usage also counts retried/failed calls; it must not replace the per-call numerator.
     const end = emit(9000, { kind: 'harness', stage: 'result', tokensOut: 400, durationMs: 9000 })
     expect(end).toMatchObject({ state: 'complete', outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, llmCalls: 2, model: 'ultimate' })
     expect(end).not.toHaveProperty('firstTokenMs')

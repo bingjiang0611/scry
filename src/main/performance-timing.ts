@@ -42,16 +42,9 @@ type PerformanceDimensions = Readonly<Partial<Record<'provider' | 'platform', st
 const providerDimensions: Record<SessionProviderId, true> = {
   claude: true, codex: true, qoder: true, opencode: true, pi: true, antigravity: true, legacy_unknown: true
 }
-// The trusted-IPC browser fixture imports this module without Node globals. The Performance
-// API itself is native in both Node and Chromium; only main can enable environment diagnostics.
 const enabledByEnvironment = (): boolean => typeof process !== 'undefined' && process.env.SCRY_PERF_LOG === '1'
 const round = (value: number): number => Math.round(value * 10) / 10
 
-/**
- * Local, content-free timing trace for expensive application paths. It intentionally accepts only
- * explicit dimensions and numeric counters so prompts, paths, tool output and credentials cannot
- * accidentally enter performance logs.
- */
 export class PerformanceTrace {
   private readonly started = performance.now()
   private readonly startedAt = new Date().toISOString()
@@ -64,8 +57,6 @@ export class PerformanceTrace {
     private readonly dimensions: PerformanceDimensions = {},
     private readonly sink: PerformanceSink | null = defaultSink()
   ) {
-    // Provider IDs can originate in untrusted IPC before the domain handler validates them.
-    // Do not turn a malformed provider field into a persistent free-text telemetry channel.
     this.dimensions = {
       ...(dimensions.provider !== undefined ? {
         provider: Object.hasOwn(providerDimensions, dimensions.provider) ? dimensions.provider : 'unknown'
