@@ -1,27 +1,42 @@
 export async function runSettings({ driver, options }) {
   const { read, wait, check, click, key, insert, capture, fixture, composerValue } = driver
   await click('textarea[aria-label="描述任务"]'); await insert('settings keeps this draft')
+  check(await read(`${composerValue} === 'settings keeps this draft'`), 'Typed draft did not reach the composer')
+  // P8 §2：连接与设备在侧栏「机器」页；位置菜单的「管理远程访问」直接跳到那里。
   await click('.location-button'); await click('.location-menu .mitem', '管理远程访问')
-  const selectedSettingsTab = '.settings-rail [role="tab"][aria-selected="true"]'
-  await wait(`document.querySelector(${JSON.stringify(selectedSettingsTab)})?.textContent.includes("远程访问") && document.querySelector(".remote-connections-settings") != null`, 'manage hosts opens remote settings directly')
-  check(await read(`${composerValue} === 'settings keeps this draft'`), 'Opening settings replaced the current draft')
-  check(await read(`document.activeElement === document.querySelector(${JSON.stringify(selectedSettingsTab)})`), 'Direct settings entry did not focus the remote tab')
+  await wait('document.querySelector(".machines-page") != null && document.querySelector(".remote-connections-settings") != null', 'manage hosts opens the machines page')
+  check(!(await read('document.querySelector(".execution-location")')), 'Machines page kept the remote composer on screen')
+  check(await read('document.querySelector(".sb-navitem.active")?.textContent.includes("机器")'), 'Machines page is not marked as the active sidebar entry')
+  check(await read('[...document.querySelectorAll(".machines-section")].length === 3 && document.querySelector(".machines-section .machine-card") != null'), 'Machines page does not lead with this machine, targets and devices')
+  check(await read(`(() => {
+    const heads = [...document.querySelectorAll(".machines-page h2")].map(node => node.textContent)
+    return JSON.stringify(heads) === JSON.stringify(['本机', '执行目标', '已配对的设备'])
+  })()`), 'Machines page sections are not 本机 / 执行目标 / 已配对的设备')
+  // 设置里只剩一行指引，按钮跳回机器页。
+  await click('.sb-settings')
+  await click('.settings-rail [role="tab"]', '远程访问')
+  await wait('document.querySelector(".settings-migrated") != null', 'settings keeps a one-line pointer to the machines page')
+  check(await read('document.querySelector(".settings-pane").textContent.includes("连接与设备已移到侧栏「机器」")'), 'Settings lost the pointer copy')
+  check(!(await read('document.querySelector(".settings-pane .remote-connections-settings") || document.querySelector(".settings-pane .remote-pairing")')), 'Settings still mounts the moved connection surfaces')
+  await click('.settings-migrated button')
+  await wait('document.querySelector(".machines-page") != null && !document.querySelector(".settings-modal")', 'settings pointer opens the machines page and closes the dialog')
   if (options.settingsOnly) {
-    await wait('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")', 'phone grant in focused settings')
-    await capture('remote-settings-focused')
+    await capture('machines-page')
+    await wait('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")', 'phone grant on the machines page')
+    await capture('machines-devices')
     await click('.remote-access-header button')
     await wait('document.querySelector(".hosts-add-modal") != null', 'nested add-host dialog')
     await key('Tab')
     check(await read('document.querySelector(".hosts-add-modal").contains(document.activeElement)'), 'Nested dialog lost keyboard focus')
     await key('Escape')
-    await wait('!document.querySelector(".hosts-add-modal") && document.querySelector(".settings-modal") != null', 'Escape closes only the nested dialog')
+    await wait('!document.querySelector(".hosts-add-modal") && document.querySelector(".machines-page") != null', 'Escape closes only the nested dialog')
     check(await read('document.activeElement === document.querySelector(".remote-access-header button")'), 'Nested dialog did not restore action focus')
     await click('.remote-access-card:not(.desktop-remote__host) button')
     await wait('document.querySelector(".remote-pairing__qr canvas") != null', 'phone code opens a nested dialog')
     check(await read('document.querySelector(".hosts-add-modal").textContent.includes("2 分钟内有效") && document.querySelector(".hosts-add-modal").textContent.includes("核对连接设备上的公钥指纹")'), 'Phone pairing lost expiry or fingerprint guidance')
     await key('Escape')
-    check(await read('document.querySelector(".settings-modal") != null && document.querySelector(".hosts-add-modal")?.closest(".modal-overlay").dataset.state === "exit"'), 'Closing phone code retired the parent or skipped its exit')
-    await wait('document.querySelector(".settings-modal") != null && !document.querySelector(".hosts-add-modal")', 'Closing phone code removes only the nested dialog after exit')
+    check(await read('document.querySelector(".machines-page") != null && document.querySelector(".hosts-add-modal")?.closest(".modal-overlay").dataset.state === "exit"'), 'Closing phone code retired the page or skipped its exit')
+    await wait('document.querySelector(".machines-page") != null && !document.querySelector(".hosts-add-modal")', 'Closing phone code removes only the nested dialog after exit')
     await read('window.desktopRemoteFixture.phoneStatusFailure = true')
     await wait('document.querySelector(".remote-access-inbound").textContent.includes("状态未知") && document.querySelector(".remote-access-inbound [role=alert]")?.textContent.includes("没能读取远程访问状态")', 'unread phone status stays unknown')
     check(!(await read('document.querySelector(".remote-access-inbound").textContent.includes("fixture phone status unavailable")')), 'Failed phone read exposed raw diagnostics')
@@ -34,4 +49,18 @@ export async function runSettings({ driver, options }) {
     await wait('document.querySelector(".remote-access-card:not(.desktop-remote__host)").textContent.includes("中继已配置")', 'phone status recovers')
     return { remoteSettingsInteractions: { directEntryKeepsDraft: true, nestedDialogKeyboard: true, phoneExpiryAndFingerprint: true, phoneUnknownDormantDisabled: true }, nativeCoordinateInput: true }
   }
+  // 后面的步骤继续在本地输入框上操作：整页视图要把草稿留在草稿库里。
+  await click('.sb-new')
+  await wait('document.querySelector(".location-button") != null', 'local draft reopened from the sidebar')
+  check(await read(`${composerValue} === 'settings keeps this draft'`), 'Returning to the local draft lost the typed text')
+  // 侧栏入口是键盘可达的顶层导航。
+  await click('.sb-navitem', '机器')
+  await wait('document.querySelector(".machines-page") != null', 'sidebar 机器 entry reopens the page')
+  await click('.sb-settings')
+  await wait('document.querySelector(".settings-modal") != null', 'settings dialog opens from the sidebar')
+  await key('Escape')
+  await wait('!document.querySelector(".settings-modal")', 'Escape closes settings')
+  check(await read('document.activeElement === document.querySelector(".sb-settings")'), 'Closing settings did not return focus to its opener')
+  await click('.sb-new')
+  await wait('document.querySelector(".location-button") != null', 'local chat after the machines page round trip')
 }

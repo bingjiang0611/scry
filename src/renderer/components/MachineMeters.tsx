@@ -3,7 +3,7 @@ import type { HostMetricsSnapshot } from '@shared/host-metrics'
 import { MACHINES_COPY as copy } from '../constants/machines-copy'
 import {
   formatBytes, formatPercent, formatSampleAge, formatSampleTime, memoryPressureText,
-  dispatchDiskRole, meterViews, providerName, providerUsageRows, runsText, scryUsageTotals,
+  dispatchDiskRole, meterViews, providerName, providerUsageRows, providerUsageTotals, runsText, scryUsageTotals,
   type MeterView
 } from '../machines-view-model'
 import { Icon } from './primitives/Icon'
@@ -40,7 +40,7 @@ function Meter({ meter }: { meter: MeterView }): JSX.Element {
 /** 一行「Scry 占用」：后台服务 + Provider 进程的合计。读不到就说读不到。 */
 export function ScryUsageLine({ snapshot }: { snapshot: HostMetricsSnapshot }): JSX.Element {
   const providers = providerUsageRows(snapshot)
-  const totals = scryUsageTotals(snapshot)
+  const totals = providerUsageTotals(snapshot)
   const daemonCpu = formatPercent(snapshot.scry.daemon.cpuPercent)
   return (
     <dl className="machine-usage">
@@ -49,7 +49,7 @@ export function ScryUsageLine({ snapshot }: { snapshot: HostMetricsSnapshot }): 
         <span>{copy.daemon} <b>{daemonCpu}</b> · {formatBytes(snapshot.scry.daemon.rssBytes)}</span>
         <span>
           {providers === null ? copy.providerUnreadable
-            : `Provider ${totals.processes} 个进程 ${totals.cpuPercent === null ? '' : `· ${formatPercent(totals.cpuPercent)} `}· ${totals.rssBytes === null ? copy.unavailable : formatBytes(totals.rssBytes)}`}
+            : `${copy.providerProcesses(totals.processes ?? 0)}${totals.cpuPercent === null ? '' : ` · ${formatPercent(totals.cpuPercent)}`} · ${totals.rssBytes === null ? copy.unavailable : formatBytes(totals.rssBytes)}`}
         </span>
       </dd>
     </dl>

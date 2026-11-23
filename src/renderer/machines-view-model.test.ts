@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { HostMetricsSnapshot } from '@shared/host-metrics'
 import {
   dispatchDiskRole, formatBytes, formatSampleAge, formatUptime, memoryPressureText,
-  meterViews, providerUsageRows, runsText, scryUsageTotals, hostSummary, targetNotice
+  meterViews, providerUsageRows, providerUsageTotals, runsText, scryUsageTotals, hostSummary, targetNotice
 } from './machines-view-model'
 
 const GB = 1024 ** 3
@@ -109,6 +109,8 @@ describe('Scry usage', () => {
     expect(rows![0]).toMatchObject({ providerId: 'pi', processes: 2 })
     // 合计含后台服务自己：Provider 1.5 GB + daemon 210 MB。
     expect(scryUsageTotals(snapshot)).toEqual({ processes: 3, cpuPercent: 14.8, rssBytes: 1.5 * GB + 210 * 1024 ** 2 })
+    // 卡片上 Provider 与后台服务分两行写，Provider 行不能把 daemon 算进去。
+    expect(providerUsageTotals(snapshot)).toEqual({ processes: 3, cpuPercent: 14, rssBytes: 1.5 * GB })
   })
 
   it('distinguishes "no provider processes" from "the process table was unreadable"', () => {

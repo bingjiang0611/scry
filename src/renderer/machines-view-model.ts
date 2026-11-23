@@ -136,6 +136,25 @@ export function providerName(providerId: string): string {
   return PROVIDER_NAME[providerId] ?? providerId
 }
 
+/** 只算 Provider 子进程树：卡片上它们和后台服务分两行写，不能混成一个数。 */
+export function providerUsageTotals(snapshot: HostMetricsSnapshot): {
+  processes: number | null
+  cpuPercent: number | null
+  rssBytes: number | null
+} {
+  const providers = snapshot.scry.providers
+  if (providers === null) return { processes: null, cpuPercent: null, rssBytes: null }
+  let cpuPercent: number | null = null
+  let rssBytes = 0
+  let processes = 0
+  for (const row of providers) {
+    processes += row.processes
+    rssBytes += row.rssBytes
+    if (row.cpuPercent !== null) cpuPercent = (cpuPercent ?? 0) + row.cpuPercent
+  }
+  return { processes, cpuPercent: cpuPercent === null ? null : Math.round(cpuPercent * 10) / 10, rssBytes }
+}
+
 export function scryUsageTotals(snapshot: HostMetricsSnapshot): {
   processes: number | null
   cpuPercent: number | null
