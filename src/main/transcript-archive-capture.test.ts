@@ -34,7 +34,6 @@ function body(runId: string, ts: number, items: TraceEvent[], extra: Record<stri
 
 interface SeedOptions { sidecars?: boolean }
 
-/** Writes canonical turn files (and optional metadata sidecars) without the writer API. */
 async function seed(dir: string, turns: Array<{ runId: string; body: string }>, options: SeedOptions = {}): Promise<void> {
   const turnDir = dirname(traceArchiveTurnPath(dir, cwd, sessionId, 'claude', { runId: 'probe' }))
   const metadataDir = turnDir.replace('/trace-archive-turns-v1/', '/trace-archive-metadata-v1/')
@@ -72,7 +71,6 @@ async function rewriteBody(dir: string, runId: string, content: string): Promise
 
 const args = (dir: string) => ({ userDataDir: dir, cwd, sessionId, providerId: 'claude' as const })
 
-/** Assembles the streamed entries into whole turns for assertions about one turn's text. */
 async function collect(dir: string) {
   const info = await traceArchiveCaptureInfo(args(dir))
   const turns: Array<{ runId: string; userText: string; events: Array<{ text: string }> }> = []
@@ -110,13 +108,11 @@ describe('trace archive capture', () => {
       { runId: 'run-2', body: body('run-2', 2, [event('run-2', 'text', { text: 'second' }),
         event('run-2', 'tool:Bash', { kind: 'tool', outputContent: { storage: 'inline', content: huge } } as never)]) }
     ], { sidecars: true })
-    // Replace the newest body with a truncated one and keep its sidecar stamps consistent:
-    // metadata stays valid, so only a body parse can fail.
     await rewriteBody(dir, 'run-2', '{')
     const info = await traceArchiveCaptureInfo(args(dir))
     expect(info).toEqual({ readMode: 'indexed', totalTurns: 2 })
     await expect(async () => {
-      for await (const _turn of iterateTraceArchiveCapture(args(dir), info)) { /* consume */ }
+      for await (const _turn of iterateTraceArchiveCapture(args(dir), info)) {}
     }).rejects.toThrow(/corrupt or truncated/)
   })
 
@@ -184,7 +180,5 @@ describe('trace archive capture', () => {
     }
     expect(count).toBe(2100)
     expect(last).toBe('run-2099')
-    // One durable read per real turn is the floor for this proof: 1.9-3.0 s alone,
-    // more when the whole suite competes for the same disk. Assertions are unchanged.
   }, 20_000)
 })

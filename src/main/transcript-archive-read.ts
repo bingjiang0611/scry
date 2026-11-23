@@ -51,8 +51,6 @@ export async function readTraceArchiveMetadataAsync(args: {
     args.providerId,
     signal
   )
-  // A segmented index cannot describe monolithic coverage. Force the caller's
-  // complete-reader fallback instead of exposing synthetic metadata markers.
   if (monolith.status === 'valid') return null
   const validIndex = await readValidTraceArchiveIndex(args, signal)
   const storedVersion = validIndex?.version ?? await traceArchiveIndexVersionAsync(args)
@@ -133,7 +131,6 @@ export async function readTraceArchiveAsync(args: {
   return mergeArchives((current.status === 'valid' ? [current.archive] : []).concat(segmented.valid))
 }
 
-/** Migration must not silently omit corrupt capture files or read an unbounded session. */
 export async function readTraceArchiveForMigration(args: {
   cwd: string
   sessionId: string
@@ -168,12 +165,6 @@ export async function readTraceArchiveForMigration(args: {
   return archive
 }
 
-/**
- * Return a cheap source stamp for refresh/reconciliation. This intentionally
- * reads metadata only; callers must still use a complete page read when the
- * stamp changes. Legacy monolithic archives are marked honestly because their
- * next page read may materialize the whole file.
- */
 export async function readTraceArchiveVersionAsync(
   args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId; agentProfileId?: string | null }
 ): Promise<TraceArchiveVersion> {
@@ -192,8 +183,6 @@ export async function readTraceArchiveVersionAsync(
   const hasMonolithic = stats[0]?.endsWith(':missing') === false
   const hasIndex = stats[2]?.endsWith(':missing') === false
   return {
-    // The index is a rebuildable cache, not source evidence. Building it during
-    // the first page read must not invalidate the unchanged archive snapshot.
     version: createHash('sha256').update(JSON.stringify([stats.slice(0, 2), Object.hasOwn(args, 'agentProfileId') ? [args.agentProfileId] : []])).digest('hex'),
     readMode: hasMonolithic ? 'monolithic' : hasIndex ? 'indexed' : 'index_rebuild'
   }
@@ -212,7 +201,6 @@ export function traceArchiveRunIds(args: {
   return [...ids]
 }
 
-/** Exact, bounded history read. A corrupt canonical turn never falls back to an older copy. */
 export async function readTraceArchiveTurnForHistory(args: {
   cwd: string
   sessionId: string
@@ -240,7 +228,6 @@ export async function readTraceArchiveTurnForHistory(args: {
     try {
       const info = await handle.stat()
       if (!info.isFile() || info.size > args.maxBytes) throw new Error('交接源归档超出读取预算或不是普通文件')
-      // Published archives are atomically replaced. Bound allocation even if a file is edited in place.
       const buffer = Buffer.alloc(info.size + 1)
       let length = 0
       while (length < buffer.length) {

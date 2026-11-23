@@ -52,7 +52,6 @@ describe('reuse the archive page already parsed for native reconciliation', () =
     const covered = selectArchivePageTurns(archive, ['run-a', 'run-c', 'run-b'])
     expect(covered.turns.map((turn) => turn.runId)).toEqual(['run-a', 'run-b'])
     expect(covered.missingRunIds).toEqual(['run-c'])
-    // 没有可复用页（例如 Profile 限定的页）时必须全部回退读盘，不能静默缺轮。
     expect(selectArchivePageTurns(null, ['run-a'])).toEqual({ turns: [], missingRunIds: ['run-a'] })
     expect(selectArchivePageTurns(archive, []).turns).toEqual([])
   })
@@ -88,15 +87,12 @@ describe('history page keeps cumulative session snapshots only where the rendere
       [diffEvent('run-2', TURN_DIFF_STAGE, 1)]
     ])
     const projected = projectHistoryPageSnapshots(page)
-    // run-2 没有累积快照，run-1 的那条就是页面内最新的一条。
     expect(projected.turns.map((turn) => turn.items.map((event) => event.stage))).toEqual([
       [TURN_DIFF_STAGE],
       [SESSION_DIFF_STAGE, TURN_DIFF_STAGE],
       [TURN_DIFF_STAGE]
     ])
-    // 负对照：未投影的页仍带着每一轮的累积快照，也就是旧行为跨 IPC 传输的体积。
     expect(page.turns.flatMap((turn) => turn.items).filter((event) => event.stage === SESSION_DIFF_STAGE)).toHaveLength(2)
-    // 输入页不被修改：main 侧 sessionHistoryCache 仍保留全部快照。
     expect(page.turns[0].items.map((event) => event.stage)).toEqual([SESSION_DIFF_STAGE, TURN_DIFF_STAGE])
   })
 

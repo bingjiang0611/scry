@@ -41,6 +41,7 @@ Record decisions whose rationale would otherwise be lost. Prefer an existing can
 - [037: Hand off legacy runs without replaying their effects](037-orchestration-legacy-handoff.md)
 - [038: Keep orchestration decisions, recovery and delivery evidence separate](038-orchestration-decisions-and-delivery.md)
 - [039: Keep login-service ownership separate from daemon liveness](039-daemon-service-lifecycle.md)
+- [040: Keep App archive bodies authoritative when indexing or paging history](040-app-transcript-archive-evidence.md)
 
 ## Source comment ratchet
 

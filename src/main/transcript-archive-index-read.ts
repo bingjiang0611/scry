@@ -51,7 +51,6 @@ export async function readSegmentedMetadataIndexAsync(args: {
     const metadataNames = (await readdir(metadataDir)).filter((name) => TRACE_ARCHIVE_METADATA_FILE.test(name)).sort()
     const metadataFiles = new Set(metadataNames)
     const metadataCoverageComplete = metadataFiles.size === names.length && names.every((name) => metadataFiles.has(name.replace(/\.json$/, TRACE_ARCHIVE_METADATA_SUFFIX)))
-    // metadata sidecars are disposable; canonical files remain authoritative
     const entries: TraceArchiveIndexEntry[] = []
     for (const file of names) {
       signal?.throwIfAborted()
@@ -78,8 +77,6 @@ export async function readSegmentedMetadataIndexAsync(args: {
       sourceComplete: metadataCoverageComplete,
       sourceIssue: metadataCoverageComplete ? undefined : 'canonical archive segment coverage changed',
       entries: entries.sort((left, right) => left.ts - right.ts || left.file.localeCompare(right.file)) }
-    // A live session can have only per-turn deltas before its first history read. Publish
-    // the validated base once so later pages do not reopen every metadata sidecar.
     if (metadataCoverageComplete) await writeTraceArchiveIndex(args, index)
     return index
   } catch (error) {
@@ -139,8 +136,6 @@ export async function readValidTraceArchiveIndex(args: {
     if (value.version !== 2) {
       return sameArchiveDirectoryStamp(value.directory, archiveDirectoryStamp(directoryStat)) ? value : null
     }
-    // A degraded base index is not evidence that missing canonical turns are absent. Force the
-    // authoritative rebuild path so repaired source can restore complete coverage.
     if (value.sourceComplete === false) return null
 
     const directory = archiveDirectoryStamp(directoryStat)

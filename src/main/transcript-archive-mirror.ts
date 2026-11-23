@@ -84,7 +84,6 @@ async function copyToOwnedFileAtomically(userDataDir: string, source: string, fi
         }
       }
     } catch {
-      // A failed incremental append falls back to a complete atomic mirror below.
     }
   }
 
@@ -104,7 +103,7 @@ async function copyToOwnedFileAtomically(userDataDir: string, source: string, fi
       sourceMtimeMs: sourceStat.mtimeMs
     })
   } catch (error) {
-    try { await unlink(tmp) } catch { /* ignore */ }
+    try { await unlink(tmp) } catch {}
     throw error
   }
 }
@@ -134,8 +133,6 @@ export function mirrorTranscript(args: {
   const dest = archivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
   const previous = transcriptMirrorTasks.get(dest) ?? Promise.resolve(true)
   const task = previous.then(async () => {
-    // Validate capture configuration without suppressing raw mirrors in full mode.
-    // Historical mirrors and Provider-owned transcripts are not rewritten or deleted here.
     try { workspaceToolContentPolicy(args.cwd) } catch { return false }
     if (inspectTranscriptIdentity(source, args.cwd, args.sessionId).status !== 'match') return false
     try {

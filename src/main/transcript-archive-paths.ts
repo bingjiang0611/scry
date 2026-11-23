@@ -22,7 +22,6 @@ import type { ProviderId } from '../shared/provider'
 import type { AgentTurnRecord, TurnEvidence } from '../shared/turn-record'
 import type { StoredAttachment } from './attachment-store'
 
-// Claude Code transcript 目录编码：路径里的 / . _ 都换成 -
 export function encodeCwd(cwd: string): string {
   return cwd.replace(/[/._]/g, '-')
 }
@@ -61,7 +60,6 @@ export function archivedTranscriptPath(userDataDir: string, cwd: string, session
 }
 
 export interface TraceArchiveTurn {
-  /** null = proven default runtime; absent = legacy/unknown Profile provenance. */
   agentProfileId?: string | null
   toolContentPolicy?: ToolContentPolicy
   runId: string
@@ -104,11 +102,6 @@ export interface TraceArchiveSessionSummary {
 export const DISCOVERABLE_PROVIDER_IDS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
 export const TRACE_DISCOVERY_MAX_FILES = 10_000
 export const TRACE_DISCOVERY_MAX_FILE_BYTES = 32 * 1024 * 1024
-/**
- * 文件数与单文件大小各自有上限，但两者相乘仍是无界的读取量。聚合预算让一次发现扫描
- * 的读取总量有硬上限：超出就带着 `complete: false` 停下，于是结果不会被当成完整索引
- * 写回缓存，也不会在启动时无限期占用磁盘 IO。
- */
 export const TRACE_DISCOVERY_MAX_TOTAL_BYTES = 256 * 1024 * 1024
 
 export interface TraceDiscoveryBudget {
@@ -137,7 +130,6 @@ export const TRACE_ARCHIVE_METADATA_TEMP_FILE = /^turn-[a-f0-9]{64}\.meta-v1\.js
 export const TRACE_ARCHIVE_PROFILE_METADATA_VERSION = 1 as const
 
 export interface TraceArchiveIndexEntry {
-  /** Distinguishes profile-aware metadata from pre-profile v2 sidecars. */
   profileMetadataVersion?: 1
   agentProfileId?: string | null
   file: string
@@ -169,7 +161,6 @@ export interface TraceArchiveDirectoryStamp {
 
 export interface TraceArchiveIndex {
   version: 1 | 2
-  /** Present on every new v2 base/delta index; absent means legacy profile provenance. */
   profileMetadataVersion?: 1
   sourceComplete?: boolean
   sourceIssue?: string
@@ -187,26 +178,20 @@ export interface TraceArchiveVersion {
 
 export interface TraceArchivePage {
   archive: TraceArchive | null
-  /** False means the page is a degraded projection of surviving canonical segments. */
   sourceComplete: boolean
   sourceIssue?: string
   offset: number
   totalTurns: number
   hasOlder: boolean
-  /** Canonical turn bodies parsed for this request; excludes the tiny index file. */
   turnFilesRead: number
-  /** Honest source cost: legacy monolithic archives are not constant-time. */
   readMode: 'monolithic' | 'indexed' | 'index_rebuild'
 }
 
 export interface TraceArchivePageRequest {
-  /** Presence selects strict Profile evidence; null selects the default runtime. */
   agentProfileId?: string | null
-  /** Session display permits unknown Profiles, never unreadable canonical turns. */
   requireComplete?: boolean
   before?: number
   limit?: number
-  /** Freeze ordinal paging to the total observed by the initial page while later turns append. */
   snapshotTotalTurns?: number
 }
 
@@ -219,7 +204,6 @@ export function traceArchiveTurnDir(userDataDir: string, cwd: string, sessionId:
 }
 
 export function traceArchiveMetadataDir(userDataDir: string, cwd: string, sessionId: string, providerId: ProviderId): string {
-  // Rebuildable metadata must not mutate canonical-directory stamps used by remote cursors.
   return join(userDataDir, 'trace-archive-metadata-v1', providerId, ownedCwdKey(cwd), ownedSessionFileStem(sessionId))
 }
 
@@ -269,11 +253,10 @@ export async function cleanupTraceArchiveTemps(userDataDir: string): Promise<voi
           (depth === 3 && (TRACE_ARCHIVE_TEMP_FILE.test(entry.name) || TRACE_ARCHIVE_METADATA_TEMP_FILE.test(entry.name))) ||
           (depth === 2 && entry.name.endsWith(`${TRACE_ARCHIVE_INDEX_SUFFIX}.tmp`))
         )) {
-          try { await unlink(path) } catch { /* startup cleanup is best-effort */ }
+          try { await unlink(path) } catch {}
         }
       }
     } catch {
-      // Startup cleanup is best-effort and only touches strict Scry temp names.
     }
   }
   await walk(root, 0)
@@ -345,7 +328,7 @@ export async function writeOwnedFileAtomicallyAsync(userDataDir: string, filePat
     await rename(tmp, filePath)
   } catch (error) {
     if (fd) await fd.close()
-    try { await unlink(tmp) } catch { /* ignore */ }
+    try { await unlink(tmp) } catch {}
     throw error
   }
 }
@@ -370,7 +353,6 @@ export function writeOwnedFileAtomically(userDataDir: string, filePath: string, 
     try {
       unlinkSync(tmp)
     } catch {
-      /* ignore */
     }
     throw error
   }

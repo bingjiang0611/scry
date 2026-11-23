@@ -125,7 +125,6 @@ describe('transcript archive mirror', () => {
     expect(full.complete).toBe(true)
     expect(full.entries).toHaveLength(3)
 
-    // 预算只够读第一个文件：剩下的不得被当成「不存在」。
     const budgeted = await scanTraceArchiveCatalogIndexAsync(userDataDir, {
       ...DEFAULT_TRACE_DISCOVERY_BUDGET,
       maxTotalBytes: full.entries[0].size
@@ -151,7 +150,6 @@ describe('transcript archive mirror', () => {
     let inserted = false
     const spy = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
       const value = parse(text, reviver)
-      // The scanner has enumerated this provider's sessions before parsing the first turn.
       if (!inserted && value?.sessionId === 'first-session') {
         inserted = true
         expect(upsertTraceArchiveTurn({ ...args, sessionId: 'second-session',
@@ -184,7 +182,6 @@ describe('transcript archive mirror', () => {
     expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
     expect(JSON.parse(readFileSync(indexPath, 'utf8'))).toMatchObject({ providers: ['qoder'], entries: [expect.objectContaining({ providerId: 'qoder' })] })
     expect(existsSync(dirtyPath)).toBe(false)
-    // The scoped index answers the same scope from the index, but never a wider request.
     expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['qoder-session'])
     expect((await discoverTraceArchiveSessionsAsync(userDataDir)).map((entry) => entry.sessionId).sort()).toEqual(['codex-session', 'qoder-session'])
     expect(JSON.parse(readFileSync(indexPath, 'utf8')).providers).toBeUndefined()
@@ -202,7 +199,6 @@ describe('transcript archive mirror', () => {
     let inserted = false
     const spy = vi.spyOn(JSON, 'stringify').mockImplementation(function (this: unknown, ...values: Parameters<typeof JSON.stringify>) {
       const [value] = values
-      // The scan finished unchanged; this write lands after that check and before the index is renamed.
       if (!inserted && value && typeof value === 'object' && 'entries' in value && 'version' in value) {
         inserted = true
         expect(upsertTraceArchiveTurn({ ...args, sessionId: 'second-session',
@@ -268,7 +264,6 @@ describe('transcript archive mirror', () => {
     expect(existsSync(dirtyPath)).toBe(false)
 
     expect(deleteTranscriptCopies({ cwd: '/repo', sessionId: 'deleted-session', userDataDir, providerId: 'qoder' }).failed).toEqual([])
-    // Deletion does not rescan or rewrite the catalog; the marker makes the old index untrusted.
     expect(readFileSync(indexPath, 'utf8')).toBe(indexBefore)
     expect(existsSync(dirtyPath)).toBe(true)
     expect((await discoverTraceArchiveSessionsAsync(userDataDir, ['qoder'])).map((entry) => entry.sessionId)).toEqual(['kept-session'])
@@ -721,7 +716,6 @@ describe('transcript archive mirror', () => {
     const updatedPath = traceArchiveTurnPath(userDataDir, cwd, sessionId, 'codex', { runId: 'run-0' })
     const indexPath = `${dirname(updatedPath)}.index-v1.json`
     expect(existsSync(indexPath)).toBe(false)
-    // Exercise canonical cold rebuilding, not the separately tested sidecar-only checkpoint.
     rmSync(join(userDataDir, 'trace-archive-metadata-v1'), { recursive: true, force: true })
 
     await expect(readTraceArchivePageAsync(
@@ -779,8 +773,6 @@ describe('transcript archive mirror', () => {
       archive: { turns: [{ runId: 'run-1' }, { runId: 'run-2' }] }
     })
 
-    // Simulate a crash after the canonical segment rename but before its index update. The filename
-    // is unchanged, so freshness must use file metadata rather than directory membership alone.
     const updatedTemp = `${updatedPath}.replacement`
     writeFileSync(updatedTemp, JSON.stringify({
       version: 3,

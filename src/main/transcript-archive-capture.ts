@@ -16,18 +16,11 @@ export interface TraceArchiveCaptureArgs {
   cwd: string
   sessionId: string
   providerId: ProviderId
-  /** Proven source profile; when the archive carries profile provenance it must match. */
   agentProfileId?: string
 }
 
 export interface TraceArchiveCaptureInfo {
-  /**
-   * `indexed`: the persisted per-turn index supplied the order.
-   * `stream_rebuild`: no usable index; turn metadata is recovered by a projected read.
-   * `monolithic`: legacy single-file archive, streamed turn by turn.
-   */
   readMode: 'indexed' | 'stream_rebuild' | 'monolithic'
-  /** Null for a legacy monolithic file, whose turn count is only known after streaming. */
   totalTurns: number | null
 }
 
@@ -39,7 +32,6 @@ export class TraceArchiveCaptureError extends Error {
 }
 
 const TURN_FILE = /^turn-[a-f0-9]{64}\.json$/
-/** Turn bodies per re-read batch; bounds one batch's live handles, not the history. */
 const BATCH_TURNS = 20
 
 interface SegmentMeta {
@@ -54,13 +46,6 @@ async function canonicalRoot(userDataDir: string): Promise<string> {
   return realpath(resolve(userDataDir))
 }
 
-/**
- * Open one archive file after proving it lives inside the controlled userData tree.
- *
- * This mirrors `trustedOwnedParent` in transcript-archive.ts, which is private and
- * lives in a file too large to extend safely: canonical-directory containment plus
- * O_NOFOLLOW, never a path assembled from renderer input.
- */
 async function openOwnedFile(root: string, path: string): Promise<{ handle: FileHandle; size: number; identity: string }> {
   const directory = await realpath(dirname(path))
   if (directory !== root && !directory.startsWith(`${root}${sep}`)) {
@@ -79,7 +64,6 @@ async function openOwnedFile(root: string, path: string): Promise<{ handle: File
   return { handle, size: opened.size, identity: stamp(opened) }
 }
 
-/** Stamps include mtime/ctime so a same-size rewrite during the read is visible. */
 function stamp(info: { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number }): string {
   return `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`
 }
@@ -95,10 +79,6 @@ function indexFilePath(args: TraceArchiveCaptureArgs): string {
   return `${dirname(traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, args.providerId, { runId: 'probe' }))}.index-v1.json`
 }
 
-/**
- * Persisted index version only. A v1 index can only be upgraded by parsing every
- * turn body, so a v1 archive takes the projected rebuild path instead.
- */
 async function storedIndexVersion(args: TraceArchiveCaptureArgs): Promise<1 | 2 | null> {
   try {
     const info = await lstat(indexFilePath(args))
@@ -118,13 +98,6 @@ async function segmentNames(args: TraceArchiveCaptureArgs): Promise<string[]> {
   }
 }
 
-/**
- * Inventory the source archive without parsing a single turn body.
- *
- * A live session may have a valid persisted index, only per-turn metadata sidecars,
- * or neither. This reports which of those is true; it never falls back to reading a
- * body just to answer "how many turns are there".
- */
 export async function traceArchiveCaptureInfo(args: TraceArchiveCaptureArgs): Promise<TraceArchiveCaptureInfo> {
   const mono = traceArchivePath(args.userDataDir, args.cwd, args.sessionId, args.providerId)
   const monoExists = await lstat(mono).then(info => info.isFile() && !info.isSymbolicLink(), () => false)
@@ -138,7 +111,6 @@ export async function traceArchiveCaptureInfo(args: TraceArchiveCaptureArgs): Pr
 }
 
 function assertProfile(expected: string | undefined, actual: string | null | undefined): void {
-  // A pre-profile archive carries no provenance; the catalog identity check still applies.
   if (actual === undefined) return
   if ((actual ?? undefined) !== expected) {
     throw new TraceArchiveCaptureError('来源归档属于其它 Agent Profile，不能作为侧聊来源')
@@ -154,13 +126,6 @@ function expectationFor(args: TraceArchiveCaptureArgs, meta: SegmentMeta | undef
   }
 }
 
-/**
- * Every source turn in canonical order, with bounded memory.
- *
- * Turn bodies are read by a structural projection: a 195 MiB tool payload is never
- * materialized and never becomes a string. Only the visible text and steer evidence
- * of each turn are kept, one turn at a time.
- */
 export async function* iterateTraceArchiveCapture(
   args: TraceArchiveCaptureArgs,
   info: TraceArchiveCaptureInfo
@@ -208,13 +173,6 @@ export async function* iterateTraceArchiveCapture(
   }
 }
 
-/**
- * One turn of a split archive, read as a projected stream.
- *
- * The conversation-capture path needs a single turn's visible text; reading its file as a
- * stream means a large turn costs one bounded projection pass instead of a whole-file
- * buffer and a fixed byte ceiling. Identity is re-asserted after the pass.
- */
 export async function* streamTraceArchiveTurn(
   args: TraceArchiveCaptureArgs,
   turn: { runId: string; providerTurnId?: string }
@@ -224,9 +182,6 @@ export async function* streamTraceArchiveTurn(
   const opened = await openOwnedFile(root, path)
   try {
     const evidence: ArchiveReadEvidence = { bytesRead: 0, digest: '' }
-    // The caller on this path (a recorded conversation turn) already holds the binding
-    // profile and the turn's item hashes, so the body is proven against those instead of
-    // against a session-level sidecar this single-file read never opens.
     for await (const entry of iterateArchiveEntries(opened.handle, opened.size, expectationFor(args, {
       file: '', runId: turn.runId, ts: 0,
       ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
@@ -245,14 +200,6 @@ function segmentOf(turn: TraceArchiveTurn): SegmentMeta {
   }
 }
 
-/**
- * Recover turn order when the index/sidecars are missing or stale.
- *
- * Passing over the bodies is unavoidable here, but each pass is a projected stream:
- * memory stays bounded by one turn's visible text, and a legacy 195 MiB payload is
- * skipped by structure. The second pass must see the same digest, so a rewrite
- * between passes is refused rather than frozen into a snapshot.
- */
 async function rebuildIndex(root: string, args: TraceArchiveCaptureArgs): Promise<SegmentMeta[]> {
   const names = await segmentNames(args)
   const found: Array<SegmentMeta & { digest: string }> = []

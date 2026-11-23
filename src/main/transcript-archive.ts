@@ -93,8 +93,6 @@ function prepareArchiveUpdate(
     const policy = existing.status === 'valid' ? existing.archive.turns[0]?.toolContentPolicy : undefined
     turn = protectToolContent({ ...turn, ...(policy ? { toolContentPolicy: policy } : {}) }, args.cwd)
   } catch { return false }
-  // Managed commit retries can present the same immutable turn more than once. Avoid touching
-  // the canonical segment and its growing page index when the durable body is unchanged.
   if (existing.status === 'valid' && existing.archive.turns.length === 1 &&
       JSON.stringify(existing.archive.turns[0]) === JSON.stringify(turn)) return true
   return {
@@ -125,8 +123,6 @@ export function upsertTraceArchiveTurn(args: {
         ? attachment
         : storeAttachmentReference(args.userDataDir, args.turn.runId, attachment as AgentInputAttachment)
     ),
-    // capture 层已经按总字节数截断 patch；保留它才能让重启/切换后的 Review
-    // 与实时会话一致，避免“有 +/- 统计但历史无 diff”的假降级。
     items: args.turn.items,
     ts: args.turn.ts ?? Date.now()
   }
@@ -183,8 +179,6 @@ export async function upsertTraceArchiveTurnAsync(args: {
     items: args.turn.items,
     ts: args.turn.ts ?? Date.now()
   }
-  // 累积会话快照与 canonical evidence 的 patch 正文写入内容库，turn 文件只留引用；
-  // 页面读取时把最新一条 session 快照取回，渲染层看到的仍是 inline patch。
   turn = (await externalizeTraceDiffPatches(args.userDataDir, args.cwd, turn)).turn
   const fp = traceArchiveTurnPath(args.userDataDir, args.cwd, args.sessionId, providerId, turn)
   const existing = await inspectArchiveFileAsync(args.userDataDir, fp, args.cwd, args.sessionId, providerId)
@@ -224,8 +218,6 @@ export function deleteTranscriptCopies(args: {
     `${indexPath}.tmp`
   ]
   if (providerId === 'claude') {
-    // The Provider-native ~/.claude transcript is not owned by Scry. Keeping it
-    // preserves Claude Code history/resume; this operation removes only Scry copies.
     const archived = archivedTranscriptPath(args.userDataDir, args.cwd, args.sessionId)
     exactTargets.push(archived, `${archived}.tmp`)
   }
@@ -280,7 +272,5 @@ export function deleteTranscriptCopies(args: {
       }
     }
   }
-  // The dirty marker above keeps the catalog untrusted; the next background discovery rescans
-  // instead of this deletion synchronously rescanning and rewriting the whole catalog.
   return { deleted, failed }
 }
