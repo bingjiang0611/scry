@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 6
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 4
+export const ORCHESTRATION_SCHEMA_VERSION = 7
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 5
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -267,6 +267,53 @@ const ORCH_DDL_V6: readonly string[] = [
   "UPDATE orch_meta SET value = '4' WHERE key = 'projection_schema_version'"
 ]
 
+const ORCH_DDL_V7: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_p_task (
+    task_id TEXT PRIMARY KEY,
+    parent_session_key TEXT NOT NULL,
+    parent_run_id TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    principal TEXT NOT NULL,
+    via TEXT,
+    command_id TEXT NOT NULL,
+    child_session_key TEXT,
+    child_run_id TEXT,
+    provider TEXT NOT NULL,
+    profile TEXT,
+    cwd TEXT NOT NULL,
+    status TEXT NOT NULL,
+    state_version INTEGER NOT NULL DEFAULT 1,
+    permission_mode TEXT NOT NULL,
+    permission_mode_source TEXT NOT NULL,
+    title TEXT,
+    role TEXT,
+    target_model TEXT,
+    target_effort TEXT,
+    isolation TEXT NOT NULL DEFAULT 'shared',
+    confirmation_question_id TEXT,
+    cancel_confirmation_question_id TEXT,
+    body TEXT,
+    summary TEXT,
+    reason TEXT,
+    created_at INTEGER NOT NULL,
+    settled_at INTEGER,
+    rev_seq INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_p_task_parent_session ON orch_p_task(parent_session_key)`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_p_task_parent_run ON orch_p_task(parent_run_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_p_task_child_run ON orch_p_task(child_run_id)`,
+  `CREATE TABLE IF NOT EXISTS orch_p_delegation_policy (
+    scope_kind TEXT NOT NULL,
+    scope_key TEXT NOT NULL,
+    enabled INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    updated_by TEXT NOT NULL,
+    rev_seq INTEGER NOT NULL,
+    PRIMARY KEY (scope_kind, scope_key)
+  )`,
+  "UPDATE orch_meta SET value = '5' WHERE key = 'projection_schema_version'"
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
-  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7
 ]

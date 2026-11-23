@@ -20,6 +20,12 @@ export interface BaseCommand {
   payloadSha256: string
   /** Optional deterministic id generator for tests/replays. */
   idPrefix?: string
+  /** R2: user grant principal (defaults to actor for peer/system/effect commands). */
+  principal?: string
+  /** R2: random credential id for agent commands (never the token itself). */
+  via?: string | null
+  /** R2: calling parent run id for agent commands. */
+  actorRunId?: string | null
 }
 
 export interface RunSubmitPayload {
@@ -220,6 +226,73 @@ export interface TurnRecordDeliveryPayload {
   settledAt?: number | null
 }
 
+export interface DelegationSetProjectPolicyPayload {
+  cwd: string
+  enabled: boolean
+}
+
+export interface DelegationSetSessionFullAccessPayload {
+  sessionKey: string
+  enabled: boolean
+}
+
+export interface TaskRequestPayload {
+  taskId: string
+  parentSessionKey: string
+  parentRunId: string
+  provider: string
+  profile: string | null
+  cwd: string
+  title?: string | null
+  role?: string | null
+  targetModel?: string | null
+  targetEffort?: string | null
+  permissionMode: 'default' | 'auto_accept_edits' | 'auto_review' | 'full_access'
+  permissionModeSource: 'inherited' | 'requested'
+  isolation?: 'shared' | 'worktree'
+  body?: PreparedBody
+  promptPreview?: string
+  confirmationQuestionId: string
+}
+
+export interface TaskCancelRequestPayload {
+  taskId: string
+  parentSessionKey: string
+  reason?: string
+  confirmationQuestionId: string
+}
+
+export interface TaskConfirmPayload {
+  taskId: string
+  questionId: string
+  answerId: string
+  answerSha256: string
+  approved: boolean
+  childSessionKey?: string
+  childRunId?: string
+  leaseOwner?: string
+  pendingTtlMs?: number
+  reason?: string
+}
+
+export interface TaskConfirmCancelPayload {
+  taskId: string
+  questionId: string
+  answerId: string
+  answerSha256: string
+  approved: boolean
+  reason?: string
+}
+
+export interface TaskSettlePayload {
+  taskId: string
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'unavailable'
+  summary?: Evidence<string> | null
+  reason?: string
+  settledAt?: number
+  evidence?: string[]
+}
+
 export type OrchestrationCommand =
   | (BaseCommand & { type: 'run.submit'; payload: RunSubmitPayload })
   | (BaseCommand & { type: 'run.resolve_intent'; payload: RunResolveIntentPayload })
@@ -239,6 +312,13 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'session.withdraw'; payload: { sessionKey: string } })
   | (BaseCommand & { type: 'session.import'; payload: SessionImportPayload })
   | (BaseCommand & { type: 'host.start'; payload: HostStartPayload })
+  | (BaseCommand & { type: 'delegation.set_project_policy'; payload: DelegationSetProjectPolicyPayload })
+  | (BaseCommand & { type: 'delegation.set_session_full_access'; payload: DelegationSetSessionFullAccessPayload })
+  | (BaseCommand & { type: 'task.request'; payload: TaskRequestPayload })
+  | (BaseCommand & { type: 'task.cancel_request'; payload: TaskCancelRequestPayload })
+  | (BaseCommand & { type: 'task.confirm'; payload: TaskConfirmPayload })
+  | (BaseCommand & { type: 'task.confirm_cancel'; payload: TaskConfirmCancelPayload })
+  | (BaseCommand & { type: 'task.settle'; payload: TaskSettlePayload })
 
 /** Pre-dispatch recheck input (core §2.3 + §2.10 R4). */
 export interface PreDispatchRecheckInput {

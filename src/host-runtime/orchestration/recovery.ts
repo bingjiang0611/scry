@@ -133,6 +133,10 @@ export function recoverOrchestrationOnStartup(
       }
 
       if (row.state === 'pending') {
+        if (run.lifecycle !== 'recorded') {
+          updateOutbox.run('done', row.leaseOwner, row.claimedAt, now, row.effectId)
+          continue
+        }
         const intentRow = readIntentEvent.get(run.intentSeq) as
           | { at: number; actor: string; payload: string }
           | undefined
@@ -294,6 +298,53 @@ export function recoverOrchestrationOnStartup(
         payloadSha256: sha256Hex(canonicalJson(qPayload))
       })
       summary.closedOpenQuestions += 1
+    }
+
+    // R8: reconcile every non-terminal delegated task across daemon restart (tools §6.4)
+    const openTasks = db
+      .prepare(
+        `SELECT task_id, status, child_run_id FROM orch_p_task
+         WHERE status NOT IN ('declined', 'completed', 'failed', 'cancelled', 'interrupted', 'unavailable')`
+      )
+      .all() as Array<{ task_id: string; status: string; child_run_id: string | null }>
+    for (const row of openTasks) {
+      let targetStatus: 'cancelled' | 'unavailable' | 'completed' | 'failed' = 'cancelled'
+      let targetReason = 'caller_run_gone'
+      if (row.status === 'awaiting_confirmation') {
+        targetStatus = 'cancelled'
+        targetReason = 'caller_run_gone'
+      } else if (row.child_run_id) {
+        const child = sink.getRun(row.child_run_id)
+        if (child?.lifecycle === 'settled') {
+          targetStatus = 'completed'
+          targetReason = 'recovered_from_evidence'
+        } else if (child?.lifecycle === 'failed') {
+          targetStatus = 'failed'
+          targetReason = 'recovered_from_evidence'
+        } else if (child?.lifecycle === 'interrupted') {
+          targetStatus = 'unavailable'
+          targetReason = 'host_restarted'
+        } else {
+          targetStatus = 'cancelled'
+          targetReason = 'caller_run_gone'
+        }
+      }
+      const settlePayload = {
+        taskId: row.task_id,
+        status: targetStatus,
+        reason: targetReason,
+        settledAt: now,
+        evidence: ['host.recovery']
+      }
+      sink.execute({
+        type: 'task.settle',
+        commandId: `effect:recovery-task-${row.task_id}:${targetStatus}`,
+        actor: `effect:recovery-task-${row.task_id}`,
+        scope: 'system',
+        at: now,
+        payload: settlePayload,
+        payloadSha256: sha256Hex(canonicalJson(settlePayload))
+      })
     }
   })
 

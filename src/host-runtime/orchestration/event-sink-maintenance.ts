@@ -204,7 +204,7 @@ export function verifyReplayConsistencyInDb(
     for (const evt of events) {
       applyEventToProjection(mem, evt)
     }
-    const tables = ['orch_p_session', 'orch_p_turn', 'orch_p_run', 'orch_p_interaction'] as const
+    const tables = ['orch_p_session', 'orch_p_turn', 'orch_p_run', 'orch_p_interaction', 'orch_p_task', 'orch_p_delegation_policy'] as const
     for (const table of tables) {
       const actual = canonicalJson(db.prepare(`SELECT * FROM ${table}`).all())
       const replayed = canonicalJson(mem.prepare(`SELECT * FROM ${table}`).all())

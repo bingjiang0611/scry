@@ -1,6 +1,11 @@
 import type Database from 'better-sqlite3'
 import type { Evidence } from '../../shared/turn-record'
 import { canonicalJson } from './canonical-json'
+import {
+  applyTaskEventToProjection,
+  deleteSessionTasksAndPolicy,
+  syncTaskProjectionOnChildRunEvent
+} from './projection-task'
 import type { OrchestrationEventRow } from './types'
 
 export {
@@ -8,6 +13,7 @@ export {
   mapReceiptRow,
   mapRunRow,
   mapSessionRow,
+  mapTaskRow,
   mapTurnRow
 } from './projection-mappers'
 
@@ -53,6 +59,7 @@ function ensureSessionForRun(db: Database.Database, event: OrchestrationEventRow
 export function applyEventToProjection(db: Database.Database, event: OrchestrationEventRow): void {
   const p = event.payload
   if (p.redacted === true) return
+  if (applyTaskEventToProjection(db, event)) return
   switch (event.type) {
     case 'run.intent_recorded': {
       db.prepare(
@@ -88,6 +95,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.seq,
         event.runId
       )
+      syncTaskProjectionOnChildRunEvent(db, event)
       return
     }
 
@@ -117,6 +125,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           'UPDATE orch_p_session SET pending_questions = pending_questions + 1, rev_seq = ? WHERE session_key = ?'
         ).run(event.seq, event.sessionKey)
       }
+      syncTaskProjectionOnChildRunEvent(db, event)
       return
     }
 
@@ -147,6 +156,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
           'UPDATE orch_p_session SET pending_questions = MAX(0, pending_questions - 1), rev_seq = ? WHERE session_key = ?'
         ).run(event.seq, event.sessionKey)
       }
+      syncTaskProjectionOnChildRunEvent(db, event)
       return
     }
 
@@ -439,6 +449,7 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       return
     case 'session.deleted':
       if (event.sessionKey) {
+        deleteSessionTasksAndPolicy(db, event.sessionKey)
         db.prepare('DELETE FROM orch_p_interaction WHERE run_id IN (SELECT run_id FROM orch_p_run WHERE session_key = ?)').run(event.sessionKey)
         db.prepare('DELETE FROM orch_p_turn WHERE session_key = ?').run(event.sessionKey)
         db.prepare('DELETE FROM orch_p_run WHERE session_key = ?').run(event.sessionKey)

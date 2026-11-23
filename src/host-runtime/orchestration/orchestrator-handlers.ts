@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { assertBoundedPayload, assertNoUsageNumbersInEvent } from './canonical-json'
 import { getEffectPolicy, type EffectKind } from './effect-policy'
 import { scopedNativeSessionKey, type NativeSessionIdentity } from './native-session-lookup'
+import type { DelegationLimits } from './delegation-limits'
 import type { OrchestrationCommand, RunEffectResultPayload } from './orchestrator-commands'
 import { canTransitionRun } from './run-transitions'
 import {
@@ -18,6 +19,7 @@ import {
   type RunProjectionRow,
   type SessionProjectionRow,
   type StickyRejectionReason,
+  type TaskProjectionRow,
   type TurnProjectionRow
 } from './types'
 
@@ -36,6 +38,17 @@ export interface OrchestratorReadView {
   activeRunCount(): number
   maxActiveRuns(): number
   isProviderAuthenticating(provider: string, profile: string | null): boolean
+  // P6 task & delegation policy read surface
+  getTask?(taskId: string): TaskProjectionRow | undefined
+  listTasksByParentRun?(parentRunId: string): TaskProjectionRow[]
+  listTasksByParentSession?(sessionKey: string): TaskProjectionRow[]
+  countNonTerminalTasksByParentRun?(parentRunId: string): number
+  countTotalTasksByParentRun?(parentRunId: string): number
+  countNonTerminalTasksBySession?(sessionKey: string): number
+  countNonTerminalAgentRuns?(): number
+  isProjectDelegationEnabled?(cwd: string): boolean
+  isSessionFullAccessEnabled?(sessionKey: string): boolean
+  delegationLimits?(): DelegationLimits
 }
 
 export type DecisionResult =
@@ -77,10 +90,10 @@ export function makeEvent(
 ): PendingOrchestrationEvent {
   assertNoUsageNumbersInEvent(fields.type, fields.payload)
   assertBoundedPayload(fields.payload)
-  if (fields.evidence?.some(isReservedEvidenceRef)) {
+  if (fields.type !== 'task.settled' && fields.evidence?.some(isReservedEvidenceRef)) {
     throw new OrchestrationStoreError(
       'orchestration_invalid_event',
-      'Reserved R10 evidence reference prefix is not allowed in P4'
+      'Reserved R10 evidence reference prefix is only allowed on task.settled'
     )
   }
   return {
@@ -96,9 +109,9 @@ export function makeEvent(
     scope: cmd.scope,
     payload: fields.payload,
     evidence: fields.evidence ?? null,
-    principal: cmd.actor,
-    via: null,
-    actorRunId: null
+    principal: cmd.principal ?? cmd.actor,
+    via: cmd.via ?? null,
+    actorRunId: cmd.actorRunId ?? null
   }
 }
 
@@ -150,9 +163,9 @@ export function acceptDecision(
       reason: null,
       result,
       resultSeq: null,
-      principal: cmd.actor,
-      via: null,
-      actorRunId: null
+      principal: cmd.principal ?? cmd.actor,
+      via: cmd.via ?? null,
+      actorRunId: cmd.actorRunId ?? null
     }
   }
 }
@@ -173,9 +186,9 @@ export function stickyReject(
         reason,
         result: options.overrideReceipt?.result ?? options.result ?? null,
         resultSeq: null,
-        principal: cmd.actor,
-        via: null,
-        actorRunId: null
+        principal: cmd.principal ?? cmd.actor,
+        via: cmd.via ?? null,
+        actorRunId: cmd.actorRunId ?? null
       }
     : undefined
   return {
