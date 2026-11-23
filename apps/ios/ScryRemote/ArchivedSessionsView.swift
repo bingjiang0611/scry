@@ -1,8 +1,6 @@
 import SwiftUI
 import RemoteTransport
 
-// Archived sessions are read from the host on demand. Restore is reversible;
-// permanent delete asks first and reports what the Mac actually removed.
 struct ArchivedSessionsView: View {
   @Environment(RemoteRunStore.self) var run
   @StateObject private var actions = SessionActionCenter()

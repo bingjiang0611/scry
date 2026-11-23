@@ -24,8 +24,6 @@ enum HostLink: Equatable {
   var isConnected: Bool { if case .connected = self { return true }; return false }
 }
 
-// Which read-only host panel a route shows. Kept with the route so the model
-// layer does not depend on a view file.
 enum ToolKind: String, CaseIterable, Identifiable {
   case analytics, llmPerformance, mcpTrust
   var id: String { rawValue }
@@ -101,7 +99,6 @@ final class AppModel: ObservableObject {
   @Published var route: Route = .home
   @Published var query: String = ""
   @Published var pairing: PairingUIState = .idle
-  // The session currently opened for read-only transcript replay (nil = none).
   @Published var openedSession: OpenedSession?
   @Published var readOnlyTranscript = false
   // The focused run's question sheet. App-level because questions belong to the
@@ -170,8 +167,6 @@ final class AppModel: ObservableObject {
   private let connections: RemoteConnectionStore
   let targetCoordinator: ExecutionTargetCoordinator
 
-  // No fabricated sessions. Until a real host feed exists this stays empty and
-  // the UI shows a truthful empty state rather than mock rows.
   @Published private(set) var sessions: [Session] = []
 
   var canShowWorkspace: Bool {
@@ -190,9 +185,6 @@ final class AppModel: ObservableObject {
        stateDirectory: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("ScryRemote", isDirectory: true)) {
     self.connections = connections
     self.targetCoordinator = ExecutionTargetCoordinator(connections: connections, historyDisk: historyDisk, stateDirectory: stateDirectory)
-    // Restore the paired state on launch so an already-paired device is never
-    // forced to re-scan. Paired != reachable: we show .offline(host) until a real
-    // exchange proves the host is reachable (markReachable), never a fake dot.
     if let host = connections.load()?.relayHost { link = .offline(host: host) }
   }
 
@@ -283,10 +275,6 @@ final class AppModel: ObservableObject {
   }
   #endif
 
-  // Drive the real device-side pairing: parse the scanned scry1: code, prove key
-  // possession over the relay (inner TLS 1.3 mTLS to the host), then poll until
-  // the Mac operator confirms and a grant is issued. Runs the PROVEN
-  // RemotePairingClient; no state is faked.
   func beginPair(scanned: String, runStore: RemoteRunStore) {
     guard !targetCoordinator.recoveryUnavailable else {
       pairing = .failed(.init(message: ConnectionCopy.targetRecoveryUnavailable)); return

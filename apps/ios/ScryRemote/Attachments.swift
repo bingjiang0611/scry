@@ -4,7 +4,6 @@ import RemoteTransport
 import UIKit
 #endif
 
-// MARK: - Attachments and composer
 
 struct DraftAttachment: Identifiable, Equatable {
   enum Kind { case image, text }
@@ -90,7 +89,6 @@ struct AttachmentThumbnail: View {
   }
 }
 
-// Full-screen view of the exact bytes staged or sent; pinch to zoom, double-tap to reset.
 struct AttachmentImagePreview: View {
   let item: AttachmentPreviewItem
   // Decoded once; the body re-evaluates on every pinch frame.
