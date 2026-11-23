@@ -21,10 +21,6 @@ import { workspaceCopy } from '../constants/workspace-copy'
 import { consumeWorkspaceDraft, type WorkspaceDraftSelection } from '../workspace-drafts'
 import { useRemoteWorktreeSetup } from './RemoteChatWorktreeSetup'
 
-// A conversation that executes on a saved remote Scry desktop. It renders the same
-// ChatView as local sessions; only the controller differs. The host owns Provider
-// install, credentials, files and archive, so this view never falls back to local
-// runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
 
@@ -63,7 +59,6 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
       const intent = await api.submit(connectionId, request)
       acknowledged = true
       if (queued) queueStore.submitted(queueKey, intent)
-      // Preserve edits made while the network write was pending.
       else {
         if (request.workspace) {
           draftStore.update(current => consumeWorkspaceDraft(current, submittedKey, request.workspace!.operationId, undefined, {
@@ -153,7 +148,6 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
         if (editingMessageId) {
           const edited = editingMessageId
           const moved = queueStore.enqueueEdited(queueKey, connectionId, edited, request, currentIntent?.intentId)
-          // 队列在点击与提交之间变了（例如刚被提交）时不能丢文本：退回普通入队。
           if (moved) {
             setMovedMessageId(moved.messageId)
           } else {
@@ -173,12 +167,10 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
   }
   useEffect(() => {
     if (!contextAvailable || unknownReceiptBlocked || runActive || submitting || pollError || submissionInFlight.current) return
-    // 跳过正在编辑的那条：否则远端一空下来就会发出去改了一半的旧文本。
     const next = queueStore.claim(queueKey, editingMessageId ?? undefined)
     if (next) void execute(next.submission, true)
   }, [queue, contextAvailable, unknownReceiptBlocked, runActive, submitting, pollError, queueKey, editingMessageId])
 
-  // 队列条目离开队列（移除、被提交、归档）后编辑态必须跟着结束。
   useEffect(() => {
     if (!editingMessageId) return
     if (queue.prompts.some(prompt => prompt.messageId === editingMessageId)) return
@@ -197,8 +189,6 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     setUnknownReceiptError(null)
     setError(null)
     try {
-      // This is the only explicit recovery action. It uses the original receipt
-      // id and never submits a replacement prompt or stops a received run.
       const resolved = await api.resolveIntent(connectionId, intent.intentId)
       setIntents((current) => current.map((item) => item.intentId === resolved.intentId ? resolved : item))
       setStatus(null)
@@ -219,12 +209,9 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     if (!connected || !runId) { const reason = new Error('远端未连接或问题所属运行已不可用。'); setError(reason.message); throw reason }
     try { await api.answer(connectionId, runId, response); setStatus('已发送回答。') } catch (reason) { setError(errorText(reason)); throw reason }
   }
-  // 取页请求自身的递增令牌：切换会话/Provider 会让 generation 失效，但「谁在途」只由
-  // 这个令牌决定，所以旧请求收尾时不会把新上下文的加载状态卡住。
   const olderRequest = useRef(0)
   const loadOlderHistory = async (): Promise<void> => {
     if (!connected || !historyEvidence?.hasOlder || historyEvidence.before === undefined || !sessionId) return
-    // 同一游标只允许一个在途请求。滚动会连续触发自动续读，重复请求不会更早拿到结果。
     if (historyOlderLoading) return
     setHistoryOlderLoading(true)
     const request = ++olderRequest.current
@@ -247,8 +234,6 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
     } catch (reason) { setError(errorText(reason)) } finally { setConnecting(false) }
   }, [api, connectionId])
 
-  // Map host Providers to the shared picker. Unavailable entries stay visible and
-  // disabled; a session whose Provider vanished keeps a placeholder, never a substitute.
   const missingAgentId = providerSelection && catalog && !provider
     ? remoteAgentId({ id: (JSON.parse(providerSelection) as [string, string])[0], agentProfileId: (JSON.parse(providerSelection) as [string, string])[1] || undefined })
     : null
@@ -295,11 +280,8 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
             ...(!queue.writeUnknown ? { action: { label: '继续队列', onClick: () => queueStore.resume(queueKey) } } : {}) }
       : currentRunStatus?.state === 'unknown'
         ? { tone: 'blocked' as const, text: `远程运行结果未知${currentRunStatus.detail ? ` · ${currentRunStatus.detail}` : ''}；不会自动重试。` }
-        // Stop/answer notes remain relevant while the run is in flight.
         : status && (submitting || runActive) && !workspaceSetup
           ? { tone: 'blocked' as const, text: status }
-          // Receipt acknowledgement is not dispatch. Only this run's host state
-          // can retire the waiting notice, even before its first trace arrives.
           : !workspaceSetup && currentIntent?.status === 'recorded' && (!currentRunStatus || currentRunStatus.state === 'recorded')
             ? { tone: 'blocked' as const, text: '已记录提交，等待远端派发…' }
             : !workspaceSetup && submitting && !currentIntent

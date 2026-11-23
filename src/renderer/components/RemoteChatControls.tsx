@@ -13,10 +13,6 @@ import { errorText, intentMatches, keepIfEqual, remoteDraftKey } from './RemoteC
 import { updateSessionComposerDraft } from '../app-model'
 import { attachmentsAfterFailedSubmit, inputAfterFailedSubmit } from '../app-model'
 
-// A conversation that executes on a saved remote Scry desktop. It renders the same
-// ChatView as local sessions; only the controller differs. The host owns Provider
-// install, credentials, files and archive, so this view never falls back to local
-// runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
 export type ControlsState = ReturnType<typeof useRemoteChatControls>
@@ -25,8 +21,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
   const { api, connected, catalog, catalogReady, providerSelection, sessionId, setSessionId, setControls, selectedProvider, selectedProviderContextKey, initializedControlsContext, setTurns, setHistoryEvidence, setHistoryLoading, historyRevision, setHistoryRevision, traceViewRef, showTrace, setRunStatus, setForeignRun, foreignRunRef, setIntents, setError, setPollError, setPollFresh, setHistoryError, generation, provider, providerId, context, presentedHistoryContext, preparedHistoryContext, controlContextKey, contextKey, sessionActive, traceDelta, pollSequence, pollInFlight, pollRef, adoptingSession, adoptedIntent, queueKey, pendingWorktreeRef, setPendingWorktree, releaseAttachments } = foundation
   const controlProvider = catalog?.providerDiscovery !== 2 ? provider
     : selectedProvider && selectedProviderContextKey === controlContextKey && desktopProviderKey(selectedProvider) === providerSelection ? selectedProvider : undefined
-  // Initialize once per execution context. Refresh validates rather than silently
-  // replacing a user's selected model, effort, or permission with new defaults.
   useEffect(() => {
     if (!controlProvider?.available || initializedControlsContext.current === contextKey) return
     initializedControlsContext.current = contextKey
@@ -75,7 +69,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
   useEffect(() => {
     if (!connected || !catalogReady) return
     let cancelled = false
-    // Returns whether the shown run changed, or undefined when this poll went stale.
     const followTrace = async (runId: string, sequence: number, traceContext: DesktopRemoteContext = context): Promise<boolean | undefined> => {
       const previous = traceViewRef.current?.run.runId === runId ? traceViewRef.current : null
       const knownCount = previous?.run.attachments?.length
@@ -89,7 +82,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
       }
       let merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, traceContext, runId, previous?.cursor, knownCount))
       if (stale()) return undefined
-      // A gap, reset or revision discontinuity never patches the shown run: read it whole.
       if (merged.kind === 'gap') merged = mergeRemoteTrace(previous, await api.traceDelta(connectionId, traceContext, runId, undefined, knownCount))
       if (stale()) return undefined
       if (merged.kind === 'gap') throw new Error('remote_trace_gap')
@@ -110,8 +102,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
     }
     let intentTrace: { runId: string; context: DesktopRemoteContext } | undefined
     const traceContextFor = (runId: string): DesktopRemoteContext => intentTrace?.runId === runId ? intentTrace.context : context
-    // The first read after opening the view: a session the catalog marks active but
-    // with no live run yet may have finished between the history read and this one.
     let immediate = true
     const readPoll = async (): Promise<void> => {
       const sequence = ++pollSequence.current
@@ -128,15 +118,11 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
             releaseAttachments(pendingWorktreeRef.current.attachments)
             setPendingWorktree(null)
           }
-          // Runs started on the host UI, a phone or another desktop leave no
-          // receipt here. Ask only while the catalog marks this session active,
-          // or to observe the end of a run already being followed.
           const followed = foreignRunRef.current
           const live = context.externalSessionId && (sessionActive || followed) ? await api.liveRun(connectionId, context) : null
           if (cancelled || sequence !== pollSequence.current) return
           setForeignRun(keepIfEqual(live))
           if ((followed && live?.runId !== followed.runId) || (immediate && sessionActive && !live)) {
-            // The run can finish between the opening history read and the live lookup.
             setHistoryRevision((revision) => revision + 1)
             void refreshRemoteCatalog(connectionId)
           }
@@ -157,8 +143,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         }
         const boundQueueKey = nextStatus.externalSessionId
           ? remoteQueueKey(remoteDraftKey(connectionId, effectiveCwd, nextStatus.externalSessionId), providerSelection) : queueKey
-        // runStatus may retire the durable receipt. Reconcile App-owned queued
-        // work even if navigation cancelled this view while the read was pending.
         if (nextStatus.externalSessionId && !context.externalSessionId) {
           queueStore.migrate(queueKey, boundQueueKey, nextStatus.externalSessionId)
         }
@@ -192,7 +176,6 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         if (nextStatus.externalSessionId && !context.externalSessionId && !activeIntent.context.externalSessionId) {
           adoptedIntent.current = activeIntent
           adoptingSession.current = true
-          // Text typed while the first run was starting belongs to the adopted session.
           const pendingKey = remoteDraftKey(connectionId, cwd)
           const adoptedKey = remoteDraftKey(connectionId, effectiveCwd, nextStatus.externalSessionId)
           draftStore.update((drafts) => {
@@ -215,13 +198,9 @@ export function useRemoteChatControls(foundation: FoundationState, { connectionI
         if (nextStatus.externalSessionId && provider && (!context.externalSessionId || effectiveCwd !== cwd)) {
           onSessionAdopted(nextStatus.externalSessionId, provider, effectiveCwd)
         }
-        // Terminal status retires the main-process receipt. Refresh history even
-        // if the last trace read fails, before the next poll drops that receipt.
         if (nextStatus.state === 'settled' || nextStatus.state === 'failed') {
           setHistoryRevision((revision) => revision + 1)
           void refreshRemoteCatalog(connectionId)
-          // runStatus retired the receipt in main. Reconcile once after this
-          // final trace read even if the host sends no further subscription event.
           if (refreshedTerminalIntent !== activeIntent.intentId) {
             refreshedTerminalIntent = activeIntent.intentId
             void poll()
