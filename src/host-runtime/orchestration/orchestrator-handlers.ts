@@ -401,7 +401,7 @@ export function decideCatalogChange(
   if (cmd.type === 'session.withdraw') {
     const { sessionKey } = cmd.payload
     const session = view.getSession(sessionKey)
-    if (cmd.actor !== 'system' || session?.catalog?.nativeSessionId !== null || session.activeRunId) {
+    if (cmd.actor !== 'system' || !session || !isWithdrawableSession(session)) {
       return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
     }
     const event = makeEvent(cmd, 0, {
@@ -433,4 +433,13 @@ export function decideCatalogChange(
     evidence: p.evidence ?? null
   })
   return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
+}
+
+/** A row the App may withdraw: a provisional send that never bound a native session, or
+ * an external transcript the catalog scan listed that Scry never ran, named or pinned. */
+export function isWithdrawableSession(session: SessionProjectionRow): boolean {
+  if (session.activeRunId || !session.catalog) return false
+  if (session.catalog.nativeSessionId === null) return true
+  return session.catalog.preview === null && session.lastRunId === null && session.title === null &&
+    session.pinnedAt === null && session.archivedAt === null && session.conversationId === null
 }

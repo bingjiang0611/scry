@@ -9,7 +9,7 @@ import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createCatalogScanWork } from './orchestration-catalog-scan'
 import { createOrchestrationCatalogAccess } from './orchestration-catalog-access'
 
-it('discovers an external session and reads only the appended interval when its detail changes', async () => {
+it('follows a session Scry knows and reads only the appended interval when its detail changes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'scry-daemon-catalog-scan-'))
   const userDataDir = join(root, 'userData')
   const homeDir = join(root, 'home')
@@ -29,19 +29,26 @@ it('discovers an external session and reads only the appended interval when its 
       sink, homeDir, userDataDir, workspaces: () => [cwd],
       isActive: () => active, log: (message) => { throw new Error(message) }
     })
+    const access = createOrchestrationCatalogAccess(() => sink)
+    const app = createAppSessionStore(userDataDir, access.beforeMirrorWrite)
+    const run = { cwd, providerId: 'claude' as const, runId: 'scry-run', runtimeProvider: 'claude_sdk' as const, prompt: '问题' }
+    app.recordPending(run)
+    app.record({ ...run, externalSessionId: sessionId })
+    const base = sink.listEvents().length
     const work = createWork()
     await work.scanCatalog()
-    const discovered = sink.listEvents().find((event) => event.type === 'session.discovered')!
-    expect(discovered).toMatchObject({ cwd, payload: { provider: 'claude', catalog: { nativeSessionId: sessionId } } })
+    const discovered = sink.listEvents().at(-1)!
+    expect(discovered).toMatchObject({ type: 'session.discovered', cwd, payload: { provider: 'claude' } })
+    expect(sink.getSession(discovered.sessionKey!)?.catalog?.nativeSessionId).toBe(sessionId)
     expect(discovered.evidence).toEqual([
       `transcript:claude:${sessionId}#bytes=0-${Buffer.byteLength(first)},sha256=${sha256Hex(first)}`
     ])
     await work.scanDetail(discovered.sessionKey!, true)
-    expect(sink.listEvents()).toHaveLength(1)
+    expect(sink.listEvents()).toHaveLength(base + 1)
     appendFileSync(transcript, next)
     active = true
     await work.scanDetail(discovered.sessionKey!, false)
-    expect(sink.listEvents()).toHaveLength(1)
+    expect(sink.listEvents()).toHaveLength(base + 1)
     active = false
     await work.scanDetail(discovered.sessionKey!, false)
     const end = Buffer.byteLength(first + next)
@@ -49,10 +56,10 @@ it('discovers an external session and reads only the appended interval when its 
       `transcript:claude:${sessionId}#bytes=${Buffer.byteLength(first)}-${end},sha256=${sha256Hex(next)}`
     ])
     await work.scanDetail(discovered.sessionKey!, false)
-    expect(sink.listEvents()).toHaveLength(2)
+    expect(sink.listEvents()).toHaveLength(base + 2)
     const reopened = createWork()
     await reopened.scanCatalog()
-    expect(sink.listEvents()).toHaveLength(2)
+    expect(sink.listEvents()).toHaveLength(base + 2)
     const afterRestart = line('重启后的消息')
     appendFileSync(transcript, afterRestart)
     await reopened.scanDetail(discovered.sessionKey!, true)
@@ -121,9 +128,18 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
       sink, homeDir, userDataDir, workspaces: () => [cwd],
       isActive: () => false, log: (message) => { throw new Error(message) }
     })
+    // Scry already lists this session; the scan only adds its transcript evidence.
+    const seed = {
+      sessionKey: 'known-session', provider: 'claude', profile: null, cwd,
+      catalog: { nativeSessionId, projectCwd: null, preview: '先前的消息', runtimeProvider: 'claude_sdk' as const }
+    }
+    expect(sink.execute({
+      type: 'session.discover', commandId: 'seed-known', actor: 'system', scope: 'system', at: 10,
+      payload: seed, payloadSha256: sha256Hex(canonicalJson(seed))
+    }).kind).toBe('accepted')
     await work.scanCatalog()
-    const [discovered] = sink.listEvents()
-    expect(discovered).toMatchObject({ type: 'session.discovered', payload: { transcript: { status: 'available' } } })
+    const discovered = sink.listEvents().at(-1)
+    expect(discovered).toMatchObject({ type: 'session.discovered', sessionKey: 'known-session', payload: { transcript: { status: 'available' } } })
     const sessionKey = discovered!.sessionKey!
     const submit = (runId: string) => {
       const payload = {
@@ -183,6 +199,58 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
     expect(sink.getSession(freshId)?.legacy).toBe(false)
     expect(sink.getTurn(freshId, 1)).toMatchObject({ runId: 'fresh-run', ordinalOrigin: 'native' })
     if (mode !== 'v5 pruned') expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+  } finally {
+    sink.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('does not list a terminal transcript and withdraws the rows earlier builds listed', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-scan-external-')))
+  const userDataDir = join(root, 'userData')
+  const homeDir = join(root, 'home')
+  const cwd = join(root, 'workspace')
+  mkdirSync(cwd)
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333']
+  for (const id of ids) {
+    const path = transcriptPath(cwd, id, homeDir)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, `${JSON.stringify({ cwd, sessionId: id, type: 'user', message: { role: 'user', content: '终端里的会话' } })}\n`)
+  }
+  const sink = EventSink.open({ userDataDir, fullfsync: false })
+  try {
+    const access = createOrchestrationCatalogAccess(() => sink)
+    const execute = (type: 'session.discover' | 'session.rename', commandId: string, payload: Record<string, unknown>) =>
+      expect(sink.execute({
+        type, commandId, actor: 'system', scope: 'system', at: 10,
+        payload, payloadSha256: sha256Hex(canonicalJson(payload))
+      } as Parameters<typeof sink.execute>[0]).kind).toBe('accepted')
+    // What an earlier build's scan wrote: two external rows, one of which the user renamed.
+    const external = (id: string) => ({
+      sessionKey: `native:${id}`, provider: 'claude', cwd,
+      catalog: { nativeSessionId: id, projectCwd: null, preview: null, runtimeProvider: 'claude_sdk' }
+    })
+    execute('session.discover', 'old-scan-1', external(ids[0]!))
+    execute('session.discover', 'old-scan-2', external(ids[1]!))
+    execute('session.rename', 'user-rename', { sessionKey: `native:${ids[1]}`, title: '保留' })
+    expect(access.read()?.map((row) => row.externalSessionId).sort()).toEqual([ids[0], ids[1]])
+
+    const work = createCatalogScanWork({
+      sink, homeDir, userDataDir, workspaces: () => [cwd],
+      isActive: () => false, log: (message) => { throw new Error(message) }
+    })
+    await work.scanCatalog()
+    expect(sink.getSession(`native:${ids[0]}`)).toBeUndefined()
+    expect(sink.getSession(`native:${ids[1]}`)?.title).toBe('保留')
+    expect(access.read()?.map((row) => row.externalSessionId)).toEqual([ids[1]])
+    expect(sink.listEvents().filter((event) => event.type === 'session.withdrawn').map((event) => event.sessionKey))
+      .toEqual([`native:${ids[0]}`])
+    // A later scan neither brings the withdrawn row back nor lists the untouched transcript.
+    const discoveredBefore = sink.listEvents().filter((event) => event.type === 'session.discovered' && event.sessionKey !== `native:${ids[1]}`).length
+    await work.scanCatalog()
+    expect(sink.listEvents().filter((event) => event.type === 'session.discovered' && event.sessionKey !== `native:${ids[1]}`)).toHaveLength(discoveredBefore)
+    expect(access.read()?.map((row) => row.externalSessionId)).toEqual([ids[1]])
+    expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   } finally {
     sink.close()
     rmSync(root, { recursive: true, force: true })

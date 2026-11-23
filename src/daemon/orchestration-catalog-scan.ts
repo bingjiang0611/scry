@@ -1,7 +1,6 @@
 import type { Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { runtimeProviderForProviderId } from '../shared/runtime'
 import { unavailable, type Evidence } from '../shared/turn-record'
 import { discoverTraceArchiveSessionsAsync, resolveTranscriptPath, transcriptDir, transcriptPath } from '../main/transcript-archive'
 import { trustedOwnedFile } from '../main/transcript-archive-paths'
@@ -19,6 +18,7 @@ import {
 } from '../host-runtime/orchestration/transcript-interval'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
 import { wasNativeSourceDeleted } from '../host-runtime/orchestration/native-session-lookup'
+import { isWithdrawableSession } from '../host-runtime/orchestration/orchestrator-handlers'
 
 interface CatalogScanOptions {
   sink: EventSink
@@ -181,7 +181,42 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     await readSource({ provider, nativeSessionId, path }, { sessionKey, provider, profile, cwd })
   }
 
+  // Earlier builds listed every terminal transcript under a known workspace. Withdraw
+  // the rows that scan created and Scry never ran, named, pinned or archived.
+  function withdrawExternalOnly(): void {
+    if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
+    const rows = sink.handle.db.prepare(
+      `SELECT session.session_key AS sessionKey FROM orch_p_session AS session
+       WHERE session.conversation_id IS NULL AND session.catalog IS NOT NULL
+         AND json_extract(session.catalog, '$.nativeSessionId') IS NOT NULL
+         AND json_extract(session.catalog, '$.preview') IS NULL
+         AND session.last_run_id IS NULL AND session.active_run_id IS NULL AND session.title IS NULL
+         AND session.pinned_at IS NULL AND session.archived_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM orch_p_run AS run WHERE run.session_key = session.session_key)
+         AND NOT EXISTS (SELECT 1 FROM orch_event AS event
+           WHERE event.session_key = session.session_key AND event.type = 'session.imported')`
+    ).all() as { sessionKey: string }[]
+    if (rows.length === 0) return
+    sink.runInBatchTransaction(() => {
+      for (const { sessionKey } of rows) {
+        const session = sink.getSession(sessionKey)
+        if (!session || !isWithdrawableSession(session)) continue
+        const payload = { sessionKey }
+        sink.execute({
+          type: 'session.withdraw',
+          commandId: `catalog-withdraw-external:${sessionKey}:${session.revSeq}`,
+          actor: 'system',
+          scope: 'system',
+          at: Date.now(),
+          payload,
+          payloadSha256: sha256Hex(canonicalJson(payload))
+        })
+      }
+    })
+  }
+
   async function scanCatalog(): Promise<void> {
+    withdrawExternalOnly()
     const workspaces = new Set(options.workspaces())
     if (workspaces.size === 0) return
     for (const cwd of workspaces) {
@@ -200,11 +235,10 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
           if (!sink.handle.db.open) return
           const sessionKey = getKey(provider, cwd, nativeSessionId)
           const existing = sink.getSession(sessionKey)
-          if (existing && options.isActive(existing)) continue
-          await readSource({ provider, nativeSessionId, path }, {
-            sessionKey, provider, cwd,
-            ...(existing ? {} : { catalog: { nativeSessionId, projectCwd: null, preview: null, runtimeProvider: runtimeProviderForProviderId(provider) } })
-          })
+          // Only sessions Scry already knows are followed. A transcript started in a
+          // terminal is not listed in the catalog (the behaviour before P4-4).
+          if (!existing || options.isActive(existing)) continue
+          await readSource({ provider, nativeSessionId, path }, { sessionKey, provider, cwd })
         }
       }
     }
