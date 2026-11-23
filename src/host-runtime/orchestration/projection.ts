@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { Evidence } from '../../shared/turn-record'
 import { canonicalJson } from './canonical-json'
 import { mergeTurnEvidence, promoteLastRunOutcomeToExact } from './projection-evidence'
+import { projectSessionBinding } from './native-session-bindings'
 import type { OrchestrationEventRow } from './types'
 
 export {
@@ -300,6 +301,14 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         p.lineage ? canonicalJson(p.lineage) : null,
         (p.createdBy as string | null) ?? event.actor
       )
+      projectSessionBinding(db, {
+        sessionKey: String(p.sessionKey),
+        provider: (p.provider as string | null) ?? null,
+        profile: (p.profile as string | null) ?? null,
+        cwd: (p.cwd as string | null) ?? null,
+        catalog: p.catalog ?? null,
+        at: event.at
+      })
       return
     }
 
@@ -333,6 +342,14 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         p.catalog ? canonicalJson(p.catalog) : null,
         (p.conversationId as string | null) ?? null
       )
+      projectSessionBinding(db, {
+        sessionKey: String(p.sessionKey),
+        provider: (p.provider as string | null) ?? null,
+        profile: (p.profile as string | null) ?? null,
+        cwd: (p.cwd as string | null) ?? null,
+        catalog: p.catalog ?? null,
+        at: event.at
+      })
       if (p.display) {
         const display = p.display as Record<string, unknown>
         db.prepare(
@@ -395,6 +412,14 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         event.actor,
         p.catalog ? canonicalJson(p.catalog) : null
       )
+      projectSessionBinding(db, {
+        sessionKey: String(p.sessionKey),
+        provider: (p.provider as string | null) ?? null,
+        profile: (p.profile as string | null) ?? null,
+        cwd: (p.cwd as string | null) ?? null,
+        catalog: p.catalog ?? null,
+        at: event.at
+      })
       return
     }
 

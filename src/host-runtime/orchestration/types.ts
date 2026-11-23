@@ -309,6 +309,8 @@ export type OrchestrationErrorCode =
   | 'orchestration_invalid_effect_kind'
   | 'orchestration_body_corrupt'
   | 'orchestration_usage_forbidden_in_event'
+  | 'orchestration_binding_conflict'
+  | 'orchestration_binding_ambiguous'
 
 export class OrchestrationStoreError extends Error {
   readonly code: OrchestrationErrorCode

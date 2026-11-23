@@ -83,6 +83,10 @@ export function deleteSessionInDb(
       db.prepare(`DELETE FROM ${table} WHERE run_id IN (SELECT value FROM json_each(?))`).run(runIds)
     }
 
+    // B3: the tombstone lives in the binding table, so pruning the event log cannot revive it.
+    db.prepare(
+      'UPDATE orch_binding SET deleted_at = COALESCE(deleted_at, ?), delete_epoch = delete_epoch + 1 WHERE session_key = ?'
+    ).run(input.at, input.sessionKey)
     const tombstone = {
       sessionKey: input.sessionKey, cwd: input.cwd,
       ...(input.nativeIdentity ? { nativeIdentity: input.nativeIdentity } : {}),

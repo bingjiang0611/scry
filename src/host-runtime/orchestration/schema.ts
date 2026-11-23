@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 6
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 4
+export const ORCHESTRATION_SCHEMA_VERSION = 7
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 5
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -267,6 +267,44 @@ const ORCH_DDL_V6: readonly string[] = [
   "UPDATE orch_meta SET value = '4' WHERE key = 'projection_schema_version'"
 ]
 
+/**
+ * B3: native identity bindings and their tombstones move out of `orch_event`.
+ * `UNIQUE(provider, profile, cwd, native_id)` makes a second key impossible, and a binding is
+ * never reassigned after deletion, so a pruned event log can no longer resurrect a deleted session.
+ */
+const ORCH_DDL_V7: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_binding (
+    provider TEXT NOT NULL,
+    profile TEXT NOT NULL DEFAULT '',
+    cwd TEXT NOT NULL DEFAULT '',
+    native_id TEXT NOT NULL,
+    session_key TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    deleted_at INTEGER,
+    delete_epoch INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (provider, profile, cwd, native_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_binding_deleted ON orch_binding(deleted_at, session_key)`,
+  // Backfill from projections that already carry a catalog identity.
+  `INSERT OR IGNORE INTO orch_binding (provider, profile, cwd, native_id, session_key, created_at)
+   SELECT COALESCE(provider, 'legacy_unknown'), COALESCE(profile, ''), COALESCE(cwd, ''),
+          json_extract(catalog, '$.nativeSessionId'), session_key, ts
+   FROM orch_p_session
+   WHERE json_extract(catalog, '$.nativeSessionId') IS NOT NULL`,
+  // Backfill tombstones from retired sessions still present in the event log.
+  `UPDATE orch_binding SET deleted_at = (
+     SELECT MAX(retiring.at) FROM orch_event AS retiring
+     WHERE retiring.type IN ('session.deleted', 'session.withdrawn')
+       AND retiring.session_key = orch_binding.session_key
+   )
+   WHERE deleted_at IS NULL AND EXISTS (
+     SELECT 1 FROM orch_event AS retiring
+     WHERE retiring.type IN ('session.deleted', 'session.withdrawn')
+       AND retiring.session_key = orch_binding.session_key
+   )`,
+  "UPDATE orch_meta SET value = '5' WHERE key = 'projection_schema_version'"
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
-  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7
 ]
