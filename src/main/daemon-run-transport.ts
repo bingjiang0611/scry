@@ -11,7 +11,7 @@ import { readDaemonTrace } from './daemon-run-trace-read'
 import { context as desktopContext } from './remote/desktop-client-validation'
 import { laneWasNotSent, laneWasWrittenUnknown } from './remote/desktop-lane'
 import { assembleByteChunks } from './remote/desktop-byte-chunks'
-import { stageDesktopImage, type desktopImageReference } from './remote/stage-desktop-image'
+import { stageDesktopImage, type desktopImageReference } from './remote/desktop-attachments'
 import { parseSubscribeReply, readDaemonArchivedRunTrace } from './daemon-subscribe-parse'
 
 // The App's run surface against its own daemon, over the same frames the phone

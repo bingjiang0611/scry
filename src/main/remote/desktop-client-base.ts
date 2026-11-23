@@ -6,7 +6,7 @@ import { desktopTlsRequest, generateDesktopDeviceIdentity, openDesktopSshTunnel,
 import { DesktopLanes, laneForRequest, replayableRequest, type DesktopLaneConnector } from './desktop-lane'
 import { framedRequest, protocolFailure } from './remote-protocol'
 import { newAttachmentId, normalizeDesktopAttachment } from './desktop-attachments'
-import { desktopImageReference, stageDesktopImage } from './stage-desktop-image'
+import { desktopImageReference, stageDesktopImage } from './desktop-attachments'
 import { context, fail, record, text, uuid, hash, validateState, validateIdentity, validatePairingResponse, validateCertificate, publicConnection, STATE_FILE, type EncryptedState, type StoredConnection, type ActiveConnection, type RunStatusCursor, type DesktopRemoteClientTransportDeps, } from './desktop-client-validation'
 import type { DesktopCapabilities } from './desktop-client-capabilities'
 import { isUnknownFailure, targetBinding } from './desktop-client-intent-rules'

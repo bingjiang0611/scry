@@ -55,6 +55,7 @@ export class DaemonRunRuntime {
   readonly #locks = new Map<string, Promise<void>>()
   readonly #bridge: TraceOutputBridge
   #disposed = false
+  readonly #terminal = new Map<string, Promise<void>>()
   #onSessionBound?: (payload: Record<string, unknown>) => void
 
   setOnSessionBound(listener: ((payload: Record<string, unknown>) => void) | undefined): void { this.#onSessionBound = listener }
@@ -63,6 +64,10 @@ export class DaemonRunRuntime {
     return {
       runs: this.#runs, wakes: this.#wakes, cursorFor: (id) => this.#cursorFor(id), send: this.#deps.send,
       isDisposed: () => this.#disposed, onWarn: this.#deps.onWarn,
+      trackTerminal: (id, delivery) => {
+        this.#terminal.set(id, delivery)
+        void delivery.finally(() => { if (this.#terminal.get(id) === delivery) this.#terminal.delete(id) })
+      },
       onSessionBound: (payload) => this.#onSessionBound?.(payload),
       publishStopState: (state: AgentStopState) => this.#deps.runTraces?.publishStopState?.(state),
       settleRunTrace: (id) => this.#deps.runTraces?.settle(id), flushBridge: () => this.#bridge.flushAll(),
@@ -73,6 +78,8 @@ export class DaemonRunRuntime {
 
   async applySubscribeSnapshot(rows: SubscribeActiveRunRow[]): Promise<void> { if (!this.#disposed) await applySubscribeSnapshotToRuntime(this.#subCtx(), rows) }
   async applySubscribeEvent(event: SubscribeEventItem): Promise<void> { if (!this.#disposed) await applySubscribeEventToRuntime(this.#subCtx(), event) }
+  /** Resolves once a terminal event's final trace delivery for `runId` has finished. */
+  async terminalDelivered(runId: string): Promise<void> { await this.#terminal.get(runId) }
   applyRunHint(hint: Extract<SubscribeHint, { kind: 'run' }>): Promise<void> | undefined {
     if (!this.#disposed) return applyRunHintToRuntime(this.#subCtx(), hint)
     return undefined

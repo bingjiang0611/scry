@@ -58,6 +58,7 @@ describe('daemon run streaming (L1: text arrives as it grows)', () => {
     await announceRun(runtime, RUN, { scryRunId: CANONICAL, outputSeq: 1 })
     await announceRun(runtime, RUN, { scryRunId: CANONICAL, outputSeq: 2 })
     await runtime.applySubscribeEvent(runEvent('run.settled', RUN))
+    await runtime.terminalDelivered(RUN)
     expect(runtime.runView(CANONICAL)?.done).toBe(true)
     runtime.dispose()
     expect(warnings).toEqual([])

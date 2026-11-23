@@ -85,7 +85,7 @@ describe('daemon IPC routing matrix', () => {
     // entry registers none of them in process: each must be a channel the daemon answers
     // (the gate's local-op or forward tables), or a channel the App keeps (route main).
     const gate = gateTableChannels()
-    expect(gate.size).toBe(110)
+    expect(gate.size).toBe(111)
     const kept = new Set(routing.channels.filter((row: { route: string }) => row.route === 'main').map((row: { channel: string }) => row.channel))
     const mainSources = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
       const path = join(directory, entry.name)

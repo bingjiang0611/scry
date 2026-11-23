@@ -15,7 +15,7 @@ import {
 } from '../shared/orchestration-subscribe'
 import { DaemonRunError, fail, record } from './daemon-run-error'
 import { readDaemonTrace, type DaemonTraceCall } from './daemon-run-trace-read'
-import { parseWorkspacePrepareProgress } from '../shared/workspace-prepare-progress'
+import { parseWorkspacePrepareProgress } from '../shared/workspace-selection-input'
 
 const MAX_UNREAD_SESSIONS = 10_000
 const MAX_SUBSCRIBE_ITEMS = 512

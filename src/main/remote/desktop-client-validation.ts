@@ -69,7 +69,7 @@ export interface RunStatusCursor {
   state?: string
 }
 
-export { parseWorkspacePrepareProgress } from '../../shared/workspace-prepare-progress'
+export { parseWorkspacePrepareProgress } from '../../shared/workspace-selection-input'
 
 export function fail(code: string): never { throw new Error(code) }
 export function submitFailure(error: unknown): string {

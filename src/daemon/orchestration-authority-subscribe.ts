@@ -14,7 +14,7 @@ import { SubscribeEngine, type SubscribeEngineOptions } from '../host-runtime/or
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
 import { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import { paginateSubscribeReplies } from './orchestration-subscribe-chunks'
-import { parseWorkspacePrepareProgress } from '../shared/workspace-prepare-progress'
+import { parseWorkspacePrepareProgress } from '../shared/workspace-selection-input'
 
 export interface AuthoritySubscribeRuntimeDeps {
   hostId: () => string

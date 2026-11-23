@@ -51,6 +51,7 @@ describe('daemon run done follows its subscribed final trace', () => {
     expect(runtime.runView(RUN)?.done).toBe(false)
     release()
     await finish
+    await runtime.terminalDelivered(RUN)
     expect(delivered).toEqual(['one', 'two'])
     expect(runtime.runView(RUN)?.done).toBe(true)
   })
@@ -59,6 +60,7 @@ describe('daemon run done follows its subscribed final trace', () => {
     const { runtime, delivered, beforeFlush } = fixture()
     await announceRun(runtime, RUN)
     await runtime.applySubscribeEvent(runEvent('run.settled', RUN))
+    await runtime.terminalDelivered(RUN)
     expect(beforeFlush).toEqual([false])
     expect(delivered).toEqual(['one', 'two'])
     expect(runtime.runView(RUN)?.done).toBe(true)

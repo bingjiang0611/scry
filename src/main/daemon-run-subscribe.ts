@@ -19,6 +19,8 @@ export interface SubscribeRuntimeContext {
   send: (channel: string, payload: unknown) => void
   isDisposed?: () => boolean
   onWarn?: (message: string, detail?: unknown) => void
+  /** Receives each run's detached terminal delivery so a caller can await it. */
+  trackTerminal?: (runId: string, delivery: Promise<void>) => void
   onSessionBound?: (payload: Record<string, unknown>) => void
   publishStopState?: (state: AgentStopState) => void
   settleRunTrace?: (runId: string) => void
@@ -317,9 +319,10 @@ export async function applySubscribeEventToRuntime(
           : undefined
     // The final read is serialized behind this run's trace reads, not behind the
     // global event feed. Other runs can now receive their bind and admission hints.
-    void finalizeTerminalCursor(ctx, cursor, lifecycle, reason).catch((error) => {
+    const delivery = finalizeTerminalCursor(ctx, cursor, lifecycle, reason).catch((error) => {
       ctx.onWarn?.('daemon subscribe terminal delivery failed', error)
     })
+    ctx.trackTerminal?.(cursor.runId, delivery)
   }
 }
 

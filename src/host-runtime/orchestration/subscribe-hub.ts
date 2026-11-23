@@ -4,7 +4,7 @@ import type { AgentDataUpdated } from '../../shared/runtime'
 import type { SessionAttentionSnapshot } from '../../shared/session-attention'
 import { SUBSCRIBE_RETAINED_WINDOW_NOTICES, type SubscribeHint } from '../../shared/orchestration-subscribe'
 import type { WorkspacePrepareProgress } from '../../shared/workspace-selection'
-import { completedWorkspaceProgress } from '../../shared/workspace-prepare-progress'
+import { completedWorkspaceProgress } from '../../shared/workspace-selection-input'
 
 const DEFAULT_COALESCE_MS = 50
 const MAX_HINT_BUFFER = 512
