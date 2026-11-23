@@ -68,6 +68,8 @@ export function claimNextEffect(input: {
   owner: string
   now: number
   sessionKey?: string
+  /** Restricts the claim to one kind so a dispatcher never takes work it cannot run. */
+  kind?: string
 }): ClaimResult {
   const { db, owner, now } = input
   return db.transaction((): ClaimResult => {
@@ -81,6 +83,7 @@ export function claimNextEffect(input: {
                   COALESCE(o.session_key, (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id)) AS sess
            FROM orch_outbox o
            WHERE o.state = 'pending'
+             AND (:kind IS NULL OR o.kind = :kind)
              AND (:session IS NULL OR COALESCE(o.session_key,
                    (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id)) = :session)
              AND NOT EXISTS (
@@ -100,7 +103,7 @@ export function claimNextEffect(input: {
                 o.causation_seq, o.payload, o.attempts
          FROM orch_outbox o JOIN pending ON pending.effect_id = o.effect_id`
       )
-      .get({ session: input.sessionKey ?? null }) as RawOutboxRow | undefined
+      .get({ session: input.sessionKey ?? null, kind: input.kind ?? null }) as RawOutboxRow | undefined
     if (!row) return { expired }
     const claimed = db
       .prepare(

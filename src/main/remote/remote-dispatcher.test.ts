@@ -233,13 +233,13 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
     expect(ledger.runState(runId)).toBe('cancelled')
   })
 
-  it('does not take a lease on effects this dispatcher cannot execute', () => {
+  it('parks a run-start effect that has no run instead of leaking a lease', () => {
     const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
     const { executor } = deferredExecutor()
-    const outbox = memoryOutbox([{ effectId: 'eff-catalog', runId: null, kind: 'catalog.refresh' }])
+    const outbox = memoryOutbox([{ effectId: 'eff-orpan', runId: null }])
     const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
 
     expect(dispatcher.pump()).toEqual([])
-    expect(outbox.settled).toEqual(['claim:eff-catalog', 'retry:eff-catalog'])
+    expect(outbox.settled).toEqual(['claim:eff-orpan', 'fail:eff-orpan'])
   })
 })

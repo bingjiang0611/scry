@@ -181,9 +181,9 @@ export class RemoteDispatcher {
         try { this.#ledger.markCancelled(row.runId) } catch { /* already terminal */ }
       }
       if (!effect) break
-      if (effect.kind !== 'provider.run.start' || !effect.runId) {
-        // Other effect kinds are not this dispatcher's job; never strand them in a lease.
-        outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'not_a_run_start_effect')
+      if (!effect.runId) {
+        // A run-start effect without a run cannot be executed; park it instead of leaking a lease.
+        outbox.fail(effect.effectId, this.#leaseOwner, Date.now(), 'run_start_without_run')
         continue
       }
       const runId = effect.runId

@@ -12,7 +12,7 @@ import type { OrchestrationOutboxGate } from '../main/remote/orchestration-seam'
 export function createOutboxGate(db: () => Database.Database): OrchestrationOutboxGate {
   return {
     claim: (owner, now) => {
-      const { expired, effect } = claimNextEffect({ db: db(), owner, now })
+      const { expired, effect } = claimNextEffect({ db: db(), owner, now, kind: 'provider.run.start' })
       return effect ? { expired, effect } : { expired }
     },
     succeed: (effectId, owner, now) => succeedEffect({ db: db(), effectId, owner, now }),
