@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { errorText, followedLiveRunId, needsTraceRead, POLL_MS, TRACE_REFRESH_FLOOR_MS } from './RemoteChatShared'
 
-// The renderer no longer ticks: the host long poll reports change. Content reads
-// coalesce on a floor instead of following every report.
 describe('trace reads coalesce on the floor', () => {
   it('reads nothing inside the floor, even right after a change report', () => {
     expect(needsTraceRead({ shownRunId: 'run-a', runId: 'run-a', lastReadAt: 1_000, now: 1_001 })).toBe(false)
@@ -19,9 +17,6 @@ describe('trace reads coalesce on the floor', () => {
   })
 
   it('bounds one followed run to at most one read per floor per second', () => {
-    // The measured regression: reading on every change report cost 6x the
-    // pre-long-poll rate. Count what this policy issues in one second of a run
-    // that reports a change every 100 ms.
     let lastReadAt = Number.NEGATIVE_INFINITY
     let reads = 0
     for (let now = 0; now < 1_000; now += POLL_MS) {
@@ -31,7 +26,6 @@ describe('trace reads coalesce on the floor', () => {
   })
 })
 
-// A version refusal must name the end that is behind; a bare code reads as a bug.
 describe('protocol refusal copy', () => {
   it('separates the host and client cases', () => {
     expect(errorText(new Error('desktop_protocol_host_older'), 'mac-mini')).toContain('mac-mini')
@@ -46,8 +40,6 @@ describe('protocol refusal copy', () => {
   })
 })
 
-// A run started elsewhere is followed for content from the first time it is seen.
-// Gating that on "was it already followed last poll" leaves its first window unread.
 describe('followed run selection', () => {
   it('follows a live external run even before it was followed previously', () => {
     expect(followedLiveRunId({ scryRunId: 'run-mac' })).toBe('run-mac')

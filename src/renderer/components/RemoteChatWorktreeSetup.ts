@@ -13,7 +13,6 @@ export function useRemoteWorktreeSetup(
   >,
   connectionId: string,
   controlRunId: string | null | undefined,
-  // Pushed by the host status subscription; there is no poll interval to speed up.
   currentRunStatus: DesktopRemoteRunStatus | null | undefined
 ): WorkspaceSetupState | null {
   const { api, activeRun, pendingWorktree, pendingWorktreeRef, setPendingWorktree, setError } = foundation
