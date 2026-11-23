@@ -1,6 +1,6 @@
 // Files copied from the candidate worktree into the baseline worktree. Production source files
 // are deliberately absent: both workers execute their own revision's production modules.
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -25,5 +25,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const target = join(baseline, file)
     mkdirSync(dirname(target), { recursive: true })
     copyFileSync(join(candidate, file), target)
+  }
+  // The frozen config names the test-isolation setup, so the baseline worktree needs it to boot
+  // even when its own revision predates it. Not hashed: it changes no measurement.
+  if (existsSync(join(candidate, 'src/test-support'))) {
+    cpSync(join(candidate, 'src/test-support'), join(baseline, 'src/test-support'), { recursive: true, force: true })
   }
 }

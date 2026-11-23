@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listenRecorderDaemon, recorderDaemonStatus, recorderSocketPath, sendRecorderDaemonHook } from './daemon.js'
 import { listRecords } from './store.js'
+import { isolatedEnv } from '../../test-support/isolated-env'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -32,6 +33,7 @@ function socketPath(root: string): string {
 describe('turn recorder daemon transport', () => {
   it('深路径 workspace 自动使用短 socket 路径', () => {
     const workspace = join(tmpdir(), 'nested', 'x'.repeat(120))
+    // Path shape only: this call writes nothing, so the ambient env is enough here.
     const path = recorderSocketPath(workspace, { ...process.env, SCRY_RECORDER_SOCKET: '' })
     expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100)
     expect(recorderSocketPath(workspace, { SCRY_RECORDER_SOCKET: '' })).toBe(path)
@@ -65,7 +67,7 @@ describe('turn recorder daemon transport', () => {
 
   it('通过 workspace socket 复用 recorder core 并提交完整轮次', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
       const base = { workspace: root, provider: 'claude' as const, env }
