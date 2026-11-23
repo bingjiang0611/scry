@@ -224,7 +224,7 @@ it('does not list a terminal transcript and withdraws the rows earlier builds li
       expect(sink.execute({
         type, commandId, actor: 'system', scope: 'system', at: 10,
         payload, payloadSha256: sha256Hex(canonicalJson(payload))
-      } as Parameters<typeof sink.execute>[0]).kind).toBe('accepted')
+      } as unknown as Parameters<typeof sink.execute>[0]).kind).toBe('accepted')
     // What an earlier build's scan wrote: two external rows, one of which the user renamed.
     const external = (id: string) => ({
       sessionKey: `native:${id}`, provider: 'claude', cwd,
