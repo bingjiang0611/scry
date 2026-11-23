@@ -22,6 +22,8 @@ import { listFiles, syncDirectory, withDirectoryLock, writeTextAtomic } from './
  * from removing a marker while its writer has not yet published the state.
  */
 export const ATTENTION_PROVIDERS = ['claude', 'codex', 'qoder', 'opencode', 'pi'] as const
+// Marker suffixes use the same readable prefix and 12-character digest as safeKey(sessionId).
+const SESSION_KEY_PATTERN = /^[A-Za-z0-9._-]{1,40}-[0-9a-f]{12}$/
 
 export function attentionRoot(dataRoot: string): string {
   return join(dataRoot, 'runtime', 'attention')
@@ -91,7 +93,7 @@ export async function markedSessions(dataRoot: string): Promise<MarkedSession[]>
     if (separator < 0) continue
     const provider = name.slice(0, separator) as ProviderId
     const sessionKey = name.slice(separator + 2)
-    if (!(ATTENTION_PROVIDERS as readonly string[]).includes(provider) || !sessionKey) continue
+    if (!(ATTENTION_PROVIDERS as readonly string[]).includes(provider) || !SESSION_KEY_PATTERN.test(sessionKey)) continue
     result.push({ provider, sessionKey, sessionDir: join(dataRoot, 'runtime', provider, sessionKey) })
   }
   return result
