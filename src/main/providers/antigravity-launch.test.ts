@@ -169,7 +169,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
           childPid = rec.spawnedChildPids[0]
           break
         }
-      } catch { /* wait */ }
+      } catch {  }
       await new Promise((r) => setTimeout(r, 40))
     }
     expect(childPid).toBeGreaterThan(0)
@@ -222,7 +222,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
           childPid = parsed
           break
         }
-      } catch { /* wait */ }
+      } catch {  }
       await new Promise((r) => setTimeout(r, 40))
     }
     expect(childPid).toBeGreaterThan(0)
@@ -238,8 +238,8 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
       expect(isPidAlive(root.pid!)).toBe(false)
       expect(isPidAlive(childPid)).toBe(false)
     } finally {
-      try { process.kill(root.pid!, 'SIGKILL') } catch { /* ignore */ }
-      try { process.kill(childPid, 'SIGKILL') } catch { /* ignore */ }
+      try { process.kill(root.pid!, 'SIGKILL') } catch {  }
+      try { process.kill(childPid, 'SIGKILL') } catch {  }
     }
   })
 
@@ -287,7 +287,6 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
     expect(signals).toContainEqual({ pid: -2000, signal: 'SIGTERM' })
     expect(signals.some((s) => s.pid === -3050 || s.pid === -3051 || s.pid === -3052)).toBe(false)
 
-    // SIGTERM signalled all 3 verified descendants individually.
     expect(signals).toContainEqual({ pid: 2050, signal: 'SIGTERM' })
     expect(signals).toContainEqual({ pid: 2051, signal: 'SIGTERM' })
     expect(signals).toContainEqual({ pid: 2052, signal: 'SIGTERM' })

@@ -387,13 +387,13 @@ export async function forceKillAntigravityProcess(
       try {
         kill(identity.pid, 0)
         anyAlive = true
-      } catch { /* exited */ }
+      } catch {  }
     }
     for (const child of first.independentDescendants) {
       try {
         kill(child.pid, 0)
         anyAlive = true
-      } catch { /* exited */ }
+      } catch {  }
     }
     if (!anyAlive) return
     await new Promise((resolve) => setTimeout(resolve, 40))

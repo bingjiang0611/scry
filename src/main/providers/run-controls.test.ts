@@ -29,12 +29,10 @@ describe('审批档位', () => {
       .toThrow('Codex 不支持“自动接受编辑”权限模式：没有独立档位')
     expect(() => openCodePermissionRules('auto_accept_edits')).toThrow('OpenCode 不支持“自动接受编辑”权限模式')
     expect(() => codexAccess('auto_accept_edits')).toThrow('Codex 不支持“自动接受编辑”权限模式')
-    // Codex 支持的两档仍按原生语义映射，没有被这次改动动过
     expect(codexAccess('default')).toEqual({ approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write' })
     expect(codexAccess('auto_review')).toEqual({ approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write' })
     expect(codexAccess('full_access')).toEqual({ approvalPolicy: 'never', sandbox: 'danger-full-access' })
     expect(() => openCodePermissionRules('auto_review')).toThrow('OpenCode 不支持自动审查权限模式')
-    // 支持的档位仍按原语义返回
     expect(openCodePermissionRules('full_access')).toEqual([{ permission: '*', pattern: '*', action: 'allow' }])
     expect(openCodePermissionRules('default')).toEqual([{ permission: '*', pattern: '*', action: 'ask' }])
   })

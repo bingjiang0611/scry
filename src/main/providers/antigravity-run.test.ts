@@ -172,10 +172,8 @@ describe('A4: Antigravity 一轮状态机、事件、审批/提问、用量与�
     // Deduplicated logical tool calls: tc-early emitted once, sub-1 emitted once.
     expect(events.filter((e) => e.stage === 'tool_use' && e.toolUseId === 'tc-early')).toHaveLength(1)
     expect(events.filter((e) => e.stage === 'tool_result' && e.toolUseId === 'tc-early')).toHaveLength(1)
-    // invoke_subagent marks usage coverage partial.
     const resEvent = events.find((e) => e.stage === 'result')!
     expect((resEvent.runtimeMetadata as Record<string, unknown>)?.usageCoverage).toBe('partial')
-    // Native stream preserves raw unknown_update without maskSecrets.
     expect(nativeLines.join('\n')).toContain('raw-unmasked-AIzaSy12345678901234567890')
   })
 

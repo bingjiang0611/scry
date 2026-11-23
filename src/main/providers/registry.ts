@@ -38,7 +38,6 @@ export class ProviderRegistry {
     options: {
       disabledProviders?: ReadonlySet<ProviderId>
       runControlsEnabled?: boolean
-      /** 版本兼容性建议源；缺省表示不附带建议。 */
       compatibility?: (providerId: ProviderId, version: string | undefined) => ProviderCompatibilityAdvisory
     } = {}
   ) {

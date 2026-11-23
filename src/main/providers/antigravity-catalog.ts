@@ -359,7 +359,7 @@ export function createAntigravityCatalog(deps: {
         if (!exited) await forceKillAntigravityProcess(spawned.identityPromise)
       }
       // Remove only our temporary 0700 probe directory; never touch user ~/.gemini data (D5).
-      try { rmSync(probeDir, { recursive: true, force: true }) } catch { /* ignore */ }
+      try { rmSync(probeDir, { recursive: true, force: true }) } catch {  }
     }
   }
 

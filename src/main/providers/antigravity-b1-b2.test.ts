@@ -280,7 +280,6 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     }).promise
     expect(rFull.status).toBe('completed')
     const fullResult = fullEvents.find((e) => e.kind === 'harness' && e.stage === 'result')
-    // S8：不能降级记为 permissions.allow
     expect(String(fullResult?.runtimeMetadata?.effectivePermissionMode)).toMatch(/^full_access/)
   }, 15_000)
 

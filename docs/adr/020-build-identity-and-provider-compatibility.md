@@ -10,4 +10,6 @@ Distinguish intentionally disabled Providers from configured Providers whose ada
 
 Codex stdio launch files use single-quoted assignments and are read on each server start; retain them for that launch lifetime and clean them up afterward. HTTP header values go in the server environment and the CLI config contains references by name, not the values. Preserve the adapter's configured home when the launcher supplies a minimal environment.
 
+The Antigravity ACP client bounds each incoming stdio line to 16 MiB by default. Its frame parsing and handshake are live protocol evidence, separate from a registry version advisory.
+
 See [build-identity.ts](../../src/shared/build-identity.ts), [provider-compatibility.ts](../../src/shared/provider-compatibility.ts) and [provider.ts](../../src/shared/provider.ts).

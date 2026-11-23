@@ -99,7 +99,7 @@ function commandCanReturnAllowDecision(
         const realCandidate = realpathSync(candidate)
         if (!isWithinRealRoots(realCandidate, allowedRealRoots)) continue
         if (HOOK_ALLOW_DECISION_PATTERN.test(readFileSync(realCandidate, 'utf8'))) return true
-      } catch { /* ignore unreadable/non-file token */ }
+      } catch {  }
     }
   }
   return false
@@ -188,7 +188,7 @@ export function collectAllowCapablePreToolUseMatchers(
           if (entry.isSymbolicLink() || !entry.isDirectory()) continue
           matchers.push(...allowMatchersInHooksFile(join(pluginsDir, entry.name, 'hooks.json'), cwd, allowedRealRoots))
         }
-      } catch { /* ignore */ }
+      } catch {  }
     }
   }
   return [...new Set(matchers)]

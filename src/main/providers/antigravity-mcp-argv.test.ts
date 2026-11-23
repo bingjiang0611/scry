@@ -135,14 +135,12 @@ describe('A6: Antigravity MCP argv 零泄露与 run 级历史检索 token 撤销
     }, { NO_PROXY: 'corp.internal', PATH: '/usr/bin' })
 
     try {
-      // Merges shell baseEnv NO_PROXY instead of overwriting it with only process.env.
       expect(prepared.extraEnv?.NO_PROXY).toContain('corp.internal')
       expect(prepared.extraEnv?.NO_PROXY).toContain('127.0.0.1')
 
       const srv = prepared.mcpServers[0] as { url: string; headers: Array<{ name: string; value: string }> }
       const auth = srv.headers[0].value
 
-      // Rejects any Origin header (DNS rebinding / browser CSRF defense).
       const originRes = await fetch(srv.url, {
         method: 'POST',
         headers: { Authorization: auth, Origin: 'http://evil.example' },
@@ -150,7 +148,6 @@ describe('A6: Antigravity MCP argv 零泄露与 run 级历史检索 token 撤销
       })
       expect(originRes.status).toBe(403)
 
-      // Rejects mismatched Host header via raw http request.
       const parsedUrl = new URL(srv.url)
       const { request: httpRequest } = await import('node:http')
       const badHostStatus = await new Promise<number>((resolve, reject) => {

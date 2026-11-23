@@ -1,7 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import type { Readable, Writable } from 'node:stream'
 
-/** Hard per-line byte ceiling for ACP stdio framing (P7 §4.2). */
 export const ACP_MAX_LINE_BYTES = 16 * 1024 * 1024
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
 
@@ -254,7 +253,7 @@ export class AcpClient {
   /** Close stdin cleanly so `agy acp` flushes its session to disk and exits naturally. */
   closeStdin(): void {
     if (!this.stdin.destroyed && this.stdin.writable) {
-      try { this.stdin.end() } catch { /* ignore */ }
+      try { this.stdin.end() } catch {  }
     }
   }
 
