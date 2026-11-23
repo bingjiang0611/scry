@@ -15,8 +15,9 @@ import { useRemoteProjectGroups } from './SidebarRemoteProjects'
 import { useDesktopConnections } from '../hooks/useDesktopConnections'
 import { useRemoteCatalogs } from '../hooks/useRemoteCatalogs'
 import './archived-sessions.css'
-import { RemotePairing } from './RemotePairing'
 import { REMOTE_ACCESS_COPY as remoteCopy } from '../constants/copy'
+import { MACHINES_COPY } from '../constants/machines-copy'
+import { Button } from './primitives/Button'
 import type { AppTheme } from '../theme'
 import { ModalFrame, requestModalClose } from './ModalFrame'
 import { ArchivedChatsPanel } from './ArchivedChatsPanel'
@@ -34,14 +35,15 @@ export function SettingsModal({
   onThemeChange,
   onClose,
   onSessionsChanged,
-  onNewRemoteSession,
+  onOpenMachines,
   initialTab = 'appearance'
 }: {
   theme: AppTheme
   onThemeChange: (theme: AppTheme) => void
   onClose: () => void
   onSessionsChanged: () => void
-  onNewRemoteSession: (connectionId: string, cwd: string) => void
+  /** 远程访问整块已搬到侧栏「机器」；这里只留一行指引。 */
+  onOpenMachines: () => void
   initialTab?: SettingsTab
 }) {
   const titleId = useId()
@@ -90,7 +92,7 @@ export function SettingsModal({
           items={[
             { value: 'appearance', label: <><Icon name="settings" /> 外观</> },
             { value: 'archived', label: <><Icon name="archive" /> 已存档会话</>, count: archivedCount },
-            { value: 'remote', label: <><Icon name="globe" /> {remoteCopy.settingsTab}</> },
+            { value: 'remote', label: <><Icon name="globe" /> {remoteCopy.settingsTab} · {MACHINES_COPY.settingsMigratedTag}</> },
             { value: 'service', label: <><Icon name="server" /> 后台服务</> }
           ].map(item => ({ ...item, value: item.value as SettingsTab, id: `${titleId}-${item.value}-tab`, controls: `${titleId}-pane` }))}
         />
@@ -120,7 +122,11 @@ export function SettingsModal({
           ) : tab === 'service' ? (
             <BackgroundServiceSettings />
           ) : (
-            <RemotePairing onNewSession={onNewRemoteSession} />
+            <div className="settings-migrated">
+              <p className="settings-migrated-text">{MACHINES_COPY.settingsMigrated}</p>
+              <Button variant="primary" onClick={onOpenMachines}>{MACHINES_COPY.settingsOpenMachines}</Button>
+              <p className="settings-migrated-hint">{MACHINES_COPY.settingsHint}</p>
+            </div>
           )}
         </div>
       </div>

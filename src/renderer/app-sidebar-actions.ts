@@ -61,6 +61,7 @@ export function useAppSidebarActions(context: AppSidebarActionsContext) {
     onRevealProject: useEventCallback((project: ProjectMeta) => window.scry.revealProject(project.cwd)),
     onUndoArchive: useEventCallback(undoArchive),
     onAnalytics: useEventCallback(() => changeView('analytics')),
+    onMachines: useEventCallback(() => changeView('machines')),
     onLlmPerformance: useEventCallback(openLlmPerformance),
     onSkills: useEventCallback(openSkills),
     onMcp: useEventCallback(openMcp),

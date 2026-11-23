@@ -69,7 +69,7 @@ function VisibilityPollingFixture() {
   const textareaRef = useRef(null)
   useConnectedCatalogLoader([connection], null)
   return <>
-    <RemotePairing onNewSession={() => {}} />
+    <InboundDevices />
     {${visibilityPollingCheck} && <PollingSidebar />}
     <RemoteChat connectionId={connection.id} cwd="/fixture/project-a" draftStore={createComposerDraftStore(new Map(${visibilityPollingCheck} ? [[remoteDraftKey(connection.id, '/fixture/project-a'), { input: 'visibility draft', attachments: [] }]] : []))}
       queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}} scrollRef={scrollRef} textareaRef={textareaRef}

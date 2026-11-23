@@ -7,14 +7,14 @@ type AppShellModalsProps = Pick<
   | 'cwd' | 'integrations' | 'showLlmPerformance' | 'setShowLlmPerformance'
   | 'showSkills' | 'showMcp' | 'openSkills' | 'openMcp' | 'setShowSkills' | 'setShowMcp'
   | 'settingsTab' | 'setSettingsTab' | 'theme' | 'changeTheme'
-  | 'setArchiveUndo' | 'workspace' | 'openRemoteLocation'
+  | 'setArchiveUndo' | 'workspace' | 'openMachines'
 >
 
 export function AppShellModals(props: AppShellModalsProps): JSX.Element {
   const {
     cwd, integrations, showLlmPerformance, setShowLlmPerformance,
     showSkills, showMcp, openSkills, openMcp, setShowSkills, setShowMcp,
-    settingsTab, setSettingsTab, theme, changeTheme, setArchiveUndo, workspace, openRemoteLocation
+    settingsTab, setSettingsTab, theme, changeTheme, setArchiveUndo, workspace, openMachines
   } = props
   return (
     <>
@@ -48,7 +48,7 @@ export function AppShellModals(props: AppShellModalsProps): JSX.Element {
           theme={theme}
           onThemeChange={changeTheme}
           onSessionsChanged={() => { setArchiveUndo(null); workspace.loadProjects() }}
-          onNewRemoteSession={(connectionId, remoteCwd) => openRemoteLocation(connectionId, remoteCwd)}
+          onOpenMachines={openMachines}
           onClose={() => setSettingsTab(null)}
         />
       )}
