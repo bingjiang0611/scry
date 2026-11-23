@@ -130,7 +130,6 @@ private struct ListRowEntrance: ViewModifier {
 
 #if os(iOS)
 // Keep the system presenter, detents, interactive dismissal and accessibility.
-// iOS 17 deliberately retains its existing presentation, as agreed for this feature.
 private struct SourceZoom: ViewModifier {
   let id: AnyHashable
   let namespace: Namespace.ID

@@ -100,7 +100,6 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
   const [selectedTurnId, setSelectedTurnId] = useState<string | null>(null)
   const [notice, setNotice] = useState<string>()
   const [turns, setTurns] = useState<Turn[]>([])
-  /** Whether the mounted body currently shows the newest bounded window of this child. */
   const newestWindow = useRef(true)
   const [diffSelection, setDiffSelection] = useState<DiffReviewSelection | null>(null)
   // One-time seed from the local capability cache: a warm child shows real options
@@ -243,7 +242,6 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
   const setPermissionMode = useCallback((mode: AgentPermissionMode): void => {
     changeControls(current => ({ ...current, permissionMode: mode }))
   }, [changeControls])
-  // A side chat shares the frozen source workspace; it may not move to another one.
   const refuseWorkspaceChange = useCallback((): void => { setNotice(SIDE_CHAT_COPY.workspaceFixed) }, [])
 
   /**
@@ -294,8 +292,6 @@ export function useSideChatInstance({ conversation, agents, onOpenFile, renderLo
     onRunModel: setRunModel,
     onRunEffort: setRunEffort,
     onPermissionMode: setPermissionMode,
-    // Opening the model/effort picker is the explicit interaction that reads capability
-    // data; a cold child therefore still gets selectable options without a mount probe.
     onOpenRunControls: requestCatalog,
     onSelect: event => setSelectedTurnId(event.id),
     onOpenDiff: (turn, _snapshot, path) =>

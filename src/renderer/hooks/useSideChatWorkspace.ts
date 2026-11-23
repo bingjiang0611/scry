@@ -123,7 +123,6 @@ export function useSideChatWorkspace({
   const busy = useRef(false)
   const inFlight = useRef<string>()
 
-  /** Whether the parent this continuation started in is still the one on screen. */
   const fenceHolds = useCallback((pinnedScope: string, pinnedSource: string): boolean =>
     latest.current.scopeKey === pinnedScope && sideChatSourceKey(latest.current.source) === pinnedSource, [])
 
@@ -169,7 +168,6 @@ export function useSideChatWorkspace({
   }, [fenceHolds, mergeRecords])
 
   useEffect(() => {
-    // Only a semantic change revalidates: another scope, another source, other tab ids.
     void validateTabs()
   }, [scopeKey, sourceKey, openKey, api, validateTabs])
 

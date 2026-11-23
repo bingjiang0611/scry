@@ -278,7 +278,6 @@ actor RemoteFileDownloadSink {
   }
 }
 
-// Complete history download: paging, optional DEFLATE, snapshot verification.
 extension RemoteRunClient {
   // Complete, restart-stable history. No turn/item/text is clipped to a frame.
   // A currently running Mac conversation can change between pages; restart the

@@ -159,7 +159,6 @@ enum SessionRowAction: Equatable {
   case archive(Bool)
 }
 
-// Archived sessions keep their restore/delete controls in the existing sheet.
 struct ArchivedSessionRowView: View {
   let session: G0Transport.RunSessionRef
   let onRestore: () -> Void
