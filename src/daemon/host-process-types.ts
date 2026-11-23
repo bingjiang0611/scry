@@ -18,7 +18,6 @@ export interface DaemonHostProcessOptions {
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
   log?: (line: string) => void
   terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
-  /** Tests: inject a commit fault into the authoritative sink. */
   orchestrationBeforeCommitHook?: () => void
   /** Tests: pause deferred legacy backfill until resolved to verify live/backfill interleaving. */
   orchestrationPauseBackfill?: Promise<void>

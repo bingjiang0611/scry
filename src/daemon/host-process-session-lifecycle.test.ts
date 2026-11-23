@@ -35,14 +35,12 @@ describe('daemon session lifecycle', () => {
       expect(sessions().some((session) => session.externalSessionId === 'native-a')).toBe(true)
       const beforePurge = await daemon.request(localSubscription())
       expect((await daemon.localOp('sessionPurge', 'deleteArchivedSessions', [1])).result).toMatchObject({ ok: true, deleted: 1 })
-      // The purge's real count reaches the App's window through the subscription, in order.
       const purgeNotices = await daemon.request(localSubscription(beforePurge.subscribe))
       const progress = (purgeNotices.subscribe.hints as Array<{ kind: string; channel?: string; payload?: unknown }>)
         .filter((item) => item.kind === 'window' && item.channel === 'agent:deleteArchivedProgress').map((item) => item.payload)
       expect(progress).toEqual([{ done: 0, total: 1, failed: 0 }, { done: 1, total: 1, failed: 0 }])
       expect(sessions().some((session) => session.externalSessionId === 'native-a')).toBe(false)
 
-      // A single deletion; the App hears of it through the subscription.
       const handshake = await daemon.request(localSubscription())
       const deleted = await daemon.localOp('sessionLifecycle', 'deleteSession', [ref('native-b')])
       expect(deleted.error).toBeUndefined()

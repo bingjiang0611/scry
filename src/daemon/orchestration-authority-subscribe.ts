@@ -29,7 +29,6 @@ export interface AuthoritySubscribeRuntimeDeps {
   scans?: SubscribeEngineOptions['scans']
 }
 
-/** Creates the volatile hint hub and commit wakeup binding. */
 export function createAuthoritySubscribeHub(
   sink: EventSink,
   stateHints?: () => Array<{ kind: 'attention'; snapshot: SessionAttentionSnapshot }>
@@ -121,7 +120,6 @@ async function readRemoteDetailPage(
   return { kind: 'remoteHistory', history: reply.history as DesktopRemoteHistory }
 }
 
-/** Resolves history using the projected session identity. */
 export function createAuthorityDetailReader(
   historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>,
   readConversation: (id: string) => Promise<import('../shared/conversation-api').ConversationPage>
@@ -180,7 +178,6 @@ export type AppHint = Exclude<SubscribeHint, { kind: 'run' | 'window' }>
   | { kind: 'run'; runId: string }
   | { kind: 'window'; channel: string; payload: unknown }
 
-/** Publishes volatile hints alongside durable orchestration events (protocol §5.3). */
 export function forwardAppHintToSubscribeHub(
   hub: SubscribeHub,
   event: AppHint,

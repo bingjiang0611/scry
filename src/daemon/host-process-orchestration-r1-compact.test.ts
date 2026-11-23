@@ -47,7 +47,6 @@ describe('large legacy import and live runs after restart', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // in the historical ledger file before starting the first daemon.
     const seedLines: string[] = []
     let seq = 0
     const baseAt = Date.now() - 60_000
@@ -79,7 +78,6 @@ describe('large legacy import and live runs after restart', () => {
         log: () => undefined
       })
 
-      // Live submission remains available while legacy history imports.
       const device = await enrollLocal(host1.service)
       const sub1 = await call(host1.channel.socketPath, host1.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
@@ -98,7 +96,6 @@ describe('large legacy import and live runs after restart', () => {
       expect(existsSync(join(ledgerDir, 'session-ledger.snapshot.json'))).toBe(false)
       expect(readFileSync(legacyLog)).toEqual(original)
 
-      // The next daemon recovers the SQLite projection and accepts new work.
       host2 = await createDaemonHostProcess({
         userDataDir,
         daemonStateDirectory,

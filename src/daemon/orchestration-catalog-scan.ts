@@ -170,7 +170,6 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     if (provider !== 'claude' && provider !== 'pi') return
     const nativeSessionId = session.catalog ? session.catalog.nativeSessionId : session.sessionKey
     if (!nativeSessionId) return
-    // An imported row may name a directory that has since been removed.
     if (![...options.workspaces()].includes(cwd)) return
     const observed = lastObservation(sessionKey)
     const known = observed?.source.provider === provider && observed.source.nativeSessionId === nativeSessionId ? observed : undefined

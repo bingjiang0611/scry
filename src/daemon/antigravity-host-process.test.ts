@@ -140,7 +140,6 @@ describe('daemon host process + Antigravity fake ACP agent (不改 host-process.
           reason: 'antigravity 尚未提供可验证的历史输入交接'
         })
 
-        // 正常 daemon 直发链路（submit + subscribe）：完整跑通 fake ACP Agent 并产出输出块。
         const submitted = await req({
           op: 'submit',
           intentId: randomUUID(),

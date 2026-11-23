@@ -16,7 +16,6 @@ import { backgroundServiceLocalOps } from './local-ops/background-service'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
-// run controls bound to its live runs, and the App subscription. A paired device on the
 
 export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): LocalEndpointHandlers {
   const deps = { ...endpointDeps, links: endpointDeps.links ?? {} }

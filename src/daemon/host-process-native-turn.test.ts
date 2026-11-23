@@ -43,7 +43,6 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
       prompt, providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID(), ...extra
     })
     // The trace can finish before the host commits its terminal projection.
-    // The native composer waits for both the view and the terminal notice.
     const waitForTerminal = (runId: string) =>
       until(() => runtime.runView(runId)?.done === true ? terminalStops.get(runId) : undefined, 10_000)
     try {

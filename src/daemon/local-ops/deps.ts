@@ -44,7 +44,6 @@ export interface DaemonLocalEndpointDeps {
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   hostAdmin?: import('../host-admin-store').HostAdminStore
-  // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>

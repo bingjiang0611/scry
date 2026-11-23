@@ -127,13 +127,10 @@ export const SMOKE_FIXTURE_ENV = [
   'SCRY_CLI_PATH'
 ] as const
 
-/** Set by daemonLaunchEnvironment alone, and only on a hop it handed the fixture env to. */
 export const SMOKE_FIXTURE_HOP = 'SCRY_DAEMON_SMOKE_FIXTURE_HOP'
 
 export function smokeFixtureEnvironment(source: NodeJS.ProcessEnv, hop: 'app' | 'supervisor' = 'app'): NodeJS.ProcessEnv {
   if (source.SCRY_DAEMON_SMOKE_PROVIDER !== '1') return {}
-  // Each hop has its own proof: the App's is a test instance, the supervisor's is the
-  // marker the App's hop set. Neither stands in for the other.
   if (hop === 'app' ? source.SCRY_TEST_APP !== '1' : source[SMOKE_FIXTURE_HOP] !== '1') return {}
   const env: NodeJS.ProcessEnv = { [SMOKE_FIXTURE_HOP]: '1' }
   for (const key of SMOKE_FIXTURE_ENV) if (source[key] !== undefined) env[key] = source[key]
@@ -150,7 +147,6 @@ export function daemonLaunchEnvironment(input: {
   isPackaged: boolean
   startedBy: string
   launchedBy?: DaemonLaunchedBy
-  /** Which launch this is: the App starting a supervisor, or a supervisor its daemon. */
   hop?: 'app' | 'supervisor'
 }): NodeJS.ProcessEnv {
   const source = input.source ?? process.env

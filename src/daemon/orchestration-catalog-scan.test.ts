@@ -129,7 +129,6 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
       sink, homeDir, userDataDir, workspaces: () => [cwd],
       isActive: () => false, log: (message) => { throw new Error(message) }
     })
-    // Scry already lists this session; the scan only adds its transcript evidence.
     const seed = {
       sessionKey: 'known-session', provider: 'claude', profile: null, cwd,
       catalog: { nativeSessionId, projectCwd: null, preview: '先前的消息', runtimeProvider: 'claude_sdk' as const }
@@ -226,7 +225,6 @@ it('does not list a terminal transcript and withdraws the rows earlier builds li
         type, commandId, actor: 'system', scope: 'system', at: 10,
         payload, payloadSha256: sha256Hex(canonicalJson(payload))
       } as unknown as Parameters<typeof sink.execute>[0]).kind).toBe('accepted')
-    // What an earlier build's scan wrote: two external rows, one of which the user renamed.
     const external = (id: string) => ({
       sessionKey: `native:${id}`, provider: 'claude', cwd,
       catalog: { nativeSessionId: id, projectCwd: null, preview: null, runtimeProvider: 'claude_sdk' }
@@ -246,7 +244,6 @@ it('does not list a terminal transcript and withdraws the rows earlier builds li
     expect(access.read()?.map((row) => row.externalSessionId)).toEqual([ids[1]])
     expect(sink.listEvents().filter((event) => event.type === 'session.withdrawn').map((event) => event.sessionKey))
       .toEqual([`native:${ids[0]}`])
-    // A later scan neither brings the withdrawn row back nor lists the untouched transcript.
     const discoveredBefore = sink.listEvents().filter((event) => event.type === 'session.discovered' && event.sessionKey !== `native:${ids[1]}`).length
     await work.scanCatalog()
     expect(sink.listEvents().filter((event) => event.type === 'session.discovered' && event.sessionKey !== `native:${ids[1]}`)).toHaveLength(discoveredBefore)

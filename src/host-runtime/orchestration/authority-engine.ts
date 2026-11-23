@@ -51,9 +51,6 @@ export type AuthorityBeforeDispatchResult =
   | { ok: false; action: 'fail'; reason: string }
   | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
 
-/**
- * Authoritative orchestration engine.
- */
 export class AuthorityEngine {
   readonly sink: EventSink
   readonly #leaseOwner: string

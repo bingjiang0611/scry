@@ -257,7 +257,6 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
         workspace: { authorize: (c) => c },
         runProvider: async () => undefined,
         gate
-        // The synthetic cleanup host has no orchestration authority.
       },
       authority: { authorizesCertificate: () => true } as never,
       ledger,

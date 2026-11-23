@@ -112,7 +112,6 @@ describe('daemon host process', () => {
       })
       expect(conversations.error).toBeUndefined()
       expect(Array.isArray(conversations.result)).toBe(true)
-      // The App begins with the current snapshot and then reads daemon changes.
       const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription())
       expect(handshake.subscribe.hints).toEqual([{ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) }])
       const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {

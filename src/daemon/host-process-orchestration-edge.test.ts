@@ -142,7 +142,6 @@ describe('Authoritative daemon startup and legacy import', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Persist the large intent in the authoritative database.
     let run1Id = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -190,7 +189,6 @@ describe('Authoritative daemon startup and legacy import', () => {
       }
     })
 
-    // Settle a second run after a restart while the former setting is absent.
     let run2Id = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -220,7 +218,6 @@ describe('Authoritative daemon startup and legacy import', () => {
       }
     })
 
-    // Restart again and verify all three runs in the durable projection.
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,

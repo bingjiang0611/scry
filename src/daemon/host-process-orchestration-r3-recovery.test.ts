@@ -286,7 +286,6 @@ describe('W9 Blocker 3 + Blocker 4 + Must-Fix 10d: real recorder evidence recove
       })
       seedDispatchedRun(sink, runId, canonicalWs, conv.id)
 
-      // Attach Decision G before-settle observer (same contract orchestration-authority uses)
       const beforeSetter = (convStore as unknown as {
         setBeforeTurnSettledObserver?: (fn: (info: {
           conversationId: string

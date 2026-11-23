@@ -67,7 +67,6 @@ export function localSubscription(known?: SubscribeKnownCursor, waitMs = 0): Rec
   }
 }
 
-/** Observe one real daemon run using the v3 projection and cursor. */
 export async function waitForProjectedRun(
   socketPath: string, ca: string, cert: string, key: string, runId: string, waitMs = 5_000
 ): Promise<string> {

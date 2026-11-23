@@ -177,7 +177,6 @@ describe('daemon graceful dispose cleans up pooled provider private env director
 
       expect(elapsedMs).toBeLessThan(2_000)
       expect(logs.some((line) => line.includes('daemon.provider-dispose-timeout'))).toBe(true)
-      // The orchestration DB EXCLUSIVE lock must already be released even though provider shutdown timed out
       const reopened = EventSink.open({ userDataDir })
       reopened.close()
     } finally {

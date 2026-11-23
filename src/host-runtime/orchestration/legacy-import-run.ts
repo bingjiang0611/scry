@@ -6,7 +6,6 @@ import type { LegacyRunState } from './legacy-ledger-reader'
 import { deletedNativeSessionKey, findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 import { parseLedgerIntentRouting, type ParsedIntentRouting } from './shadow-routing'
 
-/** Resolve a legacy run against the current catalog and honor deletions within its import transaction. */
 function legacyImportSessionKey(sink: EventSink, routing: ParsedIntentRouting): string | null | undefined {
   const { sessionKey, cwd, provider, profile, isConversationRun } = routing
   if (sessionKey === null) return null
@@ -85,7 +84,6 @@ export function importSingleRun(
       {
         type: 'run.submit',
         commandId: run.intentId,
-        // H1 legacy files only persist scopedIntentId (not raw peerCertSHA256); see plan §9 rule 1.
         actor: 'system',
         scope: 'remote',
         at: run.intentAt,

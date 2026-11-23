@@ -138,7 +138,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
     observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
-    // The pipeline's volatile notices travel on the App subscription. The trace and questions
     renderer: {
       send: (channel, payload) => {
         if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated)

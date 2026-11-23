@@ -12,8 +12,6 @@ export function readSubscribedRuns(sink: EventSink, now: number, tracked?: strin
   })
   const db = sink.handle.db
   const cutoff = now - SUBSCRIBE_ACTIVE_RUN_RETENTION_MS
-  // Every non-terminal run is always included (a live run must never be pushed out
-  // of the snapshot by recent terminal ones); only the 24 h terminal tail is capped.
   const live = db
     .prepare(
       `SELECT * FROM orch_p_run

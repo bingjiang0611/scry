@@ -59,8 +59,6 @@ function projectAppSession(row: SessionProjectionRow, appRunId: string | null): 
 const nativeAppCatalog = `orch_p_session AS session
   LEFT JOIN orch_p_run AS run ON run.run_id = session.last_run_id AND run.session_key = session.session_key`
 
-/** Local sidebar rows come from the authority. The old file is still mirrored
- * for off/shadow startup and readers that have yet to migrate. */
 export function createOrchestrationCatalogAccess(getSink: () => EventSink | undefined, log = console.warn) {
   const readDetail: ReadProjectedHistorySession = (context, canonicalCwd) => {
     const sink = getSink()

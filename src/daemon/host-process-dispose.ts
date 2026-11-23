@@ -4,7 +4,6 @@ import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
-/** Attaches the daemon’s authoritative event log and subscription hub. */
 export async function attachHostProcessOrchestration<
   State extends RunRegistryState,
   Control extends RunRegistryControl

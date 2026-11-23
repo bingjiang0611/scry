@@ -22,7 +22,6 @@ function sizeOf(path: string): number | undefined {
   try { return statSync(path).size } catch { return undefined }
 }
 
-/** Rotates `daemon.log` when it has grown past `maxBytes`. Returns whether it rotated. */
 export function rotateDaemonLog(userDataDir: string, maxBytes = DAEMON_LOG_MAX_BYTES, keep = DAEMON_LOG_KEEP): boolean {
   const path = daemonLogPath(userDataDir)
   const size = sizeOf(path)
