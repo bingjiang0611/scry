@@ -65,7 +65,6 @@ checks.append(('model-list-has-no-fixed-ideal-height', '.fixedSize(horizontal: f
 checks.append(('effort-list-has-bounded-height', '.frame(height: effortListHeight)' in popover))
 checks.append(('model-rows-are-not-lazy', 'LazyVStack(spacing: 2)' not in popover))
 
-# The preview demonstrates model choices with plain synthetic IDs and labels.
 preview_ids = re.findall(r'modelId: "([^"]+)"', preview_providers)
 preview_models = re.findall(r'RunModelOption\(id: "([^"]+)"[^\n]+?label: "([^"]+)"', preview_providers)
 checks.append(('preview-default-models-are-placeholders',

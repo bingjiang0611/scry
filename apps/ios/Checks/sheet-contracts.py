@@ -113,6 +113,4 @@ with tempfile.TemporaryDirectory(prefix='scry-sheet-contracts-') as temporary:
     directory = Path(temporary)
     main = directory / 'main.swift'
     main.write_text('import Foundation\nenum G0Transport {\n' + question_types + control_types + '\n}\n' + turn + copy + fixtures)
-    # Foundation-only contracts can run directly in the installed Swift toolchain;
-    # they do not need a separately signed, temporary executable.
     subprocess.run(['xcrun', 'swift', '-swift-version', '6', str(main)], check=True)
