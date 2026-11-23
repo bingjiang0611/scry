@@ -111,7 +111,6 @@ final class ConnectTimingRecorder: @unchecked Sendable {
     return value
   }
 
-  // `cf-ray: 8c1f2e3d4a5b6c7d-NRT` -> "NRT".
   static func colo(fromRay ray: String?) -> String? {
     guard let ray, let dash = ray.lastIndex(of: "-") else { return nil }
     let colo = ray[ray.index(after: dash)...]

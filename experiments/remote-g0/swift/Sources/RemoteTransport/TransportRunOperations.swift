@@ -146,9 +146,6 @@ extension G0Transport {
     return outcome
   }
 
-  // The host-authorized project directories this device may target. Authorized
-  // by the granted cert + anchor-pinned inner TLS, exactly like every run op; a
-  // revoked device gets RunError.host(code: "device_not_authorized").
   public static func relayRunProjects(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunProjectRef] {
     let request = try JSONEncoder().encode(RunProjectsRequest())
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request), expectedTarget: endpoint.executionTarget)
@@ -172,8 +169,6 @@ extension G0Transport {
     return page
   }
 
-  // The Providers this device may target for a new session. Authorized exactly
-  // like every run op; a revoked device gets device_not_authorized.
   public struct RunProviderDiscovery: Sendable {
     public let providers: [RunProviderRef]
     public let capability: Int?
@@ -228,8 +223,6 @@ extension G0Transport {
     return commands
   }
 
-  // The host session catalog this device may browse. Authorized exactly like
-  // every run op; a revoked device gets device_not_authorized.
   public static func relayRunSessions(endpoint: RelayEndpoint, identity: G0ProbeIdentity) async throws -> [RunSessionRef] {
     let request = try JSONEncoder().encode(RunSessionsRequest())
     let response = try decodeRun(await exchangeRelay(endpoint: endpoint, mode: "run", identity: identity, request: request, lane: .bulk), expectedTarget: endpoint.executionTarget)

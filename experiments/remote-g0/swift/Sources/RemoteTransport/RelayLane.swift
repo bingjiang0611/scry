@@ -1,8 +1,6 @@
 import Foundation
 import NIOCore
 
-// One logical lane's tunnel: opening (direct first, then relay), reuse,
-// foreground keepalive, background direct upgrade and idle close.
 actor RelayLane {
   private let endpoint: G0Transport.RelayEndpoint
   private let identity: @Sendable () throws -> G0ProbeIdentity
@@ -19,7 +17,6 @@ actor RelayLane {
   // The host closes an idle serial tunnel after 30 s (75 s for current hosts);
   // close first so a request is never written into a tunnel about to drop.
   private static let idleSeconds: UInt64 = 20
-  // Foreground keepalive: look every 5 s, ping a tunnel silent for 15 s.
   static let keepAliveCheckNanos: UInt64 = 5_000_000_000
   static let keepAliveSilenceNanos: UInt64 = 15_000_000_000
   // A relay tunnel replaced by a direct one keeps serving the requests already
@@ -168,7 +165,6 @@ actor RelayLane {
 
   private func finishAdvertisementRefresh() {
     refreshing = false
-    // New routes are only useful if the tunnel that found them can move over.
     if connection?.route == "relay" { scheduleDirectUpgrade() }
   }
 
@@ -202,7 +198,6 @@ actor RelayLane {
   }
 
   private func discard(_ failed: LaneConnection, force: Bool = false) {
-    // A multiplexed tunnel that only timed one request out still serves others.
     if !force && failed.reusable { return }
     if failed.protocolMismatch { context.transport.forgetCapabilities() }
     failed.close()

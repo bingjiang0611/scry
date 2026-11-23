@@ -175,9 +175,6 @@ extension G0Transport {
   }
 }
 
-// Fulfils on TLS handshake completion (trust validated) or fails on the first
-// error / early close. This isolates the outer-TLS trust decision from any HTTP,
-// WebSocket or inner-TLS behaviour.
 private final class TLSHandshakeReporter: ChannelInboundHandler {
   typealias InboundIn = ByteBuffer
   private let promise: EventLoopPromise<String>

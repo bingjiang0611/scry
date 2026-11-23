@@ -5,12 +5,10 @@ import NIOSSL
 import NIOTLS
 
 // Persistent inner-mTLS tunnels for the post-pairing run channel.
-//
 // A one-shot exchange pays DNS + TCP + outer TLS + WebSocket upgrade + relay
 // rendezvous + inner TLS 1.3 mTLS for every request (measured ~2 s on a phone).
 // A tunnel keeps that cost to one open. The host still re-authorizes every
 // request against the verified peer certificate.
-//
 // Current hosts multiplex: requests carry an id, run concurrently and reply out
 // of order. Then control, the live-run watch and the live-run status share ONE
 // tunnel (a long-poll no longer holds it), and bulk reads (catalog, history,
@@ -18,7 +16,6 @@ import NIOTLS
 // foreground keeps both warm with a ping when they go silent instead of closing
 // them after 20 s, so a tap after a pause does not pay a cold open. Older hosts
 // keep the original four serial lanes, one outstanding request each.
-//
 // Retry rules are explicit, not error-string guesses:
 //   - Opening a tunnel may retry: no request byte has been sent yet, so a relay
 //     close (e.g. no free host leg) or a stale leg cannot have run anything. A
@@ -29,7 +26,6 @@ import NIOTLS
 //     keeps the outcome "unknown" and reconciles by intent/answer id.
 //   - Older hosts close after each reply. Only a reply starting with
 //     `{"keepAlive":true,` proves the host keeps the tunnel open.
-//
 // Before the relay, a tunnel first tries a direct route the host advertised
 // (its LAN or overlay address), which skips the relay entirely. The trust
 // decision is identical: inner TLS pins the host anchor either way.
@@ -107,11 +103,8 @@ public final class RelaySession: Sendable {
   // open concurrently. Errors are returned to the caller; a failed prewarm is
   // not evidence that the host is offline (unless the relay said so), and one
   // tunnel's failure must not cancel the other.
-  //
   // The relay's 4001 is the exception: both tunnels reach the same room, so the
   // first one to hear "Mac offline" is the answer and the caller gets it at
-  // once instead of waiting for the slower tunnel to repeat it (measured: the
-  // slower lane added 0.5-1.2 s to the offline answer on a long relay path).
   public func prewarm() async throws {
     let jobs: [@Sendable () async throws -> Void] = [Lane.control, Lane.bulk].map { name -> @Sendable () async throws -> Void in
       let lane = lanes[name]!

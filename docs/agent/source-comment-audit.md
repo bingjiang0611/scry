@@ -36,7 +36,7 @@
 
 ## Contextual reviews awaiting changes
 
-At `0714c3a4`, reviewed 515 lexical comment tokens in all 28 Swift files under `experiments/remote-g0/swift/Sources/RemoteTransport/`. This is a product dependency of both iOS targets despite its location. The SwiftPM manifest, probe executables and package tests were outside those two passes. The same pinned review covered 174 tokens across 12 `daemon-mode-*` smoke/timing scripts and 99 across 37 `desktop-remote*` JS/TS smoke scripts. A follow-up removed 60 redundant or stale tokens in 23 scripts. Comment-free emit and tool directives matched, and 45 targeted tests passed. The live smoke scenarios were not run. Transport cleanup and the remaining smoke follow-ups are not complete.
+At `0714c3a4`, reviewed 515 lexical comment tokens in all 28 Swift files under `experiments/remote-g0/swift/Sources/RemoteTransport/`. This is a product dependency of both iOS targets despite its location. Removed 33 redundant or historical tokens in ten files; SwiftParser found identical syntax tokens and `swiftc -frontend -parse` passed. The SwiftPM manifest, probe executables and package tests were outside those two passes. No package build, simulator, or live transport validation was run. The same pinned review covered 174 tokens across 12 `daemon-mode-*` smoke/timing scripts and 99 across 37 `desktop-remote*` JS/TS smoke scripts. A follow-up removed 60 redundant or stale tokens in 23 scripts. Comment-free emit and tool directives matched, and 45 targeted tests passed. The live smoke scenarios were not run. Transport ADR candidates and the remaining smoke follow-ups are not complete.
 
 ## Inventory and remaining work
 

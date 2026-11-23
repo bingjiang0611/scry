@@ -59,7 +59,6 @@ enum RemoteBootstrap {
     }
   }
 
-  // Plain connected channel with handlers installed before connect.
   static func connectChannel(host: String, port: Int, timeout: TimeAmount, posixGroup: EventLoopGroup? = nil,
                              initialize: @escaping @Sendable (Channel) throws -> Void) async throws -> Channel {
     try await connect(host: host, port: port, timeout: timeout, posixGroup: posixGroup) { channel -> EventLoopFuture<Channel> in
