@@ -18,7 +18,6 @@ import { memoryHistoryReaderSource, type HistoryReaderSource } from './conversat
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
-/** Quote, wrapper and escape overhead of one empty message on the wire; a lower bound. */
 const MIN_HANDOFF_ENVELOPE_BYTES = 350
 
 export { MAX_CONVERSATION_HISTORY_ARTIFACT_BYTES } from './conversation-history-limits'
@@ -37,17 +36,14 @@ interface HistoryArtifact {
   cwd: string
   messages: HistoryMessage[]
   omittedItemIds?: string[]
-  /** Absent in v1 and in v2 artifacts sealed before snapshot ranges existed. */
   omittedRanges?: OmittedItemRange[]
   omittedItemsHash?: string
   coverage?: string
   context: ProviderHistoricalContext
-  /** Includes the exact wrapper. A future formatter change cannot silently rewrite an old intent. */
   prefix: string
 }
 
 export function historyTextFor(messages: readonly HistoryMessage[], coverage?: string): string {
-  // JSON preserves role boundaries and code whitespace; metadata is main-owned, never parsed from prose.
   return JSON.stringify({ source: 'scry_archive_captured_text', ...(coverage ? { coverage } : {}), messages })
 }
 
@@ -56,17 +52,14 @@ function contextFor(messages: readonly HistoryMessage[], coverage?: string, requ
   return { text, contentHash: hash(text), ...(requiresReader ? { requiresReader: true as const } : {}) }
 }
 
-/** Selection, the sealed body, and the run's reader source. Omission is explicit. */
 export interface PreparedHandoff {
   selectedItems: ConversationItemRef[]
   history?: ContentRef
-  /** Every omitted item, in context order; the turn stores it in a compact ledger. */
   omitted?: ConversationItemRef[]
   reader?: HistoryReaderSource
   budget: HandoffBudgetInput
 }
 
-/** One bounded source read supplies selection, the sealed body, and the run's reader source. */
 export async function prepareConversationHandoff(
   userData: string,
   conversation: Conversation,
@@ -75,8 +68,6 @@ export async function prepareConversationHandoff(
   allowOmission: boolean,
   nativeTarget?: NativeHandoffTarget
 ): Promise<PreparedHandoff> {
-  // A manifest child's context lives in the snapshot, so its selection is derived from
-  // the descriptor even when no inline candidate is offered.
   if (conversation.sideChat?.snapshot.format === 4) {
     return selectSideChatHistory(userData, conversation, missingItems, input, allowOmission, nativeTarget?.bindingId)
   }
@@ -108,23 +99,13 @@ export async function prepareConversationHandoff(
 const omittedLedger = (items: readonly ConversationItemRef[], ranges: readonly OmittedItemRange[]): unknown =>
   ranges.length ? { items: items.map(conversationItemKey), ranges } : items.map(conversationItemKey)
 
-/** One candidate whose body is read only when the exact selection can still fit it. */
 interface FrozenCandidate {
   index: number
   role: 'user' | 'assistant'
-  /** Exact stored size; the escaped wire form is never smaller, so it bounds the cost. */
   bytes: number
   message?: HistoryMessage
 }
 
-/**
- * Select a frozen manifest child's history from metadata, then read only what fits.
- *
- * A big child omits thousands of messages and holds hundreds of MiB of text. Reading
- * every body just to decide would reintroduce the ceiling the manifest removed, so the
- * index supplies a lower bound per candidate, a body is read only while that bound still
- * fits, and the priority stays last user, last assistant, first user, then newest first.
- */
 async function selectSideChatHistory(
   userData: string,
   conversation: Conversation,
@@ -136,19 +117,14 @@ async function selectSideChatHistory(
   const snapshot = conversation.sideChat?.snapshot
   if (snapshot?.format !== 4) throw new Error('侧聊快照不是可按下标读取的清单格式')
   const root = conversationHistoryRoot(userData, conversation)
-  // A bounded inline plan cannot shrink the ledger: the ranges cover the manifest.
   const positions = sideChatContextPositions(conversation, bindingId).missing
-  // The child's own turns are not frozen positions; they still travel as ordinary refs.
   const others = missingItems.filter(item => sideChatSnapshotIndexOf(snapshot, item) < 0)
-  // Nothing left to hand off: a resumed binding already carries the whole snapshot, and
-  // a sealed artifact that claims otherwise would contradict the turn's own ledger.
   if (!positions.length && !others.length) return { selectedItems: [], budget: input }
   const { messages: rest, contextUsage } = others.length
     ? await readConversationHistoryMessages(userData, conversation, others) : { messages: [] as HistoryMessage[] }
   const budget = { ...input, ...(contextUsage ? { contextUsage } : {}) }
   const frozen: FrozenCandidate[] = []
   for (let start = 0; start < positions.length;) {
-    // Consecutive positions share index leaves; one read covers the run.
     let end = start + 1
     while (end < positions.length && positions[end] === positions[end - 1] + 1) end++
     const items = await readSideChatManifestItems(root, snapshot, positions[start], end - start)
@@ -182,7 +158,6 @@ async function selectSideChatHistory(
   const chosen: number[] = []
   const tryAdd = async (position: number): Promise<void> => {
     if (position < 0 || chosen.includes(position)) return
-    // The escaped envelope alone exceeds any budget this candidate could still fit.
     if (position < frozen.length && frozen[position].bytes + MIN_HANDOFF_ENVELOPE_BYTES > handoffBudget(budget)) return
     const ordered = [...chosen, position].sort((left, right) => left - right)
     if (await cost(ordered) <= handoffBudget(budget)) chosen.splice(0, chosen.length, ...ordered)
@@ -217,14 +192,11 @@ function rangeIndexes(range: OmittedItemRange): number[] {
   return Array.from({ length: range.to - range.from + 1 }, (_unused, offset) => range.from + offset)
 }
 
-/** Read-only preflight before converting a native conversation's ownership. */
 export async function assertConversationHistoryReadable(
   userData: string,
   conversation: Pick<Conversation, 'id' | 'cwd' | 'turns' | 'bindings' | 'fork' | 'sideChat'>,
   selectedItems: ConversationItemRef[]
 ): Promise<void> {
-  // Adoption preserves the full source. Selection and real tool readiness belong
-  // to Send, when the current prompt and target Provider are actually known.
   await readConversationHistoryMessages(userData, conversation, selectedItems)
 }
 
@@ -233,7 +205,6 @@ export async function readConversationHistoryItem(userData: string, conversation
   return message.text
 }
 
-/** Main supplies a decoded conversation and an ordered, already-authorized selection. */
 export async function prepareConversationHistory(
   userData: string,
   conversation: Conversation,
@@ -257,10 +228,6 @@ async function sealHistory(
   const context = contextFor(messages, coverage, omitted > 0)
   const artifact: HistoryArtifact = {
     version: 2, conversationId: conversation.id, cwd: conversation.cwd, messages,
-    // The ledger retains the exact IDs. Hash the ordered set here instead of
-    // repeating an unbounded omission manifest in the model's bootstrap input.
-    // Ranges seal the exact positions instead of one reference per frozen message;
-    // an empty range list keeps the original key-list form readable.
     omittedItemsHash: hash(JSON.stringify(omittedLedger(omittedItems, omittedRanges))),
     ...(omittedRanges.length ? { omittedRanges } : {}),
     coverage, context, prefix: historicalInputPrefix(context)
@@ -270,18 +237,12 @@ async function sealHistory(
   return writeRecorderContent(conversationHistoryRoot(userData, conversation), serialized, 'json')
 }
 
-/** Read-only v1 formatter; never rewrites an already frozen dispatch body. */
 function legacyCoverage(conversationId: string, messages: HistoryMessage[], omitted: string[]): string {
   const first = messages[0]?.ref.itemId ?? 'none'
   const last = messages.at(-1)?.ref.itemId ?? 'none'
   return `Scry context handoff. Conversation: ${conversationId}. Source item range: ${first} through ${last}. Omitted item IDs: ${omitted.length ? omitted.join(',') : 'none'}. Retrieve omitted complete items only through the verified Scry conversation history reader; paginate long items and require completeness before using them. Historical attachments, Provider reasoning, and native tool state are not replayed.`
 }
 
-/**
- * Reopens the sealed artifact, not mutable source archives. It never reconstructs
- * a missing body. Frozen side-chat items are validated against the child's own
- * snapshot metadata, not against a source conversation's turns.
- */
 export async function loadConversationHistory(
   userData: string,
   conversation: Conversation,

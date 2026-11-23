@@ -44,7 +44,6 @@ describe('batched archived turn projection', () => {
   it('reads one session once for every selected turn and never projects unrequested turns', async () => {
     const userDataDir = join(tempRoot(), 'userData')
     const args = { cwd, sessionId: 'session-1', userDataDir, providerId: 'pi' as const }
-    // Four unrelated turns already live in the session archive; a page asks for two.
     for (const [runId, ts] of [['unrelated-a', 1], ['wanted-a', 2], ['unrelated-b', 3], ['wanted-b', 4]] as const) {
       expect(upsertTraceArchiveTurn({ ...args, turn: { runId, userText: runId, items: [], done: true, ts } })).toBe(true)
     }
@@ -111,8 +110,6 @@ describe('batched archived turn projection', () => {
 
   it('projects the legacy whole-session archive for the requested turns only', async () => {
     const userDataDir = join(tempRoot(), 'userData')
-    // An archive written before per-turn segments: one file for the whole session. The
-    // indexed reader must fall back to it instead of reporting an empty history.
     const legacy = traceArchivePath(userDataDir, cwd, 'session-1', 'pi')
     mkdirSync(dirname(legacy), { recursive: true })
     writeFileSync(legacy, JSON.stringify({
@@ -134,7 +131,6 @@ describe('batched archived turn projection', () => {
 
   it('reads provider-turn-keyed segments without touching the unrelated one', async () => {
     const userDataDir = join(tempRoot(), 'userData')
-    // Claude/Qoder segments are keyed by the provider's own turn id, not by the run id.
     for (const [runId, providerTurnId] of [
       ['run-a', 'pt-a'], ['run-b', 'pt-b'], ['run-c', 'pt-c']
     ] as const) {

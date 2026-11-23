@@ -99,7 +99,6 @@ describe('run-scoped immutable history MCP reader', () => {
   it('refuses non-complete or mismatched snapshots instead of supplying fallback history', async () => {
     const source = item('original')
     source.text = 'changed'
-    // The bounded in-memory source refuses before any server starts.
     expect(() => createConversationHistoryReader([source])).toThrow('hash-matching')
     expect(() => createConversationHistoryReader([item('x'.repeat(4 * 1024 * 1024 + 1))])).toThrow('bounded')
     expect(() => createConversationHistoryReader([item('same'), item('same')])).toThrow('Duplicate')

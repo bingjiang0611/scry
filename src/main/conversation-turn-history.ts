@@ -6,22 +6,10 @@ import { readTraceArchiveTurnsAsync, type TraceArchiveTurn } from './transcript-
 
 type ConversationTurn = Conversation['turns'][number]
 
-/**
- * Batched archived-history projection for one visible conversation page.
- *
- * A page shows up to 40 turns that usually belong to one or two bindings. Reading the
- * whole native archive once per turn made a pure tab/page change reread the same
- * session up to 40 times, so requested run ids are grouped per binding and session and
- * read in one indexed pass. `readTraceArchiveTurnsAsync` already reads only the
- * canonical segments it was asked for; its own legacy-monolith fallback stays intact,
- * which is why an old archive still reports what it actually holds instead of a fake
- * empty history.
- */
 export function createConversationTurnLoader({
   userDataDir, readTurns = readTraceArchiveTurnsAsync
 }: {
   userDataDir: string
-  /** Injected for the batching regression; production always uses the indexed reader. */
   readTurns?: (args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId },
     runIds: readonly string[]) => Promise<TraceArchiveTurn[]>
 }): (conversation: Conversation, turns: readonly ConversationTurn[]) => Promise<Map<string, LoadedSessionTurn>> {
@@ -43,15 +31,10 @@ export function createConversationTurnLoader({
       try {
         archiveTurns = await readTurns(args, group.runIds)
       } catch {
-        // A corrupt archive is reported as unavailable history by the page projection,
-        // never as a turn that ran without content.
         return
       }
       const context = { userDataDir }
       for (const archiveTurn of archiveTurns) {
-        // Project one real archived turn at a time. The synthetic archive carries only
-        // provenance fields readTraceArchiveTurnsAsync already validated; no coverage
-        // marker is invented here.
         const projected = mergeSessionTurns([], {
           version: 3, cwd: conversation.cwd, sessionId: group.sessionId, providerId: group.providerId,
           turns: [archiveTurn]

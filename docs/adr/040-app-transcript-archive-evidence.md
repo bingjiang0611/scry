@@ -12,4 +12,6 @@ Keep canonical diff patches available through content references. Only the lates
 
 Test a body failure with otherwise valid sidecar stamps; a metadata-only check must not pass it. Cover archive replacement under an unchanged filename, partial discovery under a byte budget, and a write during catalog publication. The bounded capture regression performs a real read per turn, so its test timeout accommodates disk contention without reducing assertions.
 
+For a visible conversation page, group requested runs by native binding and session and read them in one indexed pass per group. Keep the monolithic fallback and match Provider-native turn IDs when that is the archive key. Report a corrupt archive as unavailable history, not a turn with zero content. A per-turn projection carries only provenance the archive reader verified.
+
 See [catalog publication](../../src/main/transcript-archive-catalog.ts), [archive capture](../../src/main/transcript-archive-capture.ts), [archive paging](../../src/main/transcript-archive-page.ts), and [history projection tests](../../src/main/session-history-page-projection.test.ts).

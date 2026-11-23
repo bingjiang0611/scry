@@ -18,7 +18,6 @@ const hash = (text: string): string => createHash('sha256').update(text, 'utf8')
 
 export type { HistoryMessage } from './conversation-history-content'
 
-/** Build immutable App-visible refs from the same complete-body extractor used for handoff. */
 export async function conversationItemsFromTrace(input: {
   userData: string
   conversation: Pick<Conversation, 'cwd'>
@@ -34,11 +33,6 @@ export async function conversationItemsFromTrace(input: {
   return refs
 }
 
-/**
- * One bounded read supplies handoff selection and provenance. A side chat resolves
- * its own frozen refs from its sealed snapshot; every other ref must resolve from a
- * source archive, so a missing body is an error and never empty history.
- */
 export async function readConversationHistoryMessages(
   userData: string,
   conversation: Pick<Conversation, 'id' | 'cwd' | 'turns' | 'bindings' | 'fork' | 'sideChat'>,
@@ -74,7 +68,6 @@ export async function readConversationHistoryMessages(
       for (let index = events.length - 1; index >= 0; index--) {
         const evidence = contextUsageEvidence(events[index])
         if (!evidence) continue
-        // Model changes invalidate both the old token count and old window.
         if (!nativeTarget.model || (nativeTarget.model.id === evidence.model &&
           (!nativeTarget.model.providerId || nativeTarget.model.providerId === evidence.provider))) {
           contextUsage = { usedTokens: evidence.used, maxTokens: evidence.window }
@@ -97,8 +90,6 @@ export async function readConversationHistoryMessages(
   const budget = historyReadBudget()
   const snapshotMessage = async (ref: ConversationItemRef): Promise<HistoryMessage | undefined> => {
     if (!conversation.sideChat || !belongsToSideChatSnapshot(conversation, ref)) return undefined
-    // Per-ref reads touch only the manifest leaves and body parts of this message, so
-    // asking for one frozen item never loads the rest of a large child history.
     return readSideChatSnapshotMessage(userData, conversation, ref)
   }
   const messages: HistoryMessage[] = []
@@ -122,8 +113,6 @@ export async function readConversationHistoryMessages(
       let text = ref.itemId === 'user' ? turn.userText : await turnAssistantText(userData, conversation, turn, budget)
       let contentHash = hash(text)
       if (ref.itemId === 'user' && contentHash !== ref.contentHash) {
-        // Old refs explicitly hashed the stripped projection. Honor that hash
-        // without treating a literal marker in new App-captured requests as metadata.
         const legacy = stripAttachmentMetadata(text)
         if (legacy !== text) {
           text = legacy
@@ -139,8 +128,6 @@ export async function readConversationHistoryMessages(
     }
   }
   if (nativeTarget && !contextUsage) {
-    // Visible captured text is only an estimate of hidden/native context. The
-    // separate instructions/tools reserve remains; this is not tokenizer evidence.
     contextUsage = { usedTokens: Buffer.byteLength(JSON.stringify(messages.filter(message => nativeKeys.has(conversationItemKey(message.ref))))) }
   }
   const requested = messages.filter(message => requestedKeys.has(conversationItemKey(message.ref)))

@@ -10,15 +10,12 @@ const MAX_REQUEST_BYTES = 4096
 const PAGE_CHARACTERS = 1024
 const MANIFEST_PAGE_ITEMS = 8
 
-/** Main-only, ephemeral authority. Never persist this token or expose it through preload. */
 export interface HistoryReaderConnection {
   url: string
   token: string
   snapshotId: string
 }
 
-// Native HTTP MCP clients inherit proxy variables. Keep the private capability
-// on loopback, preserving both existing exclusion lists across client conventions.
 export function historyReaderEnvironment(env: Readonly<Record<string, string>>): Record<string, string> {
   const noProxy = [env.NO_PROXY, env.no_proxy, '127.0.0.1'].filter(Boolean).join(',')
   return { ...env, NO_PROXY: noProxy, no_proxy: noProxy }
@@ -30,32 +27,20 @@ export interface HistoryReaderItem {
   source?: Pick<HistoryMessage, 'providerId' | 'nativeSessionId' | 'providerTurnId' | 'ordinal' | 'status' | 'delivery'>
 }
 
-/** Manifest-visible metadata of one authorized item; never its body. */
 export interface HistoryReaderEntry {
   id: string
   role: 'user' | 'assistant'
   contentHash: string
-  /** UTF-16 length, when the source knows it without reading the body. */
   characters?: number
   bytes: number
-  /** Provenance of an App-captured item; frozen snapshot items carry none. */
   source?: HistoryReaderItem['source']
 }
 
 export interface HistoryReaderPage extends HistoryReaderEntry {
-  /** A bounded page of the body, starting at the requested offset. */
   text: string
-  /** Offset to request next, in this source's own unit, or null when the item is complete. */
   nextOffset: number | null
 }
 
-/**
- * Where one run's omitted history comes from.
- *
- * The reader holds nothing itself: a frozen snapshot is read from its sealed manifest,
- * so neither the item list nor a body has to be resident. Offsets are opaque to the
- * model, so a source may count bytes or characters; it only has to echo them back.
- */
 export interface HistoryReader {
   connection: HistoryReaderConnection
   close: () => Promise<void>
@@ -94,12 +79,6 @@ async function requestBody(request: IncomingMessage): Promise<Record<string, unk
   return object(JSON.parse(Buffer.concat(chunks).toString('utf8')))
 }
 
-/**
- * In-memory source for conversation and archive omissions.
- *
- * Those items were already read to decide selection, so they are bounded by the request
- * that produced them. A frozen snapshot does not use this path: it pages its manifest.
- */
 export function memoryHistoryReaderSource(source: readonly HistoryReaderItem[]): HistoryReaderSource {
   let bytes = 0
   if (source.length > 4000) throw new Error('History reader exceeds the 2000-turn scope')
@@ -137,16 +116,10 @@ export function memoryHistoryReaderSource(source: readonly HistoryReaderItem[]):
   }
 }
 
-/** Bounded in-memory form, for callers that already hold the exact authorized bodies. */
 export function createConversationHistoryReader(items: readonly HistoryReaderItem[]): Promise<HistoryReader> {
   return openConversationHistoryReader(memoryHistoryReaderSource(items))
 }
 
-/**
- * A stateless Streamable HTTP MCP endpoint bound to one immutable authorized set.
- * No request can select a cwd, path, conversation, session, or a different run.
- * The caller must revoke it when that run settles; this is not an OS sandbox.
- */
 export async function openConversationHistoryReader(source: HistoryReaderSource): Promise<HistoryReader> {
   const snapshotId = randomUUID()
   const token = randomBytes(32).toString('hex')

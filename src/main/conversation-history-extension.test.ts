@@ -22,8 +22,6 @@ it('keeps the owned Pi reader off the environment proxy, rechecks active tools, 
   if (!address || typeof address === 'string') throw new Error('Missing fixture proxy address')
   const proxyUrl = `http://127.0.0.1:${address.port}`
   try {
-    // Only the host's schema constructors are stubbed. The shipped extension,
-    // HTTP client, proxy environment and reader server are executed unchanged.
     const executable = join(directory, 'probe.mjs')
     await build({
       stdin: { contents: `

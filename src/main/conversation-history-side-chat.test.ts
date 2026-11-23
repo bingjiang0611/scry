@@ -20,8 +20,6 @@ const conversationId = '33333333-3333-4333-8333-333333333333'
 const snapshotId = '44444444-4444-4444-8444-444444444444'
 const cwd = '/tmp/handoff-workspace'
 const COUNT = 400
-// One message is far larger than any handoff budget, so selection must skip it from
-// stored size alone instead of loading it.
 const HUGE_INDEX = 17
 const HUGE = `巨大消息${'内容'.repeat(1_500_000)}`
 const origin = { id: conversationId, cwd }
@@ -76,12 +74,10 @@ describe('frozen manifest handoff', () => {
     const prepared = await prepareConversationHandoff(userData, conversation, missing, { userText: 'continue', attachments: [] }, true)
     expect(prepared.selectedItems.length).toBeGreaterThan(0)
     expect(prepared.selectedItems.length).toBeLessThan(missing.length)
-    // The oversized message is omitted without ever being a selection candidate.
     const huge = missing.find(ref => ref.runId === sideChatSnapshotRunId(snapshotId, HUGE_INDEX))
     expect(prepared.omitted?.some(ref => conversationItemKey(ref) === conversationItemKey(huge!))).toBe(true)
     const split = splitOmittedItems(conversation, prepared.omitted ?? [])
     expect(split.items).toEqual([])
-    // Omitting almost every one of 400 messages stays one contiguous range.
     expect(split.ranges.length).toBeLessThanOrEqual(2)
     expect(prepared.reader?.count).toBe(prepared.omitted?.length)
   }, 60_000)
@@ -115,7 +111,6 @@ describe('frozen manifest handoff', () => {
     const prepared = await prepareConversationHandoff(userData, conversation, missing, { userText: 'continue', attachments: [] }, true)
     const calls = read.mock.calls.length
     read.mockRestore()
-    // The 400-message index alone costs ~13 leaf reads; every body read would add 400.
     expect(calls).toBeLessThan(80)
     expect(prepared.selectedItems.length + 60).toBeGreaterThan(calls)
   }, 60_000)
