@@ -145,7 +145,6 @@ struct ChatView: View {
     return run.hasConnection ? ConversationCopy.pairedMac : ConversationCopy.disconnected
   }
 
-  // Design A: this run's state in one line above the composer, most urgent first.
   private var status: SessionStatusLine? {
     if !paired { return .offline }
     if let focused = SessionStatusLine.focusedRun(run, onAnswer: { model.showRunQuestion = true },

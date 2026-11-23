@@ -169,7 +169,6 @@ extension View {
 
 // MARK: - Turns and session status
 
-// All sources use the same turn shell; only the evidence and reading strategy differ.
 private struct ConversationProviderKey: EnvironmentKey { static let defaultValue = "" }
 extension EnvironmentValues {
   var conversationProvider: String {
@@ -298,7 +297,6 @@ struct ConversationTurn {
     !["reasoning", "tool", "tool_result", "truncated"].contains(kind)
   }
 
-  /// Prose entries the page may split, in entry order.
   var splitCandidates: [ConversationMarkdownSplitCandidate] {
     ConversationBlock.group(entries).enumerated().compactMap { index, block in
       guard !block.isToolGroup else { return nil }
@@ -363,7 +361,6 @@ struct ConversationTurnRow<TurnID: Hashable>: View, Identifiable {
   }
 }
 
-// The source decides which evidence exists; the renderer never invents it.
 extension ConversationTurn {
   static func completed(_ turn: RemoteRunStore.CompletedLiveTurn) -> Self {
     Self(prompt: turn.prompt, attachments: turn.attachments,
