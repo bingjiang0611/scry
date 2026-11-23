@@ -42,8 +42,6 @@ export interface OlderHistoryDependencies {
 
 export function registerOlderHistoryHandler(deps: OlderHistoryDependencies): void {
   const { handleTrusted, getSessionHistoryCache, setSessionHistoryCache, getLoadSessionRevision, resolveKnownProjectDirectory, providerRegistry, pageWithHookCommands, markIncompleteArchivePage, sessionHistoryCacheKey } = deps
-  // 更早轮次的纯读取：不重做任何会话切换副作用（cwd / baseline / dock badge / resume）。
-  // revision 或 session 身份不匹配时返回 null：renderer 将它当作过期请求丢弃，而不是拼上错会话的轮次。
   handleTrusted('agent:loadSessionOlder', async (_e, payload: ProviderContext, request: SessionHistoryPageRequest) => {
     if (!payload.externalSessionId) return null
     const perf = new PerformanceTrace('session_history.load_older', { provider: payload.providerId })

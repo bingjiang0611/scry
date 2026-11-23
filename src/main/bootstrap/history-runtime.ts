@@ -13,20 +13,15 @@ type HistoryInternals = 'getLoadSessionAbortController' | 'setLoadSessionAbortCo
   'nextLoadSessionRevision' | 'getLoadSessionRevision' | 'getSessionHistoryCache' | 'setSessionHistoryCache' |
   'pageWithHookCommands' | 'markIncompleteArchivePage' | 'sessionHistoryCacheKey' | 'applySelection'
 
-// Main applies the window selection itself; the daemon passes its own `applySelection`
-// (a no-op) and reports the selection with the page for the App to apply.
 export type HistoryRegisterDependencies = Omit<LoadSessionDependencies, HistoryInternals> & (
   | { applySelection: LoadSessionDependencies['applySelection'] }
   | ({ applySelection?: undefined; getWindow: () => { isFocused: () => boolean } | null } & Omit<SessionSelectionTarget, 'isWindowFocused' | 'providerContextKey'>)
 )
 
-// Hook 命令附写只对当前页的事件做，而不是对整个会话的全部事件做。
 function pageWithHookCommands(
   page: SessionHistoryPage,
   hookConfig: ReturnType<typeof loadClaudeHookConfig> | null
 ): SessionHistoryPage {
-  // Only trim superseded cumulative session snapshots from the page crossing IPC.
-  // The archive and the main-side history cache keep the complete evidence.
   const projected = projectHistoryPageSnapshots(page)
   if (!hookConfig) return projected
   return {
@@ -54,8 +49,6 @@ function markIncompleteArchivePage(page: SessionHistoryPage, issue: string | und
 export function createHistoryRuntime() {
   let loadSessionRevision = 0
   let loadSessionAbortController: AbortController | null = null
-  // 已加载会话的单条历史缓存：翻页复用归一化事件，但附件只在页越过 IPC 前读取。
-  // 这把图片 I/O/base64 与常驻内存限制在可见页；事件源仍完整解析，后续由源级索引继续收窄。
   let sessionHistoryCache: SessionHistoryCache | null = null
 
   function invalidateSessionHistoryLoad(reason: string): void {
@@ -69,8 +62,6 @@ export function createHistoryRuntime() {
     const applySelection = deps.applySelection ?? ((selection) => applySessionSelection({
       ...deps, providerContextKey: deps.providerContextKey, isWindowFocused: () => Boolean(deps.getWindow()?.isFocused())
     }, selection))
-    // Daemon mode: the daemon loads the page and reports the selection; this window applies
-    // it here, exactly as the in-process loader would have, and the renderer gets the page.
     if (!deps.applySelection && daemonModeEnabled()) {
       installDaemonChannelResultHandler('agent:loadSession', (value) => {
         if (value === null) return null
