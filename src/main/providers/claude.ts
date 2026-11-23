@@ -38,6 +38,7 @@ import type { McpLiveStatus } from '../../shared/trace'
 import type { AuthorizedMcpExecution, ProviderAdapter, ProviderRunRequest } from './types'
 import { HistoricalInput } from './historical-input'
 import { HISTORY_READER_SERVER, historyReaderEnvironment } from '../conversation-history-reader'
+import { createClaudeOrchestratorMcpServer, ORCHESTRATOR_MCP_SERVER_NAME } from './orchestrator-mcp-sdk'
 import { effortOption, permissionOptions } from './run-controls'
 import { sanitizeMcpAuthError } from './mcp-auth-security'
 import { writePrivateMcpConfig } from './private-mcp-config'
@@ -322,6 +323,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
     runtimeProvider: 'claude_sdk',
     historicalContext: true,
     historyReader: true,
+    orchestrationTools: true,
     continuationKey: (context) => {
       const env = claudeRuntimeEnv()
       if (!env.HOME) throw new Error('Claude runtime HOME 不可用，无法确认接续身份')
@@ -398,9 +400,10 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       const history = new HistoricalInput(request)
       const prompt = history.text(request.prompt)
       const mcpServers = { ...authorizedMcpServers(request.mcpExecution) }
-      if (request.expectedContinuationKey || request.historyReader) {
+      if (request.expectedContinuationKey || request.historyReader || request.orchestrationTools) {
         try {
           if (request.historyReader && mcpServers[HISTORY_READER_SERVER]) throw new Error('仓库 MCP 名称与 App 历史检索服务冲突')
+          if (request.orchestrationTools && mcpServers[ORCHESTRATOR_MCP_SERVER_NAME]) throw new Error('仓库 MCP 名称与 App 编排服务冲突')
           if (request.expectedContinuationKey) {
             if (!env.HOME) throw new Error('Claude runtime HOME 不可用，输入未投递')
             const identity = claudeContinuationKey({ providerId: 'claude', cwd: request.cwd, agentProfileId: request.agentProfileId },
@@ -422,6 +425,9 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
       }
       if (request.historyReader) mcpServers[HISTORY_READER_SERVER] = {
         type: 'http', url: request.historyReader.url, headers: { Authorization: `Bearer ${request.historyReader.token}` }
+      }
+      if (request.orchestrationTools?.kind === 'in_process') {
+        mcpServers[ORCHESTRATOR_MCP_SERVER_NAME] = createClaudeOrchestratorMcpServer(request.orchestrationTools.callTool) as unknown as Record<string, unknown>
       }
       const handle = runAgent(
         prompt,

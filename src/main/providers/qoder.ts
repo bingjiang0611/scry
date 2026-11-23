@@ -34,6 +34,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
     id: 'qoder',
     runtimeProvider: 'qoder_cli',
     historicalContext: true,
+    orchestrationTools: true,
     continuationKey: (context) => qoderContinuationKey(context, homeDir, qoderExecutable()),
     describe: async () => {
       const path = executable()
