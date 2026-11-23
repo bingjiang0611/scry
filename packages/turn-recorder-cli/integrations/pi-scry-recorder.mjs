@@ -183,8 +183,6 @@ function pinnedCliPath(workspace) {
   }
 }
 
-// 工作区把要用的 CLI 绝对路径写在 .scry/cli-path（`scry init`/`repair` 写入，provider hook 也读它）。
-// 固定猜 ~/.local/bin/scry 会在多份安装并存时静默用错版本，所以固定路径必须先于猜测。
 function executable(workspace) {
   const configured = process.env.SCRY_CLI_PATH
   if (configured !== undefined) return resolveExecutable(configured, 'configured SCRY_CLI_PATH')
