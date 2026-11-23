@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import type { AgentPermissionMode } from '../shared/runtime-types'
 import type { Evidence } from '../shared/turn-record-contracts'
 import type { DelegatedTaskView } from '../shared/delegation'
 import type { OrchestrationToolsAttachment } from '../main/providers/types'
+import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import type { ChildUsageSample } from '../host-runtime/orchestration/delegation-evidence'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { TaskProjectionRow } from '../host-runtime/orchestration/types'
@@ -120,5 +122,46 @@ export function verifyDelegatedChildPreDispatch(deps: {
     permissionCeilingViolated: fullAccessViolation,
     projectDelegationDisabled: !sink.isProjectDelegationEnabled(task.cwd),
     repoFingerprintMatchesUserRun: baselineOk.ok
+  })
+}
+
+export function recordDelegatedChildRunStep(
+  sink: EventSink,
+  clock: () => number,
+  childRunId: string,
+  step: 'admitted_and_dispatched' | 'settled' | 'failed' | 'cancelled' | 'interrupted',
+  reason?: string
+): void {
+  if (sink.isWriteIndeterminate()) return
+  const payload = { runId: childRunId, step, ...(reason ? { reason } : {}), evidence: ['host.run_completion'] }
+  sink.execute({
+    type: 'run.effect_result',
+    commandId: `child-run:${childRunId}:${step}:${randomUUID().slice(0, 8)}`,
+    actor: 'system',
+    scope: 'system',
+    at: clock(),
+    payload,
+    payloadSha256: sha256Hex(canonicalJson(payload))
+  })
+}
+
+export function settleDelegatedTask(
+  sink: EventSink,
+  clock: () => number,
+  taskId: string,
+  status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'unavailable',
+  summary: Evidence<string>,
+  reason?: string
+): void {
+  if (sink.isWriteIndeterminate()) return
+  const payload = { taskId, status, summary, ...(reason ? { reason } : {}) }
+  sink.execute({
+    type: 'task.settle',
+    commandId: `task-settle:${taskId}:${status}:${randomUUID().slice(0, 8)}`,
+    actor: 'system',
+    scope: 'system',
+    at: clock(),
+    payload,
+    payloadSha256: sha256Hex(canonicalJson(payload))
   })
 }

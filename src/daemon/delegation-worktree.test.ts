@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { DaemonDelegationRuntime } from './delegation-runtime'
+import { computePortableMcpTrustFingerprint } from './delegation-host-wiring'
 import { createDelegatedWorktreePreparer } from './delegation-worktree'
 
 const PEER_A = `peer:${'c'.repeat(64)}`
@@ -72,7 +73,8 @@ describe('P6-4 worktree isolation for delegated tasks', () => {
     const seenCwds: string[] = []
     const runtime = new DaemonDelegationRuntime({
       sink,
-      currentTrustFingerprint: () => 'fp-clean',
+      // B1 regression: use real `buildMcpExecutionSnapshot` via `computePortableMcpTrustFingerprint`
+      currentTrustFingerprint: (provider, cwd) => computePortableMcpTrustFingerprint(provider as 'qoder', cwd, root),
       hasLocalSubscriber: () => true,
       requestRunStop: () => true,
       prepareChildWorktree: createDelegatedWorktreePreparer({ userDataDir, authorizeDirectory: (d) => d }),
@@ -164,6 +166,65 @@ describe('P6-4 worktree isolation for delegated tasks', () => {
       approved: true
     })
     expect(confirmed).toMatchObject({ ok: false, status: 'failed', reason: 'trust_gate_rejected' })
+    expect(existsSync(createdWtCwd)).toBe(false)
+    expect(sink.countNonTerminalAgentRuns()).toBe(0)
+    prep.cleanup()
+  })
+
+  it('B4: cancels and cleans up worktree if stopSessionSubtasks arrives during async worktree preparation', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'scry-p6-4-wt-race-'))
+    tempDirs.push(root)
+    const userDataDir = join(root, 'userdata')
+    mkdirSync(userDataDir, { recursive: true })
+    const repoCwd = initGitRepo(root)
+
+    const sink = EventSink.open({ userDataDir, authorizedActors: [PEER_A], fullfsync: false, checkpointFullfsync: false })
+    sinks.push(sink)
+    const { runId, sessionKey } = submitParent(sink, repoCwd)
+
+    const basePreparer = createDelegatedWorktreePreparer({ userDataDir, authorizeDirectory: (d) => d })
+    let releasePrep!: () => void
+    const prepGate = new Promise<void>((r) => { releasePrep = r })
+    let createdWtCwd = ''
+
+    const runtime = new DaemonDelegationRuntime({
+      sink,
+      currentTrustFingerprint: (provider, cwd) => computePortableMcpTrustFingerprint(provider as 'qoder', cwd, root),
+      hasLocalSubscriber: () => true,
+      requestRunStop: () => true,
+      prepareChildWorktree: async (input) => {
+        const wt = await basePreparer(input)
+        createdWtCwd = wt.cwd
+        await prepGate
+        return wt
+      },
+      dispatchChildRun: async () => { throw new Error('must not dispatch cancelled worktree') }
+    })
+    runtimes.push(runtime)
+    runtime.setProjectPolicy(PEER_A, { cwd: repoCwd, enabled: true })
+
+    const prep = await runtime.prepareRunOrchestration({
+      runId, canonicalRunId: runId, providerId: 'qoder', cwd: repoCwd, sessionKey, permissionMode: 'default', via: 'local'
+    })
+    if (prep.orchestrationTools?.kind !== 'in_process') throw new Error('expected in_process')
+
+    await prep.orchestrationTools.callTool('scry_task_delegate', {
+      task: '准备期间被停止',
+      isolation: 'worktree',
+      clientRequestId: 'wt-race'
+    })
+    const task = runtime.getState({ cwd: repoCwd, parentSessionKey: sessionKey }).tasks[0]!
+    const confirmPromise = runtime.confirmTask(PEER_A, {
+      taskId: task.taskId,
+      questionId: task.confirmationQuestionId!,
+      approved: true
+    })
+    await vi.waitFor(() => { expect(createdWtCwd).not.toBe('') })
+    runtime.stopSessionSubtasks(PEER_A, { parentSessionKey: sessionKey, reason: 'stop during prep' })
+    releasePrep()
+
+    const res = await confirmPromise
+    expect(res).toMatchObject({ ok: false, status: 'cancelled' })
     expect(existsSync(createdWtCwd)).toBe(false)
     expect(sink.countNonTerminalAgentRuns()).toBe(0)
     prep.cleanup()

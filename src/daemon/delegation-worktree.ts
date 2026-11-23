@@ -3,7 +3,11 @@ import { mkdir, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ScGit } from '../main/source-control/git'
 import { ScProcess } from '../main/source-control/process'
-import { cleanupAbortedWorkspaceWorktree, createWorkspaceWorktree } from '../main/source-control/workspace-git'
+import {
+  assertWorkspaceCheckoutSafe,
+  cleanupAbortedWorkspaceWorktree,
+  createWorkspaceWorktree
+} from '../main/source-control/workspace-git'
 
 export interface DelegatedWorktreeHandle {
   cwd: string
@@ -18,19 +22,27 @@ export interface DelegatedWorktreePreparerOptions {
 
 /**
  * P6-4 worktree isolation for delegated tasks:
- * Reuses `createWorkspaceWorktree` and `cleanupAbortedWorkspaceWorktree` from `workspace-git.ts`.
- * Creates an isolated worktree at `<userDataDir>/worktrees/<repoHash>/delegated-<taskPrefix>`.
+ * Reuses `assertWorkspaceCheckoutSafe`, `createWorkspaceWorktree`, and `cleanupAbortedWorkspaceWorktree`
+ * from `workspace-git.ts`. Enforces `authorizeDirectory` on both `sourceCwd` and `identity.root` (B3).
  */
 export function createDelegatedWorktreePreparer(options: DelegatedWorktreePreparerOptions) {
   const proc = new ScProcess()
   const git = new ScGit(proc, options.authorizeDirectory)
 
   return async (input: { sourceCwd: string; taskId: string }): Promise<DelegatedWorktreeHandle> => {
-    const identity = await git.identity(input.sourceCwd)
+    // B3: explicitly authorize both sourceCwd and resolved git root so a nested subdir cannot check out an unauthorized parent repo.
+    const authorizedSource = options.authorizeDirectory(input.sourceCwd)
+    const identity = await git.identity(authorizedSource)
+    options.authorizeDirectory(identity.root)
+
     const head = (await git.run(identity.root, ['rev-parse', 'HEAD'])).trim()
     if (!head) throw new Error('delegated_worktree_no_head')
 
-    const safePrefix = input.taskId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 12) || 'task'
+    // B3: block .gitattributes smudge/clean/process filters and submodules before checkout.
+    await assertWorkspaceCheckoutSafe(git, identity, head)
+
+    const shortHash = createHash('sha256').update(input.taskId).digest('hex').slice(0, 8)
+    const safePrefix = `${input.taskId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 8) || 'task'}-${shortHash}`
     const repoHash = createHash('sha256').update(identity.commonDir).digest('hex')
     const root = await realpath(options.userDataDir)
     const repoDir = join(root, 'worktrees', repoHash)
@@ -40,15 +52,19 @@ export function createDelegatedWorktreePreparer(options: DelegatedWorktreePrepar
     const branch = `scry-delegated-${safePrefix}`
     const branchRef = `refs/heads/${branch}`
 
-    await createWorkspaceWorktree(git, identity, worktreePath, branch, head)
-    const canonicalCwd = await realpath(worktreePath)
-
-    return {
-      cwd: canonicalCwd,
-      branch,
-      cleanup: async () => {
-        await cleanupAbortedWorkspaceWorktree(git, identity, canonicalCwd, branchRef, head, options.userDataDir)
+    try {
+      await createWorkspaceWorktree(git, identity, worktreePath, branch, head)
+      const canonicalCwd = await realpath(worktreePath)
+      return {
+        cwd: canonicalCwd,
+        branch,
+        cleanup: async () => {
+          await cleanupAbortedWorkspaceWorktree(git, identity, canonicalCwd, branchRef, head, options.userDataDir)
+        }
       }
+    } catch (error) {
+      await cleanupAbortedWorkspaceWorktree(git, identity, worktreePath, branchRef, head, options.userDataDir).catch(() => undefined)
+      throw error
     }
   }
 }

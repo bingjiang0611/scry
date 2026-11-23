@@ -19,6 +19,8 @@ import { OrchestratorMcpHttpServer } from '../host-runtime/orchestration/orchest
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { isTerminalTaskStatus } from '../host-runtime/orchestration/types'
 import {
+  recordDelegatedChildRunStep,
+  settleDelegatedTask,
   toDelegatedTaskView,
   verifyDelegatedChildPreDispatch,
   type ChildRunDispatchInput,
@@ -286,12 +288,25 @@ export class DaemonDelegationRuntime {
         const preparedWt = await this.#prepareChildWorktree({ sourceCwd: task.cwd, taskId: task.taskId })
         executionCwd = preparedWt.cwd
         worktreeCleanup = preparedWt.cleanup
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'worktree_prepare_failed'
-        this.#recordChildRunStep(childRunId, 'failed', reason)
-        this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, 'worktree_prepare_failed'), reason)
-        return { ok: false, status: 'failed', reason }
+      } catch {
+        this.#recordChildRunStep(childRunId, 'failed', 'worktree_prepare_failed')
+        this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, 'worktree_prepare_failed'), 'worktree_prepare_failed')
+        return { ok: false, status: 'failed', reason: 'worktree_prepare_failed' }
       }
+    }
+
+    // B4: after async worktree preparation, recheck runtime close, task terminal state, and child stop request.
+    const latestTask = this.#sink.getTask(task.taskId)
+    const latestChildRun = this.#sink.getRun(childRunId)
+    if (this.#closed || !latestTask || isTerminalTaskStatus(latestTask.status) || latestChildRun?.stopState === 'requested') {
+      await worktreeCleanup?.().catch(() => undefined)
+      if (!this.#closed && latestChildRun && !['settled', 'failed', 'cancelled', 'interrupted'].includes(latestChildRun.lifecycle)) {
+        this.#recordChildRunStep(childRunId, 'cancelled', 'cancelled_before_dispatch')
+      }
+      if (!this.#closed && latestTask && !isTerminalTaskStatus(latestTask.status)) {
+        this.#settleTask(task.taskId, 'cancelled', buildTaskSummaryEvidence(null, 'cancelled_before_dispatch'), 'cancelled_before_dispatch')
+      }
+      return { ok: false, status: 'cancelled', reason: 'cancelled_before_dispatch' }
     }
 
     const recheck = verifyDelegatedChildPreDispatch({
@@ -299,22 +314,30 @@ export class DaemonDelegationRuntime {
       credentials: this.#credentials,
       baselineStore: this.#baselineStore,
       currentTrustFingerprint: this.#currentTrustFingerprint,
-      task,
+      task: latestTask,
       executionCwd
     })
     if (!recheck.ok) {
       await worktreeCleanup?.().catch(() => undefined)
-      // B4: transition child run to terminal failed so orch_p_run does not leak maxHostAgentRuns quota.
       this.#recordChildRunStep(childRunId, 'failed', recheck.reason)
       this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, recheck.reason), recheck.reason)
       return { ok: false, status: 'failed', reason: recheck.reason }
     }
 
-    // B4: drive child run into admitted+dispatched before launching provider so orch_p_task becomes running and L4 won't void it.
+    // B4: read task prompt BEFORE transitioning child run to admitted_and_dispatched so a corrupt body never leaks quota or worktree.
+    let prompt: string
+    try {
+      prompt = latestTask.body ? this.#sink.bodyStore.readBody(latestTask.body).toString('utf8') : (latestTask.title ?? '')
+    } catch {
+      await worktreeCleanup?.().catch(() => undefined)
+      this.#recordChildRunStep(childRunId, 'failed', 'task_body_unreadable')
+      this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, 'task_body_unreadable'), 'task_body_unreadable')
+      return { ok: false, status: 'failed', reason: 'task_body_unreadable' }
+    }
+
     this.#recordChildRunStep(childRunId, 'admitted_and_dispatched')
-    const prompt = task.body ? this.#sink.bodyStore.readBody(task.body).toString('utf8') : (task.title ?? '')
     this.#activeChildRunIds.add(childRunId)
-    void this.#runAndSettleChild({ task, childRunId, childSessionKey, executionCwd, prompt })
+    void this.#runAndSettleChild({ task: latestTask, childRunId, childSessionKey, executionCwd, prompt })
     return { ok: true, status: 'running' }
   }
 
@@ -323,22 +346,7 @@ export class DaemonDelegationRuntime {
     step: 'admitted_and_dispatched' | 'settled' | 'failed' | 'cancelled' | 'interrupted',
     reason?: string
   ): void {
-    if (this.#closed || this.#sink.isWriteIndeterminate()) return
-    const payload = {
-      runId: childRunId,
-      step,
-      ...(reason ? { reason } : {}),
-      evidence: ['host.run_completion']
-    }
-    this.#sink.execute({
-      type: 'run.effect_result',
-      commandId: `child-run:${childRunId}:${step}:${randomUUID().slice(0, 8)}`,
-      actor: 'system',
-      scope: 'system',
-      at: this.#clock(),
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
-    })
+    if (!this.#closed) recordDelegatedChildRunStep(this.#sink, this.#clock, childRunId, step, reason)
   }
 
   async #runAndSettleChild(input: ChildRunDispatchInput): Promise<void> {
@@ -373,22 +381,8 @@ export class DaemonDelegationRuntime {
     summary: Evidence<string>,
     reason?: string
   ): void {
-    if (this.#closed || this.#sink.isWriteIndeterminate()) return
-    const payload = {
-      taskId,
-      status,
-      summary,
-      ...(reason ? { reason } : {})
-    }
-    this.#sink.execute({
-      type: 'task.settle',
-      commandId: `task-settle:${taskId}:${status}:${randomUUID().slice(0, 8)}`,
-      actor: 'system',
-      scope: 'system',
-      at: this.#clock(),
-      payload,
-      payloadSha256: sha256Hex(canonicalJson(payload))
-    })
+    if (this.#closed) return
+    settleDelegatedTask(this.#sink, this.#clock, taskId, status, summary, reason)
     this.#onTaskChanged?.()
   }
 

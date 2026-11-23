@@ -1,12 +1,40 @@
+import { createHash } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { relative } from 'node:path'
 import type { ProviderId } from '../shared/provider'
 import type { AgentPermissionMode, AgentStartRequest } from '../shared/runtime'
 import { buildMcpExecutionSnapshot } from '../main/mcp-execution-trust'
+import { canonicalJson } from '../host-runtime/orchestration/canonical-json'
 import type { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import type { RunHost } from '../main/bootstrap/run-host'
 import { DaemonDelegationRuntime } from './delegation-runtime'
 import { createDelegatedWorktreePreparer } from './delegation-worktree'
+
+/**
+ * B1: Computes a cwd-path-independent content fingerprint from `buildMcpExecutionSnapshot`
+ * so a delegated worktree with identical MCP configs & executables matches the source cwd baseline.
+ */
+export function computePortableMcpTrustFingerprint(provider: ProviderId, cwd: string, homeDir = homedir()): string {
+  const snapshot = buildMcpExecutionSnapshot({ providerId: provider, cwd, homeDir })
+  if (!snapshot) return 'empty'
+  let canonicalCwd = cwd
+  try { canonicalCwd = realpathSync(cwd) } catch { /* keep cwd */ }
+  const normalizedTargets = snapshot.targets.map((t) => {
+    const relSource = t.sourcePath ? relative(canonicalCwd, t.sourcePath) : ''
+    const portableSource = relSource && !relSource.startsWith('..') ? `cwd:${relSource}` : (t.sourcePath ?? '')
+    return {
+      name: t.name,
+      enabled: t.enabled,
+      portableSource,
+      config: t.config,
+      executableDigest: t.executableDigest ?? null,
+      executableIdentity: t.executableIdentity ?? null
+    }
+  }).sort((a, b) => `${a.portableSource}:${a.name}`.localeCompare(`${b.portableSource}:${b.name}`))
+  return createHash('sha256').update(canonicalJson({ provider, targets: normalizedTargets })).digest('hex')
+}
 
 export function prepareHostRunOrchestration(
   getRuntime: () => DaemonDelegationRuntime | undefined
@@ -44,9 +72,8 @@ export function createHostDelegationRuntime(deps: HostDelegationWiringDeps): Dae
   return new DaemonDelegationRuntime({
     sink: deps.authority.sink,
     currentTrustFingerprint: (provider, cwd) => {
-      // Fail closed (B6 / P6 security §S3): never substitute a constant on read failure.
-      const snapshot = buildMcpExecutionSnapshot({ providerId: provider as ProviderId, cwd, homeDir: homedir() })
-      return snapshot?.fingerprint ?? 'empty'
+      // B1 & B6: fail closed on read error and normalize cwd prefixes for worktree content matching.
+      return computePortableMcpTrustFingerprint(provider as ProviderId, cwd)
     },
     // B2 / P6 security §S7: require an active local App subscribe reader, not the 30s terminal idle window.
     hasLocalSubscriber: () => deps.authority.subscribeHub.hasActiveLocalSubscriber(),
@@ -57,6 +84,7 @@ export function createHostDelegationRuntime(deps: HostDelegationWiringDeps): Dae
     }),
     dispatchChildRun: async (input) => {
       const permissionMode = input.task.permissionMode as AgentPermissionMode
+      const isWorktree = input.task.isolation === 'worktree' && input.executionCwd !== input.task.cwd
       const req: AgentStartRequest = {
         providerId: input.task.provider as ProviderId,
         prompt: input.prompt,
@@ -66,13 +94,22 @@ export function createHostDelegationRuntime(deps: HostDelegationWiringDeps): Dae
         ...(input.task.targetModel ? { model: { id: input.task.targetModel } } : {}),
         ...(input.task.targetEffort ? { effort: input.task.targetEffort } : {})
       }
-      // B5: pass grantScope='local' so local workspace authorization applies (not remoteProjectRoots).
+      // B2 & B5: pass grantScope='local' and workspaceAdmission for isolated worktrees so frontdoor authorizes them.
       const completion = await deps.pipeline.startAppRun(req, {
         runId: input.childRunId,
         ledgerRunId: input.childRunId,
         origin: 'remote',
         grantScope: 'local',
-        permissionModeOverride: permissionMode
+        permissionModeOverride: permissionMode,
+        ...(isWorktree
+          ? {
+              projectCwd: input.task.cwd,
+              workspaceAdmission: {
+                cwd: input.executionCwd,
+                admit: async (register) => { register() }
+              }
+            }
+          : {})
       })
       if ('status' in completion && typeof completion.status === 'string') {
         const rawStatus: string = completion.status
