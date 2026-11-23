@@ -19,7 +19,6 @@ describe('S3: scripts/main-import-boundary strict gate and negative controls', (
     for (const key of ['forbiddenPackages', 'forbiddenModules', 'nonWhitelistedChildProcess']) expect(baseline[key]).toEqual([])
     const report = await scanMainImportBoundary('src/main/index.ts')
     expect(report.orchestrationImporters).toEqual([])
-    // The App reaches about 190 modules; the in-process runtime made it 639.
     expect(report.totalReachableModules).toBeLessThanOrEqual(baseline.totalReachableModules)
     const evaluation = evaluateBoundaryReport(report, null)
     expect(evaluation.ok).toBe(true)

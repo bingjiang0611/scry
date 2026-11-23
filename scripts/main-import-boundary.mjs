@@ -1,18 +1,4 @@
 #!/usr/bin/env node
-/**
- * S3 static import boundary check for Electron main (`src/main/index.ts`). S3 removed the
- * in-process runtime from main; CI runs `--strict` (0 violations, node job).
- *
- * Scans the esbuild metafile reachability graph + dynamic `require()`/`import()` calls:
- *   1. `orchestrationImporters` — HARD FAIL (zero tolerance, Layer 3 single-writer boundary).
- *   2. `forbiddenPackages` — Provider SDKs, `node-pty`, `better-sqlite3`.
- *   3. `forbiddenModules` — In-process runtime modules (run pipeline, remote host, ledgers, terminals, SQLite, Providers).
- *   4. `nonWhitelistedChildProcess` — Reachable `child_process` importers outside the post-S3 allowlist.
- *   5. `testOnlySymbols` — HARD FAIL: a reachable module other than its own uses a test-only export.
- *
- * `--strict` requires 0 violations across all categories. The ratchet mode (`--baseline <json>`,
- * default scripts/main-import-boundary-baseline.json, now empty) only allows listed violations.
- */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -44,7 +30,6 @@ export const FORBIDDEN_MODULES = [
   'src/main/providers/qoder-launch.ts',
   'src/main/providers/pi-rpc.ts',
   'src/main/providers/antigravity-launch.ts',
-  // S3: the assembly that built those runtimes in main, and their writers.
   'src/main/providers/registry.ts',
   'src/main/bootstrap/provider-runtime.ts',
   'src/main/bootstrap/terminal-runtime.ts',
@@ -65,10 +50,6 @@ export const CHILD_PROCESS_ALLOWLIST = new Set([
   'src/main/llm-network-configuration.ts'
 ])
 
-// Exports that exist for tests only. The App reaches their defining module (it uses other
-// exports of it) but no other App module may call them: registerTrustCheckedListener is the
-// trust check without the daemon gate, which the App must only reach through
-// registerTrustedIpcHandler.
 export const TEST_ONLY_SYMBOLS = [
   { symbol: 'registerTrustCheckedListener', definedIn: 'src/main/ipc-trust.ts' }
 ]
@@ -119,7 +100,6 @@ export async function scanMainImportBoundary(entryPath = resolve(repoRoot, 'src/
       }
     }
 
-    // Also inspect dynamic require(...) / import(...) in reachable source files (e.g. node-pty, better-sqlite3)
     const diskPath = resolve(repoRoot, rawFile)
     let source = ''
     try {
@@ -159,7 +139,6 @@ export function evaluateBoundaryReport(report, baseline) {
     forbiddenPackages: [],
     forbiddenModules: [],
     nonWhitelistedChildProcess: [],
-    // Like orchestration: no baseline can allow it.
     testOnlySymbols: [...(report.testOnlySymbols ?? [])]
   }
   const categories = ['forbiddenPackages', 'forbiddenModules', 'nonWhitelistedChildProcess']
