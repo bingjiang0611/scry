@@ -35,7 +35,6 @@ import {
 import { checkWorkspaceCaptureLimits, WorkspaceReadUnavailable } from './git-workspace-limits.js'
 import { sampleGitRepositoryLocation, type GitRepositoryHead, type GitRepositoryLocation } from './git-repository-location.js'
 
-// Match contents of .scry directories at every depth, including the Git root.
 export const SCRY_DATA_EXCLUSION = ':(top,exclude,glob)**/.scry/**'
 
 export interface GitTurnDiffCapture {
@@ -190,8 +189,6 @@ export async function beginGitTurnDiff(
   try {
     const canonicalCwd = await realpath(cwd)
     const readEnv = workspaceSnapshot ? { ...process.env, GIT_NO_LAZY_FETCH: '1' } : undefined
-    // The recursive glob also matches the root .scry directory's contents.
-    // Git add treats a literal excluded ignored directory as an explicit path.
     const dataPathspec = options.excludeScryData ? [SCRY_DATA_EXCLUSION] : []
     const cwdLocation = workspaceSnapshot ? undefined : sampleGitRepositoryLocation(canonicalCwd, true)
     const [layoutResult, statusResult] = await Promise.allSettled([

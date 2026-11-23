@@ -53,9 +53,6 @@ export function parseWorkspaceStartSelection(value: unknown): WorkspaceStartSele
   return { operationId, intent }
 }
 
-// One parser for managed-worktree preparation progress, used where it crosses a trust
-// boundary: the host reading its own run_progress marker before projecting it, and a
-// paired desktop reading the projected row or hint. Anything malformed is dropped.
 
 const STAGES: ReadonlySet<string> = new Set([
   'preparing', 'checking_out', 'verifying', 'cancelling', 'cancelled', 'completed', 'failed'
@@ -108,7 +105,6 @@ export function parseWorkspacePrepareProgress(value: unknown): WorkspacePrepareP
   }
 }
 
-/** Admission ends preparation: the Provider has launched and nothing is left to cancel. */
 export function completedWorkspaceProgress(progress: WorkspacePrepareProgress): WorkspacePrepareProgress {
   return { ...progress, stage: 'completed', cancellable: false }
 }

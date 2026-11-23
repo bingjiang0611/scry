@@ -7,11 +7,6 @@ import type { ConversationPage } from './conversation-api'
 import type { DesktopHostReadResult, DesktopRemoteHistory } from './desktop-remote'
 import type { WorkspacePrepareProgress } from './workspace-selection'
 
-/**
- * Shared wire contract for orchestration `subscribe` (P4-orchestration-protocol.md §5).
- * Kept in `src/shared/` with zero imports from `src/host-runtime/orchestration/`
- * so Electron main preserves the Layer 3 single-writer static import boundary.
- */
 
 export type SubscribeView = 'sessions' | 'activeRuns' | 'detail'
 
@@ -19,15 +14,10 @@ export const SUBSCRIBE_MAX_TRACKED_RUN_IDS = 128
 
 export const SUBSCRIBE_VIEWS: ReadonlySet<SubscribeView> = new Set(['sessions', 'activeRuns', 'detail'])
 
-/**
- * Window notices retained as volatile hints in P4-3 (`protocol §5.3`).
- * `agent:turnDone`, `agent:session`, `agent:stopState`, and `agent:questionAttention` come from the run projection.
- */
 export const SUBSCRIBE_RETAINED_WINDOW_NOTICES: ReadonlySet<string> = new Set([
   'agent:error',
   'agent:backgroundWork',
   'agent:deleteArchivedProgress',
-  // Managed worktree preparation progress for the App's own first send.
   'workspaceSelection:progress'
 ])
 
@@ -50,13 +40,10 @@ export interface SubscribeRequest {
   session?: SubscribeSessionRef
   known?: SubscribeKnownCursor
   sessionsCursor?: string
-  /** Gateway-supplied hint cursor scope. It grants no read authority. */
   subscriptionId?: string
   historyFormat?: 'turns'
   historyOnly?: true
-  /** Local App detail already displays its history page. Watch the focused source. */
   detailWatch?: 'open' | 'continue'
-  /** Local-only exact run projection when the bounded activeRuns snapshot omits a tracked run. */
   trackedRunIds?: string[]
   waitMs: number
   eventSet?: number
@@ -92,15 +79,11 @@ export interface SubscribeSessionRow {
 export interface SubscribeActiveRunRow {
   runId: string
   scryRunId?: string
-  /** Device trace address for the authorized run, as in the v2 bound marker. */
   traceRunId?: string
   questions?: AgentQuestionRequest[]
-  /** Local-only routing for a unified-conversation turn. */
   isConversationRun?: boolean
   admitted?: boolean
-  /** Native session ID from the authorized binding or projected catalog. */
   externalSessionId?: string
-  /** Live managed-worktree preparation before admission (volatile, not persisted). */
   workspaceProgress?: WorkspacePrepareProgress
   sessionKey: string | null
   scope: 'local' | 'remote' | 'system'
@@ -129,7 +112,6 @@ export interface SubscribeEventItem {
   cwd?: string | null
   payload: Record<string, unknown>
   evidence?: string[] | null
-  /** Authorized projections for devices applying a delta to a paged snapshot. */
   sessionRow?: SubscribeSessionRow | null
   runRow?: SubscribeActiveRunRow | null
 }

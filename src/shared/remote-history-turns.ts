@@ -1,5 +1,4 @@
 export interface RemoteHistoryTurn {
-  // Scry run id, only on structured turn pages (see history-reader pageTurn).
   runId?: string
   userText: string
   items: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }[]

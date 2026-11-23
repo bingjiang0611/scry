@@ -21,14 +21,11 @@ export interface SessionHistoryProjection {
 }
 
 export interface SessionHistoryPage {
-  /** The recorded workspace no longer exists: history is readable, the session is not resumable. */
   workspaceMissing?: true
   turns: LoadedSessionTurn[]
-  /** Zero-based index of the first displayed turn in the full history. */
   offset: number
   totalTurns: number
   hasOlder: boolean
-  /** False when a partial source cannot prove the full history. */
   sourceComplete?: boolean
   completeness: 'complete' | 'partial'
   projection?: SessionHistoryProjection

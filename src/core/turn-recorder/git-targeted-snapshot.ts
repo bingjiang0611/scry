@@ -59,11 +59,6 @@ export async function writeTargetedSnapshotTree(options: {
   deadline: number
   filterOverrides: string[]
   targetIndex: string
-  /**
-   * `discovery.index` whose content already equals `baseTree` and whose stat cache is warm.
-   * Publishing it as `after.index` skips expanding the whole before-tree again; `add -A` then only
-   * has to hash the candidate paths. Sparsity and reused-index proof stay the caller's decision.
-   */
   sourceIndex?: string
 }): Promise<string> {
   const { cwd, baseTree, pathspec, env, deadline, filterOverrides, targetIndex, sourceIndex } = options
@@ -75,7 +70,6 @@ export async function writeTargetedSnapshotTree(options: {
   return (await gitCommand(snapshotGitArgs(filterOverrides, ['write-tree']), { cwd, env, deadline })).trim()
 }
 
-/** 启动时的 index 在这一轮里没有被改写时，它仍然是 beforeTree 的可用基线。 */
 export async function unchangedIndexPath(capture: GitTurnDiffCapture): Promise<string | undefined> {
   const { indexPath, indexState } = capture
   if (!capture.baselineClean || !indexPath || !indexState) return undefined

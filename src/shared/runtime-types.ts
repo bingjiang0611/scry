@@ -150,7 +150,6 @@ export interface AgentForkSessionResult {
 
 export interface AgentStartResult {
   runId: string
-  /** Durable daemon receipt when the reply includes it. */
   commandStatus?: 'executed' | 'duplicate'
   commandSequence?: number
   externalSessionId?: string

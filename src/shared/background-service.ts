@@ -75,7 +75,6 @@ export interface BackgroundServiceSelfReport {
   supervisorPid?: number
   remoteConfig?: BackgroundServiceRemoteConfig
   cliApproval?: HostCliApprovalSelfReport
-  /** Authoritative orchestration status when reported by the running daemon. */
   orchestration?: BackgroundServiceOrchestrationStatus
 }
 
@@ -94,7 +93,6 @@ export type BackgroundServiceStatus =
     remoteConfig?: BackgroundServiceRemoteConfig | null
     loginStart?: LoginStartStatus
     cliApproval?: CliApprovalStatus
-    /** Authoritative orchestration status when reported by the running daemon. */
     orchestration?: BackgroundServiceOrchestrationStatus
     runtimeNotice?: BackgroundServiceRuntimeNotice
     checkedAt: number
