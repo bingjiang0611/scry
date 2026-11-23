@@ -80,6 +80,9 @@
 .machine-usage-table tr.is-total td { border-top: 1px solid var(--border3); color: var(--dim); }
 .machine-usage-table p { margin: 4px 0 0; }
 .machine-services { display: grid; gap: 12px; }
+/* 设置面板在这里只是一块卡片：别再按设置页的大标题排版。 */
+.machine-services .background-service { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-faint); }
+.machine-services .background-service__head b { font-size: var(--text-md); }
 
 @media (max-width: 900px) {
   .machine-meters, .machine-meters.is-compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -81,12 +81,13 @@ export function dispatchDiskRole(role: HostDiskRole): string {
 
 export function runsText(runs: HostMetricsSnapshot['runs']): string {
   if (runs.active === 0 && runs.queued === 0) return '没有运行'
-  return `运行中 ${runs.active} · 排队 ${runs.queued}`
+  return `进行中 ${runs.active} · 排队 ${runs.queued}`
 }
 
 /** 「10 核 · 开机 3 天 · 运行中 2」 */
 export function hostSummary(snapshot: HostMetricsSnapshot): string {
-  return `${snapshot.cpu.cores} 核 · ${formatUptime(snapshot.uptimeSec)} · ${runsText(snapshot.runs).split(' · ')[0]}`
+  const running = snapshot.runs.active === 0 ? '没有运行' : `运行中 ${snapshot.runs.active}`
+  return `${snapshot.cpu.cores} 核 · ${formatUptime(snapshot.uptimeSec)} · ${running}`
 }
 
 /** The volume the card summarizes: the data disk, else whichever was measured. */

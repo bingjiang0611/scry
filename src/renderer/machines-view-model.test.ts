@@ -37,7 +37,7 @@ describe('machine metrics text', () => {
     expect(formatUptime(5 * 3600)).toBe('开机 5 小时')
     expect(formatUptime(120)).toBe('开机 2 分钟')
     expect(formatUptime(null)).toBe('开机时长不可用')
-    expect(runsText({ active: 2, queued: 1 })).toBe('运行中 2 · 排队 1')
+    expect(runsText({ active: 2, queued: 1 })).toBe('进行中 2 · 排队 1')
     expect(runsText({ active: 0, queued: 0 })).toBe('没有运行')
   })
 

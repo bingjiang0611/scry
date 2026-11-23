@@ -51,7 +51,18 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   await read('window.desktopRemoteFixture.localMetricsFailure = false')
   await click('.machines-head-actions button')
   await wait('document.querySelector(".machine-card--local")?.textContent.includes("34%")', 'local metrics recover after refresh')
-  await capture('machines-metrics')
+  // 明暗两种主题各截一张总览和一张本机明细，用于和设计稿对照。
+  for (const theme of ['light', 'dark']) {
+    await read('document.documentElement.dataset.theme = ' + JSON.stringify(theme))
+    await capture('machines-main-' + theme)
+    await click('.machine-card-expand')
+    await wait('document.querySelector(".machine-details .machine-usage-table table tbody tr.is-total") != null', 'expanded local detail with usage totals')
+    check(await read('document.querySelector(".machine-details").textContent.includes("数据盘") && document.querySelector(".machine-details").textContent.includes("Claude Code")'), 'Local detail omitted volumes or provider rows')
+    await capture('machines-detail-' + theme)
+    await click('.machine-card-expand')
+    await wait('!document.querySelector(".machine-details")', 'local detail collapsed again')
+  }
+  await read('document.documentElement.dataset.theme = "dark"')
   check(await read('document.querySelector(".remote-access-inbound").textContent.includes("Fixture iPhone")'), 'Settings omitted inbound grant')
   check(!(await read('document.querySelector(".remote-access-card-note")')), 'Default remote cards contain explanatory small copy')
   await capture('machines-page')
