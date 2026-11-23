@@ -6,7 +6,6 @@ export type ButtonSize = 'sm' | 'md'
 type ButtonProps = ComponentPropsWithoutRef<'button'> & {
   /** primary: the one main action of a group; danger: irreversible confirm; quiet: low-emphasis inline action. */
   variant?: ButtonVariant
-  /** md (32px) for dialogs and panels; sm (28px) for toolbars and inline rows. */
   size?: ButtonSize
 }
 

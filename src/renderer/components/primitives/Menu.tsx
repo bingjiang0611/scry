@@ -16,7 +16,6 @@ const ITEM_SELECTOR = ['menuitem', 'menuitemradio', 'menuitemcheckbox']
 type MenuItemNode = { focus: () => void; textContent: string | null; getAttribute: (name: string) => string | null }
 type MenuNode = { querySelectorAll: (selector: string) => ArrayLike<MenuItemNode> } | null
 
-/** The enabled items of a menu in DOM order. */
 export function menuItems(menu: MenuNode): MenuItemNode[] {
   return Array.from(menu?.querySelectorAll(ITEM_SELECTOR) ?? [])
 }
@@ -64,7 +63,6 @@ export function menuKeyDown(
 }
 
 type MenuProps = HTMLAttributes<HTMLDivElement> & {
-  /** Accessible name of the menu. */
   label: string
 }
 
@@ -115,7 +113,6 @@ export function MenuSeparator() {
   return <div className="mdiv" role="separator" />
 }
 
-/** A group heading inside a menu; not focusable. */
 export function MenuLabel({ children }: { children: ReactNode }) {
   return <div className="mhdr" role="none">{children}</div>
 }

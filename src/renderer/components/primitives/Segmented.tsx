@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 export type SegmentedOption<T extends string | number> = { value: T; label: ReactNode; title?: string; disabled?: boolean }
 
 type SegmentedProps<T extends string | number> = {
-  /** Accessible name of the group. */
   label: string
   value: T
   onChange: (value: T) => void

@@ -5,9 +5,6 @@ import { Icon, type IconName } from './Icon'
 
 // An icon that already means the action (refresh, sync) turns instead of being
 // swapped for a spinner. Phases, all transform-only:
-//   start  0→180° easing in from rest      (320ms)
-//   loop   180→540° linear while busy       (530ms per turn, ~680°/s)
-//   settle 180→360° easing out to rest      (320ms)
 // The decision to loop or settle is taken at 180°, so an instant answer still
 // gets exactly one whole turn (640ms), three turns land at 1.7s, and a long
 // wait always stops on a whole turn.

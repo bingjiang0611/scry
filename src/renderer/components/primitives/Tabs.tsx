@@ -13,7 +13,6 @@ export type TabItem<T extends string> = {
 }
 
 type TabsProps<T extends string> = {
-  /** Accessible name of the tablist. */
   label: string
   value: T
   onChange: (value: T) => void
@@ -28,7 +27,6 @@ type TabsProps<T extends string> = {
   children?: ReactNode
 }
 
-/** Roving-focus target for a key press, or -1 when the key is not a tab navigation key. Wraps at both ends. */
 export function nextTabIndex(key: string, current: number, count: number): number {
   if (count === 0) return -1
   if (key === 'Home') return 0

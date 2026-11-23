@@ -15,7 +15,6 @@ export type SkeletonRowsProps = {
   label: string
   /** Matches the real row's outer height so nothing moves when data arrives. */
   rowHeight?: number
-  /** A second, shorter meta line under the title. */
   meta?: boolean
   /** A leading circle at the real picture/icon size. */
   avatar?: number

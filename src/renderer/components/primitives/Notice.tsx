@@ -8,7 +8,6 @@ type NoticeProps = ComponentPropsWithoutRef<'div'> & {
   tone?: NoticeTone
   /** box sits inside content; strip spans the full width of a panel edge. */
   layout?: 'box' | 'strip'
-  /** sm for dense headers and inventory rows. */
   size?: 'sm' | 'md'
   /** At most one or two small buttons; the notice never owns navigation. */
   action?: ReactNode

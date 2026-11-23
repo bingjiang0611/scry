@@ -41,12 +41,10 @@ describe('Menu primitive', () => {
     expect(nextMenuIndex('ArrowUp', 0, labels)).toBe(3)
     expect(nextMenuIndex('Home', 2, labels)).toBe(0)
     expect(nextMenuIndex('End', 0, labels)).toBe(3)
-    // Typeahead cycles through items sharing a first letter, starting after the current one.
     expect(nextMenuIndex('c', -1, labels)).toBe(0)
     expect(nextMenuIndex('c', 0, labels)).toBe(1)
     expect(nextMenuIndex('c', 1, labels)).toBe(0)
     expect(nextMenuIndex('z', 0, labels)).toBe(-1)
-    // Space, Enter and Tab are not navigation keys.
     expect(nextMenuIndex(' ', 0, labels)).toBe(-1)
     expect(nextMenuIndex('Enter', 0, labels)).toBe(-1)
     expect(nextMenuIndex('Tab', 0, labels)).toBe(-1)
