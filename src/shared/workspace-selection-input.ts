@@ -1,4 +1,4 @@
-import type { WorkspaceCheckoutProgress, WorkspacePrepareProgress, WorkspacePrepareStage } from './workspace-selection'
+import type { WorkspaceCheckoutProgress, WorkspacePrepareProgress, WorkspacePrepareStage } from './workspace-selection.js'
 import type { WorkspaceBranchRef, WorkspaceIntent, WorkspaceStartSelection } from './workspace-selection.js'
 
 export const workspaceOperationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
