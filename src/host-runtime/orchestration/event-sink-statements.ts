@@ -11,6 +11,7 @@ export interface EventSinkStatements {
   readRun: Database.Statement
   readSession: Database.Statement
   readTurnByRunId: Database.Statement
+  readTurnByOrdinal: Database.Statement
   nextOrdinal: Database.Statement
   readInteraction: Database.Statement
   hasActiveSessionRun: Database.Statement
@@ -53,6 +54,7 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
     readRun: db.prepare('SELECT * FROM orch_p_run WHERE run_id = ?'),
     readSession: db.prepare('SELECT * FROM orch_p_session WHERE session_key = ?'),
     readTurnByRunId: db.prepare('SELECT * FROM orch_p_turn WHERE run_id = ?'),
+    readTurnByOrdinal: db.prepare('SELECT * FROM orch_p_turn WHERE session_key = ? AND ordinal = ?'),
     nextOrdinal: db.prepare(
       'SELECT COALESCE(MAX(ordinal), 0) + 1 AS next_ordinal FROM orch_p_turn WHERE session_key = ?'
     ),

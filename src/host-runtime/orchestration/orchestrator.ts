@@ -91,6 +91,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         return retryableReject('provider_authenticating')
       }
       if (view.getRun(p.runId)) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      // A1: an explicit ordinal taken by another run is a decision-time invariant failure, not a
+      // storage fault. Reject the command so the sink never sees a `(session_key, ordinal)` conflict.
+      if (p.sessionKey && !p.skipTurnProjection && p.ordinal !== undefined) {
+        const taken = view.getTurnByOrdinal?.(p.sessionKey, p.ordinal)
+        if (taken && taken.runId !== p.runId) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      }
 
       const promptPreview = truncatePreview(p.promptPreview, PROMPT_PREVIEW_MAX_CHARS)
       const bodyDescriptor = p.body ? { storage: p.body.storage, sha256: p.body.sha256, bytes: p.body.bytes } : null
@@ -286,6 +292,10 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       const existingTurn = view.getTurnByRunId?.(p.runId)
       const session = view.getSession(p.sessionKey)
       if (!existingTurn) {
+        // A1: the turn is located by `run_id`. A caller-supplied ordinal that is already owned by a
+        // different run is rejected here instead of reaching the `(session_key, ordinal)` primary key.
+        const taken = view.getTurnByOrdinal?.(p.sessionKey, p.ordinal)
+        if (taken && taken.runId !== p.runId) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
         events.push(
           makeEvent(cmd, events.length, {
             type: 'turn.began',

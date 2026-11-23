@@ -10,9 +10,8 @@ import {
   type WalCheckpointSample
 } from './db'
 import { getEffectPolicy } from './effect-policy'
-import { findNativeSession } from './native-session-lookup'
 import {
-  deleteSessionInDb,
+  deleteSessionWithErasure,
   pruneEventsInDb,
   resumeBodyErasure,
   stopRunBypassingFenceInRegistry,
@@ -24,8 +23,6 @@ import {
 import {
   listAllEventsRaw,
   listAllOutboxRaw,
-  listNonTerminalChildRunsBySessionRaw,
-  listNonTerminalChildRunsRaw,
   readInteractionRaw,
   readNextTurnOrdinalRaw,
   readReceiptRaw,
@@ -35,6 +32,8 @@ import {
   readTurnRaw
 } from './event-sink-queries'
 import { prepareEventSinkStatements, type EventSinkStatements } from './event-sink-statements'
+import { createOrchestratorReadView } from './read-view'
+import { buildRollbackRejection, isFatalOrchestrationStoreError } from './store-fault'
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
 import { applyEventToProjection } from './projection'
 import {
@@ -70,7 +69,6 @@ export interface EventSinkTxExtras {
   expectedSessionDeleteEpoch?: number
 }
 
-/** Single-writer atomic persistence sink for P4 orchestration (core §2.5, data §4). */
 export class EventSink {
   readonly handle: OrchestrationDbHandle
   readonly bodyStore: BodyStore
@@ -225,22 +223,13 @@ export class EventSink {
   }
 
   private createReadView(): OrchestratorReadView {
-    return {
-      isActorAuthorized: (actor) => actor.startsWith('effect:') || this.#authorizedActors.has(actor),
-      getReceipt: (commandId, actor) => readReceiptRaw(this.#stmts, commandId, actor),
-      getRun: (runId) => readRunRaw(this.#stmts, runId),
-      getSession: (sessionKey) => readSessionRaw(this.#stmts, sessionKey),
-      getNativeSession: (identity) => findNativeSession(this, identity),
-      getTurnByRunId: (runId) => readTurnByRunIdRaw(this.#stmts, runId),
-      getNextTurnOrdinal: (sessionKey) => readNextTurnOrdinalRaw(this.#stmts, sessionKey),
-      getInteraction: (runId, questionId) => readInteractionRaw(this.#stmts, runId, questionId),
-      listNonTerminalChildRuns: (parentRunId) => listNonTerminalChildRunsRaw(this.#stmts, parentRunId),
-      listNonTerminalChildRunsBySession: (sessionKey) => listNonTerminalChildRunsBySessionRaw(this.#stmts, sessionKey),
-      hasActiveRunForSession: (sessionKey) => Boolean(this.#stmts.hasActiveSessionRun.get(sessionKey)),
-      activeRunCount: () => (this.#stmts.activeRunCount.get() as { count: number }).count,
-      maxActiveRuns: () => this.#maxActiveRuns,
-      isProviderAuthenticating: (provider, profile) => this.#isProviderAuthenticating(provider, profile)
-    }
+    return createOrchestratorReadView({
+      stmts: this.#stmts,
+      authorizedActors: this.#authorizedActors,
+      maxActiveRuns: this.#maxActiveRuns,
+      isProviderAuthenticating: this.#isProviderAuthenticating,
+      nativeSessionSource: this
+    })
   }
 
   execute(command: OrchestrationCommand, txExtras?: EventSinkTxExtras): DecisionResult {
@@ -323,7 +312,52 @@ export class EventSink {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
         throw error
       }
+      if (!isFatalOrchestrationStoreError(error)) {
+        console.warn(
+          `[scry] orchestration batch rolled back: ${error instanceof Error ? error.message : String(error)}`
+        )
+        throw error
+      }
       this.tripFence(error)
+    }
+  }
+
+  /** A1: converts a rolled-back commit into one sticky rejection without fencing the store. */
+  private rejectAfterRollback(
+    decision: Extract<DecisionResult, { kind: 'accepted' | 'rejected' }>,
+    error: unknown
+  ): DecisionResult {
+    const { receipt, reason } = buildRollbackRejection({
+      base: decision.receipt,
+      error,
+      writeReceipt: (row) => {
+        this.handle.db
+          .transaction(() => {
+            this.#stmts.insertCommand.run(
+              row.commandId,
+              row.actor,
+              row.type,
+              row.payloadSha256,
+              row.acceptedAt,
+              row.status,
+              row.reason,
+              null,
+              null,
+              row.principal,
+              row.via,
+              row.actorRunId
+            )
+          })()
+      }
+    })
+    // A2 fatal failure while persisting the rejection receipt is itself a fence.
+    if (isFatalOrchestrationStoreError(error)) this.tripFence(error)
+    return {
+      kind: 'rejected',
+      reason,
+      sticky: true,
+      writeReceipt: Boolean(receipt),
+      ...(receipt ? { receipt } : {})
     }
   }
 
@@ -428,7 +462,8 @@ export class EventSink {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
         throw error
       }
-      this.tripFence(error)
+      if (isFatalOrchestrationStoreError(error)) this.tripFence(error)
+      return this.rejectAfterRollback(decision, error)
     }
   }
 
@@ -444,28 +479,25 @@ export class EventSink {
     if (this.#writeIndeterminate) {
       return { status: 'unavailable', error: 'orchestration_write_indeterminate' }
     }
-    try {
-      const { existed, redactedEvents } = deleteSessionInDb(
-        this.handle.db,
-        input,
-        this.#beforeCommitHook
-      )
-      if (existed) {
-        this.#sessionDeleteEpoch.set(input.sessionKey, (this.#sessionDeleteEpoch.get(input.sessionKey) ?? 0) + 1)
-        this.handle.enforceModes()
-        this.scheduleIdleCheckpoint()
-        this.#notifyCommitted()
-      }
-      const erased = resumeBodyErasure(this.handle.db, this.bodyStore, {
-        sessionKey: input.sessionKey, canWrite: () => !this.#writeIndeterminate
-      })
-      if (erased.error) return { status: 'unavailable', error: erased.error }
-      if (!existed && erased.completed === 0 && erased.deferred === 0) return { status: 'not_present' }
-      return { status: 'deleted', deletedBodies: erased.erased, redactedEvents }
-    } catch (error) {
-      this.#writeIndeterminate = true
-      return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
-    }
+    return deleteSessionWithErasure(
+      {
+        db: this.handle.db,
+        bodyStore: this.bodyStore,
+        isFenced: () => this.#writeIndeterminate,
+        onFenced: () => {
+          this.#writeIndeterminate = true
+        },
+        bumpDeleteEpoch: (sessionKey) =>
+          this.#sessionDeleteEpoch.set(sessionKey, (this.#sessionDeleteEpoch.get(sessionKey) ?? 0) + 1),
+        onCommitted: () => {
+          this.handle.enforceModes()
+          this.scheduleIdleCheckpoint()
+          this.#notifyCommitted()
+        },
+        beforeCommitHook: this.#beforeCommitHook
+      },
+      input
+    )
   }
 
   pruneEvents(options: { olderThanAt: number }): { deletedEvents: number; prunedThrough: number } {
