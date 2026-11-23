@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ConversationStore } from '../../main/conversation-store'
 import { canonicalJson, sha256Hex } from './canonical-json'
-import { getEffectPolicy } from './effect-policy'
+import { findEffectPolicy } from './effect-policy'
 import type { EventSink } from './event-sink'
 
 export interface RecorderTerminalEvidence {
@@ -30,6 +30,7 @@ export interface RecoverOrchestrationSummary {
   closedOpenQuestions: number
   voidedProcessBoundEffects: number
   requeuedReplayableEffects: number
+  failedUnknownEffects: number
 }
 
 /**
@@ -52,7 +53,8 @@ export function recoverOrchestrationOnStartup(
     settledFromEvidence: 0,
     closedOpenQuestions: 0,
     voidedProcessBoundEffects: 0,
-    requeuedReplayableEffects: 0
+    requeuedReplayableEffects: 0,
+    failedUnknownEffects: 0
   }
 
   sink.runInBatchTransaction(() => {
@@ -67,6 +69,9 @@ export function recoverOrchestrationOnStartup(
       payloadSha256: sha256Hex(canonicalJson(startPayload))
     })
 
+    const failUnknown = db.prepare(
+      "UPDATE orch_outbox SET state = 'failed', lease_owner = NULL, claimed_at = NULL, completed_at = ?, last_error = ? WHERE effect_id = ?"
+    )
     const updateOutbox = db.prepare(
       'UPDATE orch_outbox SET state = ?, lease_owner = ?, claimed_at = ?, completed_at = ? WHERE effect_id = ?'
     )
@@ -105,7 +110,13 @@ export function recoverOrchestrationOnStartup(
 
     for (const row of sink.listOutbox()) {
       if (row.state !== 'pending' && row.state !== 'running') continue
-      const spec = getEffectPolicy(row.kind)
+      const spec = findEffectPolicy(row.kind)
+      if (!spec) {
+        // A4: unknown kind must not block startup. Park the row as failed with its kind recorded.
+        failUnknown.run(now, `unregistered_effect_kind:${row.kind}`, row.effectId)
+        summary.failedUnknownEffects += 1
+        continue
+      }
 
       if (spec.onRestart === 'void') {
         updateOutbox.run('voided', null, null, now, row.effectId)

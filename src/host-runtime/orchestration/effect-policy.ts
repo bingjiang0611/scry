@@ -39,8 +39,17 @@ export const EFFECT_POLICIES: Readonly<Record<EffectKind, EffectPolicySpec>> = {
   'legacy.mirror': { policy: 'replayable', onRestart: 'requeue' }
 }
 
+/**
+ * A4: recovery must survive an effect kind this build does not know (for example a row written by
+ * a newer build, or a corrupt kind). Callers that decide at enqueue time keep using
+ * `getEffectPolicy`, which rejects unregistered kinds.
+ */
+export function findEffectPolicy(kind: string): EffectPolicySpec | undefined {
+  return (EFFECT_POLICIES as Record<string, EffectPolicySpec | undefined>)[kind]
+}
+
 export function getEffectPolicy(kind: string): EffectPolicySpec {
-  const spec = (EFFECT_POLICIES as Record<string, EffectPolicySpec | undefined>)[kind]
+  const spec = findEffectPolicy(kind)
   if (!spec) {
     throw new OrchestrationStoreError(
       'orchestration_invalid_effect_kind',
