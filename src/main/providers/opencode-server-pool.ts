@@ -20,6 +20,8 @@ import type { AuthorizedMcpExecution } from './types'
 export interface OpenCodeServerLease {
   release(): void
   forceClose(): void
+  /** A5: the shared server currently has exactly one active run (this lease). */
+  isExclusive(): boolean
 }
 
 export interface OpenCodeServerHealth {
@@ -190,6 +192,7 @@ export function createOpenCodeServerPool(
       let released = false
       return {
         forceClose: () => manager.forceClose(),
+        isExclusive: () => !released && (managerActivity.get(manager) ?? 0) === 1,
         release: () => {
           if (released) return
           released = true

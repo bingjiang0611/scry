@@ -165,6 +165,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
       handle.current?.forceKill()
     },
     forceKillScope: () => handle.current?.forceKillScope,
+    exclusiveKillAvailable: () => handle.current?.exclusiveKillAvailable?.() === true,
     stopBackgroundTask: (taskId) => handle.current?.stopBackgroundTask?.(taskId) ?? Promise.resolve({ status: 'unavailable', message: '当前 Provider 不支持单任务停止。' }),
     steer: (input) => managedConversation
       ? Promise.resolve({ status: 'unavailable', message: '统一对话暂不支持 Steer；追加输入尚无完整的顺序投影，未发送。' })

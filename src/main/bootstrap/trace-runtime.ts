@@ -282,7 +282,8 @@ export function createTraceRuntime({
       runtimeProvider: stopping.runtimeProvider,
       interrupt: stopping.interrupt,
       forceKill: stopping.forceKill,
-      forceKillScope: stopping.forceKillScope
+      forceKillScope: stopping.forceKillScope,
+      exclusiveKillAvailable: stopping.exclusiveKillAvailable
     })
     userQuestionBroker.cancelRun(stopping.runId)
     // Live-run observers (the remote host's long poll) re-read on this signal

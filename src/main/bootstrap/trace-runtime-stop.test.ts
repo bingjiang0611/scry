@@ -12,6 +12,7 @@ function control(runId: string, calls: { interrupt: string[]; forceKill: string[
     interrupt: () => calls.interrupt.push(runId),
     forceKill: () => calls.forceKill.push(runId),
     forceKillScope: () => 'run_scoped',
+  exclusiveKillAvailable: () => true,
     getExternalSessionId: () => `native-${runId}`,
     getProviderTurnId: () => `${runId}-turn`,
     canonicalLifecycle: false,

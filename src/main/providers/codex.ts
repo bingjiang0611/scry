@@ -703,6 +703,8 @@ export function createCodexAdapter(
 ): ProviderAdapter {
   const clients = new Map<string, CodexAppServerClient>()
   const clientActivity = new Map<CodexAppServerClient, number>()
+  /** A5：每个共享 client 上正在进行的 run 数；硬杀只回收计数为 1 的 client。 */
+  const clientActiveRuns = new Map<CodexAppServerClient, number>()
   const clientLastUsed = new Map<CodexAppServerClient, number>()
   const clientIdleTimers = new Map<CodexAppServerClient, ReturnType<typeof setTimeout>>()
   // Stdio MCP env files live as long as the pooled client that may (re)start the servers.
@@ -864,6 +866,7 @@ export function createCodexAdapter(
     if (timer) clearTimeout(timer)
     clientIdleTimers.delete(client)
     clientActivity.delete(client)
+    clientActiveRuns.delete(client)
     clientLastUsed.delete(client)
     let registered = false
     for (const [key, cached] of clients) {
@@ -1305,6 +1308,7 @@ export function createCodexAdapter(
           )
           activeClient = appServer
           clientActivity.set(appServer, (clientActivity.get(appServer) ?? 0) + 1)
+          clientActiveRuns.set(appServer, (clientActiveRuns.get(appServer) ?? 0) + 1)
           await appServer.start()
           const generationFailure = appServer.failureForCurrentGeneration()
           unsubscribeRequest = appServer.onRequest(handleServerRequest)
@@ -1791,6 +1795,9 @@ export function createCodexAdapter(
             const active = Math.max(0, (clientActivity.get(activeClient) ?? 1) - 1)
             if (active > 0) clientActivity.set(activeClient, active)
             else clientActivity.delete(activeClient)
+            const runs = Math.max(0, (clientActiveRuns.get(activeClient) ?? 1) - 1)
+            if (runs > 0) clientActiveRuns.set(activeClient, runs)
+            else clientActiveRuns.delete(activeClient)
             if (runRequest.historyReader) await shutdownClient(activeClient)
             else scheduleClientShutdown(activeClient)
           }
@@ -1847,6 +1854,9 @@ export function createCodexAdapter(
         // app-server client 按 cwd 复用（clientActivity 计数）：close() 会断掉同一 client 上
         // 所有并发 run，所以不能当作 run-scoped 硬杀自动发出。
         forceKillScope: 'shared_transport',
+        // A5：活动计数为 1 时 close() 只回收本 run 的 client，自动升级可以发出。
+        exclusiveKillAvailable: () =>
+          activeClient !== undefined && (clientActiveRuns.get(activeClient) ?? 0) <= 1,
         getExternalSessionId: () => externalSessionId,
         getProviderTurnId: () => turnId,
         getInputReceipt: () => history.snapshot()

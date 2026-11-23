@@ -83,6 +83,11 @@ export interface ProviderRunHandle {
    * 自动停止升级会据此拒绝发出会波及其他 run 的硬杀。
    */
   forceKillScope: AgentForceKillScope
+  /**
+   * A5：共享 transport 当下的活动计数是否为 1（forceKill 只会回收本 run 的 client/server）。
+   * 只有 adapter 能读到真实计数时才提供；返回 false 时自动升级仍然拒绝硬杀。
+   */
+  exclusiveKillAvailable?: () => boolean
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
   getForkTurnId?: () => string | undefined

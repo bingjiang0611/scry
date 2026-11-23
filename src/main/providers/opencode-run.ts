@@ -282,6 +282,8 @@ return {
   // OpenCode server 按 cwd 复用（pool 计数租约）：forceClose() 会终止整个
   // server 及其上其他并发 run。
   forceKillScope: 'shared_transport',
+  // A5：活动计数为 1 时 forceClose() 只回收本 run 的 server，可以自动发出。
+  exclusiveKillAvailable: () => lease?.isExclusive() === true,
   getExternalSessionId: () => externalSessionId,
   getProviderTurnId: () => providerTurnId,
   getRecordingFailure: () => recordingFailure,

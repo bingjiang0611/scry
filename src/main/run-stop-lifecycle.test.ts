@@ -340,3 +340,64 @@ describe('RunStopLifecycle', () => {
     }
   })
 })
+
+describe('A5: exclusive shared transports are reclaimed after the graceful window', () => {
+  it.each(['codex_cli', 'opencode_server'] as const)(
+    'force-kills the exclusive %s transport instead of reporting no_safe_force_kill',
+    (runtime) => {
+      const clock = fakeClock()
+      const { lifecycle, published } = tracker(clock)
+      const shared = target({
+        runId: `run-exclusive-${runtime}`,
+        providerId: runtime === 'codex_cli' ? 'codex' : 'opencode',
+        runtimeProvider: runtime,
+        forceKillScope: () => 'shared_transport',
+        exclusiveKillAvailable: () => true
+      })
+
+      lifecycle.request(shared)
+      expect(shared.kills).toBe(0)
+      clock.advance(stopEscalationWindow(runtime).gracefulMs)
+
+      expect(shared.kills).toBe(1)
+      expect(published.map((state) => state.phase)).toEqual(['interrupt_requested', 'force_kill_requested'])
+      expect(published.at(-1)?.forceKillBlockReason).toBeUndefined()
+      clock.advance(stopEscalationWindow(runtime).forceKillMs)
+      expect(published.at(-1)?.phase).toBe('provider_unsettled')
+    }
+  )
+
+  it('still reports no_safe_force_kill when another run shares the transport', () => {
+    const clock = fakeClock()
+    const { lifecycle, published } = tracker(clock)
+    const shared = target({
+      runId: 'run-shared-busy',
+      providerId: 'codex',
+      runtimeProvider: 'codex_cli',
+      forceKillScope: () => 'shared_transport',
+      exclusiveKillAvailable: () => false
+    })
+    lifecycle.request(shared)
+    clock.advance(stopEscalationWindow('codex_cli').gracefulMs)
+    expect(shared.kills).toBe(0)
+    expect(published.at(-1)).toMatchObject({ phase: 'no_safe_force_kill', forceKillBlockReason: 'shared_transport' })
+  })
+
+  it('keeps failing closed when the exclusivity probe throws', () => {
+    const clock = fakeClock()
+    const { lifecycle, published } = tracker(clock)
+    const shared = target({
+      runId: 'run-probe-throws',
+      runtimeProvider: 'opencode_server',
+      providerId: 'opencode',
+      forceKillScope: () => 'shared_transport',
+      exclusiveKillAvailable: () => {
+        throw new Error('transport gone')
+      }
+    })
+    lifecycle.request(shared)
+    clock.advance(stopEscalationWindow('opencode_server').gracefulMs)
+    expect(shared.kills).toBe(0)
+    expect(published.at(-1)).toMatchObject({ phase: 'no_safe_force_kill', forceKillBlockReason: 'shared_transport' })
+  })
+})
