@@ -31,6 +31,8 @@ export type RunHost = {
     cwd?: string
     sessionKey?: string
     permissionMode: AgentPermissionMode
+    isRemoteRun?: boolean
+    grantScope?: 'local' | 'remote'
   }) => Promise<{ orchestrationTools?: OrchestrationToolsAttachment; cleanup: () => void }>
   providerRegistry: ProviderRegistry
   piRunDiagnostics: PiRunDiagnostics

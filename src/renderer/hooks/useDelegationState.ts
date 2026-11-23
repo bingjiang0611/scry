@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DelegationStateSnapshot } from '@shared/delegation'
 
 const EMPTY_STATE: DelegationStateSnapshot = {
@@ -11,8 +11,10 @@ const EMPTY_STATE: DelegationStateSnapshot = {
 export function useDelegationState(cwd: string | null | undefined, parentSessionKey: string | null | undefined) {
   const [state, setState] = useState<DelegationStateSnapshot>(EMPTY_STATE)
   const [busy, setBusy] = useState(false)
+  const reqSeqRef = useRef(0)
 
   const refresh = useCallback(async () => {
+    const seq = ++reqSeqRef.current
     const api = window.scry?.delegation
     if (!api || (!cwd && !parentSessionKey)) {
       setState(EMPTY_STATE)
@@ -20,7 +22,7 @@ export function useDelegationState(cwd: string | null | undefined, parentSession
     }
     try {
       const next = await api.getState({ cwd: cwd ?? null, parentSessionKey: parentSessionKey ?? null })
-      setState(next)
+      if (seq === reqSeqRef.current) setState(next)
     } catch {
       // Daemon unavailable or disconnected; keep last known snapshot.
     }

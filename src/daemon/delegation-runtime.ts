@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import type { AgentPermissionMode } from '../shared/runtime-types'
 import type { Evidence } from '../shared/turn-record-contracts'
 import type {
-  DelegatedTaskView,
   DelegationActionResult,
   DelegationConfirmCancelRequest,
   DelegationConfirmTaskRequest,
@@ -12,7 +10,6 @@ import type {
   DelegationStateSnapshot,
   DelegationStopSubtasksRequest
 } from '../shared/delegation'
-import type { OrchestrationToolsAttachment } from '../main/providers/types'
 import { AgentRepoBaselineStore, computeExtendedRepoConfigFingerprint } from '../host-runtime/orchestration/agent-repo-baseline'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { DelegationCredentialStore } from '../host-runtime/orchestration/delegation-credentials'
@@ -21,83 +18,26 @@ import { evaluatePreDispatchRecheck } from '../host-runtime/orchestration/orches
 import { DelegationService } from '../host-runtime/orchestration/delegation-service'
 import { OrchestratorMcpHttpServer } from '../host-runtime/orchestration/orchestrator-mcp-http'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
-import type { TaskProjectionRow } from '../host-runtime/orchestration/types'
+import { isTerminalTaskStatus } from '../host-runtime/orchestration/types'
+import {
+  toDelegatedTaskView,
+  type ChildRunDispatchInput,
+  type ChildRunDispatchOutcome,
+  type DaemonDelegationRuntimeOptions,
+  type PreparedRunOrchestration,
+  type PrepareRunOrchestrationInput
+} from './delegation-runtime-types'
 
-export interface ChildRunDispatchInput {
-  task: TaskProjectionRow
-  childRunId: string
-  childSessionKey: string
-  prompt: string
-}
-
-export interface ChildRunDispatchOutcome {
-  status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'unavailable'
-  finalMessage?: Evidence<string> | null
-  reason?: string
-}
-
-export interface PrepareRunOrchestrationInput {
-  runId: string
-  canonicalRunId: string
-  providerId: string
-  profile?: string
-  cwd?: string
-  sessionKey?: string
-  permissionMode: AgentPermissionMode
-  isAgentRun?: boolean
-  actor?: string
-  principal?: string
-  via?: 'local' | 'remote' | 'agent'
-}
-
-export interface PreparedRunOrchestration {
-  orchestrationTools?: OrchestrationToolsAttachment
-  cleanup: () => void
-}
-
-export interface DaemonDelegationRuntimeOptions {
-  sink: EventSink
-  currentTrustFingerprint: (provider: string, cwd: string) => string
-  hasLocalSubscriber: () => boolean
-  requestRunStop: (runId: string) => boolean
-  dispatchChildRun: (input: ChildRunDispatchInput) => Promise<ChildRunDispatchOutcome>
-  readArchiveFinalMessage?: (childRunId: string) => Evidence<string> | undefined
-  readChildUsage?: (childRunId: string) => ChildUsageSample | undefined
-  onTaskChanged?: () => void
-  clock?: () => number
-  log?: (line: string) => void
-}
+export type {
+  ChildRunDispatchInput,
+  ChildRunDispatchOutcome,
+  DaemonDelegationRuntimeOptions,
+  PreparedRunOrchestration,
+  PrepareRunOrchestrationInput
+} from './delegation-runtime-types'
 
 const HTTP_MCP_PROVIDERS = new Set(['codex'])
 const SDK_MCP_PROVIDERS = new Set(['claude', 'qoder'])
-
-function toTaskView(row: TaskProjectionRow): DelegatedTaskView {
-  return {
-    taskId: row.taskId,
-    parentSessionKey: row.parentSessionKey,
-    parentRunId: row.parentRunId,
-    childSessionKey: row.childSessionKey,
-    childRunId: row.childRunId,
-    provider: row.provider,
-    profile: row.profile,
-    permissionMode: row.permissionMode,
-    permissionModeSource: row.permissionModeSource,
-    status: row.status,
-    stateVersion: row.stateVersion,
-    title: row.title,
-    confirmationQuestionId: row.confirmationQuestionId,
-    cancelConfirmationQuestionId: row.cancelConfirmationQuestionId,
-    summary: row.summary
-      ? {
-          status: row.summary.status,
-          quality: row.summary.quality,
-          ...(row.summary.value !== undefined ? { value: row.summary.value } : {}),
-          ...(row.summary.omissionReason ? { omissionReason: row.summary.omissionReason } : {})
-        }
-      : null,
-    reason: row.reason
-  }
-}
 
 /**
  * Daemon-side P6 multi-agent orchestration runtime.
@@ -162,10 +102,16 @@ export class DaemonDelegationRuntime {
   async #ensureHttpServer(): Promise<string> {
     if (this.#httpServerUrl) return this.#httpServerUrl
     if (!this.#httpStartPromise) {
-      this.#httpServer = new OrchestratorMcpHttpServer(this.#service)
-      this.#httpStartPromise = this.#httpServer.start().then((info) => {
+      const server = new OrchestratorMcpHttpServer(this.#service)
+      this.#httpServer = server
+      this.#httpStartPromise = server.start().then((info) => {
         this.#httpServerUrl = info.url
         return info.url
+      }).catch((err) => {
+        // B7: clear rejected promise so subsequent Codex runs can retry.
+        this.#httpStartPromise = null
+        this.#httpServer = null
+        throw err
       })
     }
     return await this.#httpStartPromise
@@ -173,29 +119,38 @@ export class DaemonDelegationRuntime {
 
   /**
    * Records user-run repo baselines (D15 / S3) and conditionally issues per-run orchestration tools
-   * when project delegation is enabled, a local App subscriber is attached, and depth === 0.
+   * when project delegation is enabled, a local App subscriber is attached, origin is local, and depth === 0.
    */
   async prepareRunOrchestration(input: PrepareRunOrchestrationInput): Promise<PreparedRunOrchestration> {
     if (this.#closed || !input.cwd) return { cleanup: () => undefined }
-    const isChild = Boolean(input.isAgentRun) || this.#activeChildRunIds.has(input.runId) || this.#activeChildRunIds.has(input.canonicalRunId)
-    if (!isChild) {
-      try {
-        const baseFp = this.#currentTrustFingerprint(input.providerId, input.cwd)
-        const extFp = computeExtendedRepoConfigFingerprint(input.providerId, input.cwd, baseFp)
-        this.#baselineStore.recordUserRun(input.providerId, input.cwd, extFp)
-      } catch (error) {
-        this.#log?.(`delegation.baseline-record-failed ${error instanceof Error ? error.message : String(error)}`)
-      }
+    const parentRun = this.#sink.getRun(input.canonicalRunId)
+    // B1 & Minor #7: remote-origin runs and depth-1 agent child runs never get tools or record user baselines.
+    const isChild =
+      Boolean(input.isAgentRun) ||
+      this.#activeChildRunIds.has(input.runId) ||
+      this.#activeChildRunIds.has(input.canonicalRunId) ||
+      parentRun?.origin === 'agent'
+    const isRemote = input.via === 'remote' || parentRun?.origin === 'remote'
+    if (isChild || isRemote) return { cleanup: () => undefined }
+
+    try {
+      const baseFp = this.#currentTrustFingerprint(input.providerId, input.cwd)
+      const extFp = computeExtendedRepoConfigFingerprint(input.providerId, input.cwd, baseFp)
+      this.#baselineStore.recordUserRun(input.providerId, input.cwd, extFp)
+    } catch (error) {
+      this.#log?.(`delegation.baseline-record-failed ${error instanceof Error ? error.message : String(error)}`)
     }
 
-    if (isChild || !input.sessionKey) return { cleanup: () => undefined }
+    if (!input.sessionKey) return { cleanup: () => undefined }
     if (!HTTP_MCP_PROVIDERS.has(input.providerId) && !SDK_MCP_PROVIDERS.has(input.providerId)) {
       return { cleanup: () => undefined }
     }
     if (!this.#sink.isProjectDelegationEnabled(input.cwd)) return { cleanup: () => undefined }
     if (!this.#hasLocalSubscriber()) return { cleanup: () => undefined }
 
-    const parentRun = this.#sink.getRun(input.canonicalRunId)
+    // B7: start HTTP server before issuing Codex credential so a startup error never leaks a token.
+    const httpUrl = HTTP_MCP_PROVIDERS.has(input.providerId) ? await this.#ensureHttpServer() : null
+
     const cred = this.#credentials.issue({
       runId: input.canonicalRunId,
       sessionKey: input.sessionKey,
@@ -211,12 +166,11 @@ export class DaemonDelegationRuntime {
       this.#credentials.revokeRun(input.canonicalRunId)
     }
 
-    if (HTTP_MCP_PROVIDERS.has(input.providerId)) {
-      const url = await this.#ensureHttpServer()
+    if (httpUrl) {
       return {
         orchestrationTools: {
           kind: 'codex_http',
-          url,
+          url: httpUrl,
           bearerToken: cred.token
         },
         cleanup
@@ -247,7 +201,7 @@ export class DaemonDelegationRuntime {
     return {
       projectDelegationEnabled,
       sessionFullAccessEnabled,
-      tasks: rows.map(toTaskView),
+      tasks: rows.map(toDelegatedTaskView),
       usageBreakdown
     }
   }
@@ -316,10 +270,15 @@ export class DaemonDelegationRuntime {
     const task = this.#sink.getTask(req.taskId)
     if (!task) return { ok: false, reason: 'task_not_found' }
 
-    // Pre-dispatch recheck (security §S3 / D15): verify switch, baseline, and parent run before launching child
-    const baseFp = this.#currentTrustFingerprint(task.provider, task.cwd)
-    const extFp = computeExtendedRepoConfigFingerprint(task.provider, task.cwd, baseFp)
-    const baselineOk = this.#baselineStore.verifyAgentRun(task.provider, task.cwd, extFp)
+    // Pre-dispatch recheck (security §S3 / D15 / B6): fail closed if trust fingerprint cannot be read.
+    let baselineOk: { ok: boolean } = { ok: false }
+    try {
+      const baseFp = this.#currentTrustFingerprint(task.provider, task.cwd)
+      const extFp = computeExtendedRepoConfigFingerprint(task.provider, task.cwd, baseFp)
+      baselineOk = this.#baselineStore.verifyAgentRun(task.provider, task.cwd, extFp)
+    } catch {
+      baselineOk = { ok: false }
+    }
     const parentRun = this.#sink.getRun(task.parentRunId)
     const parentTerminal = !parentRun || ['settled', 'failed', 'cancelled', 'interrupted'].includes(parentRun.lifecycle)
     const parentStopRequested = parentRun?.stopState === 'requested'
@@ -341,19 +300,55 @@ export class DaemonDelegationRuntime {
       repoFingerprintMatchesUserRun: baselineOk.ok
     })
     if (!recheck.ok) {
-      this.#settleTask(task.taskId, 'unavailable', buildTaskSummaryEvidence(null, recheck.reason), recheck.reason)
-      return { ok: false, status: 'unavailable', reason: recheck.reason }
+      // B4: transition child run to terminal failed so orch_p_run does not leak maxHostAgentRuns quota.
+      this.#recordChildRunStep(childRunId, 'failed', recheck.reason)
+      this.#settleTask(task.taskId, 'failed', buildTaskSummaryEvidence(null, recheck.reason), recheck.reason)
+      return { ok: false, status: 'failed', reason: recheck.reason }
     }
 
+    // B4: drive child run into admitted+dispatched before launching provider so orch_p_task becomes running and L4 won't void it.
+    this.#recordChildRunStep(childRunId, 'admitted_and_dispatched')
     const prompt = task.body ? this.#sink.bodyStore.readBody(task.body).toString('utf8') : (task.title ?? '')
     this.#activeChildRunIds.add(childRunId)
     void this.#runAndSettleChild({ task, childRunId, childSessionKey, prompt })
-    return { ok: true, status: 'queued' }
+    return { ok: true, status: 'running' }
+  }
+
+  #recordChildRunStep(
+    childRunId: string,
+    step: 'admitted_and_dispatched' | 'settled' | 'failed' | 'cancelled' | 'interrupted',
+    reason?: string
+  ): void {
+    if (this.#closed || this.#sink.isWriteIndeterminate()) return
+    const payload = {
+      runId: childRunId,
+      step,
+      ...(reason ? { reason } : {}),
+      evidence: ['host.run_completion']
+    }
+    this.#sink.execute({
+      type: 'run.effect_result',
+      commandId: `child-run:${childRunId}:${step}:${randomUUID().slice(0, 8)}`,
+      actor: 'system',
+      scope: 'system',
+      at: this.#clock(),
+      payload,
+      payloadSha256: sha256Hex(canonicalJson(payload))
+    })
   }
 
   async #runAndSettleChild(input: ChildRunDispatchInput): Promise<void> {
     try {
       const outcome = await this.#dispatchChildRun(input)
+      const runStep =
+        outcome.status === 'completed'
+          ? 'settled'
+          : outcome.status === 'cancelled'
+            ? 'cancelled'
+            : outcome.status === 'interrupted'
+              ? 'interrupted'
+              : 'failed'
+      this.#recordChildRunStep(input.childRunId, runStep, outcome.reason)
       const summary = buildTaskSummaryEvidence(
         outcome.finalMessage ?? null,
         outcome.reason ?? 'archive_unavailable'
@@ -361,6 +356,7 @@ export class DaemonDelegationRuntime {
       this.#settleTask(input.task.taskId, outcome.status, summary, outcome.reason)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
+      this.#recordChildRunStep(input.childRunId, 'failed', reason)
       this.#settleTask(input.task.taskId, 'failed', buildTaskSummaryEvidence(null, 'child_dispatch_failed'), reason)
     } finally {
       this.#activeChildRunIds.delete(input.childRunId)
@@ -394,10 +390,15 @@ export class DaemonDelegationRuntime {
 
   confirmCancelTask(actor: string, req: DelegationConfirmCancelRequest): DelegationActionResult {
     const taskBefore = this.#sink.getTask(req.taskId)
+    // B8 / D21: resolve the exact run_id that owns the open cancel-confirmation interaction.
+    const openRow = this.#sink.handle.db
+      .prepare('SELECT run_id FROM orch_p_interaction WHERE question_id = ? AND state = ? LIMIT 1')
+      .get(req.questionId, 'open') as { run_id: string } | undefined
     const answerId = randomUUID()
     const payload = {
       taskId: req.taskId,
       questionId: req.questionId,
+      ...(openRow?.run_id ? { questionRunId: openRow.run_id } : {}),
       approved: req.approved,
       answerId,
       answerSha256: sha256Hex(canonicalJson({ taskId: req.taskId, approved: req.approved })),
@@ -417,12 +418,20 @@ export class DaemonDelegationRuntime {
       this.#requestRunStop(taskBefore.childRunId)
     }
     this.#onTaskChanged?.()
-    return { ok: true, status: req.approved ? 'cancelled' : (taskBefore?.status ?? 'running') }
+    const latest = this.#sink.getTask(req.taskId)
+    // B8 / F5: never claim 'cancelled' before child run actually settles; report actual status or stop_requested.
+    const status = latest
+      ? (req.approved && !isTerminalTaskStatus(latest.status) ? 'stop_requested' : latest.status)
+      : (req.approved ? 'stop_requested' : 'running')
+    return { ok: true, status }
   }
 
   stopSessionSubtasks(actor: string, req: DelegationStopSubtasksRequest): DelegationActionResult {
     const before = this.#sink.listTasksByParentSession(req.parentSessionKey)
-    const activeChildIds = before.map((t) => t.childRunId).filter((id): id is string => Boolean(id))
+    // Minor #1: only stop non-terminal child runs so historical tasks are never signalled or counted.
+    const activeChildIds = before
+      .filter((t) => !isTerminalTaskStatus(t.status) && Boolean(t.childRunId))
+      .map((t) => t.childRunId!)
     const payload = {
       sessionKey: req.parentSessionKey,
       ...(req.reason ? { reason: req.reason } : {})

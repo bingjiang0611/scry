@@ -156,6 +156,8 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: options.requestUserInput ?? (async (request, signal) => userQuestionBroker.request(request, signal)), askWindow: questionsGoToWindow({ appSemantics, windowCanReceive, hasLedgerInput: Boolean(options.requestUserInput) }), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value },
     ledgerRunId: options.ledgerRunId,
     sessionKey: managedConversation?.conversationId ?? (resume ? scopedSessionKey(resume) : undefined),
+    isRemoteRun,
+    grantScope: options.grantScope,
     prepareOrchestrationTools
   })
 

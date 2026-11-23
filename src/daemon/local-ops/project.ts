@@ -111,28 +111,57 @@ export const projectLocalOps: DaemonLocalOpGroup = (deps) => {
       const peer = localOpCaller()
       if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
       const req = rawReq as DelegationConfirmTaskRequest
-      if (!req || typeof req.taskId !== 'string' || typeof req.questionId !== 'string' || typeof req.approved !== 'boolean') {
+      if (
+        !req ||
+        typeof req.taskId !== 'string' || !req.taskId.trim() ||
+        typeof req.questionId !== 'string' || !req.questionId.trim() ||
+        typeof req.approved !== 'boolean' ||
+        (req.reason !== undefined && (typeof req.reason !== 'string' || req.reason.length > 2000))
+      ) {
         return { ok: false, reason: 'invalid_request' }
       }
-      return await deps.delegation.confirmTask(`peer:${peer}`, req)
+      return await deps.delegation.confirmTask(`peer:${peer}`, {
+        taskId: req.taskId.trim(),
+        questionId: req.questionId.trim(),
+        approved: req.approved,
+        ...(req.reason !== undefined ? { reason: req.reason } : {})
+      })
     },
     'delegation:confirmCancelTask': (rawReq: unknown) => {
       const peer = localOpCaller()
       if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
       const req = rawReq as DelegationConfirmCancelRequest
-      if (!req || typeof req.taskId !== 'string' || typeof req.questionId !== 'string' || typeof req.approved !== 'boolean') {
+      if (
+        !req ||
+        typeof req.taskId !== 'string' || !req.taskId.trim() ||
+        typeof req.questionId !== 'string' || !req.questionId.trim() ||
+        typeof req.approved !== 'boolean' ||
+        (req.reason !== undefined && (typeof req.reason !== 'string' || req.reason.length > 2000))
+      ) {
         return { ok: false, reason: 'invalid_request' }
       }
-      return deps.delegation.confirmCancelTask(`peer:${peer}`, req)
+      return deps.delegation.confirmCancelTask(`peer:${peer}`, {
+        taskId: req.taskId.trim(),
+        questionId: req.questionId.trim(),
+        approved: req.approved,
+        ...(req.reason !== undefined ? { reason: req.reason } : {})
+      })
     },
     'delegation:stopSessionSubtasks': (rawReq: unknown) => {
       const peer = localOpCaller()
       if (!deps.delegation || !peer) return { ok: false, reason: 'delegation_unavailable' }
       const req = rawReq as DelegationStopSubtasksRequest
-      if (!req || typeof req.parentSessionKey !== 'string' || !req.parentSessionKey.trim()) {
+      if (
+        !req ||
+        typeof req.parentSessionKey !== 'string' || !req.parentSessionKey.trim() ||
+        (req.reason !== undefined && (typeof req.reason !== 'string' || req.reason.length > 2000))
+      ) {
         return { ok: false, reason: 'invalid_request' }
       }
-      return deps.delegation.stopSessionSubtasks(`peer:${peer}`, req)
+      return deps.delegation.stopSessionSubtasks(`peer:${peer}`, {
+        parentSessionKey: req.parentSessionKey.trim(),
+        ...(req.reason !== undefined ? { reason: req.reason } : {})
+      })
     }
   } as Record<string, LocalOpHandler>
 }

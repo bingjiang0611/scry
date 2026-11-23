@@ -122,6 +122,12 @@ export type DaemonChannelGuardOutcome = { args: unknown[]; settled?: () => void 
 
 const guards = new Map<string, (args: unknown[]) => Promise<DaemonChannelGuardOutcome>>()
 
+// B3 / P6 security §S2: these policy-switch channels MUST never bypass main's OS confirmation guard.
+const GUARD_REQUIRED_CHANNELS: ReadonlySet<string> = new Set([
+  'delegation:setProjectPolicy',
+  'delegation:setSessionFullAccess'
+])
+
 /**
  * A channel whose App part comes first: a confirmation dialog the daemon cannot show
  * (decided: dialogs stay in main). Answering `result` means the daemon is never asked.
@@ -133,6 +139,9 @@ export function installDaemonChannelGuard(channel: string, guard: (args: unknown
 
 async function guarded(channel: string, args: unknown[], ask: (args: unknown[]) => Promise<unknown>): Promise<unknown> {
   const guard = guards.get(channel)
+  if (!guard && GUARD_REQUIRED_CHANNELS.has(channel)) {
+    return { ok: false, reason: 'guard_required' }
+  }
   const outcome = guard ? await guard(args) : { args }
   if ('result' in outcome) return outcome.result
   try {

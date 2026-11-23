@@ -191,10 +191,15 @@ export class DelegationService {
     })
     if (!perm.ok) return fail(perm.code, perm.reason, { allowedModes: perm.allowedModes })
 
-    // D15 / security §S3: Agent-initiated run requires matching user-run baseline
-    const baseTrust = this.#currentTrustFingerprint(caller.provider, caller.cwd)
-    const extFp = computeExtendedRepoConfigFingerprint(caller.provider, caller.cwd, baseTrust)
-    const baselineCheck = this.#baselineStore.verifyAgentRun(caller.provider, caller.cwd, extFp)
+    // D15 / security §S3 / B6: Agent-initiated run requires matching user-run baseline (fail closed on read error).
+    let baselineCheck: ReturnType<AgentRepoBaselineStore['verifyAgentRun']>
+    try {
+      const baseTrust = this.#currentTrustFingerprint(caller.provider, caller.cwd)
+      const extFp = computeExtendedRepoConfigFingerprint(caller.provider, caller.cwd, baseTrust)
+      baselineCheck = this.#baselineStore.verifyAgentRun(caller.provider, caller.cwd, extFp)
+    } catch (err) {
+      return fail('trust_gate_rejected', `Failed to read repo trust fingerprint: ${err instanceof Error ? err.message : String(err)}`)
+    }
     if (!baselineCheck.ok) return fail(baselineCheck.code, baselineCheck.detail)
 
     const commandId = agentCommandId('scry_task_delegate', caller.runId, clientRequestId)

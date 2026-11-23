@@ -140,15 +140,28 @@ describe('project and workspace selection in daemon mode', () => {
     ]
     dispose = () => { for (const step of undo) step() }
     const channel = gateDaemonChannel('delegation:setProjectPolicy', async (_event: unknown, _req: unknown) => { throw new Error('local') })
-    await expect(channel({}, { cwd: '/w', enabled: true })).resolves.toEqual({ ok: false, cancelled: true })
+    await expect(channel({}, { cwd: '/real/sensitive/repo', enabled: true, targetLabel: 'spoofed-demo' })).resolves.toEqual({ ok: false, cancelled: true })
+    expect(confirmDelegationSwitch).toHaveBeenCalledWith({
+      switchKind: 'project_delegation',
+      nextEnabled: true,
+      targetLabel: '/real/sensitive/repo'
+    })
     expect(forwarder).not.toHaveBeenCalled()
 
-    await expect(channel({}, { cwd: '/w', enabled: true })).resolves.toEqual({ ok: true, status: 'enabled' })
+    await expect(channel({}, { cwd: '/real/sensitive/repo', enabled: true })).resolves.toEqual({ ok: true, status: 'enabled' })
     expect(forwarder).toHaveBeenCalledWith({
       op: 'delegation',
       method: 'setProjectPolicy',
-      args: [{ cwd: '/w', enabled: true }],
+      args: [{ cwd: '/real/sensitive/repo', enabled: true }],
       read: false
     })
+
+    // B3: fail closed when no guard is installed
+    dispose()
+    const unguardedUndo = installDaemonChannelForwarder(forwarder)
+    dispose = unguardedUndo
+    forwarder.mockClear()
+    await expect(channel({}, { cwd: '/real/sensitive/repo', enabled: true })).resolves.toEqual({ ok: false, reason: 'guard_required' })
+    expect(forwarder).not.toHaveBeenCalled()
   })
 })

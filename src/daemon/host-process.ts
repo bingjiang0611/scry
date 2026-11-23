@@ -31,7 +31,7 @@ import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
 import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
-import { createHostDelegationRuntime } from './delegation-host-wiring'
+import { createHostDelegationRuntime, prepareHostRunOrchestration } from './delegation-host-wiring'
 import type { DaemonDelegationRuntime } from './delegation-runtime'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
 import { authoritySubscribeDeps, createAuthorityDetailReader } from './orchestration-authority-subscribe'
@@ -153,17 +153,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
     observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
-    prepareOrchestrationTools: (run) => delegationRuntime
-      ? delegationRuntime.prepareRunOrchestration({
-          runId: run.runId,
-          canonicalRunId: run.ledgerRunId ?? run.runId,
-          providerId: run.providerId,
-          profile: run.agentProfileId,
-          cwd: run.cwd,
-          sessionKey: run.sessionKey,
-          permissionMode: run.permissionMode
-        })
-      : Promise.resolve({ cleanup: () => undefined }),
+    prepareOrchestrationTools: prepareHostRunOrchestration(() => delegationRuntime),
     // The pipeline's volatile notices travel on the App subscription. The trace and questions
     // reach the App through its own run reads, so they are not sent twice (W1).
     renderer: {

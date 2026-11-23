@@ -108,11 +108,11 @@ describe('P6-3 App UI components, sidebar nesting, and main native switch dialog
       switchKind: 'session_full_access',
       nextEnabled: true,
       targetLabel: 'Demo Session',
-      providerFullAccessCopy: 'Codex danger-full-access'
+      providerId: 'codex'
     })
     expect(dlg.type).toBe('warning')
     expect(dlg.defaultId).toBe(1) // cancel by default!
-    expect(dlg.detail).toContain('Codex danger-full-access')
+    expect(dlg.detail).toContain('danger-full-access')
     expect(dlg.detail).toContain('父 Agent')
   })
 })

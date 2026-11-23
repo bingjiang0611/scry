@@ -153,14 +153,15 @@ describe('DaemonDelegationRuntime (P6-3)', () => {
       questionId: task.confirmationQuestionId!,
       approved: true
     })
-    expect(confirmed).toEqual({ ok: true, status: 'queued' })
+    expect(confirmed).toEqual({ ok: true, status: 'running' })
 
-    // Wait for async child dispatch + settle
+    // Wait for async child dispatch + settle, and verify B4: orch_p_run settles cleanly (no quota leak).
     await vi.waitFor(() => {
       const stateAfter = runtime.getState({ cwd, parentSessionKey: sessionKey })
       expect(stateAfter.tasks[0]?.status).toBe('completed')
       expect(stateAfter.tasks[0]?.summary?.value).toBe('子任务分析完成')
     })
+    expect(sink.countNonTerminalAgentRuns()).toBe(0)
     expect(dispatched).toHaveLength(1)
     expect(dispatched[0]?.prompt).toBe('检查构建脚本')
     prepared.cleanup()
@@ -190,9 +191,69 @@ describe('DaemonDelegationRuntime (P6-3)', () => {
       approved: true
     })
     expect(confirmed.ok).toBe(false)
-    expect(confirmed.status).toBe('unavailable')
+    expect(confirmed.status).toBe('failed')
     expect(dispatched).toHaveLength(0)
-    expect(runtime.getState({ cwd, parentSessionKey: sessionKey }).tasks[0]?.status).toBe('unavailable')
+    expect(sink.countNonTerminalAgentRuns()).toBe(0)
+    expect(runtime.getState({ cwd, parentSessionKey: sessionKey }).tasks[0]?.status).toBe('failed')
+    prepared.cleanup()
+  })
+
+  it('B1/B6/B8: denies tools for remote runs, fails closed on trust read error, and handles running cancel honestly', async () => {
+    let throwFp = false
+    let resolveChild!: (v: { status: 'cancelled' }) => void
+    const childPromise = new Promise<{ status: 'cancelled' }>((r) => { resolveChild = r })
+    const { cwd, sink, runtime } = openRuntime({
+      trustFp: () => {
+        if (throwFp) throw new Error('boom')
+        return 'fp-ok'
+      },
+      dispatchOutcome: () => childPromise
+    })
+    const { runId, sessionKey } = submitParentRun(sink, cwd)
+    runtime.setProjectPolicy(PEER_A, { cwd, enabled: true })
+
+    // B1: remote-origin run never gets orchestration tools
+    const remote = await runtime.prepareRunOrchestration({
+      runId: 'remote-run-1', canonicalRunId: 'remote-run-1', providerId: 'qoder', cwd, sessionKey, permissionMode: 'default', via: 'remote'
+    })
+    expect(remote.orchestrationTools).toBeUndefined()
+    remote.cleanup()
+
+    const prepared = await runtime.prepareRunOrchestration({
+      runId, canonicalRunId: runId, providerId: 'qoder', cwd, sessionKey, permissionMode: 'default', via: 'local'
+    })
+    if (prepared.orchestrationTools?.kind !== 'in_process') throw new Error('expected in_process')
+
+    // B6: trust fingerprint throw fails closed
+    throwFp = true
+    const denied = await prepared.orchestrationTools.callTool('scry_task_delegate', {
+      task: '应该被拒',
+      clientRequestId: 'req-b6'
+    })
+    expect(denied).toMatchObject({ ok: false, code: 'trust_gate_rejected' })
+    throwFp = false
+
+    // B8: cancel confirmation on running task returns stop_requested (not prematurely 'cancelled')
+    await prepared.orchestrationTools.callTool('scry_task_delegate', {
+      task: '运行中待取消',
+      clientRequestId: 'req-b8'
+    })
+    const task = runtime.getState({ cwd, parentSessionKey: sessionKey }).tasks[0]!
+    await runtime.confirmTask(PEER_A, { taskId: task.taskId, questionId: task.confirmationQuestionId!, approved: true })
+    await prepared.orchestrationTools.callTool('scry_task_cancel', {
+      taskId: task.taskId,
+      reason: '不再需要',
+      clientRequestId: 'cancel-b8'
+    })
+    const updated = runtime.getState({ cwd, parentSessionKey: sessionKey }).tasks[0]!
+    expect(updated.cancelConfirmationQuestionId).toBeTruthy()
+    const cancelRes = runtime.confirmCancelTask(PEER_A, {
+      taskId: updated.taskId,
+      questionId: updated.cancelConfirmationQuestionId!,
+      approved: true
+    })
+    expect(cancelRes).toEqual({ ok: true, status: 'stop_requested' })
+    resolveChild({ status: 'cancelled' })
     prepared.cleanup()
   })
 

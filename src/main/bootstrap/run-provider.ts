@@ -66,6 +66,8 @@ export interface RunProviderBootstrapDependencies {
   userQuestionBroker: UserQuestionBroker
   ledgerRunId?: string
   sessionKey?: string
+  isRemoteRun?: boolean
+  grantScope?: 'local' | 'remote'
   prepareOrchestrationTools?: import('./run-host').RunHost['prepareOrchestrationTools']
 }
 
@@ -117,6 +119,8 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
     setProviderStartedAt,
     ledgerRunId,
     sessionKey,
+    isRemoteRun,
+    grantScope,
     prepareOrchestrationTools
   } = deps
   const runProvider = async (): Promise<{
@@ -159,12 +163,16 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
           agentProfileId,
           cwd,
           sessionKey,
-          permissionMode: effectivePermissionMode
+          permissionMode: effectivePermissionMode,
+          isRemoteRun,
+          grantScope
         })
       : undefined
-    handle.current = providerRegistry.run(providerId, {
-      runId,
-      ...(preparedOrchestration?.orchestrationTools ? { orchestrationTools: preparedOrchestration.orchestrationTools } : {}),
+    let result: Awaited<ProviderRunHandle['promise']>
+    try {
+      handle.current = providerRegistry.run(providerId, {
+        runId,
+        ...(preparedOrchestration?.orchestrationTools ? { orchestrationTools: preparedOrchestration.orchestrationTools } : {}),
       prompt: runtimePrompt,
       ...(managedConversation?.historicalContext ? { historicalContext: managedConversation.historicalContext } : {}),
       ...(managedConversation?.historyReader ? { historyReader: managedConversation.historyReader } : {}),
@@ -247,17 +255,14 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
         return response
       }
     })
-    if (stopSignal?.aborted) requestStop()
-    if (!handle.current?.steer) emit({
-      id: mainEventId('steer-capability', runId), ts: new Date().toISOString(), runId,
-      kind: 'harness', stage: 'runtime:steer_capability',
-      steerCapability: { status: 'unavailable', reason: `${providerId} 当前接入未提供已验证的原生 Steer；消息仍按队列发送。` }
-    })
-    if (interrupted()) handle.current?.interrupt()
-    let result: Awaited<ProviderRunHandle['promise']>
-    try {
+      if (stopSignal?.aborted) requestStop()
+      if (!handle.current?.steer) emit({
+        id: mainEventId('steer-capability', runId), ts: new Date().toISOString(), runId,
+        kind: 'harness', stage: 'runtime:steer_capability',
+        steerCapability: { status: 'unavailable', reason: `${providerId} 当前接入未提供已验证的原生 Steer；消息仍按队列发送。` }
+      })
+      if (interrupted()) handle.current?.interrupt()
       try { result = await handle.current!.promise } finally {
-        preparedOrchestration?.cleanup()
         if (providerId === 'pi') piRunDiagnostics.record(runId, 'main_finalization')
         steering.close()
         await steering.idle()
@@ -275,6 +280,8 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       })
       await ingestion.idle()
       throw error
+    } finally {
+      preparedOrchestration?.cleanup()
     }
     emit({
       id: mainEventId('provider-ended', runId),

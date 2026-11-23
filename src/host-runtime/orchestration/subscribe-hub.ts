@@ -88,6 +88,11 @@ export class SubscribeHub {
     return this.#reading > 0 ? 0 : Math.max(0, this.#now() - this.#lastRead)
   }
 
+  /** Whether a local App subscriber is actively reading right now (P6 security §S7 / D9). */
+  hasActiveLocalSubscriber(): boolean {
+    return this.#reading > 0
+  }
+
   beginRead(): void {
     this.#reading += 1
   }

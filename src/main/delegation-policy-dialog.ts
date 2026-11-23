@@ -3,8 +3,15 @@ import type { BrowserWindow, MessageBoxOptions } from 'electron'
 export interface DelegationSwitchConfirmRequest {
   switchKind: 'project_delegation' | 'session_full_access'
   nextEnabled: boolean
+  /** Canonical target identifier (cwd or sessionKey) — never renderer-supplied display aliases. */
   targetLabel: string
-  providerFullAccessCopy?: string
+  providerId?: string
+}
+
+const PROVIDER_FULL_ACCESS_COPY: Record<string, string> = {
+  claude: '跳过 Claude Code 工具与命令权限确认（bypassPermissions），直接以本机用户权限执行',
+  codex: '跳过 Codex 沙箱与审批（danger-full-access），直接以本机用户权限执行',
+  qoder: '跳过 Qoder 工具与命令权限确认（bypassPermissions），直接以本机用户权限执行'
 }
 
 /**
@@ -36,7 +43,9 @@ export function buildDelegationSwitchDialogOptions(req: DelegationSwitchConfirmR
         '子任务结果返回后，父 Agent 仍以其自身权限档位行动，权限上限挡不住父 Agent 采信子任务输出。'
     }
   }
-  const providerCopy = req.providerFullAccessCopy?.trim() || '本机完全访问（跳过该 Provider 的工具与命令审批）'
+  const providerCopy =
+    (req.providerId && PROVIDER_FULL_ACCESS_COPY[req.providerId]) ||
+    '本机完全访问（跳过该 Provider 的工具与命令审批，以本机用户权限执行）'
   return {
     type: 'warning',
     buttons: ['开启完全访问', '取消'],

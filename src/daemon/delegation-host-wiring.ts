@@ -4,7 +4,27 @@ import type { AgentPermissionMode, AgentStartRequest } from '../shared/runtime'
 import { buildMcpExecutionSnapshot } from '../main/mcp-execution-trust'
 import type { createRunPipeline } from '../host-runtime/create-run-pipeline'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
+import type { RunHost } from '../main/bootstrap/run-host'
 import { DaemonDelegationRuntime } from './delegation-runtime'
+
+export function prepareHostRunOrchestration(
+  getRuntime: () => DaemonDelegationRuntime | undefined
+): NonNullable<RunHost['prepareOrchestrationTools']> {
+  return (run) => {
+    const rt = getRuntime()
+    if (!rt) return Promise.resolve({ cleanup: () => undefined })
+    return rt.prepareRunOrchestration({
+      runId: run.runId,
+      canonicalRunId: run.ledgerRunId ?? run.runId,
+      providerId: run.providerId,
+      profile: run.agentProfileId,
+      cwd: run.cwd,
+      sessionKey: run.sessionKey,
+      permissionMode: run.permissionMode,
+      via: run.isRemoteRun && run.grantScope !== 'local' ? 'remote' : 'local'
+    })
+  }
+}
 
 export interface HostDelegationWiringDeps {
   authority: DaemonOrchestrationAuthority
@@ -21,15 +41,12 @@ export function createHostDelegationRuntime(deps: HostDelegationWiringDeps): Dae
   return new DaemonDelegationRuntime({
     sink: deps.authority.sink,
     currentTrustFingerprint: (provider, cwd) => {
-      try {
-        const snapshot = buildMcpExecutionSnapshot({ providerId: provider as ProviderId, cwd, homeDir: homedir() })
-        return snapshot?.fingerprint ?? 'empty'
-      } catch {
-        return 'unreadable'
-      }
+      // Fail closed (B6 / P6 security §S3): never substitute a constant on read failure.
+      const snapshot = buildMcpExecutionSnapshot({ providerId: provider as ProviderId, cwd, homeDir: homedir() })
+      return snapshot?.fingerprint ?? 'empty'
     },
-    // SubscribeHub tracks whether the local App is actively subscribed (idleMs() === 0 while a read is active).
-    hasLocalSubscriber: () => deps.authority.subscribeHub.idleMs() < 30_000,
+    // B2 / P6 security §S7: require an active local App subscribe reader, not the 30s terminal idle window.
+    hasLocalSubscriber: () => deps.authority.subscribeHub.hasActiveLocalSubscriber(),
     requestRunStop: deps.requestRunStop,
     dispatchChildRun: async (input) => {
       const permissionMode = input.task.permissionMode as AgentPermissionMode
@@ -42,36 +59,33 @@ export function createHostDelegationRuntime(deps: HostDelegationWiringDeps): Dae
         ...(input.task.targetModel ? { model: { id: input.task.targetModel } } : {}),
         ...(input.task.targetEffort ? { effort: input.task.targetEffort } : {})
       }
+      // B5: pass grantScope='local' so local workspace authorization applies (not remoteProjectRoots).
       const completion = await deps.pipeline.startAppRun(req, {
         runId: input.childRunId,
         ledgerRunId: input.childRunId,
         origin: 'remote',
+        grantScope: 'local',
         permissionModeOverride: permissionMode
       })
       if ('status' in completion && typeof completion.status === 'string') {
+        const rawStatus: string = completion.status
         const mapped =
-          completion.status === 'completed'
+          rawStatus === 'completed'
             ? 'completed'
-            : completion.status === 'cancelled'
+            : rawStatus === 'cancelled'
               ? 'cancelled'
-              : completion.status === 'interrupted'
+              : rawStatus === 'interrupted'
                 ? 'interrupted'
-                : 'failed'
-        const finalText = 'finalMessage' in completion && typeof completion.finalMessage === 'string'
-          ? completion.finalMessage
+                : rawStatus === 'unavailable'
+                  ? 'unavailable'
+                  : 'failed'
+        const reason = 'error' in completion && typeof completion.error === 'string'
+          ? completion.error
           : undefined
+        // B5 / P6 evidence §E1: never fabricate quality='exact'; leave finalMessage null when archive reader is absent.
         return {
           status: mapped,
-          ...(finalText
-            ? {
-                finalMessage: {
-                  status: 'available' as const,
-                  quality: 'exact' as const,
-                  source: ['provider-run-completion'],
-                  value: finalText
-                }
-              }
-            : {})
+          ...(reason ? { reason } : {})
         }
       }
       return { status: 'completed' }

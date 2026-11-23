@@ -59,37 +59,36 @@ export function installProjectDaemonWindow(window: ProjectDaemonWindow): () => v
       }
       return invalidDaemonResponse()
     }),
-    ...(window.confirmDelegationSwitch
-      ? [
-          installDaemonChannelGuard('delegation:setProjectPolicy', async (args) => {
-            const raw = args[0] as DelegationProjectPolicyRequest | undefined
-            if (!raw || typeof raw.cwd !== 'string' || typeof raw.enabled !== 'boolean') {
-              return { result: { ok: false, reason: 'invalid_request' } }
-            }
-            const confirmed = await window.confirmDelegationSwitch!({
-              switchKind: 'project_delegation',
-              nextEnabled: raw.enabled,
-              targetLabel: raw.targetLabel?.trim() || raw.cwd
-            })
-            return confirmed ? { args: [{ cwd: raw.cwd, enabled: raw.enabled }] } : { result: { ok: false, cancelled: true } }
-          }),
-          installDaemonChannelGuard('delegation:setSessionFullAccess', async (args) => {
-            const raw = args[0] as DelegationSessionFullAccessRequest | undefined
-            if (!raw || typeof raw.sessionKey !== 'string' || typeof raw.enabled !== 'boolean') {
-              return { result: { ok: false, reason: 'invalid_request' } }
-            }
-            const confirmed = await window.confirmDelegationSwitch!({
-              switchKind: 'session_full_access',
-              nextEnabled: raw.enabled,
-              targetLabel: raw.targetLabel?.trim() || raw.sessionKey,
-              providerFullAccessCopy: raw.providerFullAccessCopy
-            })
-            return confirmed
-              ? { args: [{ sessionKey: raw.sessionKey, enabled: raw.enabled }] }
-              : { result: { ok: false, cancelled: true } }
-          })
-        ]
-      : [])
+    // B3 / P6 security §S2: OS confirmation guards are always installed (fail-closed if callback absent)
+    // and never trust renderer-supplied targetLabel or providerFullAccessCopy.
+    installDaemonChannelGuard('delegation:setProjectPolicy', async (args) => {
+      if (!window.confirmDelegationSwitch) return { result: { ok: false, reason: 'guard_required' } }
+      const raw = args[0] as DelegationProjectPolicyRequest | undefined
+      if (!raw || typeof raw.cwd !== 'string' || !raw.cwd.trim() || typeof raw.enabled !== 'boolean') {
+        return { result: { ok: false, reason: 'invalid_request' } }
+      }
+      const confirmed = await window.confirmDelegationSwitch({
+        switchKind: 'project_delegation',
+        nextEnabled: raw.enabled,
+        targetLabel: raw.cwd
+      })
+      return confirmed ? { args: [{ cwd: raw.cwd, enabled: raw.enabled }] } : { result: { ok: false, cancelled: true } }
+    }),
+    installDaemonChannelGuard('delegation:setSessionFullAccess', async (args) => {
+      if (!window.confirmDelegationSwitch) return { result: { ok: false, reason: 'guard_required' } }
+      const raw = args[0] as DelegationSessionFullAccessRequest | undefined
+      if (!raw || typeof raw.sessionKey !== 'string' || !raw.sessionKey.trim() || typeof raw.enabled !== 'boolean') {
+        return { result: { ok: false, reason: 'invalid_request' } }
+      }
+      const confirmed = await window.confirmDelegationSwitch({
+        switchKind: 'session_full_access',
+        nextEnabled: raw.enabled,
+        targetLabel: raw.sessionKey
+      })
+      return confirmed
+        ? { args: [{ sessionKey: raw.sessionKey, enabled: raw.enabled }] }
+        : { result: { ok: false, cancelled: true } }
+    })
   ]
   return () => { for (const step of undo) step() }
 }

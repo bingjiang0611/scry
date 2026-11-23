@@ -36,14 +36,19 @@ export function DelegationTaskCard(props: {
         <span>{task.permissionMode}（{sourceText}）</span>
       </div>
       <div className="delegation-card-summary">
-        {summary && summary.status !== 'unavailable' && summary.value ? (
+        {summary && summary.status !== 'unavailable' && summary.status !== 'disabled' && summary.value ? (
           <>
             <span>{summary.value}</span>
             <span className="badge">{DELEGATION_COPY.qualityLabel[summary.quality]}</span>
+            {summary.status === 'partial' ? (
+              <span className="delegation-muted">
+                部分{summary.omissionReason ? `（${summary.omissionReason}）` : ''}
+              </span>
+            ) : null}
           </>
         ) : (
           <span className="delegation-muted">
-            {DELEGATION_COPY.summaryUnavailable}
+            {summary?.status === 'disabled' ? '摘要已禁用' : DELEGATION_COPY.summaryUnavailable}
             {summary?.omissionReason ? `（${summary.omissionReason}）` : ''}
           </span>
         )}
