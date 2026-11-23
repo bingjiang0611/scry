@@ -34,6 +34,8 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   check(await read('document.querySelector(".machine-card--local").textContent.includes("已用 9.1 GB / 16 GB") && document.querySelector(".machine-card--local").textContent.includes("剩余 212 GB")'), 'Local card omitted memory or disk numbers')
   check(await read('document.querySelector(".machine-card--local").textContent.includes("在线")'), 'Local card did not report the machine as online')
   await wait('document.querySelector(".machine-target-metrics")?.textContent.includes("34%")', 'target machine metrics from the execution target')
+  // P8 §2：每张机器卡片都有一行「Scry 占用」，执行目标也不能漏。
+  check(await read('document.querySelector(".machine-target-metrics .machine-usage dt")?.textContent.includes("Scry 占用") && document.querySelector(".machine-target-metrics .machine-usage").textContent.includes("后台服务")'), 'Target card omitted the Scry usage line')
   check((await fixture()).targetMetricsCalls.length > 0, 'Machines page never read the target metrics')
   // 旧宿主不声明 hostMetrics 时写「请升级」，不算读取失败。
   await read('window.desktopRemoteFixture.targetMetricsUnsupported = true; window.desktopRemoteFixture.phoneEnabled = false')

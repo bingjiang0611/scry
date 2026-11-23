@@ -43,7 +43,12 @@ export interface HostMetricsSnapshot {
     /** null = the process table could not be read this time (not "no processes"). */
     providers: HostProviderUsage[] | null
   }
-  runs: { active: number; queued: number }
+  /**
+   * `queued` is the projection's admitted-but-not-dispatched count (P8 §3). The daemon
+   * can only see runs it already dispatched, so v1 reports `null` there rather than a
+   * measured-looking `0`; the card then says 「排队 不可用」.
+   */
+  runs: { active: number; queued: number | null }
 }
 
 /** Cached snapshots younger than this are returned as they are (P8 §4). */

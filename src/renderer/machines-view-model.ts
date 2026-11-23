@@ -80,8 +80,9 @@ export function dispatchDiskRole(role: HostDiskRole): string {
 }
 
 export function runsText(runs: HostMetricsSnapshot['runs']): string {
+  const queued = runs.queued === null ? '不可用' : `${runs.queued}`
   if (runs.active === 0 && runs.queued === 0) return '没有运行'
-  return `进行中 ${runs.active} · 排队 ${runs.queued}`
+  return `进行中 ${runs.active} · 排队 ${queued}`
 }
 
 /** 「10 核 · 开机 3 天 · 运行中 2」 */

@@ -253,7 +253,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     userDataDir: options.userDataDir,
     workspaceRoots: () => workspace.remoteProjectRoots(),
     providerRoots: () => [],
-    activeRuns: () => ({ active: pipeline.runs.activeStates().length, queued: 0 })
+    // 排队数在编排投影（orch_p_run 的 recorded/admitted）里，第一版没接；报 null 不报 0。
+    activeRuns: () => ({ active: pipeline.runs.activeStates().length, queued: null })
   }))
   const listHostAdminNotices = isHostCliExperimentalEnabled(process.env) ? () => hostAdmin.recentNotices() : undefined
   const service = await createHostRuntime({

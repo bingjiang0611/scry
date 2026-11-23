@@ -39,6 +39,8 @@ describe('machine metrics text', () => {
     expect(formatUptime(null)).toBe('开机时长不可用')
     expect(runsText({ active: 2, queued: 1 })).toBe('进行中 2 · 排队 1')
     expect(runsText({ active: 0, queued: 0 })).toBe('没有运行')
+    // 排队数在编排投影里，第一版读不到：说「不可用」，不说 0。
+    expect(runsText({ active: 2, queued: null })).toBe('进行中 2 · 排队 不可用')
   })
 
   it('names memory pressure in the same words the system reports', () => {

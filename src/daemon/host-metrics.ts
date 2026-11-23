@@ -60,7 +60,7 @@ export interface HostMetricsSources {
   daemonPid(): number
   /** W20's per-session provider roots when available; empty means unknown. */
   providerRoots(): Array<{ providerId: string; pid: number }>
-  activeRuns(): { active: number; queued: number }
+  activeRuns(): { active: number; queued: number | null }
 }
 
 const COMMAND_TIMEOUT_MS = 2_000
@@ -217,7 +217,7 @@ export interface HostMetricsSourceOptions {
   userDataDir: string
   workspaceRoots: () => string[]
   providerRoots: () => Array<{ providerId: string; pid: number }>
-  activeRuns: () => { active: number; queued: number }
+  activeRuns: () => { active: number; queued: number | null }
   now?: () => number
   sleep?: (ms: number) => Promise<void>
   run?: HostMetricsCommand['run']
@@ -261,9 +261,9 @@ export function createHostMetricsSources(options: HostMetricsSourceOptions): Hos
     processTable: async () => {
       const limits = { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: PROCESS_TABLE_MAX_BYTES }
       const runs = options.activeRuns()
-      // 有运行在跑（或排队）时降优先级，采样不和它抢 CPU；空闲时直接调用 ps。
-      // 空闲时省掉一次 nice 进程：实测单次采样省约 8 ms，p95 进入门限以内。
-      if (runs.active + runs.queued === 0) return run('ps', PROCESS_TABLE_ARGS, limits)
+      // 有运行在跑（或排队；排队数未知时按有算）时降优先级，采样不和它抢 CPU。
+      // 没有运行时直接调用 ps，省掉一次 nice 进程：实测单次采样省约 8 ms。
+      if (runs.active === 0 && runs.queued === 0) return run('ps', PROCESS_TABLE_ARGS, limits)
       const output = await run('nice', ['-n', '10', 'ps', ...PROCESS_TABLE_ARGS], limits)
       // `nice` is present on both targets; a missing one must not lose the table.
       return output ?? await run('ps', PROCESS_TABLE_ARGS, limits)
