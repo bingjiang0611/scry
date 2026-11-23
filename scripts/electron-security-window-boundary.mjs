@@ -327,7 +327,6 @@ export async function exerciseWindowBoundary(smokeContext) {
   })()`)
   assert.notEqual(subframeIpc, 'allowed', 'an untrusted subframe reached privileged IPC')
 
-  // 只上报窗口由谁提供边框：macOS 是应用自绘标题栏，Linux 交给窗口管理器。
   const chrome = { platform: windowChrome.platform }
 
   return { windowChrome, collapsedChrome, transportPicker, modal, subframeIpc, chrome }

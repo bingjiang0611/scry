@@ -283,7 +283,6 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
       { sigkillDelayMs: 25, ps, kill }
     )
 
-    // Root PGID (-2000) is verified; descendant independent PGIDs (-3050/-3051/-3052) MUST NEVER be signalled (kills M6a).
     expect(signals).toContainEqual({ pid: -2000, signal: 'SIGTERM' })
     expect(signals.some((s) => s.pid === -3050 || s.pid === -3051 || s.pid === -3052)).toBe(false)
 
@@ -291,7 +290,6 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
     expect(signals).toContainEqual({ pid: 2051, signal: 'SIGTERM' })
     expect(signals).toContainEqual({ pid: 2052, signal: 'SIGTERM' })
 
-    // SIGKILL stage MUST skip reused PID 2050 and command-changed PID 2051 (kills M6b), and only SIGKILL verified PID 2052.
     expect(signals).not.toContainEqual({ pid: 2050, signal: 'SIGKILL' })
     expect(signals).not.toContainEqual({ pid: 2051, signal: 'SIGKILL' })
     expect(signals).toContainEqual({ pid: 2052, signal: 'SIGKILL' })

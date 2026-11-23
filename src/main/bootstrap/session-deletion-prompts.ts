@@ -1,6 +1,5 @@
 import type { DeleteSessionResult } from '../../shared/provider'
 
-// What the user is asked and told when a session, or every archived session, is deleted.
 // Free of Electron so main's dialogs and the daemon-mode App ask with the same words.
 
 export const ARCHIVED_DELETION_DETAIL = '将删除 Scry 的 catalog、archive、附件、SQLite 和 usage 记录。工作区 .scry/ canonical evidence 与 Provider 原生 transcript/history 会保留。'
@@ -20,7 +19,6 @@ export const SESSION_DELETION_PROMPT = {
   detail: ARCHIVED_DELETION_DETAIL
 }
 
-/** The single-session prompt, naming the side chats the deletion takes along. */
 export function sessionDeletionPrompt(sideChatCount = 0) {
   return sideChatCount > 0
     ? { ...SESSION_DELETION_PROMPT, detail: `${SESSION_DELETION_PROMPT.detail}\n这个会话的 ${sideChatCount} 个侧边会话会一并删除。` }

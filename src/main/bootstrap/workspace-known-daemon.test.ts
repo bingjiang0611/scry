@@ -9,10 +9,6 @@ const { gateDaemonChannel, installDaemonChannelForwarder } = await import('../da
 const { registerWorkspaceHandlers } = await import('./workspace')
 const { HomeFileAccess } = await import('../home-file-access')
 
-// Daemon mode: the known projects (recent folders, project records, session cwds) are the
-// daemon's userData. The window selection and the known-project file channels still run
-// in the App, but each asks the daemon whether a directory is one of its projects
-// (workspaceSelection:setCwd) instead of reading the App's own copy of those stores.
 
 const ON = { SCRY_HOST_DAEMON: '1' } as NodeJS.ProcessEnv
 type Listener = (event: unknown, ...args: unknown[]) => unknown
@@ -87,7 +83,6 @@ describe('known-project channels', () => {
     expect(refusing.selection()).toBe(window)
     for (const step of undo.splice(0)) step()
 
-    // No daemon client: refused by name, never answered from the App's own stores.
     const absent = register(ON, { window })
     await expect(absent.invoke('agent:setCwd', stranger)).rejects.toThrow('daemon_capability_unavailable:agent:setCwd')
     expect(absent.selection()).toBe(window)
@@ -127,7 +122,6 @@ describe('known-project channels', () => {
     const c = app.invoke('agent:setCwd', null)
     const d = app.invoke('agent:setCwd', second)
     await new Promise((resolve) => setTimeout(resolve, 20))
-    // The later calls wait for the first, as main's synchronous handler made them.
     expect(app.setCurrentCwd).not.toHaveBeenCalled()
     releaseFirst()
     await expect(Promise.all([a, b, c, d])).resolves.toEqual([first, second, null, second])

@@ -1,4 +1,3 @@
-// 可复制的 Markdown 会话报告：把可验证 token、调用明细、文件足迹与行动信号汇成一份文本。
 import { workspaceDiffCopy } from '@shared/constants/copy'
 import type { WorkspaceDiffResult } from '@shared/trace'
 import { basename, fmtKnownTokens, fmtTok } from './format-text'
@@ -12,7 +11,6 @@ function safeReportLabel(name: string): string {
   return name.replace(/\s+/g, ' ').trim().slice(0, 96)
 }
 
-// Billing Guardian P0：把本会话的 SDK/transcript token 和行动信号汇成可复制 Markdown。
 // 工具/Skill/MCP/hook 没有独立 token 字段；报告只说明不可硬拆，不展示弱关联明细。
 export function buildSessionReport(turns: Turn[], gitDiff?: WorkspaceDiffResult | null, opts: { sessionId?: string | null } = {}): string {
   const billing = analyzeBilling(turns)
@@ -71,7 +69,6 @@ export function buildSessionReport(turns: Turn[], gitDiff?: WorkspaceDiffResult 
       `- **危险审计**：${dangers.map((e) => `[${e.danger!.level === 'danger' ? '高危' : '可疑'}] ${e.danger!.reason}`).join(' · ')}`
     )
 
-  // 从真实数据派生的优化提示（有就列，没有不编）
   const hints: string[] = []
   if (cov.blind.length)
     hints.push(

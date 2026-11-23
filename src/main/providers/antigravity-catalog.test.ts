@@ -60,7 +60,6 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
     expect(models[1].description).toContain('经 Antigravity 提供')
     expect(first.data!.permissions.map((p) => p.id)).toEqual(['default', 'auto_accept_edits', 'full_access'])
 
-    // Commands read reuses the cached probe without spawning a second agy process!
     const recAfterFirst = readFileSync(recordPath, 'utf8')
     const cmds = await adapter.commands!.list({ providerId: 'antigravity', cwd })
     expect(cmds.state).toBe('ready')
@@ -68,7 +67,6 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
     expect(cmds.data!.map((c) => c.name)).toEqual(['compact', 'plan'])
     expect(readFileSync(recordPath, 'utf8')).toBe(recAfterFirst)
 
-    // Second runControls read also hits cache (zero extra spawn).
     const second = await adapter.runControls!.read({ providerId: 'antigravity', cwd })
     expect(second.state).toBe('ready')
     expect(readFileSync(recordPath, 'utf8')).toBe(recAfterFirst)
@@ -135,7 +133,6 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
       return 'probed'
     })
 
-    // While run is active, probe MUST NOT start (mutation deleting `|| activeRuns > 0` fails here).
     await new Promise((r) => setTimeout(r, 120))
     expect(probeStarted).toBe(false)
 
@@ -158,7 +155,6 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
       probeWaitTimeoutMs: 120
     })
 
-    // 1. Populate cache while idle.
     const initial = await catalog.runControls({ providerId: 'antigravity', cwd })
     expect(initial.state).toBe('ready')
     expect(initial.data?.models[0].model.id).toBe('gemini-3-pro')
@@ -173,13 +169,11 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
       expect(Date.now() - t0).toBeLessThan(200)
       expect(staleHit.state).toBe('ready')
       expect(staleHit.data?.models[0].model.id).toBe('gemini-3-pro')
-      // Returned stale cache without spawning a second agy process.
       expect(readFileSync(recordPath, 'utf8')).toBe(recAfterFirst)
     } finally {
       releaseLongRun()
     }
 
-    // 3. Cold cache (after invalidate) while an active run is held: bounded timeout returns unknown instead of hanging.
     catalog.invalidate()
     const releaseColdRun = await catalog.enterRun()
     try {
@@ -192,7 +186,6 @@ describe('A5: Antigravity 目录探测、动态 thought_level、Skills/Commands�
       releaseColdRun()
     }
 
-    // 4. Once the active run ends, catalog probe recovers cleanly.
     const recovered = await catalog.runControls({ providerId: 'antigravity', cwd })
     expect(recovered.state).toBe('ready')
     expect(recovered.data?.models[0].model.id).toBe('gemini-3-pro')

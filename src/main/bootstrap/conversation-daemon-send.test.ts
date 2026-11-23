@@ -2,9 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gateDaemonChannel, installDaemonChannelForwarder, installDaemonRunFollower } from '../daemon-channel-gate'
 import { installDaemonConversationSend } from './conversation-daemon-send'
 
-// Daemon mode `conversation:send` (P3-conversation-send.md): the daemon answers with the
-// ledger run that carries the conversation turn. The window follows that run like one it
-// submitted, then refreshes the conversation, and the renderer gets the in-process answer.
 const TURN = '3f2b8c1d-5e6a-4b7c-8d9e-0f1a2b3c4d5e'
 const request = { conversationId: 'conv-1', commandId: 'c'.repeat(32) }
 

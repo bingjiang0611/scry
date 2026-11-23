@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gateDaemonChannel, installDaemonChannelForwarder } from '../daemon-channel-gate'
 import { installSessionLifecycleDialogs } from './session-lifecycle-daemon'
 
-// Daemon mode: dialogs stay in this window (B4 D2). The App asks before it sends; a "no"
-// never reaches the daemon, and an archived purge carries the count the user saw.
 
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
@@ -81,7 +79,6 @@ describe('session lifecycle dialogs in daemon mode', () => {
     expect(window.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ args: [{ ...fork, cwd: '/explicit' }] }))
     window.dispose()
 
-    // No selection: sent as it came, as main's handler would have received it.
     const none = wire({ confirm: true }, () => ({ externalSessionId: 'forked' }))
     dispose = none.dispose
     await none.channel('agent:forkSession')({}, fork)

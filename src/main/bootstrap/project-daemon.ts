@@ -10,15 +10,11 @@ import type { PiProfileAddition } from './project-channels'
 // authorization input) or run as a Pi launcher.
 
 export interface ProjectDaemonWindow {
-  /** The native folder picker; null when cancelled. */
   pickFolder(): Promise<string | null>
-  /** The native file picker for a Pi launcher; null when cancelled. */
   pickPiLauncher(): Promise<string | null>
-  /** The window's error dialog for a launcher that failed the Pi handshake. */
   notifyPiFailure(message: string): Promise<void>
   /** This window's workspace selection (agent:setCwd, kept in main). */
   windowCwd(): string | undefined
-  /** Select the folder the daemon validated and remembered, as agent:setCwd does. */
   applyChosenFolder(dir: string): void
 }
 
@@ -64,8 +60,6 @@ export function installProjectDaemonWindow(window: ProjectDaemonWindow): () => v
  * learns that selection, so the App fills it before the call, exactly as main did.
  */
 export function installProviderContextWindowCwd(windowCwd: () => string | undefined): () => void {
-  // Both fall back to main's currentCwd in process (resetProviderSession too); the daemon
-  // has no window selection, so the App names it.
   const undo = ['agent:invalidateProviderContext', 'agent:newSession'].map((channel) =>
     installDaemonChannelGuard(channel, async (args) => {
       const [context, ...rest] = args

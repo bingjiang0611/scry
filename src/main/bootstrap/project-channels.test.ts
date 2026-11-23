@@ -4,8 +4,6 @@ import {
   recentFolderChannelHandlers, rememberChosenFolder
 } from './project-channels'
 
-// The handler tables main registers and the daemon serves as local ops (B4-L4). Main's
-// validation and order are the contract; the daemon only gets the same functions.
 
 function stores() {
   const projectStore = { setPinned: vi.fn(() => true), rename: vi.fn(() => true), remove: vi.fn() }

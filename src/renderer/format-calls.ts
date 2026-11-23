@@ -1,4 +1,3 @@
-// 调用明细：逻辑调用去重与 skill 投影、工具显示名/参数、按 工具/skill/子agent/mcp 分类计数。
 import { mcpCallsForEvent, type TraceEvent } from '@shared/trace'
 import { logicalCallEventsForTurn as deduplicateCallEvents } from '@shared/logical-calls'
 import { projectRequestedSkillLoads } from './skill-load-evidence'
@@ -39,7 +38,6 @@ export function toolMeta(ev: TraceEvent): string {
   return ''
 }
 
-// 调用明细（本会话）：把 tool_use 事件按 工具/skill/子agent/mcp 分类计数，供右栏监控/定位。
 // 只数 tool_use（排除 stage==='tool_result'，否则每次调用会被结果事件重复计一遍）。
 export interface CallCount {
   name: string

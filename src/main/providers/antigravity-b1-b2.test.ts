@@ -53,7 +53,6 @@ describe('W8 复核 B1：所有 .gemini 根目录推导统一使用清洗后的�
     const ws = makeTempDir('scry-ws-b1-')
     const userData = makeTempDir('scry-ud-b1-')
 
-    // 真实 homeDir/.gemini 下存在 toolPermission: auto、user MCP、user Skill
     mkdirSync(join(fakeHome, '.gemini', 'antigravity-cli'), { recursive: true })
     mkdirSync(join(fakeHome, '.gemini', 'config', 'skills', 'real-skill'), { recursive: true })
     writeFileSync(
@@ -92,7 +91,6 @@ describe('W8 复核 B1：所有 .gemini 根目录推导统一使用清洗后的�
 
     const adapter = createAntigravityAdapter(fakeHome, { userDataDir: userData })
 
-    // 1. default 运行必须被真实 homeDir/.gemini 的 toolPermission:auto 拒绝（不能被未放行的 GEMINI_HOME 绕过）
     await expect(
       adapter.run({
         runId: 'b1-bypass-check',
@@ -104,7 +102,6 @@ describe('W8 复核 B1：所有 .gemini 根目录推导统一使用清洗后的�
       }).promise
     ).rejects.toThrow(/已拒绝启动 Antigravity/)
 
-    // 2. MCP 路径、MCP 快照、Skill 列表必须全部读真实 homeDir/.gemini，而不是未放行的 GEMINI_HOME
     const mcpPaths = providerMcpConfigPaths('antigravity', ws, fakeHome, process.env)
     expect(mcpPaths).toContain(join(fakeHome, '.gemini', 'config', 'mcp_config.json'))
     expect(mcpPaths).not.toContain(join(fakeEmptyGemini, 'config', 'mcp_config.json'))
@@ -222,7 +219,6 @@ describe('W8 复核 B2：运行并发、排队停止与槽位后置门禁', () =
       emit: (ev) => events.push(ev)
     })
 
-    // 排队期间不该提前跑门禁与 MCP 准备
     await new Promise((r) => setTimeout(r, 30))
     expect(trustChecks).toBe(0)
     expect(mcpPrepares).toBe(0)
@@ -305,7 +301,6 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     process.env.SCRY_AGY_PATH = binPath
     const adapter = createAntigravityAdapter(fakeHome)
 
-    // 1. 可返回 decision:"allow" 且 matcher 匹配、无用户级规则 -> 标「由 hook 放行」
     const events: TraceEvent[] = []
     const res = await adapter.run({
       runId: 'd12-hook',
@@ -320,7 +315,6 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     expect(toolResult?.runtimeMetadata?.approvalSource).toBe('hook')
     expect(toolResult?.runtimeMetadata?.approvalLabel).toBe('由 hook 放行')
 
-    // 2. N5 日志型 PreToolUse hook（不含 decision:allow）-> 绝不误标「由 hook 放行」
     const logOnlyWs = makeTempDir('scry-ws-d12-log-')
     mkdirSync(join(logOnlyWs, '.agents'), { recursive: true })
     writeFileSync(
@@ -342,7 +336,6 @@ describe('W8 维护者决定 D11 / D12 与应修 S8：用户规则、有效权�
     const logResult = logEvents.find((e) => e.kind === 'tool' && e.stage === 'tool_result' && e.toolUseId === 'tc-hook-1')
     expect(logResult?.runtimeMetadata?.approvalSource).toBeUndefined()
 
-    // 3. N5 matcher 不匹配（只匹配 write_file，实际运行 run_command）-> 不误标
     const mismatchWs = makeTempDir('scry-ws-d12-mismatch-')
     mkdirSync(join(mismatchWs, '.agents'), { recursive: true })
     writeFileSync(

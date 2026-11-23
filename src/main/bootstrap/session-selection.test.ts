@@ -21,7 +21,6 @@ function target() {
 
 const selection = { providerId: 'codex' as const, cwd: '/w', externalSessionId: 'native-1', canResume: true, loadingUnsettledRun: false }
 
-// The window part of a history load, as the in-process loader applied it inline.
 describe('session selection', () => {
   it('points the window at the loaded session and resets its revision and aliases', () => {
     const t = target()

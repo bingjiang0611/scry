@@ -52,7 +52,6 @@ export interface SessionLifecycleDependencies {
   sideChatCascade: SideChatCascade
   deleteNativeProjection?: (ref: AppSessionRef, runIds: ReadonlySet<string>) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
   publishDataUpdated: (event: AgentDataUpdated) => void
-  /** The real count of archived sessions handled so far, for the renderer to show in place. */
   publishDeleteProgress?: (progress: DeleteArchivedProgress) => void
   /** Asks the user; false or absent answer means no. Absent when the caller already asked. */
   confirm?: (prompt: { message: string; detail: string; button: string }) => Promise<boolean>
@@ -312,7 +311,6 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
     }
     let deleted = 0
     const failures: DeleteArchivedSessionsResult['failures'] = []
-    // Progress is the real count of sessions handled so far; the renderer shows it in place.
     const progress = (done: number): void => deps.publishDeleteProgress?.({ done, total: targets.length, failed: failures.length })
     progress(0)
     for (const [index, target] of targets.entries()) {

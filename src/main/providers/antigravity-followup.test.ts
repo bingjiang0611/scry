@@ -90,7 +90,6 @@ describe('W8 第三轮后续项 1：run 内选择 allow_always 后停止推断�
     process.env.SCRY_AGY_PATH = binPath
     const adapter = createAntigravityAdapter(fakeHome)
 
-    // 1. 选 allow_always：tc-2 不得被误推为「由 hook 放行」，tc-3 显式 _meta 仍标「由 hook 放行」
     const eventsAlways: TraceEvent[] = []
     const resAlways = await adapter.run({
       runId: 'followup-allow-always',
@@ -144,7 +143,6 @@ describe('W8 第三轮后续项 2：hook 脚本 realpath 边界限制与防回�
     const outsideScript = join(outsideDir, 'outside-allow.sh')
     writeFileSync(outsideScript, '#!/bin/sh\nprintf \'{"decision":"allow"}\\n\'\n', 'utf8')
 
-    // A. 绝对路径指向外部脚本 -> 拒绝读取
     const wsAbs = makeTempDir('scry-ws-hook-abs-')
     mkdirSync(join(wsAbs, '.agents'), { recursive: true })
     writeFileSync(
@@ -154,7 +152,6 @@ describe('W8 第三轮后续项 2：hook 脚本 realpath 边界限制与防回�
     )
     expect(collectAllowCapablePreToolUseMatchers(wsAbs, fakeHome)).toEqual([])
 
-    // B. 相对路径 ../ 穿越指向外部脚本 -> 拒绝读取
     const wsRel = makeTempDir('scry-ws-hook-rel-')
     mkdirSync(join(wsRel, '.agents'), { recursive: true })
     const relEscape = relative(join(wsRel, '.agents'), outsideScript)
@@ -178,7 +175,6 @@ describe('W8 第三轮后续项 2：hook 脚本 realpath 边界限制与防回�
     )
     expect(collectAllowCapablePreToolUseMatchers(wsSymlinkParent, fakeHome)).toEqual([])
 
-    // D. 合法边界内脚本（工作区 .agents/scripts 与 ~/.gemini/config）-> 正常识别
     const wsValid = makeTempDir('scry-ws-hook-valid-')
     mkdirSync(join(wsValid, '.agents', 'scripts'), { recursive: true })
     writeFileSync(join(wsValid, '.agents', 'scripts', 'allow.sh'), '#!/bin/sh\nprintf \'{"decision":"allow"}\\n\'\n', 'utf8')
@@ -218,12 +214,10 @@ describe('W8 第三轮后续项 2：hook 脚本 realpath 边界限制与防回�
       return result?.runtimeMetadata?.approvalSource === 'hook'
     }
 
-    // 1. 经典 ReDoS 表达式必须在极短时间内结束且不误匹配
     const evilStart = Date.now()
     expect(runMatcher(['(a+)+b'], `${'a'.repeat(30)}!`)).toBe(false)
     expect(Date.now() - evilStart).toBeLessThan(100)
 
-    // 2. 超长 matcher (> 128) 被拒绝，不会触发匹配
     const longTool = 'a'.repeat(200)
     expect(runMatcher([longTool], longTool)).toBe(false)
 

@@ -109,7 +109,6 @@ export async function exerciseNativeHistory(smokeContext) {
     assert.equal(reopened.turns.length, 3)
     assert.equal(reopened.turns.at(-1).runId, 'scry-continuation')
     const creditOf = turn => turn.items.filter(item => item.stage === 'credit_usage').at(-1)?.creditUsage
-    // Keep the >64 MiB workload intact: missing records are not inferred as zero.
     assert.equal(creditOf(reopened.turns.at(-1)).status, 'unavailable')
     assert.equal(creditOf(reopened.turns.at(-1)).value.amount, undefined)
     // A real receipt beyond the former file-size cap must now survive the IPC projection.

@@ -1,5 +1,4 @@
 // 分段视图：按实际发生的 skill/MCP 调用把会话切段，聚合每段的 token/api/工具/文件/效率。
-// 子 agent 没有独立 usage 时只计数，不把父轮 token 分摊给子 agent。
 import { mcpCallsForEvent, type ModelUsageRow, type TraceEvent } from '@shared/trace'
 import { resultWallTiming } from '@shared/result-timing'
 import { basename } from './format-text'
@@ -7,8 +6,6 @@ import { hasTokenUsage, resultTokenTotal } from './format-usage'
 import { logicalCallEventsForTurn } from './format-calls'
 import type { Turn } from './format-types'
 
-// P1 Segment View（RFC §8.3，通用不绑 workflow）：按会话里实际发生的 skill 调用把时间线切段，
-// 每段聚合工具数/子 agent/读写/报错，回答「哪段最贵、哪段反复、哪个 skill 吃掉大头」。不假设任何特定 phase 名。
 export interface Segment {
   skill: string // skill 名；首段无 skill 时为 '（无 skill）'
   tools: number // 本段普通 tool_use 数（不含切段的 skill 事件本身，也不含子 agent）
@@ -48,7 +45,6 @@ export function aggregateSegments(items: TraceEvent[]): Segment[] {
   return segs
 }
 
-// Segment View（蓝本 segments.html）：把会话按「活跃 context」切成段，每段聚合 token/api/工具/文件/效率。
 // per-segment token = 段内各 turn 的 result usage 之和；% = 段 api / 总 api。
 // 活跃 skill 跨 turn 携带（启发式：skill 注入后持续到下个 skill）——精确 active_skill 待后端 PR#7（spans.skill_name）。
 export interface SegAct {
@@ -208,7 +204,6 @@ export function aggregateSegmentsRich(turns: Turn[]): SegmentReport {
     return { kind: 'baseline', name: '—' }
   })
 
-  // 连续同 context 合并成段
   const groups: { ctx: TurnCtx; idx: number[] }[] = []
   turnCtx.forEach((c, i) => {
     const last = groups[groups.length - 1]

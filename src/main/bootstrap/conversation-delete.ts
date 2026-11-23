@@ -26,7 +26,6 @@ export interface NativeSideChatScope {
 export interface SideChatCascade {
   /** Read-only: how many side chats a deletion of this session takes along. Throws when one cannot be deleted. */
   count(scope: NativeSideChatScope): Promise<number>
-  /** Deletes them; an empty `failed` means none is left behind. */
   run(scope: NativeSideChatScope): Promise<Pick<ConversationDeletionResult, 'deleted' | 'retained' | 'failed'>>
 }
 
@@ -75,7 +74,6 @@ export function registerConversationDeletionHandlers(handle: ChannelRegistrar, d
     return plans
   }
 
-  /** The plan a user confirms for one conversation: its own scope plus its side chats. */
   async function previewWithSideChats(conversation: Conversation): Promise<ConversationDeletionPreview> {
     const evidence = await workspaceEvidence(conversation.cwd)
     // A side chat is never a parent, and nesting is refused at creation.

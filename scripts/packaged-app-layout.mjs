@@ -32,7 +32,6 @@ export function defaultPackagedAppPath({ platform = process.platform, arch = pro
   throw new Error(`不支持的桌面打包平台：${platform}`)
 }
 
-// 本地 smoke 跑的是 node_modules 里未打包的 Electron，它同样按平台有不同布局。
 export function electronDevLayout({ platform = process.platform } = {}) {
   if (platform === 'darwin') {
     const appPath = join('node_modules', 'electron', 'dist', 'Electron.app')

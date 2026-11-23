@@ -17,7 +17,6 @@ export function nativeHistoryCatalog({ nativeSessionId, canonicalWorkspace, home
   ]
 }
 
-// Real renderer/preload/main with a Pi JSONL and two temporary directories.
 // projectCwd is presentation grouping; it must never replace the session's cwd.
 export async function exerciseActivityHistory({ evaluate, cdp, userDataDir, home, canonicalWorkspace, nativeSessionId }) {
   const catalogPath = join(userDataDir, 'app-sessions.json')

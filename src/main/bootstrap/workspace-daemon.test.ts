@@ -8,9 +8,6 @@ vi.mock('electron', () => ({ app: { getPath: () => '/nonexistent' }, shell: {}, 
 const { gateDaemonChannel, installDaemonChannelForwarder } = await import('../daemon-channel-gate')
 const { registerWorkspaceHandlers } = await import('./workspace')
 
-// Daemon mode keeps workspace:openExternal and workspace:trash in the App: the daemon has
-// no shell. They stay bound to the window's selection exactly as in process, and read
-// nothing the daemon owns: the cross-project fallback asks the daemon for its projects.
 
 type Listener = (event: unknown, ...args: unknown[]) => Promise<unknown>
 const dirs: string[] = []

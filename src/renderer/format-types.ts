@@ -1,4 +1,3 @@
-// 渲染层共享的会话视图类型：一轮会话（Turn）与 MCP 状态。无 React 依赖，只描述 renderer 看到的形状。
 import type { AgentInputAttachment } from '@shared/runtime'
 import type { ProviderId } from '@shared/provider'
 import type { TraceEvent } from '@shared/trace'

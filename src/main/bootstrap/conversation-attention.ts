@@ -7,9 +7,7 @@ import type { TrustedRegistrar } from './agent-runtime-ipc'
 /** Reading history is not proof of viewing it: previews and refreshes read it too. */
 export function registerConversationAttention(deps: {
   handleTrusted: TrustedRegistrar
-  /** The conversation's published ledger, read only (ConversationStore.read). */
   readConversation: (id: string) => Promise<Conversation | null>
-  /** The daemon's known-project answer for the conversation's directory. */
   resolveKnownProjectDirectory: (cwd: string) => unknown
   getWindow: () => Pick<BrowserWindow, 'isFocused'> | null
   clearLegacyFocus: () => void
@@ -23,7 +21,6 @@ export function registerConversationAttention(deps: {
 }): () => void {
   let revision = 0
   let viewedKey: string | null = null
-  // The view the window asked for while the daemon could not answer its project check.
   let deferred: { id: string; revision: number } | null = null
   const release = (): void => {
     revision += 1
