@@ -55,7 +55,6 @@ function fakeClock() {
 
 const repos: string[] = []
 afterEach(async () => {
-  // 每个用例的临时仓库都在这里回收，绝不污染用户仓库。
   await Promise.all(repos.splice(0).map((root) => rm(root, { recursive: true, force: true }).catch(() => undefined)))
 })
 
@@ -589,7 +588,6 @@ describe('WriteCompletionTracker 写盘时序', () => {
     const tracker = new WriteCompletionTracker()
     expect(tracker.observe({ stage: 'tool:Write', toolUseId: 'w1', fileOp: 'write', filePath: '/repo/a.ts' })).toBe(false)
     expect(tracker.observe({ stage: 'tool_result', toolUseId: 'w1' })).toBe(true)
-    // 同一个 toolUseId 的结果只兑付一次。
     expect(tracker.observe({ stage: 'tool_result', toolUseId: 'w1' })).toBe(false)
   })
 
@@ -650,7 +648,6 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
 
     // 基线必须在本轮任何写入前就位（main 用 sessionBaselineReady 保证），否则会把本轮写入误折进基线。
     const baselineCapture = await baseline.capture
-    // 运行中：模型写了一个新文件（untracked）。
     await writeFile(join(root, 'feature.ts'), 'a\nb\n')
     await previewer.notifyChange()
 
@@ -691,7 +688,6 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       now: () => 0,
       minIntervalMs: 0
     })
-    // 先发布一版运行中预览。
     await previewer.notifyChange()
     expect(events.at(-1)?.snapshot && fileNames(events.at(-1)!.snapshot)).toEqual(['x.ts'])
 
@@ -735,13 +731,10 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       if (tracker.observe(event)) await previewer.notifyChange()
     }
 
-    // 1) start：文件还没写盘。
     await observe({ stage: 'tool:Write', toolUseId: 'w1', fileOp: 'write', filePath: join(root, 'feature.ts') })
     expect(events).toEqual([]) // 一条预览都不该发（旧实现会在这里发出空 files 的假预览）
 
-    // 2) 真正写盘。
     await writeFile(join(root, 'feature.ts'), 'a\nb\n')
-    // 3) tool_result 到达。
     await observe({ stage: 'tool_result', toolUseId: 'w1' })
 
     expect(events).toHaveLength(1)
@@ -867,7 +860,6 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     expect(entry.origin).toBe('resumed')
     const baselineCapture = await entry.capture
 
-    // 重锚之后才写的文件。
     await writeFile(join(root, 'after-resume.ts'), 'new\n')
     const settled = await snapshotSessionNetDiff(baselineCapture)
     expect(fileNames(settled)).toEqual(['after-resume.ts']) // earlier.ts 不在净 diff 里

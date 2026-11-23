@@ -346,7 +346,6 @@ export function signalProcessTreeWithIdentity(args: {
   }
   const identityKey = processIdentityKey(row)
   try {
-    // 进程组优先：逃到后代里的工作必须一起停。
     kill(-identity.pid, signal)
     return { status: 'signalled', signal, identityKey, scope: 'group', nodes }
   } catch (error) {

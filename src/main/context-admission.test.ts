@@ -160,7 +160,6 @@ describe('context admission', () => {
       expect(action).not.toHaveBeenCalled()
       releaseHolder()
       await holder
-      // The timed-out start released its own place, so the next one is not stuck behind it.
       await expect(admitRun(admission, ['a'], async () => 'after')).resolves.toBe('after')
     } finally {
       vi.useRealTimers()
@@ -238,7 +237,6 @@ describe('context admission', () => {
     expect(expectedSessionMatches('run-pending', undefined, () => pending)).toBe(true)
     // 可 resume 的会话丢了 main 侧边界时仍然必须拒绝，不能静默新建 session。
     expect(expectedSessionMatches('run-a', undefined, () => [{ runId: 'run-a', externalSessionId: 'session-a' }])).toBe(false)
-    // 本地壳也不能被当成其他会话的投递目标。
     expect(expectedSessionMatches('run-failed', 'session-b', () => localOnly)).toBe(false)
     expect(expectedSessionMatches('run-other', undefined, () => localOnly)).toBe(false)
   })

@@ -51,7 +51,6 @@ export function assertProvider(expectation: ArchiveTurnExpectation, raw: { provi
   }
 }
 
-/** Keeps only the provenance fields that were actually present. */
 export function factsOf(fields: Map<string, unknown>): ArchiveBodyFacts {
   const facts: ArchiveBodyFacts = {}
   for (const key of BODY_KEYS) if (typeof fields.get(key) === 'string') facts[key as 'source'] = fields.get(key) as string

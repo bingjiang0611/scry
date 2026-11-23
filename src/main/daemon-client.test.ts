@@ -124,14 +124,12 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     const env = await harness({ version: '0.2.199' })
     const mismatch = client(env)
     await expect(mismatch.connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch', running: '0.2.199' })
-    // Nothing was persisted: a version mismatch must not leave a usable grant behind.
     expect(existsSync(daemonClientPaths(env.daemonStateDirectory, env.userDataDir).statePath)).toBe(false)
   })
 
   // A5: `install:mac:dev` reinstalls without bumping the version, so the old daemon
   // answered with the same version and the new App adopted it.
   it('refuses a daemon of the same version built from other sources, before and after enrolling', async () => {
-    // At enrollment: the reply names the daemon's build, and nothing is stored.
     const fresh = await harness({ build: BUILD_OLD })
     await expect(client(fresh, { appBuild: BUILD_NEW }).connect())
       .rejects.toMatchObject({ reason: 'daemon_version_mismatch', running: VERSION, runningBuild: BUILD_OLD })
@@ -144,7 +142,6 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     same.close()
     await expect(client(env, { appBuild: BUILD_NEW }).connect()).rejects.toMatchObject({ reason: 'daemon_version_mismatch', runningBuild: BUILD_OLD })
     expect(await client(env, { appBuild: BUILD_NEW }).daemonInfo()).toEqual({ version: VERSION, build: BUILD_OLD })
-    // Control: the refusal kept the grant, and the same build still connects with it.
     expect(await client(env, { appBuild: BUILD_OLD }).connect()).toEqual({ version: VERSION, build: BUILD_OLD, enrolled: false })
   })
 
@@ -242,7 +239,6 @@ describe('daemon client admission (L2: probe, enroll, version)', () => {
     const lost = client(env)
     expect(lost.hasGrant).toBe(false)
     await expect(lost.connect()).rejects.toMatchObject({ reason: 'daemon_enrollment_unavailable' })
-    // Control: with the enrollment socket gone the same client reports absence instead.
     const gone = client(env, { connectEnroll: async () => { throw new Error('ECONNREFUSED') } })
     await expect(gone.connect()).rejects.toMatchObject({ reason: 'daemon_not_running' })
   })

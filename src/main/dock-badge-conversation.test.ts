@@ -15,7 +15,6 @@ describe('DockBadgeState: a conversation on screen', () => {
     badge.viewSessions(MAIN, ['codex|/w|a', 'claude|/w|b'], true)
     badge.markAttention('claude|/w|b', attention(true))
     expect(badge.count).toBe(0)
-    // A session outside the conversation still counts.
     badge.markAttention('other', attention(true))
     expect(badge.count).toBe(1)
   })

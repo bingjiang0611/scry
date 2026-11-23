@@ -93,7 +93,6 @@ describe('RunRegistry', () => {
     expect(registry.focusedSnapshot()).toBeNull()
     registry.register({ runId: 'run-a', done: false }, { runId: 'run-a' })
     registry.register({ runId: 'run-b', done: true }, { runId: 'run-b' })
-    // register 会把焦点切到最新注册的 run。
     expect(registry.focusedSnapshot()?.runId).toBe('run-b')
     registry.focus(null)
     expect(registry.focusedSnapshot()).toBeNull()

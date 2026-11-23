@@ -98,10 +98,8 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       })
       await expect.poll(() => runtime.isTracking(extSub.runId as string), { timeout: 5_000 }).toBe(true)
 
-      // activeRuns() uses subscribed state, never liveRuns
       await surface.activeRuns()
 
-      // W11 host-admin notice arrives via subscribe hostNotice hint with exact payload
       const recorded = daemon.host.hostAdmin.recordNotice({
         kind: 'device_approved_via_cli',
         deviceLabel: 'W16Phone',
@@ -125,7 +123,6 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       ).c
       expect(cmdCount).toBeGreaterThanOrEqual(2)
 
-      // Hard assertions: ZERO watch, ZERO liveRuns, ZERO settledTail, ZERO appEvents
       expect(ops.filter((o) => o.op === 'subscribe').length).toBeGreaterThan(0)
       expect(ops.filter((o) => o.op === 'watch')).toHaveLength(0)
       expect(ops.filter((o) => o.op === 'liveRuns')).toHaveLength(0)
@@ -213,11 +210,9 @@ describe('P4-3 local subscribe App integration (W16 Unit 3)', () => {
       // Wait for pump to reconnect and detect logId change + snapshot resync
       await expect.poll(() => logIdChanges.length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
 
-      // Run view is preserved and turnDone was NOT emitted a second time
       expect(runtime.runView(run.runId)?.done).toBe(true)
       expect(turnDoneEvents.filter((e) => e.runId === run.runId)).toHaveLength(1)
 
-      // Subsequent run after reset still works seamlessly
       const run2 = await surface.start({
         prompt: 'after reset',
         providerId: 'codex',
@@ -343,24 +338,20 @@ main().catch((err) => { console.error(err); process.exit(1) })
         waitMs: 300
       })
 
-      // First run before SIGKILL
       const r1 = await surface.start({ prompt: 'before sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() })
       await expect.poll(() => runtime!.runView(r1.runId)?.done, { timeout: 10_000 }).toBe(true)
 
       // Capture the App notification before killing the transport that delivers it.
       await expect.poll(() => turnDone.filter((id) => id === r1.runId).length, { timeout: 3_000 }).toBe(1)
 
-      // Hard-kill child daemon with SIGKILL
       child.kill('SIGKILL')
       await new Promise<void>((resolve) => child.once('exit', () => resolve()))
       client.close()
 
-      // Relaunch daemon on same directories and reconnect client
       child = await spawnChildDaemon()
       await client.connect()
       expect(client.subscribeSupported).toBe(true)
 
-      // App pump recovers and second run succeeds cleanly
       const r2 = await surface.start({ prompt: 'after sigkill', providerId: 'codex', cwd: workspace, commandId: randomUUID() }).catch(async (error) => {
         const evidence = await transport.subscribe({ views: ['activeRuns'], waitMs: 0 })
           .catch(() => undefined)

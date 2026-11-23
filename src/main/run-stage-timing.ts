@@ -59,7 +59,6 @@ export function recordRunStage(runId: string, stage: RunStage): void {
   } catch { /* observation must never block a run */ }
 }
 
-/** Records one orchestration commit timing sample when SCRY_RUN_TIMING=1 (P4-1 measurement). */
 export function recordOrchestrationCommitTiming(input: {
   runId: string
   ledgerRunId: string

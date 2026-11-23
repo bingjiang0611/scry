@@ -113,7 +113,6 @@ export class RunDiffPreviewer {
     return demanded && this.hasObservedChange ? this.notifyChange() : Promise.resolve()
   }
 
-  /** 终态发布前封口该 scope。 */
   seal(scope: DiffPreviewScope): void {
     this.sealedScopes.add(scope)
     // 悬挂的延迟 trailing 必须当场取消：封口后不发布，idle() 也不该等它到期。
@@ -177,7 +176,6 @@ export class RunDiffPreviewer {
     return started
   }
 
-  /** 节流窗口内的改动合并成一次延迟刷新：已有待到期的就直接复用，不叠加。 */
   private scheduleDelayedTrailing(scope: DiffPreviewScope, delayMs: number): void {
     if (this.delays.has(scope)) return
     const capture = scope === 'turn' ? this.options.turnCapture : this.options.sessionCapture
@@ -190,7 +188,6 @@ export class RunDiffPreviewer {
         settle()
         return
       }
-      // 到期时串入该 scope 同一条调度链：有在途链就记 trailing，没有就自己开一条。
       const inFlight = this.cycles.get(scope)
       if (inFlight) {
         this.trailing.add(scope)
@@ -280,7 +277,6 @@ export class RunDiffPreviewer {
   private async run(scope: DiffPreviewScope, capture: Promise<GitTurnDiffCapture>, epoch: number): Promise<void> {
     const resolved = await capture
     if (resolved.status !== 'ready' || !this.demanded || epoch !== this.demandEpoch || this.sealedScopes.has(scope)) return
-    // 保留两种 scope 的采集策略；同一首轮基线可以复用在途读取，不缓存已完成的预览。
     const snapshot = await this.readSnapshot(scope, resolved, scope === 'turn' ? this.options.hints() : {})
     // null = 终态已接管这份 capture；sealed = 终态在本次计算期间发布过。两种情况都丢弃。
     if (!snapshot || !this.demanded || epoch !== this.demandEpoch || this.sealedScopes.has(scope)) return

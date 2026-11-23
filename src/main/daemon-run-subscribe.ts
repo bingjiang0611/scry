@@ -364,7 +364,6 @@ export function applyRunHintToRuntime(
   }
 }
 
-/** Waits for an admission or terminal event from the subscription. */
 export async function awaitSubscribeAdmission(input: {
   runId: string
   cursor: () => RunCursor | undefined

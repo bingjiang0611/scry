@@ -55,7 +55,6 @@ export class DockBadgeState {
     for (const group of this.viewedGroups.values()) for (const key of group) this.clear(key)
   }
 
-  // What the window shows right now, whichever way it came to show it.
   private shows(sessionKey: string): boolean {
     if (sessionKey === this.viewedSessionKey) return true
     for (const group of this.viewedGroups.values()) if (group.has(sessionKey)) return true
@@ -143,7 +142,6 @@ export class DockBadgeState {
     return this.unreadSessionKeys.size + this.remoteSessionKeys.size + (this.daemonSessionKeys?.size ?? 0)
   }
 
-  // Callers waiting for the daemon's first unread snapshot (whenDaemonKnown).
   private daemonWaiters: Array<() => void> = []
 
   /** Resolves true once the daemon's set is known, false if it is not within `timeoutMs`. */

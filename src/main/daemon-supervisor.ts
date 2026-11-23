@@ -29,7 +29,6 @@ export interface DaemonSupervisorOptions {
 }
 
 export type DaemonSupervisorResult =
-  // A daemon was already serving this socket; nothing was launched.
   | { status: 'adopted'; version: string }
   | { status: 'started'; version: string }
   // The daemon answers but was built from different sources (another version, or the
@@ -41,7 +40,6 @@ export type DaemonSupervisorResult =
 export const DAEMON_READY_TIMEOUT_MS = 10_000
 const READY_POLL_MS = 250
 
-/** Bring up a usable daemon, or explain exactly why there is none. */
 export async function ensureDaemon(options: DaemonSupervisorOptions): Promise<DaemonSupervisorResult> {
   const first = await probeQuietly(options.probe)
   if (first !== undefined) return adopt(first, options)

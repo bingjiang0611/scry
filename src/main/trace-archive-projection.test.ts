@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { iterateArchiveEntries, type ArchiveEntry, type ArchiveReadEvidence } from './trace-archive-projection'
 
-/** Assembles the streamed entries of one file into the turns the assertions speak about. */
 async function collect(entries: AsyncIterable<ArchiveEntry>): Promise<Array<{
   runId: string; done: boolean; status?: string; userText: string;
   events: Array<{ kind: 'text'; text: string; stage: string } | { kind: 'steer'; status: string; prompt: string; messageId?: string }>;
@@ -116,7 +115,6 @@ describe('readArchiveTurnProjection', () => {
   })
 
   it('never selects an event from text inside an unrelated payload', async () => {
-    // The payload below contains a full fake event; only structure may select events.
     const decoy = JSON.stringify({ kind: 'model', stage: 'text', runId, text: 'decoy' })
     const turn = await read(archive([
       event({ id: 'tool', kind: 'tool', stage: 'tool:Bash', outputContent: { storage: 'inline', content: decoy } }),

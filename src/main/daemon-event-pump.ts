@@ -23,7 +23,6 @@ export interface DaemonEventPumpDeps {
   onTerminal?: () => void
   // An MCP OAuth page the daemon asks this App to open (its own re-auth only).
   onOAuth?: (url: string) => void
-  // P5-7: host CLI approval switch / approve / cancel / revoke / desktop-off notice.
   onHostAdmin?: (notice: HostAdminNotice) => void
   // W1: one of the run pipeline's window notices. Awaited, so notices keep their order;
   // without a handler it goes to the window as it came.

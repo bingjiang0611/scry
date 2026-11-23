@@ -70,7 +70,6 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
       platform: 'darwin'
     })).toBe(true)
 
-    // Both unset and explicit SCRY_HOST_DAEMON=1 must refuse default userData under SCRY_TEST_APP=1.
     for (const env of [{ SCRY_TEST_APP: '1' }, { SCRY_TEST_APP: '1', SCRY_HOST_DAEMON: '1' }] as NodeJS.ProcessEnv[]) {
       expect(() => applyAppStartupGuards(env, {
         userDataDir: join(macAppData, 'scry'),
@@ -80,7 +79,6 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
       })).toThrow(/test_app_requires_isolated_user_data/)
     }
 
-    // Normal non-test builds are allowed to use default appData/<name>.
     const normalDev: NodeJS.ProcessEnv = {}
     expect(() => applyAppStartupGuards(normalDev, {
       userDataDir: join(macAppData, 'scry'),
@@ -89,7 +87,6 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
       platform: 'darwin'
     })).not.toThrow()
 
-    // Isolated temp userData passes under SCRY_TEST_APP=1.
     expect(() => assertIsolatedTestUserData({ SCRY_TEST_APP: '1' }, {
       userDataDir: '/tmp/scry-isolated-123/userData',
       appDataDir: macAppData,
@@ -141,7 +138,6 @@ describe('SCRY_TEST_APP=1 fail-closed isolation (W15 S3)', () => {
     expect(packagedLoginStart.canLaunchViaService()).toBe(false)
     electronMock.isPackaged = false
 
-    // Attempting to point a test instance at the production label is refused; explicit test label stays isolated.
     expect(resolveLoginStartOverrides({
       SCRY_TEST_APP: '1',
       SCRY_TEST_LOGIN_START_LABEL: 'com.scry.daemon',

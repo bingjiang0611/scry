@@ -34,7 +34,6 @@ export function traceEventByteSize(event: TraceEvent): number {
   return bytes
 }
 
-/** 一次 trace IPC 的载荷：事件按到达顺序排列，bytes 是这一批的 JSON UTF-8 字节数。 */
 export interface TraceBatchReceipt {
   /** Changes whenever the renderer delivery state is reset, fencing stale acknowledgements. */
   generation: number
@@ -115,7 +114,6 @@ export class TraceOutputBridge {
   private readonly highWaterBytes: number
   private readonly maxBufferBytes: number
   private readonly maxBufferEvents: number
-  /** 已发出但未 ACK 的事件条数。 */
   private inFlightEvents = 0
   private readonly schedule: (fn: () => void, ms: number) => () => void
 
@@ -156,7 +154,6 @@ export class TraceOutputBridge {
     this.cancelTimer = this.schedule(() => this.flush(), this.flushMs)
   }
 
-  /** 是否已被明确挡住：没有 ACK 额度，或 renderer 当前不可接收。 */
   private blocked(): boolean {
     return this.inFlightBytes >= this.highWaterBytes || !this.options.canSend()
   }
@@ -205,7 +202,6 @@ export class TraceOutputBridge {
     return true
   }
 
-  /** 当前交付代数。每次快照栅栏与窗口重挂之后递增。 */
   get generation(): number {
     return this.deliveryGeneration
   }
@@ -244,7 +240,6 @@ export class TraceOutputBridge {
     this.fencedSkipped = undefined
     if (fenced == null) return false
     this.skippedEvents = Math.max(0, this.skippedEvents - fenced)
-    // 快照之后新增的缺口仍然成立，并要求再对齐一次。
     this.degraded = this.skippedEvents > 0
     this.resyncRequired = this.skippedEvents > 0
     this.publishHealth()
@@ -297,7 +292,6 @@ export class TraceOutputBridge {
     this.inFlightBatches.clear()
   }
 
-  /** 连续发批直到缓冲排空或被背压/不可发送挡住。 */
   private deliver(ignoreHighWater: boolean): void {
     while (this.buffer.length > 0) {
       if (!this.sendBatch(ignoreHighWater)) break

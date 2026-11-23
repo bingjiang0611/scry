@@ -27,7 +27,6 @@ import { archivedTurnStatus } from './trace-archive-turn-status'
  * instead of producing a partial snapshot.
  */
 
-/** Provenance of one stored visible body, projected field by field. */
 export interface ArchiveBodyFacts {
   source?: string
   encoding?: string
@@ -172,7 +171,6 @@ export async function* iterateArchiveEntries(
     pending = undefined
   }
 
-  /** Emits the spooled body of the value that just ended, then frees its storage. */
   const spoolingNow = (): boolean => spoolTarget !== undefined && frames.at(-1)?.key === spoolKey
 
   const flush = async function* (): AsyncGenerator<ArchiveEntry> {
@@ -212,7 +210,6 @@ export async function* iterateArchiveEntries(
     }
   }
 
-  /** One event ended: its text, its body provenance, or the break it makes in text runs. */
   const closeEvent = async function* (): AsyncGenerator<ArchiveEntry> {
     finishScalar()
     for await (const entry of flush()) yield entry

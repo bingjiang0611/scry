@@ -251,7 +251,6 @@ describe('DockBadgeState', () => {
     badge.setRemote(['["conn","pi","","/repo","s1"]'])
     expect(badge.count).toBe(2)
     expect(counts.at(-1)).toBe(2)
-    // Remote keys never leak into the local renderer snapshot.
     expect(badge.snapshot().unreadSessionKeys).toEqual(['local-session'])
 
     // Repeating the same remote set must not re-publish or re-notify.
@@ -287,7 +286,6 @@ describe('DockBadgeState', () => {
     expect(badge.snapshot().unreadSessionKeys).toEqual(['conversation\0adopter'])
     badge.releaseQuestionAttention('native-session', 0)
     expect(badge.count).toBe(0)
-    // Other sessions keep their own rows.
     badge.markAttention('other-session', background)
     expect(badge.snapshot().unreadSessionKeys).toEqual(['other-session'])
   })

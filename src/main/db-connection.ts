@@ -1,7 +1,5 @@
 // SQLite 连接、模块级缓存与迁移闸控。schema/行映射/查询 SQL 在 span-ledger.ts。
 // 这里是唯一持有连接、缓存槽与失效入口的模块；其它 db-* 模块只读这些槽。
-// P0（RFC v2.4）：可信数据底座的持久化层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
-// 本文件只负责路径注入 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
 // 路径来自 storage-paths 的注入（main 或 daemon 各自提供 userData），这里不碰 Electron。
 // 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
 import type Database from 'better-sqlite3'
