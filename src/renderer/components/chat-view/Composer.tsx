@@ -33,16 +33,11 @@ export function Composer({
   const workspaceSetupActive = workspaceSetup != null
   const sessionOwnerLoading = sessionLoading || sessionCacheVisible
   const resettingNewConversation = sessionLoading && !hasSelectedSession
-  // New conversation clears the visible session synchronously, while main may still be
-  // invalidating Provider context. Do not make the project picker wait for that background
-  // work; historical-session loading remains hidden because it already has a session id.
   const showWorkdirPicker = !cwd || (turns.length === 0 && !workspaceSetupActive && (!agentLocked || resettingNewConversation) && !busy && !submitting && (!sessionOwnerLoading || resettingNewConversation) && !sessionEvidenceGap)
   const slashMatches = filterSlashCommands(input, slashCmds)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const [composerMenu, setComposerMenu] = useState<'workdir' | 'agent' | 'modelEffort' | null>(null)
   const promptHistory = useMemo(() => composerPromptHistory(turns, queuedPrompts), [turns, queuedPrompts])
-  // 编辑中的行不参与自动出队，所以「下一个」是第一条没在编辑中的消息——
-  // 高亮必须跟着真实发送顺序走，否则界面在骗人。
   const nextQueuedMessageId = useMemo(
     () => queuedPrompts.find((prompt) => prompt.messageId !== editingQueuedId)?.messageId ?? null,
     [queuedPrompts, editingQueuedId]
@@ -50,13 +45,10 @@ export function Composer({
   const editingQueuedIndex = editingQueuedId == null
     ? -1
     : queuedPrompts.findIndex((prompt) => prompt.messageId === editingQueuedId)
-  // Browse one snapshot until returning to the draft. Remote refreshes, older-page
-  // loads and queue dispatch must not invalidate the cursor on a recalled prompt.
   const promptHistoryRef = useRef<{ scopeKey?: string; history: string[]; position: number } | null>(null)
   const historyNavigation = promptHistoryRef.current?.scopeKey === composerScopeKey &&
     promptHistoryRef.current?.history[promptHistoryRef.current.position] === input
     ? promptHistoryRef.current : null
-  // Recalling a slash prompt is history navigation, not command completion.
   const slashOpen = slashRequested && !historyNavigation
   const resetPromptHistory = (): void => {
     promptHistoryRef.current = null
@@ -99,7 +91,6 @@ export function Composer({
   const hasDraft = input.trim().length > 0 || draftAttachments.length > 0
   const composerStatus = composerError ?? (showSendBlockedReason ? sendBlockedReason : detectionIssue ?? (hasDraft ? sendBlockedReason : null))
 
-  // 运行状态条数据：当前未完成 turn 的首个事件时间戳（真实字段，不做假数字）
   const inFlightTurn = turns.find((turn) => !turn.done && !turn.error)
   const stopStatus = runStopStatus(
     inFlightTurn ? stopStates[inFlightTurn.runId] : undefined,
@@ -107,8 +98,6 @@ export function Composer({
     inFlightTurn && stopRequest?.runId === inFlightTurn.runId ? stopRequest : undefined
   )
   const busyTurn = busy ? inFlightTurn : undefined
-  // Only the in-flight turn's own questions block it; another run's question is
-  // shown in its own turn, not attributed to this status bar.
   const busyQuestionCount = busyTurn ? pendingQuestions.filter((question) => question.runId === busyTurn.runId).length : 0
   const backgroundStatus = stopStatus.tone === 'running'
     ? pendingQuestionStatus(busyQuestionCount) ?? (busyTurn ? backgroundWorkStatus(latestBackgroundWork(busyTurn.items)) : undefined)

@@ -14,6 +14,8 @@ A view owns only its subscription: hiding it unsubscribes, and showing it again 
 
 For the legacy focused channel, prefer the snapshot that includes completed runs, since the active-only read omits their final evidence. Missing, rejected or obsolete snapshots leave the view degraded. An applied snapshot and a successful acknowledgement are separate facts. A selection, start or newer resync supersedes the startup snapshot. Apply a terminal notice to any still-visible matching turn, even after focus moves, but only the focused run can change the window’s running flag.
 
+An unavailable stream is degraded but does not prove skipped events. Trace loading does not own the composer lock. Show elapsed time only from an observed start, and block the current run only for its own questions.
+
 A daemon trace response is bounded, even for a live run. The reader must follow chunk cursors instead of waiting for settlement or treating the first response as complete. The [large-trace regression](../../src/daemon/host-process-large-trace.test.ts) proves the response exceeded the single-frame limit, covers delivery before settlement, and reopens through the desktop path.
 
 A daemon question must reach the App under the same canonical run ID returned by start and used by the scoped subscription. A trace marker can arrive before the Provider names its native turn; the native Stop probe and its regression rely on delivery before the run ends. Use a time bound rather than a reply count when waiting for settlement because progress may wake the observer many times.

@@ -20,6 +20,8 @@ Before draining the local queue, wait for history restoration and usable workspa
 
 Accepted native steer evidence can reconcile a lost reply and remove the item, not make it dispatchable again. An older rejection cannot overwrite a new pending attempt. To dismiss an unknown attempt, require terminal unknown evidence for its owning run; dismissal changes only the queue. Steer requires matching Provider, profile, directory and session identity; do not infer missing identities from the selected view.
 
+A new side chat has a frozen source, not missing archived turns. An unresolved first send is a distinct state and must not appear as a new empty side chat.
+
 Before sending a side-chat prompt, persist a bounded pending receipt for that exact command. Move only the submitted text and attachments into the receipt; preserve edits made during preparation. If preparation loses draft ownership, do not write or send. If the reserve is full or the receipt cannot be persisted, refuse before dispatch and keep the draft. Apply later results only to the matching command, never by run ID or prompt text.
 
 A missing history record or lost reply does not establish `not_sent`. Keep an unknown submission blocked for inspection; do not resend it. A host-confirmed refusal preserves the original content and a bounded reason. An explicit resend uses a new command ID. A known live dispatch needs no separate recovery block, but an unresolved local receipt still does, even when the host reports a pending attempt.

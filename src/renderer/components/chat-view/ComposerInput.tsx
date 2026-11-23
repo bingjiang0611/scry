@@ -174,7 +174,6 @@ export function ComposerInput({
                   className="run-status-trace-degraded"
                   title="实时视图为了保持界面可用而暂停镜像最新事件；本轮完整证据仍在 runState 与本机归档里，收口后会自动对齐"
                 >
-                  {/* 没有 scoped 流时一条也没丢：只报降级，不编一个缺口条数。 */}
                   {CONVERSATION_COPY.traceDegraded(traceHealth.skippedEvents)}
                 </span>
               )}
@@ -215,9 +214,6 @@ export function ComposerInput({
             compositionEndedAtRef.current = performance.now()
           }}
           onKeyUp={() => {
-            // The key that confirmed the IME candidate has been released (Enter,
-            // Space, or a selection key). The next Enter is a new send intent,
-            // not another confirmation merely because it arrived within 120 ms.
             compositionEndedAtRef.current = Number.NEGATIVE_INFINITY
           }}
           onPaste={(event) => {
@@ -294,7 +290,6 @@ export function ComposerInput({
               }
             }
             if (event.key === 'Enter' && !event.shiftKey) {
-              // Ignoring an IME confirmation or held Enter must not insert a newline.
               event.preventDefault()
               if (imeEnter || event.repeat) return
               if (sessionLoading || sendBlockedReason) return
@@ -302,7 +297,6 @@ export function ComposerInput({
               onSend()
               return
             }
-            // Esc 退出编辑态，行与原文本原样保留。放在 slash 之后，保留先关菜单的旧行为。
             if (event.key === 'Escape' && editingQueuedIndex >= 0) {
               event.preventDefault()
               onCancelQueuedPromptEdit?.()

@@ -92,7 +92,6 @@ export function ComposerQueue({
                     : editDraftBlocked
                       ? QUEUE_COPY.editTitleDraft
                       : QUEUE_COPY.editTitle
-                // 下一个真正会跑的是第一条没在编辑中的消息：跳过编辑中的行。
                 const next = nextQueuedMessageId === prompt.messageId
                 return (
                   <div
