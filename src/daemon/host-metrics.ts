@@ -118,16 +118,20 @@ export class HostMetricsSampler {
 
     let usedBytes: number | null = null
     let swapUsedBytes: number | null = null
+    let swapTotalBytes: number | null = null
     let pressure: HostMetricsSnapshot['memory']['pressure'] = null
     if (sources.platform === 'linux') {
       const meminfo = parseProcMeminfo(memoryText ?? '')
       if (meminfo.availableBytes !== null) usedBytes = Math.max(0, totalBytes - meminfo.availableBytes)
       swapUsedBytes = meminfo.swapUsedBytes
+      swapTotalBytes = meminfo.swapTotalBytes
       pressure = parsePsiMemory(pressureText ?? '')
     } else {
       const vmStat = parseVmStat(memoryText ?? '')
       if (vmStat) usedBytes = Math.max(0, totalBytes - vmStat.availableBytes)
-      swapUsedBytes = parseSwapUsage(swapText ?? '')
+      const swap = parseSwapUsage(swapText ?? '')
+      swapUsedBytes = swap.usedBytes
+      swapTotalBytes = swap.totalBytes
       pressure = parseMemoryPressureLevel(pressureText ?? '')
     }
 
@@ -139,7 +143,7 @@ export class HostMetricsSampler {
       sampledAt,
       uptimeSec: sources.uptimeSec(),
       cpu: { percent: cpuPercent, cores: sources.cores, load1: sources.load1() },
-      memory: { totalBytes, usedBytes, pressure, swapUsedBytes },
+      memory: { totalBytes, usedBytes, pressure, swapUsedBytes, swapTotalBytes },
       disks: await this.#disks(),
       scry: {
         daemon: { cpuPercent: this.#daemonPercent(sampledAt), rssBytes: sources.daemonRss(), pid: sources.daemonPid() },

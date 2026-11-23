@@ -62,7 +62,7 @@ describe('HostMetricsSampler', () => {
     expect(snapshot.cpu).toEqual({ percent: 50, cores: 10, load1: 4.1 })
     expect(snapshot.memory).toEqual({
       totalBytes: 16 * 1024 ** 3, usedBytes: (16 * 1024 ** 3) - (400 * 16384), pressure: 'medium',
-      swapUsedBytes: 1024 * 1024 ** 2
+      swapUsedBytes: 1024 * 1024 ** 2, swapTotalBytes: 4096 * 1024 ** 2
     })
     expect(snapshot.uptimeSec).toBe(3 * 86400)
     // /work/project is the same volume as /work: one row, first role wins.
@@ -113,6 +113,7 @@ describe('HostMetricsSampler', () => {
     const snapshot = await new HostMetricsSampler(src).read('local')
     expect(snapshot.memory.pressure).toBeNull()
     expect(snapshot.memory.swapUsedBytes).toBeNull()
+    expect(snapshot.memory.swapTotalBytes).toBeNull()
   })
 
   it('drops the PID before a remote scope answer', async () => {

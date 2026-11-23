@@ -12,7 +12,7 @@ const SNAPSHOT = {
   sampledAt: 1_700_000_000_000,
   uptimeSec: 100,
   cpu: { percent: 12, cores: 8, load1: 1.5 },
-  memory: { totalBytes: 16, usedBytes: 8, pressure: 'low', swapUsedBytes: 0 },
+  memory: { totalBytes: 16, usedBytes: 8, pressure: 'low', swapUsedBytes: 0, swapTotalBytes: 20 },
   disks: [{ role: 'data', totalBytes: 100, freeBytes: 40 }],
   scry: { daemon: { cpuPercent: 1, rssBytes: 10 }, providers: [{ providerId: 'other', processes: 1, cpuPercent: 0, rssBytes: 5 }] },
   runs: { active: 0, queued: 0 }

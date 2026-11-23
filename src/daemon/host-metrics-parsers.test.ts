@@ -53,12 +53,12 @@ describe('memory pressure and swap', () => {
 
   it('reads used swap in bytes from sysctl vm.swapusage', () => {
     expect(parseSwapUsage('vm.swapusage: total = 4096.00M  used = 1228.88M  free = 2867.12M  (encrypted)'))
-      .toBe(Math.round(1228.88 * 1024 * 1024))
+      .toEqual({ usedBytes: Math.round(1228.88 * 1024 * 1024), totalBytes: 4096 * 1024 ** 2 })
   })
 
   it('returns null for swap output without a used figure', () => {
-    expect(parseSwapUsage('vm.swapusage: total = 0.00M  free = 0.00M')).toBeNull()
-    expect(parseSwapUsage('')).toBeNull()
+    expect(parseSwapUsage('vm.swapusage: total = 0.00M  free = 0.00M')).toEqual({ usedBytes: null, totalBytes: 0 })
+    expect(parseSwapUsage('')).toEqual({ usedBytes: null, totalBytes: null })
   })
 })
 

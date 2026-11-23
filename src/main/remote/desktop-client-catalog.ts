@@ -225,7 +225,10 @@ function hostMetricsSnapshot(value: unknown): HostMetricsSnapshot {
     sampledAt: sampledAt as number,
     uptimeSec: count(value.uptimeSec),
     cpu: { percent: percent(cpu.percent), cores: cores as number, load1: typeof cpu.load1 === 'number' && Number.isFinite(cpu.load1) && cpu.load1 >= 0 ? cpu.load1 : null },
-    memory: { totalBytes: totalBytes as number, usedBytes: count(memory.usedBytes), pressure, swapUsedBytes: count(memory.swapUsedBytes) },
+    memory: {
+      totalBytes: totalBytes as number, usedBytes: count(memory.usedBytes), pressure,
+      swapUsedBytes: count(memory.swapUsedBytes), swapTotalBytes: count(memory.swapTotalBytes)
+    },
     disks,
     scry: { daemon: { cpuPercent: percent(daemon.cpuPercent), rssBytes: rssBytes as number }, providers },
     runs: { active: active as number, queued: queued as number }

@@ -10,7 +10,7 @@ const snapshot: HostMetricsSnapshot = {
   sampledAt: 1,
   uptimeSec: 10,
   cpu: { percent: 12, cores: 8, load1: 1 },
-  memory: { totalBytes: 100, usedBytes: 40, pressure: 'low', swapUsedBytes: 0 },
+  memory: { totalBytes: 100, usedBytes: 40, pressure: 'low', swapUsedBytes: 0, swapTotalBytes: 0 },
   disks: [{ role: 'data', totalBytes: 100, freeBytes: 60 }],
   scry: { daemon: { cpuPercent: 1, rssBytes: 1 }, providers: [{ providerId: 'other', processes: 1, cpuPercent: 0, rssBytes: 1 }] },
   runs: { active: 0, queued: 0 }

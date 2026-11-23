@@ -28,6 +28,8 @@ export interface HostMetricsSnapshot {
     usedBytes: number | null
     pressure: HostMemoryPressure | null
     swapUsedBytes: number | null
+    /** Total swap the machine has configured; the swap bar needs a denominator. */
+    swapTotalBytes: number | null
   }
   /** One entry per volume, deduplicated by volume. Only the role is a name. */
   disks: Array<{ role: HostDiskRole; totalBytes: number; freeBytes: number }>

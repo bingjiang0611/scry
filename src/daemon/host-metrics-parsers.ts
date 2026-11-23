@@ -72,14 +72,17 @@ export function parseMemoryPressureLevel(text: string): HostMemoryPressure | nul
   return null
 }
 
-/** `sysctl -n vm.swapusage` used bytes. */
-export function parseSwapUsage(text: string): number | null {
-  const used = text.match(/used\s*=\s*([\d.]+)\s*([KMG])?/)
-  if (!used) return null
-  const value = Number(used[1])
-  if (!Number.isFinite(value)) return null
-  const unit = used[2] === 'K' ? 1024 : used[2] === 'G' ? 1024 ** 3 : 1024 ** 2
-  return Math.round(value * unit)
+/** `sysctl -n vm.swapusage`: used and configured totals, each null when unreadable. */
+export function parseSwapUsage(text: string): { usedBytes: number | null; totalBytes: number | null } {
+  const field = (name: 'used' | 'total'): number | null => {
+    const match = text.match(new RegExp(`${name}\\s*=\\s*([\\d.]+)\\s*([KMG])?`))
+    if (!match) return null
+    const value = Number(match[1])
+    if (!Number.isFinite(value)) return null
+    const unit = match[2] === 'K' ? 1024 : match[2] === 'G' ? 1024 ** 3 : 1024 ** 2
+    return Math.round(value * unit)
+  }
+  return { usedBytes: field('used'), totalBytes: field('total') }
 }
 
 /** Linux `/proc/meminfo`. `MemAvailable` is the system's own "usable" figure. */
@@ -87,6 +90,7 @@ export function parseProcMeminfo(text: string): {
   totalBytes: number | null
   availableBytes: number | null
   swapUsedBytes: number | null
+  swapTotalBytes: number | null
 } {
   const field = (name: string): number | null => {
     const match = text.match(new RegExp(`^${name}:\\s*(\\d+) kB`, 'm'))
@@ -98,7 +102,8 @@ export function parseProcMeminfo(text: string): {
   return {
     totalBytes: Number.isSafeInteger(total) && total! > 0 ? total : null,
     availableBytes: field('MemAvailable'),
-    swapUsedBytes: swapTotal !== null && swapFree !== null ? Math.max(0, swapTotal - swapFree) : null
+    swapUsedBytes: swapTotal !== null && swapFree !== null ? Math.max(0, swapTotal - swapFree) : null,
+    swapTotalBytes: Number.isSafeInteger(swapTotal) && swapTotal! > 0 ? swapTotal : null
   }
 }
 
