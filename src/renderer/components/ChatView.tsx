@@ -61,7 +61,6 @@ export function ChatView(props: ChatViewProps) {
   } = props
   const remote = remoteHost != null
   const workspaceName = cwd?.split('/').filter(Boolean).at(-1) ?? null
-  // Only the selected session's turns or its own display cache may be rendered.
   const displayedTurns = !sessionLoading || sessionCacheVisible ? turns : NO_TURNS
   const hasPendingTurnForSetup = Boolean(workspaceSetup && displayedTurns.some(turn => turn.pendingStart))
   const ownerReady = !sessionLoading && !sessionCacheVisible
@@ -74,7 +73,6 @@ export function ChatView(props: ChatViewProps) {
     if (!ownerReady || lastLive.current.scope !== composerScopeKey) lastLive.current = { scope: composerScopeKey, runId: liveRunId }
     else if (liveRunId) lastLive.current.runId = liveRunId
   }, [ownerReady, composerScopeKey, liveRunId])
-  // 滚到接近顶部就续读；收起的状态卡不改变取页语义，仍由 historyWindow/loading 决定。
   useHistoryAutoload({
     scrollRef,
     turnsLength: displayedTurns.length,
