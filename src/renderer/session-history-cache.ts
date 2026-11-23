@@ -17,10 +17,6 @@ function snapshotKey(context: ProviderContext): string {
     context.cwd ?? '', context.externalSessionId ?? null])
 }
 
-/** Display-only, recent-page cache. It never owns a subscription or authorizes
- * resume. A hit must remain labeled cached until the normal main read settles.
- * Bounds are estimated UTF-16 JSON bytes, not an exact JS heap measurement.
- */
 export class SessionHistorySnapshotCache {
   private entries = new Map<string, SnapshotEntry>()
   private bytes = 0
@@ -48,8 +44,6 @@ export class SessionHistorySnapshotCache {
     const key = snapshotKey(context)
     const previous = this.entries.get(key)
     this.remove(key)
-    // Only initial recent pages are cached. Expanded history and live partial
-    // turns must not grow a snapshot or impersonate a current runtime.
     if (page.offset + page.turns.length !== page.totalTurns || page.turns.some(turn => turn.done === false)) {
       this.scheduleExpiry()
       return page
@@ -67,9 +61,6 @@ export class SessionHistorySnapshotCache {
       this.scheduleExpiry()
       return page
     }
-    // Authority still comes from the completed main read. Exact wire equality
-    // lets unchanged Markdown/event arrays keep their React memo identities;
-    // a hash alone would risk showing stale evidence after a collision.
     if (previous?.bytes === bytes && JSON.stringify(previous.page) === representation) snapshot = previous.page
     while (this.entries.size >= SESSION_SNAPSHOT_MAX_ENTRIES || this.bytes + bytes > SESSION_SNAPSHOT_MAX_BYTES) {
       this.remove(this.entries.keys().next().value!)

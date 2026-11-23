@@ -49,7 +49,6 @@ describe('stored session selection', () => {
     expect(parseStoredSessionSelection('[]')).toBeNull()
     expect(parseStoredSessionSelection(JSON.stringify({ sessionId: 'a', providerId: 'pi' }))).toBeNull()
     expect(parseStoredSessionSelection(JSON.stringify({ cwd: '/w', providerId: 'nope' }))).toBeNull()
-    // legacy_unknown 会话不可重新选择，不能成为恢复目标。
     expect(parseStoredSessionSelection(JSON.stringify({ cwd: '/w', providerId: 'legacy_unknown' }))).toBeNull()
   })
 

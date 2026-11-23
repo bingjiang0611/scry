@@ -14,8 +14,6 @@ import {
 const css = readCssManifest(join(__dirname, 'styles.css'))
 
 it('时间线容器声明自动续读能力', () => {
-  // 性能基准用这个无条件属性区分「滚到顶自动取页」与「点按钮取页」两种构建；
-  // 用条件渲染的提示行判断会在历史取尽后丢失，把新构建误判成旧构建。
   const source = readFileSync(join(__dirname, 'components/ChatView.tsx'), 'utf8')
   expect(source).toContain('data-history-autoload="scroll"')
 })
@@ -56,7 +54,6 @@ describe('主动补页失败后不自动重试', () => {
   })
 
   it('请求结束且轮次没增加时，同一批轮次不再自动补页', () => {
-    // 短视口没有滚动事件可等：不阻断就会在 loading 回到 false 后立刻再发一次，持续失败即无限重试。
     const failed = settleFillRetry({ pendingTurns: 10, blockedTurns: null }, 10, false)
     expect(failed.blockedTurns).toBe(10)
     expect(canFill(failed, 10)).toBe(false)
@@ -77,8 +74,6 @@ describe('主动补页失败后不自动重试', () => {
 
 describe('续读依赖的滚动锚定合同', () => {
   it('时间线容器保持 overflow-anchor: none，位移只由 hook 补偿', () => {
-    // 开启浏览器锚定会与本 hook 的显式补偿叠加；关闭后补偿才是唯一来源，且与
-    // 会话切换时的显式定位策略一致。改动这一行前先改补偿逻辑。
     const index = css.indexOf('\n.chat {')
     expect(index, 'missing .chat rule').toBeGreaterThan(-1)
     const body = css.slice(css.indexOf('{', index) + 1, css.indexOf('}', css.indexOf('{', index)))
