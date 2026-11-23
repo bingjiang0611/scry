@@ -86,6 +86,9 @@ export interface SubscribeSessionRow {
   pendingQuestions: number
   legacy: boolean
   revSeq: number
+  /** P6-5: optional lineage fields for nested delegated child sessions (ignored by older clients). */
+  parentSessionKey?: string | null
+  lineageKind?: 'fork' | 'side_chat' | 'delegated' | null
   catalog?: SessionCatalogMetadata
 }
 

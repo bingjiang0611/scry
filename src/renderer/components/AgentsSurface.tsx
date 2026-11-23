@@ -46,12 +46,14 @@ export function AgentsSurface({
   turns,
   busy,
   cwd,
-  sessionKey
+  sessionKey,
+  isLocalHost = true
 }: {
   turns: Turn[]
   busy: boolean
   cwd?: string | null
   sessionKey?: string | null
+  isLocalHost?: boolean
 }) {
   const rows = useMemo(() => deriveAgentRows(turns, { busy }), [busy, turns])
   const delegation = useDelegationState(cwd, sessionKey)
@@ -89,7 +91,7 @@ export function AgentsSurface({
       {(cwd || sessionKey) && (
         <div className="delegation-surface-section">
           <DelegationSwitchesSection
-            isLocalHost={true}
+            isLocalHost={isLocalHost}
             projectDelegationEnabled={delegation.state.projectDelegationEnabled}
             sessionFullAccessEnabled={delegation.state.sessionFullAccessEnabled}
             onToggleProjectDelegation={(next) => { void delegation.toggleProject(next) }}

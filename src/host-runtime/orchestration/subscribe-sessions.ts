@@ -25,6 +25,8 @@ export function projectSubscribeSession(
     pendingQuestions: mapped.pendingQuestions,
     legacy: mapped.legacy,
     revSeq: mapped.revSeq,
+    ...(mapped.parentSessionKey ? { parentSessionKey: mapped.parentSessionKey } : {}),
+    ...(mapped.lineage?.kind ? { lineageKind: mapped.lineage.kind } : {}),
     ...(mapped.catalog ? { catalog: visibleCatalog(mapped.catalog, canReadCwd) } : {})
   }
 }

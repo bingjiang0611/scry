@@ -52,6 +52,10 @@ export function RemoteChatView(props: RemoteChatViewProps) {
   const historyFailed = Boolean(sessionId && displayTurns.length === 0 && props.historyError !== null && (!waitingForRun || historyLoading))
   const archiveUnavailable = Boolean(sessionId && historyEvidence?.status === 'unavailable' && displayTurns.length === 0 &&
     pollFresh && !waitingForRun)
+  const isDelegatedChild = props.session?.lineageKind === 'delegated' || props.catalogSession?.lineageKind === 'delegated'
+  const effectiveSendBlockedReason = isDelegatedChild
+    ? '委派子会话为只读，不能直接发送消息'
+    : (workspaceSelection.blockedReason ?? sendBlockedReason)
   return (
     <>
       <ChatView
@@ -72,7 +76,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         runControlsReason={provider && runControlCatalog.models.length === 0 ? `${host} 未提供模型列表；使用 Provider 默认模型` : null}
         input={input}
         composerScopeKey={draftKey}
-        sendBlockedReason={workspaceSelection.blockedReason ?? sendBlockedReason}
+        sendBlockedReason={effectiveSendBlockedReason}
         submitting={submitting}
         sessionLoading={historyLoading && displayTurns.length === 0 && !runActive}
         transcriptPending={historyLoading || waitingForRun}

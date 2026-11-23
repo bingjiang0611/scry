@@ -115,6 +115,8 @@ extension G0Transport {
     let activeRunId: String?
     let lastRunOutcome: Outcome?
     let revSeq: Int
+    let parentSessionKey: String?
+    let lineageKind: String?
     let catalog: Catalog?
 
     var reference: RunSessionRef {
@@ -122,7 +124,8 @@ extension G0Transport {
         externalSessionId: catalog == nil && conversationId == nil ? sessionKey : catalog?.nativeSessionId,
         providerId: provider ?? "legacy_unknown", agentProfileId: profile, cwd: cwd,
         label: title ?? catalog?.preview ?? "", ts: ts, pinnedAt: pinnedAt, isActive: activeRunId != nil,
-        archivedAt: archivedAt, lastRunOutcome: lastRunOutcome?.value)
+        archivedAt: archivedAt, lastRunOutcome: lastRunOutcome?.value,
+        parentSessionKey: parentSessionKey, lineageKind: lineageKind)
     }
   }
 
