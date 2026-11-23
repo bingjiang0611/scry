@@ -16,6 +16,10 @@ Daemon sends reuse the conversation service, but record a prepared launch under 
 
 Retain a queued message ID through session binding; it identifies the native steer or submit receipt. An edited submission is a new intent with a new ID at the queue tail; otherwise the earlier receipt could be credited to different text. Skip an editing row while draining other rows in FIFO order. A fresh native ID after a failed first turn can replace a local shell only if this view owns the run and the selection has not changed.
 
+Before draining the local queue, wait for history restoration and usable workspace binding. A failed start holds its queued item; removing it explicitly skips the failure. A start that succeeds after navigation still removes its original queued item. If an edited row disappeared before commit, enqueue the text as a new message rather than losing it.
+
+Accepted native steer evidence can reconcile a lost reply and remove the item, not make it dispatchable again. An older rejection cannot overwrite a new pending attempt. To dismiss an unknown attempt, require terminal unknown evidence for its owning run; dismissal changes only the queue. Steer requires matching Provider, profile, directory and session identity; do not infer missing identities from the selected view.
+
 Before sending a side-chat prompt, persist a bounded pending receipt for that exact command. Move only the submitted text and attachments into the receipt; preserve edits made during preparation. If preparation loses draft ownership, do not write or send. If the reserve is full or the receipt cannot be persisted, refuse before dispatch and keep the draft. Apply later results only to the matching command, never by run ID or prompt text.
 
 A missing history record or lost reply does not establish `not_sent`. Keep an unknown submission blocked for inspection; do not resend it. A host-confirmed refusal preserves the original content and a bounded reason. An explicit resend uses a new command ID. A known live dispatch needs no separate recovery block, but an unresolved local receipt still does, even when the host reports a pending attempt.

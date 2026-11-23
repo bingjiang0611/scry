@@ -46,10 +46,7 @@ export function steerStateForMessage(
   local: QueuedSteerState | undefined,
   evidence: AgentSteerEvidence | undefined
 ): QueuedSteerState | undefined {
-  // Authoritative native admission can reconcile a lost IPC response. It may only
-  // remove the item, never make it eligible for another ordinary/Steer dispatch.
   if (evidence?.status === 'accepted') return { status: 'accepted', providerTurnId: evidence.providerTurnId }
-  // In particular an old rejected trace cannot overwrite a new pending retry.
   if (local?.status === 'pending' || local?.status === 'unknown') return local
   if (local) return local
   if (evidence) return {
@@ -65,13 +62,10 @@ export function isSteerDrainBlocked(state: QueuedSteerState | undefined): boolea
 }
 
 export function canDismissUnknownSteer(state: QueuedSteerState | undefined, evidence: RendererSteerEvidence | undefined): boolean {
-  // Only the owning run's terminal unknown receipt permits local dismissal. An idle
-  // composer or an old rejected attempt is not proof that this dispatch has ended.
   return state?.status === 'unknown' && evidence?.status === 'unknown' && evidence.runEnded === true
 }
 
 export function isSteerRemovalBlocked(state: QueuedSteerState | undefined, evidence?: RendererSteerEvidence): boolean {
-  // Dismissal changes only the waiting queue, never the receipt or dispatch eligibility.
   return isSteerDrainBlocked(state) && !canDismissUnknownSteer(state, evidence)
 }
 
@@ -116,8 +110,6 @@ export function activeSteerIdentityMatches(input: {
 }): boolean {
   const { request, active } = input
   const activeSession = active.externalSessionId ?? active.sessionId
-  // A missing identity is not proof that this is the same run. Refuse admission
-  // instead of guessing from the currently selected Provider or workspace.
   if (!active.providerId || !activeSession || active.cwd == null) return false
   return request.providerId === active.providerId &&
     (request.agentProfileId ?? null) === (active.agentProfileId ?? null) &&

@@ -89,7 +89,6 @@ export function useAppComposer(context: AppComposerContext) {
   } = context
 
   const pickSlash = (cmd: SlashCmd): void => {
-    // 填入 "/name "，让用户补参数或直接 Enter 发送（有空白后 slashToken 变 null，菜单自然关闭）
     setInput('/' + cmd.name + ' ')
     setSlashHidden(true)
     taRef.current?.focus()
@@ -126,9 +125,6 @@ export function useAppComposer(context: AppComposerContext) {
     )
     if (!openingSession || sessionLoading) return
 
-    // History replacement can emit a scroll event while the old scrollTop is
-    // clamped against the empty transcript. Keep the opening intent through
-    // that event, then re-apply it after the loaded transcript has laid out.
     const frame = requestAnimationFrame(() => {
       if (!openingSessionBottomRef.current || chatNavigation.active.current) return
       scrollChatToBottomIfNeeded(scrollRef.current, true)
@@ -140,8 +136,6 @@ export function useAppComposer(context: AppComposerContext) {
 
   const openTurnInChat = useCallback(
     (runId: string, ev?: TraceEvent | null, target: 'turn' | 'event' = 'turn'): void => {
-      // Explicit navigation owns scrolling, including layout work already queued
-      // by history opening or virtual row materialization.
       openingSessionBottomRef.current = false
       shouldStickToBottomRef.current = false
       if (ev) session.setSelected(ev)
@@ -176,13 +170,11 @@ export function useAppComposer(context: AppComposerContext) {
   const startPrompt = useAppPromptStart(context, currentRunRequest)
 
   useEffect(() => {
-    // 历史页尚未恢复完成时不能启动队列，否则会用上一会话残留的 busy/身份状态发送。
     if (sessionLoading || session.busy || sessionWorkspaceMissing) return
     const queueKey = draftKey
     if (queuedStartPendingRef.current) return
     const queued = nextDrainableQueuedPrompt(queuedPrompts, editingQueuedPromptId)
     if (!queued) return
-    // Preserve FIFO and pause barriers, including the render before ACK removal commits.
     if (pausedQueuedPromptsRef.current.has(queued.messageId) || steerInFlightRef.current.has(queued.messageId) ||
       isSteerDrainBlocked(steerStateForMessage(queued.steer, steerEvidenceByMessageId.get(queued.messageId)))) return
     const queuedAgentId = queued.request.agentId ?? queued.request.providerId
@@ -196,7 +188,6 @@ export function useAppComposer(context: AppComposerContext) {
     const queueGeneration = queuedDrainGenerationRef.current
     void startPrompt(next.text, next.attachments, next.request, queueKey)
       .then(() => {
-        // 即使期间切到了别的会话，也要从它原属的会话队列中移除已成功启动的消息。
         setSessionPromptQueues((current) => dequeueStartedPromptFromSessions(current, next))
         pausedQueuedPromptsRef.current.delete(next.messageId)
         if (queueGeneration !== queuedDrainGenerationRef.current || queueKeyRef.current !== queueKey) return
@@ -206,16 +197,12 @@ export function useAppComposer(context: AppComposerContext) {
       .catch((error) => {
         pausedQueuedPromptsRef.current.add(next.messageId)
         if (queueGeneration !== queuedDrainGenerationRef.current || queueKeyRef.current !== queueKey) return
-        // Keep the failed item at the head and pause automatic draining. Removing that
-        // head is the explicit "skip" action, so later prompts can never overtake it.
         queuedStartInFlightRef.current = false
         queuedStartPendingRef.current = true
         setComposerError(`${ipcErrorMessage(error)}；这条消息仍保留在队列，队列已暂停`)
       })
   }, [draftKey, editingQueuedPromptId, integrations.agents, queuedPrompts, session.busy, sessionLoading, sessionWorkspaceMissing, startPrompt, steerEvidenceByMessageId])
 
-  // 队列项离开队列（移除、Steer 被接受、被自动出队）后，编辑态必须跟着结束，
-  // 否则输入框会停在一个已经不存在的队列条目上。
   useEffect(() => {
     if (!editingQueuedPromptId) return
     if (queuedPrompts.some((prompt) => prompt.messageId === editingQueuedPromptId)) return
@@ -228,10 +215,8 @@ export function useAppComposer(context: AppComposerContext) {
     return () => window.clearTimeout(timer)
   }, [movedQueuedPromptId])
 
-  // Agent / 目录就绪后立即预取；用户输入 / 时只展示缓存，不再现场等 Provider。
   useEffect(refreshSlashCatalog, [refreshSlashCatalog])
 
-  // 过滤结果变化时高亮项回到顶部
   useEffect(() => {
     setSlashSel(0)
   }, [slashToken])
@@ -263,16 +248,12 @@ export function useAppComposer(context: AppComposerContext) {
       setComposerError(sendBlockedReason)
       return
     }
-    // Dock badge 权限是可选装饰，而 macOS 的系统弹窗可能很久不返回（新安装的 bundle 就是
-    // permission=default）。曾经在这里 await 它：一旦弹窗不返回，send() 就卡在进入 submitting 之前，
-    // 按钮既不禁用也不报错，点击完全没反应。发送不能等它。
     void requestDockBadgePermission()
     if (shouldQueuePrompt(session.busy, queuedPrompts.length, queuedStartPendingRef.current)) {
       const request = currentRunRequest()
       if (editingQueuedPromptId) {
         const editingId = editingQueuedPromptId
         const moved = editedPromptToTail(queuedPrompts, editingId, text, attachments)
-        // 队列在点击与提交之间变了（例如刚自动出队）时不能丢文本：退回普通入队。
         if (moved.next) {
           setQueuedPrompts(moved.queue)
           setMovedQueuedPromptId(moved.next.messageId)
@@ -303,7 +284,6 @@ export function useAppComposer(context: AppComposerContext) {
         setSlashHidden(true)
       }
       if (draft?.workspace && activeSessionIdRef.current === null) {
-        // Preparation can outlive this renderer. Keep the durable draft until a known ACK.
         await startPrompt(text, attachments)
         commit()
       } else {
@@ -313,8 +293,6 @@ export function useAppComposer(context: AppComposerContext) {
         if (attachment.previewUrl.startsWith('blob:')) URL.revokeObjectURL(attachment.previewUrl)
       }
     } catch (error) {
-      // Admission can still fail after the optimistic paint. Put the submitted draft back without
-      // overwriting anything the user typed or pasted while main was starting the Provider.
       setInput((current) => inputAfterFailedSubmit(current, originalInput))
       setDraftAttachments((current) => attachmentsAfterFailedSubmit(current, submittedAttachments))
       if (!isWorkspaceStartCancelledError(error)) setComposerError(ipcErrorMessage(error))

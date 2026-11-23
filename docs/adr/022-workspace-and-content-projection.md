@@ -36,4 +36,8 @@ A new conversation has no native binding: keep its draft with the workspace acro
 
 Treat a loaded empty page, no readable history, and live evidence awaiting archival as different states. Catalog refresh failures must not block the other refresh. On archive acknowledgement, update the sidebar before awaiting catalog refresh in reset; the Provider may still be settling. Undo only restores catalog visibility, not execution.
 
+Preserve the requested scroll position through history replacement and layout; explicit navigation supersedes queued scroll work. Prefetch slash commands once an Agent and directory are ready so opening the menu need not wait for a Provider. Sending cannot wait for optional Dock badge permission. Preserve a workspace draft through preparation until an acknowledged start. On admission failure, restore submitted content without overwriting newer edits.
+
+The composer reads the synchronous draft snapshot. Bound ordinary drafts by recency; reserve a separate bounded allowance for unresolved receipts and refuse new receipts rather than evicting existing ones. Reject malformed recovered receipts, not guessing their contents. Coalesce ordinary persistence but flush on page hide or unmount; a crash can lose the unflushed interval. A failed write leaves the live draft dirty. Attachment handlers target one draft key and leave preview cleanup to the store, which releases only URLs not referenced by the new snapshot.
+
 See [workspace-selection.ts](../../src/shared/workspace-selection.ts), [source-control.ts](../../src/shared/source-control.ts), [tool-panel.ts](../../src/shared/tool-panel.ts), and [tool-content.ts](../../src/shared/tool-content.ts).
