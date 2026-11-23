@@ -13,7 +13,6 @@ describe('run trace stream teardown and re-alignment', () => {
       health: healthy
     })
     expect(h.states.at(-1)?.run?.done).toBe(true)
-    // main 交回一份「还在运行」的旧快照：终态不能被盖回去。
     h.resyncResult.value = Promise.resolve({
       status: 'ok',
       run: run('run-main', [event('run-main', 'older')]),
@@ -28,7 +27,6 @@ describe('run trace stream teardown and re-alignment', () => {
     h.flushAndCommit()
     expect(h.states.at(-1)?.run?.done).toBe(true)
     expect(h.states.at(-1)?.run?.items.map((item) => item.id)).not.toContain('older')
-    // 没有采纳这份快照就不能确认：否则等于宣布自己已经对齐了。
     expect(h.confirmed).toEqual([])
   })
 
@@ -87,7 +85,6 @@ describe('run trace stream teardown and re-alignment', () => {
     })
     expect(h.session.drain()).toEqual([])
     expect(h.states).toHaveLength(before)
-    // 迟到的回执仍然交给 main；由 main 的 generation/batch 台账拦住，不会误清额度。
     await h.port.ack('sub-main-1', { generation: 0, batchId: 3, bytes: 10 })
     expect(h.acks).toEqual([{ subscriptionId: 'sub-main-1', batchId: 3 }])
   })
