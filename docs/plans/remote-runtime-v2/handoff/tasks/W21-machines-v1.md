@@ -1,6 +1,6 @@
 # W21 · 机器管理第一版（与 W20 并行）
 
-执行方：维护者本机上一个独立的执行方，与 W20 并行。依据：[P8-machine-management](../../P8-machine-management.md)，以下简称「设计」，维护者 2026-11-23 已定。界面以 UI 设计稿为准：源文件在 [designs/machines/](../../designs/machines/README.md)。
+执行方：维护者本机上一个独立的执行方，与 W20 并行。依据：[P8-machine-management](../../P8-machine-management.md)，以下简称「设计」，维护者 2026-11-23 已定。界面以 UI 设计稿为准：源文件在 [ui-mockups/machines/](../../ui-mockups/machines/README.md)。
 
 ## 范围
 
