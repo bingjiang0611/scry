@@ -383,7 +383,6 @@ export class ScGit {
       if (url.username || url.password || url.search || url.hash)
         throw new Error('推送 URL 不允许内嵌凭证、查询或片段')
     } else if (/^(?:git@[A-Za-z0-9.-]+:|ssh:\/\/git@[A-Za-z0-9.-]+\/)[A-Za-z0-9_./-]+$/.test(target)) {
-      // User-level SSH configuration is the user's transport, not the GitHub API identity.
     } else if (isAbsolute(target)) {
       if ((await realpath(target)) !== this.authorizeLocalRemote(target))
         throw new Error('本地 remote 尚未授权')

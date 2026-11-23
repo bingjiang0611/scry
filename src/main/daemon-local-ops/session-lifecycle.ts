@@ -1,9 +1,7 @@
 import type { DaemonForwardTable, DaemonLocalOpTable } from './types'
 
-// Session delete, rename/archive/pin, fork, archived list and purge; then conversation delete/fork.
 // The App's own session semantics (empty-cwd sessions, deleting an unarchived session
 // after the App's dialog), which the device ops sessionAction/sessionDelete do not have.
-// Writes are never replayed after a lost reply.
 export const SESSION_LIFECYCLE_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:renameSession': { op: 'sessionLifecycle', method: 'renameSession', read: false },
   'agent:setSessionPinned': { op: 'sessionLifecycle', method: 'setSessionPinned', read: false },

@@ -15,7 +15,6 @@ export async function executeMutation(
     store: ScStore
     expected: (identity: GitIdentity, request: ScExpected) => Promise<ScRepository>
     githubScope: (identity: GitIdentity, repository: string, session: GithubSession) => Promise<void>
-    /** A person's cancel; honoured for push and fetch, the long network steps. */
     signal?: AbortSignal
   },
   authorize?: () => void

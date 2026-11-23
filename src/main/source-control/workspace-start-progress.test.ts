@@ -126,7 +126,6 @@ describe('workspace worktree progress streaming and cancellation with real Git',
     await expect(cancelPromise).rejects.toThrow('workspace_start_cancelled')
     expect(providerCalls).toHaveLength(0)
     expect(events.some(event => event.stage === 'cancelled')).toBe(true)
-    // Cleanup removed both the managed worktree registration and the newly created branch.
     expect(git('worktree', 'list', '--porcelain').match(/^worktree /gm)).toHaveLength(1)
     expect(git('for-each-ref', '--format=%(refname)', 'refs/heads/cancel/topic')).toBe('')
     // Repository is NOT stuck in unknown; sending again with the same operationId succeeds cleanly.

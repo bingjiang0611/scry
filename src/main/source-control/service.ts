@@ -28,9 +28,7 @@ export class SourceControlService {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly active = new Set<string>()
   private readonly pending = new Set<Promise<unknown>>()
-  // Running push/fetch operations a person may cancel, by operation id.
   private readonly cancels = new Map<string, { repositoryId: string; controller: AbortController }>()
-  // Running workspace-preparation starts a person may cancel before Provider handoff.
   private readonly workspaceCancels = new Map<string, { repositoryId: string; controller: AbortController; cancellable: boolean }>()
   private closed = false
   readonly git: ScGit
@@ -134,7 +132,6 @@ export class SourceControlService {
       await this.store.ready
       const directory = this.options.authorizeDirectory(cwd)
       const identity = await this.git.identity(directory)
-      // A nested project grant does not authorize its parent Git repository.
       this.options.authorizeDirectory(identity.root)
       this.identities.set(identity.id, identity)
       const snapshot = await this.git.status(identity)

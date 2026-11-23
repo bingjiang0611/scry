@@ -1,6 +1,5 @@
 import type { DaemonLocalOpTable } from './types'
 
-// Session catalog, project list, Provider catalog and context, session history.
 export const CATALOG_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:listSessions': { op: 'sessionStore', method: 'listSessions', read: true },
   'agent:catalogHealth': { op: 'sessionStore', method: 'catalogHealth', read: true },

@@ -45,7 +45,6 @@ export async function planWorkspace(
     requireUsableWorktree(tree)
     return { cwd, head: tree.head, branchRef: tree.branchRef, worktreeId: tree.id, write: 'none' }
   }
-  // Reusing a checkout writes nothing; verifyWorkspacePlan re-reads its identity afterwards.
   if (intent.kind === 'existingWorktree') {
     const tree = worktrees.find(tree => tree.id === intent.worktreeId)
     if (!tree) throw new Error('所选 worktree 已不存在，请重新选择')
