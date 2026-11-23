@@ -14,19 +14,7 @@ import { isDefaultAppUserDataDir } from '../daemon-mode-default'
 
 export { appDaemonModeDeps } from './app-daemon-mode-deps'
 
-// The App's own run surface: the App talks to the daemon that owns the ledger and the
-// runs; there is no in-process pipeline to fall back to (S3).
-//
-// Nothing here retries, replaces, or hides a daemon. A version mismatch is the
-// user's decision (restart the background service); a missing secret or a grant
-// the daemon revoked is reported as such; unsafe credential storage refuses before
-// a credential is written.
 
-/**
- * Whether a failed request may be retried after the daemon is relaunched. A read the
- * caller declared replayable can be asked again — it changes nothing. A write cannot:
- * its reply may have been lost after the daemon already applied it.
- */
 export function retryAfterReconnect(error: unknown, replayable: boolean): boolean {
   if (!replayable) return false
   const reason = (error as { reason?: unknown } | null)?.reason
@@ -39,11 +27,8 @@ export interface DaemonRunModeResult {
   version?: string
   running?: string
   expected?: string
-  /** version-mismatch: the build ids behind `running` and `expected`, when each side has one (A5). */
   runningBuild?: string
-  /** version-mismatch: active runs reported by the running daemon over daemonInfo, when known (W15). */
   runningActiveRuns?: number
-  /** version-mismatch: whether the running daemon reported itself as packaged, when known (W15 S2). */
   runningIsPackaged?: boolean
   /** version-mismatch: live daemonInfo activeRuns probe over the existing client before signalling (W15 S1). */
   probeActiveRuns?: () => Promise<number | undefined>
@@ -61,9 +46,7 @@ export interface DaemonRunModeDeps {
   appDataDir?: string
   appName?: string
   env?: NodeJS.ProcessEnv
-  /** This bundle's build id (shared/build-identity.ts); absent when unbundled. */
   appBuild?: string
-  /** Returns the credential cipher, or the reason it must not be used. */
   credentialCipher: () => { ok: true; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string } | { ok: false; reason: string }
   send: (channel: string, payload: unknown) => void
   currentCwd: () => string | undefined
@@ -73,25 +56,18 @@ export interface DaemonRunModeDeps {
   /** Fallback direct launch when a service-manager launch timed out waiting for ready (P5 §2.4). */
   launchFallback?: DaemonLaunch
   launchFailure?: () => Promise<string | undefined>
-  /** Tests: shorten ensureDaemon's ready wait (defaults to DAEMON_READY_TIMEOUT_MS). */
   readyTimeoutMs?: number
   waitMs?: number
   onWarn?: (message: string, detail?: unknown) => void
-  // E1b: this window's badge mirrors the daemon's unread set and decides what was viewed.
   dockBadge?: Pick<DockBadgeState, 'setDaemon' | 'bindDaemon' | 'forgetDaemon' | 'view'>
   isWindowFocused?: () => boolean
   rendererCanReceive?: () => boolean
-  // P3f W2: this window's run-level subscriptions also see the runs it follows here.
   runTraces?: NonNullable<DaemonRunRuntimeDeps['runTraces']> & Pick<RunTraceRouter, 'attachRuns' | 'publishStopState'>
-  // W10: App-side desktop client that fulfills phone-originated execution-target calls forwarded by the daemon.
   desktopRemoteClient?: () => DesktopRemoteTargetAPI
-  // W17: App-side Electron shell ops bridged for remote workbench openPath/trashItem.
   shellOps?: AppShellOps
-  // P5-7: host CLI admin notice handler (system notification + open devices).
   onHostAdmin?: (notice: HostAdminNotice) => void
 }
 
-// Answers from the daemon that a launch or a retry cannot change.
 const REFUSALS: ReadonlySet<string> = new Set([
   'daemon_version_mismatch', 'daemon_device_not_authorized', 'daemon_local_grant_corrupt', 'daemon_enrollment_unavailable'
 ])
@@ -134,16 +110,8 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     encrypt: cipher.encrypt,
     decrypt: cipher.decrypt
   })
-  // The probe answers "is one there, and may we use it?" without spending the grant:
-  // `connect()` discards a credential when the daemon does not answer, which would
-  // make a daemon that is merely stopped look like a revoked device.
   const connect = async (): Promise<DaemonProbeInfo | undefined> =>
-    // Before the first grant the only way to learn the daemon is ready is to enroll;
-    // afterwards a stopped daemon must not cost the credential its restart needs.
     client.hasGrant ? await client.daemonInfo() : await client.connect()
-  // A refusal is an answer, not "not there yet". The supervisor treats a thrown probe
-  // as absent and would launch a daemon that refuses again, so the refusal is
-  // remembered here and short-circuits before any launch, or ends the wait for one.
   let refused: DaemonClientError | undefined
   const probe: DaemonProbe = async () => {
     try {
@@ -155,14 +123,7 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   }
   const refusal = (error: DaemonClientError): DaemonRunModeResult => {
     client.close()
-    // Before the first grant the enrollment reply is the only place the daemon says
-    // which version it is; without it the version stays unknown, never guessed.
     if (error.reason === 'daemon_version_mismatch') return mismatch(error.running ?? 'unknown', error.runningBuild)
-    // A6: a daemon that answers its enrollment socket with no secret for an App without a
-    // grant holds a live local grant for another credential (this App's lost one, or
-    // another instance's). For the user that is a refused local connection: the same
-    // reconnect state, and only the confirmed 「重新连接本机后台服务」 changes it. Launching
-    // cannot: the new daemon finds daemon.lock held and exits.
     if (error.reason === 'daemon_device_not_authorized' || error.reason === 'daemon_enrollment_unavailable') {
       return { status: 'device-not-authorized', reason: error.reason }
     }
@@ -176,7 +137,6 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
   const supervision = {
     probe, launch, appVersion: deps.appVersion, ...(deps.appBuild === undefined ? {} : { appBuild: deps.appBuild }),
     ...(deps.readyTimeoutMs === undefined ? {} : { readyTimeoutMs: deps.readyTimeoutMs, pollMs: Math.min(25, deps.readyTimeoutMs) }),
-    // Polled while waiting for a launched daemon: a refusal ends the wait by name.
     launchFailure: async (): Promise<string | undefined> => refused?.reason ?? await deps.launchFailure?.()
   }
   let supervised = await ensureDaemon(supervision)
@@ -195,8 +155,6 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     client.close()
     return { status: 'unavailable', reason: supervised.reason }
   }
-  // The supervisor only adopted what it probed; this second connect is what loads
-  // the stored grant and refuses a daemon built from other sources.
   let version: string
   try {
     const connected = await connectForRunMode(client)
@@ -209,15 +167,9 @@ export async function createDaemonRunMode(deps: DaemonRunModeDeps): Promise<Daem
     return { status: 'unavailable', reason: error instanceof Error ? error.message : 'daemon_connect_failed' }
   }
 
-  // A daemon that exited takes its channels with it. The supervisor adopts or launches
-  // one, and the client reconnects against the grant it already holds. Only a request
-  // the caller declared replayable is retried: a write whose outcome is unknown is
-  // reported, never resubmitted (the device lane has the same rule).
   let reconnecting: Promise<void> | undefined
   const reconnect = async (): Promise<void> => {
     reconnecting ??= (async () => {
-      // The channels to the daemon that exited are dead sockets; keeping them would
-      // fail every retried read on a lane that can never answer.
       client.close()
       const again = await ensureDaemon(supervision)
       if (again.status === 'unavailable' || again.status === 'version-mismatch') {
