@@ -65,6 +65,12 @@ export async function runSettings({ driver, options }) {
   await key('Escape')
   await wait('!document.querySelector(".settings-modal")', 'Escape closes settings')
   check(await read('document.activeElement === document.querySelector(".sb-settings")'), 'Closing settings did not return focus to its opener')
+  // 关闭按钮（×）这条路也要还在：原来由设置页驱动，搬迁后容易漏。
+  await click('.sb-settings')
+  await wait('document.querySelector(".settings-modal .modal-x") != null', 'settings shows its close button')
+  await click('.settings-modal .modal-x')
+  await wait('!document.querySelector(".settings-modal")', 'the close button closes settings')
+  check(await read('document.activeElement === document.querySelector(".sb-settings")'), 'Close button did not return focus to its opener')
   await click('.sb-new')
   await wait('document.querySelector(".location-button") != null', 'local chat after the machines page round trip')
 }

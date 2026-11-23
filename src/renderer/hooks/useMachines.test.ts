@@ -53,6 +53,14 @@ describe('machine reads', () => {
     })
   })
 
+  it('does not read a different failure as a missing capability', async () => {
+    // 只有那个确切的错误码才写「请升级」；别的失败照样是读取失败。
+    targetHostMetrics.mockRejectedValue(new Error('Error invoking remote method \'desktopRemote:hostMetrics\': Error: desktop_host_metrics_unsupported_timeout'))
+    await refreshTargetMetrics('mac4')
+    expect(machinesSnapshot().targets.get('mac4')).toMatchObject({ read: { status: 'failed' } })
+    expect(machinesSnapshot().targets.get('mac4')?.unsupported).toBeUndefined()
+  })
+
   it('refreshes the local machine and every saved target in one pass', async () => {
     hostMetricsRead.mockResolvedValue(snapshot)
     targetHostMetrics.mockResolvedValue({ ...snapshot, runs: { active: 2, queued: 1 } })
