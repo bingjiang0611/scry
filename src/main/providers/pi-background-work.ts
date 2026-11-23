@@ -100,7 +100,6 @@ export class PiBackgroundWork {
     return {
       providerId: 'pi', phase: pending ? this.parentIdle ? 'waiting' : 'working' : 'inactive',
       quiet: false, lastEventAt: now, revision: ++this.revision,
-      // A launch without a terminal state is an unknown outcome, never a completion.
       tasks: pending ? [...this.tasks.values()] : this.unconfirmed(),
       coverage: 'partial', taskStop: 'unavailable'
     }

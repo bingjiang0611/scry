@@ -111,7 +111,6 @@ export async function runPiAgentSuccess(ctx: PiRunSuccessContext): Promise<Provi
         for (const [key, value] of piModelContextWindows(available.map(record))) ctx.modelContextWindows.set(key, value)
       }
     }).catch(() => {
-      // Model-window telemetry is optional; usage remains available without Context%.
     })
     const explicitSkillEvent = await proveExplicitPiSkill(ctx.rpc, ctx.request)
     ctx.extensionCommand = await piExtensionCommand(ctx.rpc, ctx.request.prompt)

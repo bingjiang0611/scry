@@ -16,7 +16,6 @@ import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from '.
 
 export interface OpenCodeRunDependencies {
   pool: OpenCodeServerPool
-  /** Inputs of the native resume identity; re-derived here before dispatch. */
   identity: OpenCodeIdentityOptions
 }
 
@@ -34,7 +33,6 @@ const permissionController = new AbortController()
 const requestController = new AbortController()
 const eventController = new AbortController()
 const context: ProviderContext = { providerId: 'opencode', cwd: request.cwd, externalSessionId }
-// A run-scoped lease keeps the shared server alive; the server itself is per cwd.
 const lease = deps.pool.lease(request.cwd)
 const promise: Promise<ProviderRunResult> = (async () => {
   // A refused identity never touches the shared server, so it must not be recorded
@@ -279,8 +277,6 @@ return {
     eventController.abort()
     lease?.forceClose()
   },
-  // OpenCode server 按 cwd 复用（pool 计数租约）：forceClose() 会终止整个
-  // server 及其上其他并发 run。
   forceKillScope: 'shared_transport',
   getExternalSessionId: () => externalSessionId,
   getProviderTurnId: () => providerTurnId,

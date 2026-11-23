@@ -206,7 +206,6 @@ async function readClaudeMcpStatus(
   signal?: AbortSignal
 ): Promise<McpServerStatus[]> {
   if (signal?.aborted) throw new Error(MCP_CHECK_CANCELLED)
-  // Same private file as a run: the SDK would otherwise put headers and env on argv.
   const mcpConfig = writePrivateMcpConfig(authorizedMcpServers(execution))
   const prompt = heldPrompt()
   let q: ReturnType<typeof query>

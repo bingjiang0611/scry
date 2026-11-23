@@ -106,7 +106,6 @@ export function rememberOpenCodeMessage(state: OpenCodeEventState, info: Record<
   state.messages.set(id, info)
 }
 
-/** SSE 事件的类型名；取不到就记为 unknown，不猜。 */
 export function openCodeEventType(raw: unknown): string {
   const type = record(raw).type
   return typeof type === 'string' && type ? type : 'unknown'

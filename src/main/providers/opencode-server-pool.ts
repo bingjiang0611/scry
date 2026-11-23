@@ -41,11 +41,9 @@ export interface OpenCodeServerPool {
     mcpExecution: AuthorizedMcpExecution | undefined,
     action: (client: OpencodeClient) => Promise<T>
   ): Promise<T>
-  /** Holds the shared server open for a run; `undefined` when no cwd is known. */
   lease(cwd: string | undefined): OpenCodeServerLease | undefined
   recordOk(): void
   recordFailure(error: unknown): void
-  /** Launch diagnostic handle for the shared server of one workspace, when it exists. */
   diagnosticHandle(cwd: string | undefined): Pick<OpenCodeServerManager, 'diagnostic'> | undefined
   health(): OpenCodeServerHealth
   /** A private manager for one MCP OAuth flow; released by the caller. */

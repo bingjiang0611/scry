@@ -286,7 +286,7 @@ async function compatiblePiNode(env: Record<string, string>, rotom: boolean): Pr
         env, timeout: PI_NODE_PROBE_TIMEOUT_MS
       }).then((raw) => {
         let response: unknown
-        try { response = JSON.parse(raw) } catch { /* A failed/non-Node candidate is not reusable. */ }
+        try { response = JSON.parse(raw) } catch {  }
         if (!Array.isArray(response) || response.length !== 2 || typeof response[0] !== 'string' || typeof response[1] !== 'string') {
           piNodeVersions.delete(key)
           return ''

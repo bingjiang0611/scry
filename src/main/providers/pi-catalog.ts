@@ -167,8 +167,6 @@ export function probePiAgent(profile: PiAgentProfile, cwd?: string): Promise<PiP
   const pending = piProbesInFlight.get(key)
   if (pending) return pending
   const trace = performanceRecordingEnabled() ? new PerformanceTrace('pi.catalog.probe', { provider: 'pi' }) : undefined
-  // Cold vs reused is the number the warm pool has to move: a reused probe answers
-  // from a running child, a cold one pays the whole Provider startup first.
   const warm = { reused: false }
   const probe = withPiRpc(profile, probeCwd, piRpcArgs({ noSession: true, offline: true }), async (rpc) => {
     const [state, models, levels, commands] = await Promise.all([
