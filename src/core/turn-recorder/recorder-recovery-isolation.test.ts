@@ -50,9 +50,12 @@ async function fixture() {
     commitHook: { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
   }))
   const dataRoot = join(root, '.scry')
+  // Grants and CLI state belong to this fixture. An empty env, or one inherited from the runner,
+  // resolves to whoever runs the suite: commitHookGrantPath falls back to $HOME/.scry/grants.
+  const env = { HOME: root, XDG_STATE_HOME: join(root, 'state'), SCRY_GRANT_DIR: join(root, 'grants') }
   const seed = async (provider: 'claude' | 'codex' | 'qoder', sessionId: string, deferDelivery = false) => {
     await handleRecorderHook({
-      provider, event: 'UserPromptSubmit', workspace: root, env: {}, deferDelivery,
+      provider, event: 'UserPromptSubmit', workspace: root, env, deferDelivery,
       payload: { session_id: sessionId, prompt: sessionId, timestamp: '2026-10-24T12:00:00.000Z' }
     })
     const path = join(dataRoot, 'runtime', provider, safeKey(sessionId), 'open.json')
@@ -63,7 +66,7 @@ async function fixture() {
     }))
     return path
   }
-  return { root, dataRoot, capture, hook, failure, seed }
+  return { root, dataRoot, capture, hook, failure, env, seed }
 }
 
 async function notifications(path: string): Promise<Array<{ sessionId: string }>> {
@@ -80,7 +83,7 @@ describe('recorder recovery session isolation', () => {
     const first = await f.seed('claude', 's1')
     await f.seed('codex', 's2')
     faults.finalize = true
-    await expect.soft(recoverRecorder(f.root, {})).resolves.toMatchObject({ recovered: 1, pending: 1 })
+    await expect.soft(recoverRecorder(f.root, f.env)).resolves.toMatchObject({ recovered: 1, pending: 1 })
     expect.soft((await listRecords(f.dataRoot)).map((record) => record.sessionId)).toEqual(['s2'])
     expect(JSON.parse(await readFile(first, 'utf8')).status).toBe('closing')
     await expect.soft(notifications(f.capture)).resolves.toEqual([expect.objectContaining({ sessionId: 's2' })])
@@ -90,7 +93,7 @@ describe('recorder recovery session isolation', () => {
     })
     expect(await readFile(join(f.dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('s1 finalize failure')
     faults.finalize = false
-    await expect(recoverRecorder(f.root, {})).resolves.toMatchObject({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(f.root, f.env)).resolves.toMatchObject({ recovered: 1, pending: 0 })
     expect((await notifications(f.capture)).map((item) => item.sessionId)).toEqual(['s2', 's1'])
   })
 
@@ -101,7 +104,7 @@ describe('recorder recovery session isolation', () => {
     const lock = recorderSessionLock(f.dataRoot, 'claude', 's1')
     await mkdir(lock, { recursive: true })
     await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: 'held-by-test' }))
-    await expect(recoverRecorder(f.root, {})).resolves.toMatchObject({ recovered: 1, pending: 1 })
+    await expect(recoverRecorder(f.root, f.env)).resolves.toMatchObject({ recovered: 1, pending: 1 })
     expect((await listRecords(f.dataRoot)).map((record) => record.sessionId)).toEqual(['s2'])
     expect(await notifications(f.capture)).toEqual([expect.objectContaining({ sessionId: 's2' })])
     expect((await readHealth(f.dataRoot)).droppedEvents).toBe(0)
@@ -111,7 +114,7 @@ describe('recorder recovery session isolation', () => {
     const f = await fixture()
     await f.seed('codex', 's2')
     faults.pendingHealth = true
-    await expect(recoverRecorder(f.root, {})).rejects.toThrow('injected recovery health failure')
+    await expect(recoverRecorder(f.root, f.env)).rejects.toThrow('injected recovery health failure')
     expect((await listRecords(f.dataRoot)).map((record) => record.sessionId)).toEqual(['s2'])
     expect(await notifications(f.capture)).toEqual([expect.objectContaining({ sessionId: 's2' })])
   })
@@ -119,12 +122,12 @@ describe('recorder recovery session isolation', () => {
   it('scoped Qoder recovery leaves another session open, inbox, and notification untouched', async () => {
     const f = await fixture()
     await f.seed('qoder', 'notification-session')
-    await expect(recoverRecorder(f.root, {})).resolves.toMatchObject({ recovered: 1, pending: 0 })
+    await expect(recoverRecorder(f.root, f.env)).resolves.toMatchObject({ recovered: 1, pending: 0 })
     const beforeNotifications = await readFile(f.capture, 'utf8')
 
     const otherOpen = await f.seed('qoder', 'other-session')
     await handleRecorderHook({
-      provider: 'qoder', event: 'Stop', workspace: f.root, env: {}, queueOnly: true,
+      provider: 'qoder', event: 'Stop', workspace: f.root, env: f.env, queueOnly: true,
       payload: { session_id: 'other-session', timestamp: '2026-10-24T12:00:02.000Z' }
     })
     const otherInbox = join(f.dataRoot, 'runtime', 'qoder', safeKey('other-session'), 'inbox')
@@ -132,7 +135,7 @@ describe('recorder recovery session isolation', () => {
     const beforeOtherInbox = await Promise.all((await readdir(otherInbox)).map(async (name) => [name, await readFile(join(otherInbox, name), 'utf8')] as const))
 
     await f.seed('qoder', 'target-session')
-    await expect(recoverRecorder(f.root, {}, undefined, { provider: 'qoder', sessionId: 'target-session' }))
+    await expect(recoverRecorder(f.root, f.env, undefined, { provider: 'qoder', sessionId: 'target-session' }))
       .resolves.toMatchObject({ recovered: 1, pending: 0 })
 
     expect((await listRecords(f.dataRoot)).map((record) => record.sessionId)).toEqual(['notification-session', 'target-session'])
@@ -141,7 +144,7 @@ describe('recorder recovery session isolation', () => {
     expect(await Promise.all((await readdir(otherInbox)).map(async (name) => [name, await readFile(join(otherInbox, name), 'utf8')] as const))).toEqual(beforeOtherInbox)
     expect(await readFile(f.capture, 'utf8')).not.toBe(beforeNotifications)
     expect((await listRecords(f.dataRoot)).some((record) => record.sessionId === 'other-session')).toBe(false)
-    await expect(recoverRecorder(f.root, {}, undefined, { provider: 'qoder', sessionId: 'target-session' }))
+    await expect(recoverRecorder(f.root, f.env, undefined, { provider: 'qoder', sessionId: 'target-session' }))
       .resolves.toMatchObject({ recovered: 0, pending: 0 })
     expect((await notifications(f.capture)).map((item) => item.sessionId)).toEqual(['notification-session', 'target-session'])
   })
@@ -149,7 +152,7 @@ describe('recorder recovery session isolation', () => {
   it('scoped recovery skips a real other-session retry without changing its evidence or checkpoint', async () => {
     const f = await fixture()
     const fingerprint = 'scoped-retry'
-    const env = { SCRY_RECORDER_COMMIT_HOOK: f.hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint }
+    const env = { ...f.env, SCRY_RECORDER_COMMIT_HOOK: f.hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint }
     await f.seed('qoder', 'other-session')
     await writeFile(f.failure, '')
     await expect(recoverRecorder(f.root, env)).resolves.toMatchObject({ recovered: 1 })
@@ -186,7 +189,7 @@ describe('recorder recovery session isolation', () => {
   it('scoped recovery refuses legacy migration without changing the shared state', async () => {
     const f = await fixture()
     const fingerprint = 'scoped-legacy'
-    const env = { SCRY_RECORDER_COMMIT_HOOK: f.hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint }
+    const env = { ...f.env, SCRY_RECORDER_COMMIT_HOOK: f.hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint }
     const legacyPath = join(f.dataRoot, 'notifications', 'commit-hook-state.json')
     await f.seed('qoder', 'target-session', true)
     await expect(recoverRecorder(f.root, env)).resolves.toMatchObject({ recovered: 1 })
@@ -220,7 +223,7 @@ describe('recorder recovery session isolation', () => {
     const inbox = join(f.dataRoot, 'runtime', 'qoder', safeKey('target-session'), 'inbox')
     if (queueStop) {
       await handleRecorderHook({
-        provider: 'qoder', event: 'Stop', workspace: f.root, env: {}, queueOnly: true,
+        provider: 'qoder', event: 'Stop', workspace: f.root, env: f.env, queueOnly: true,
         payload: { session_id: 'target-session', timestamp: '2026-10-24T12:00:02.000Z' }
       })
     }
@@ -229,7 +232,7 @@ describe('recorder recovery session isolation', () => {
     await writeFile(openPath, JSON.stringify({ ...JSON.parse(before), sessionId: 'other-session' }))
     const mismatched = await readFile(openPath, 'utf8')
 
-    await expect(recoverRecorder(f.root, {}, undefined, { provider: 'qoder', sessionId: 'target-session' }))
+    await expect(recoverRecorder(f.root, f.env, undefined, { provider: 'qoder', sessionId: 'target-session' }))
       .resolves.toMatchObject({ recovered: 0, pending: 1 })
     expect(await readFile(openPath, 'utf8')).toBe(mismatched)
     expect(await readFile(otherOpen, 'utf8')).toBe(beforeOtherOpen)
@@ -242,7 +245,7 @@ describe('recorder recovery session isolation', () => {
     const f = await fixture()
     await f.seed('qoder', 'target-session', true)
     await handleRecorderHook({
-      provider: 'qoder', event: 'Stop', workspace: f.root, env: {}, queueOnly: true,
+      provider: 'qoder', event: 'Stop', workspace: f.root, env: f.env, queueOnly: true,
       payload: { session_id: 'target-session', timestamp: '2026-10-24T12:00:02.000Z' }
     })
     const inbox = join(f.dataRoot, 'runtime', 'qoder', safeKey('target-session'), 'inbox')
@@ -252,7 +255,7 @@ describe('recorder recovery session isolation', () => {
     await writeFile(path, JSON.stringify({ ...JSON.parse(before), sessionId: 'other-session' }))
     const mismatched = await readFile(path, 'utf8')
 
-    await expect(recoverRecorder(f.root, {}, undefined, { provider: 'qoder', sessionId: 'target-session' }))
+    await expect(recoverRecorder(f.root, f.env, undefined, { provider: 'qoder', sessionId: 'target-session' }))
       .resolves.toMatchObject({ recovered: 0, pending: 1 })
     expect(await readFile(path, 'utf8')).toBe(mismatched)
     expect(await readFile(join(f.dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('inbox identity differs')
@@ -261,7 +264,7 @@ describe('recorder recovery session isolation', () => {
   it('scoped delivery rejects a damaged canonical record instead of treating it as another session', async () => {
     const f = await fixture()
     const fingerprint = 'scoped-corrupt'
-    const env = { SCRY_RECORDER_COMMIT_HOOK: f.hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint }
+    const env = { ...f.env, SCRY_RECORDER_COMMIT_HOOK: f.hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint }
     await f.seed('qoder', 'target-session', true)
     await writeFile(f.failure, '')
     await expect(recoverRecorder(f.root, env)).resolves.toMatchObject({ recovered: 1 })

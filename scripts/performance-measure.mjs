@@ -160,6 +160,11 @@ function freezeCounterHarness(candidate, baseline) {
   // Replace, not overlay: a collector the candidate removed or renamed must not keep running on the baseline side.
   rmSync(join(baseline, 'scripts/performance-counters'), { recursive: true, force: true })
   cpSync(join(candidate, 'scripts/performance-counters'), join(baseline, 'scripts/performance-counters'), { recursive: true, force: true })
+  // The frozen config names the test-isolation setup, so the baseline worktree needs it to boot
+  // even when its own revision predates it. Not hashed: it changes no measurement.
+  if (existsSync(join(candidate, 'src/test-support'))) {
+    cpSync(join(candidate, 'src/test-support'), join(baseline, 'src/test-support'), { recursive: true, force: true })
+  }
 }
 
 function createBaselineWorktree(candidate, reference) {

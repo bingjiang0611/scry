@@ -6,6 +6,7 @@ import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listenRecorderDaemon, recorderDaemonStatus, sendRecorderDaemonHook } from './daemon'
 import { RECORDER_VERSION, listRecords } from './store'
+import { isolatedEnv } from '../../test-support/isolated-env'
 
 const roots: string[] = []
 const socketDirs: string[] = []
@@ -67,7 +68,7 @@ async function isolatedSocketDir(root: string): Promise<string> {
 describe('turn recorder daemon', () => {
   it('socket 接受 direct Pi lifecycle', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
       const base = { workspace: root, provider: 'pi' as const, env }
@@ -83,7 +84,7 @@ describe('turn recorder daemon', () => {
 
   it('闲置后自动退出，下次事件可由 launcher 再拉起', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 50, env })
     await daemon.closed
     await expect(recorderDaemonStatus(root, env)).resolves.toMatchObject({ running: false })
@@ -116,7 +117,7 @@ describe('turn recorder daemon', () => {
 
   it('无 open turn 时不运行 recovery poll', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     let recoveryRuns = 0
     const recoveryTimeouts = manualRecoveryTimeouts()
     const daemon = await listenRecorderDaemon({
@@ -138,7 +139,7 @@ describe('turn recorder daemon', () => {
 
   it('存在未终态 open turn 时跨过 idle timeout 仍保持运行', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 50, env })
     try {
       await sendRecorderDaemonHook({
@@ -159,7 +160,7 @@ describe('turn recorder daemon', () => {
   it('空闲退出前触发更新，装完即退出，让下一个事件跑上新版本', async () => {
     const root = await workspace()
     const dir = await isolatedSocketDir(root)
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: join(dir, 'x.sock') }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: join(dir, 'x.sock') })
     const calls: string[] = []
     const daemon = await listenRecorderDaemon({
       workspace: root,
@@ -176,7 +177,7 @@ describe('turn recorder daemon', () => {
 
   it('轮次未结束时不触发更新，避免同一轮跨两个版本', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     let attempts = 0
     const daemon = await listenRecorderDaemon({
       workspace: root,
@@ -203,7 +204,7 @@ describe('turn recorder daemon', () => {
   it('更新失败不影响 daemon 退出，也不声称装上了东西', async () => {
     const root = await workspace()
     const dir = await isolatedSocketDir(root)
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: join(dir, 'x.sock') }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: join(dir, 'x.sock') })
     const daemon = await listenRecorderDaemon({
       workspace: root,
       idleMs: 50,
@@ -218,7 +219,7 @@ describe('turn recorder daemon', () => {
 
   it('idle close 检查期间到达新 start 时不会关闭已写入 open 的 daemon', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     let releaseProbe = (): void => {}
     let enterProbe = (): void => {}
     const probeEntered = new Promise<void>((resolvePromise) => { enterProbe = resolvePromise })
@@ -255,7 +256,7 @@ describe('turn recorder daemon', () => {
 
   it('无终态 hook 时轮询 Codex rollout 并提交 turn_aborted', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'aborted.jsonl')
     await mkdir(join(rollout, '..'), { recursive: true })
     await writeFile(rollout, [
@@ -294,7 +295,7 @@ describe('turn recorder daemon', () => {
 
   it('未观测到终态时继续 recovery poll，rollout 变为终态后提交', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'delayed-abort.jsonl')
     await mkdir(join(rollout, '..'), { recursive: true })
     await writeFile(rollout, [
@@ -353,11 +354,10 @@ describe('turn recorder daemon', () => {
     const capture = join(root, 'commit-hook.jsonl')
     await writeFile(hook, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
     await chmod(hook, 0o700)
-    const env = {
-      ...process.env,
+    const env = isolatedEnv(root, {
       SCRY_RECORDER_SOCKET: socketPath(root),
       SCRY_RECORDER_COMMIT_HOOK: hook
-    }
+    })
     const rollout = join(root, '.codex', 'sessions', '2026', '07', '19', 'callback-aborted.jsonl')
     await mkdir(join(rollout, '..'), { recursive: true })
     await writeFile(rollout, [
@@ -394,7 +394,7 @@ describe('turn recorder daemon', () => {
 
   it('不会用第二个 serve 覆盖仍在运行的 socket', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
       await expect(listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })).rejects.toThrow('owned by live process')
@@ -407,7 +407,7 @@ describe('turn recorder daemon', () => {
   it('daemon 整个生命周期保留所有权标记，关闭后只清理自己的标记', async () => {
     const root = await workspace()
     const socket = socketPath(root)
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socket }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socket })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     const markerPath = `${socket}.owner.json`
     const marker = JSON.parse(await readFile(markerPath, 'utf8')) as Record<string, unknown>
@@ -424,7 +424,7 @@ describe('turn recorder daemon', () => {
   it('Socket 仍在但无响应时拒绝 unlink，避免把活进程变成孤儿', async () => {
     const root = await workspace()
     const socket = socketPath(root)
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socket }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socket })
     const connections = new Set<Socket>()
     const blocker = createNetServer((connection) => {
       connections.add(connection)
@@ -449,7 +449,7 @@ describe('turn recorder daemon', () => {
 
   it('拒绝超过 8 MiB 的请求并返回失败而不是假 ACK', async () => {
     const root = await workspace()
-    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const env = isolatedEnv(root, { SCRY_RECORDER_SOCKET: socketPath(root) })
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
       await expect(sendRecorderDaemonHook({
