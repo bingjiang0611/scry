@@ -81,10 +81,6 @@ function acquireWorker(): ParserWorker {
   return entry
 }
 
-/** One bounded worker cache survives short session switches; it never keeps
- * the process alive while idle. Superseded work is terminated when it has no
- * remaining consumers, rather than parsing a large abandoned file in background.
- */
 export async function parseTranscriptFileInWorker(args: TranscriptFileRequest): Promise<TranscriptFileResult> {
   args.signal?.throwIfAborted()
   const entry = acquireWorker()
