@@ -170,8 +170,6 @@ export function useAppQueueActions(context: AppQueueContext) {
     const removed = queuedPrompts[index]
     if (removed) pausedQueuedPromptsRef.current.delete(removed.messageId)
   }
-  // 编辑队列消息：把这条文本放回输入框，原条目留在队列里并标为编辑中。
-  // 附件不回到输入框（原 DraftAttachment 的预览已释放），仍随这条消息留在队列项上。
   const editQueuedPrompt = (messageId: string): void => {
     const index = queuedPrompts.findIndex((candidate) => candidate.messageId === messageId)
     if (index < 0) return
@@ -189,7 +187,6 @@ export function useAppQueueActions(context: AppQueueContext) {
       setComposerError(QUEUE_COPY.editTitleUnknown)
       return
     }
-    // 不静默覆盖用户正在打的字：输入框非空时不进入编辑态。
     const currentDraft = draftStore.getSnapshot().get(draftKey)
     if ((currentDraft?.input ?? '').trim() || (currentDraft?.attachments ?? EMPTY_DRAFT_ATTACHMENTS).length > 0) {
       setComposerError(QUEUE_COPY.editTitleDraft)
@@ -244,8 +241,6 @@ export function useAppQueueActions(context: AppQueueContext) {
     await session.stopRun()
   }
   const [historyOlderLoading, setHistoryOlderLoading] = useState(false)
-  // 更早轮次按需取回：请求只带当前窗口的 offset，main 侧再用 revision + 会话身份栅栏；
-  // 过期响应由 prependOlderTurns 丢弃，不会把别的会话的轮次拼进时间线。
   const loadOlderTurns = async (): Promise<void> => {
     const historyWindow = session.historyWindow
     if (!historyWindow?.hasOlder || historyOlderLoading) return
