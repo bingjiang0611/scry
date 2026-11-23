@@ -49,7 +49,6 @@ extension RemoteRunStore {
     let recoveredReads = await reads.value
     checks.append(("recovery.transientReadRecoversWithoutTap", recoveredReads == 2 && coordinator.homeFailure == nil && coordinator.lastFullRefresh != nil && coordinator.homeSessions.first?.session == session))
 
-    // A foreground refresh must not repeatedly retry an authorization failure.
     await reads.reset()
     store.catalogFixture = CatalogFixture(connection: connection, fetch: { _ in
       _ = await reads.next(); throw G0Transport.RunError.host(code: "device_not_authorized")

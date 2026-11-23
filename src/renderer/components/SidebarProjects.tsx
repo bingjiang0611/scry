@@ -20,7 +20,6 @@ export function SidebarProjects({
   onClearSearch, onChooseFolder, onRetryProjects
 }: {
   projects: ProjectMeta[]
-  // The project read failed: say so instead of showing the empty catalog.
   projectsError?: string | null
   canShowEmpty?: boolean
   q: string
@@ -42,7 +41,6 @@ export function SidebarProjects({
   const ql = q.trim().toLowerCase()
   const { pinned, filtered } = useMemo(() => {
     const matches = (session: SessionMeta): boolean => !ql || session.preview.toLowerCase().includes(ql)
-    // 置顶会话跨项目平铺，从原项目分组里移出；行内带项目名。
     const pinned = projects
       .flatMap((project) => project.sessions
         .filter((session) => session.pinnedAt && matches(session))
@@ -70,7 +68,6 @@ export function SidebarProjects({
       .filter((project) => project.projectMatch || project.sessions.length > 0 || project.conversations.length > 0)
     return { pinned: pinnedRows, filtered }
   }, [projects, ql])
-  // Match local project ordering: named roots, explicit pins, then recent activity.
   // Remote projects must not live in a separate tail section below every local root.
   const projectGroups = [
     ...filtered.map((project) => ({ kind: 'local' as const, project, cwd: project.cwd, pinnedAt: project.pinnedAt, mtime: project.mtime })),

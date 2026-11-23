@@ -3,8 +3,6 @@ import RemoteTransport
 
 #if DEBUG
 extension RemoteRunStore {
-  // Pure checks used by the launch self-test; they exercise the invariants that
-  // do not require a relay or Provider.
   nonisolated static func selfTestRecoveryCheckpointRoundTrip() -> Bool {
     let identity = SessionIdentity.new(providerId: "codex", cwd: "/repo")
     let attachment = RemoteRunClient.Attachment(kind: .text, name: "note.txt", mimeType: "text/plain",

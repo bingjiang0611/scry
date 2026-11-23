@@ -1,4 +1,3 @@
-// 左侧栏（蓝本 welcome/chat 通用）：brand+版本 / 新建会话 / 搜索 / 置顶分组 / 按工作目录分组的历史会话。
 import type { SessionSaveState } from '../session-save-state'
 // 会话行的置顶与存档是行内 hover 按钮；删除只在设置的「已存档会话」里发生，这里没有删除入口。
 import { memo, useCallback, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
@@ -98,10 +97,8 @@ export const Sidebar = memo(function Sidebar({
   activeAgentProfileId?: string
   draftStore?: ComposerDraftStore
   runningRunIds?: ReadonlySet<string>
-  /** One-pass child totals/running/attention per parent, already computed by the shell. */
   waitingQuestionRunIds?: ReadonlySet<string>
   unreadSessionKeys?: ReadonlySet<string>
-  /** Notices for sessions the user is not looking at; shown above the settings footer. */
   backgroundNotices?: readonly BackgroundNotice[]
   onOpenBackgroundNotice?: (notice: BackgroundNotice) => void
   onDismissBackgroundNotice?: (key: string) => void

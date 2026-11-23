@@ -93,7 +93,6 @@ export const SessionRow = memo(function SessionRow({
           <span className="sb-sesstext">{session.preview || copy.noPreview}</span>
         </span>
         <span className="sb-session-meta">
-          {/* Saving / Saved take the time's fixed place; the change itself is never covered. */}
           {!waitingForAnswer && (saveState?.status === 'saving' || saveState?.status === 'saved'
             ? <span className="sb-sesstime sb-sess-save" data-save={saveState.status} role="status">
               {saveState.status === 'saving' ? SESSION_SAVE_COPY.saving : <><Icon name="check" /> {SESSION_SAVE_COPY.saved}</>}
