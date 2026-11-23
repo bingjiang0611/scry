@@ -163,6 +163,7 @@ export type StickyRejectionReason =
   | 'resolved_absent'
   | 'delegated_session_read_only'
   | 'active_subtasks_present'
+  | 'limit_exceeded'
 
 export type RetryableRejectionReason =
   | 'session_run_active'

@@ -278,6 +278,7 @@ export interface TaskConfirmPayload {
 export interface TaskConfirmCancelPayload {
   taskId: string
   questionId: string
+  questionRunId?: string
   answerId: string
   answerSha256: string
   approved: boolean
@@ -361,7 +362,7 @@ export function evaluatePreDispatchRecheck(input: PreDispatchRecheckInput): PreD
     if (input.agentCredentialRevoked) return { ok: false, action: 'fail', reason: 'agent_credential_revoked' }
     if (input.permissionCeilingViolated) return { ok: false, action: 'fail', reason: 'permission_ceiling_exceeded' }
     if (input.projectDelegationDisabled) return { ok: false, action: 'fail', reason: 'delegation_disabled' }
-    if (input.repoFingerprintMatchesUserRun === false) {
+    if (input.repoFingerprintMatchesUserRun !== true) {
       return { ok: false, action: 'fail', reason: 'trust_gate_rejected' }
     }
   }

@@ -33,7 +33,7 @@ export function decideTaskConfirm(
   cmd: Extract<OrchestrationCommand, { type: 'task.confirm' }>,
   view: OrchestratorReadView
 ): DecisionResult {
-  if (!isPeerActor(cmd.actor)) return retryableReject('device_not_authorized')
+  if (!isPeerActor(cmd.actor) || cmd.scope !== 'local') return retryableReject('device_not_authorized')
   const p = cmd.payload
   const task = view.getTask?.(p.taskId)
   if (!task) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
@@ -312,24 +312,59 @@ export function decideSessionStopSubtasks(
       const child = view.getRun(task.childRunId)
       if (child && !isTerminalRunLifecycle(child.lifecycle)) {
         stoppedRunIds.add(child.runId)
-        events.push(
-          makeEvent(cmd, events.length, {
-            type: 'run.stop_requested',
-            stream: `run:${child.runId}`,
-            sessionKey: child.sessionKey,
-            runId: child.runId,
-            cwd: child.cwd,
-            payload: { runId: child.runId, cascadeRoot: child.parentRunId ?? cmd.payload.sessionKey }
-          })
-        )
-        effects.push(
-          makeEffect(cmd, effects.length, {
-            kind: 'provider.run.stop',
-            runId: child.runId,
-            payload: { runId: child.runId },
-            state: 'pending'
-          })
-        )
+        if (child.lifecycle === 'recorded') {
+          events.push(
+            makeEvent(cmd, events.length, {
+              type: 'run.cancelled',
+              stream: `run:${child.runId}`,
+              sessionKey: child.sessionKey,
+              runId: child.runId,
+              cwd: child.cwd,
+              payload: { runId: child.runId, reason: cmd.payload.reason ?? 'session_stop_subtasks', settledAt: cmd.at }
+            })
+          )
+          if (child.sessionKey) {
+            events.push(
+              makeEvent(cmd, events.length, {
+                type: 'turn.delivery',
+                stream: `session:${child.sessionKey}`,
+                sessionKey: child.sessionKey,
+                runId: child.runId,
+                cwd: child.cwd,
+                payload: { runId: child.runId, delivery: 'not_sent', reason: cmd.payload.reason ?? 'session_stop_subtasks' }
+              })
+            )
+          }
+          events.push(
+            makeEvent(cmd, events.length, {
+              type: 'task.settled',
+              stream: `session:${task.parentSessionKey}`,
+              sessionKey: task.parentSessionKey,
+              runId: child.runId,
+              cwd: task.cwd,
+              payload: { taskId: task.taskId, status: 'cancelled', reason: cmd.payload.reason ?? 'session_stop_subtasks', settledAt: cmd.at }
+            })
+          )
+        } else {
+          events.push(
+            makeEvent(cmd, events.length, {
+              type: 'run.stop_requested',
+              stream: `run:${child.runId}`,
+              sessionKey: child.sessionKey,
+              runId: child.runId,
+              cwd: child.cwd,
+              payload: { runId: child.runId, cascadeRoot: child.parentRunId ?? cmd.payload.sessionKey }
+            })
+          )
+          effects.push(
+            makeEffect(cmd, effects.length, {
+              kind: 'provider.run.stop',
+              runId: child.runId,
+              payload: { runId: child.runId },
+              state: 'pending'
+            })
+          )
+        }
       }
     }
   }

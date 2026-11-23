@@ -44,7 +44,8 @@ const STICKY_REASONS: ReadonlySet<StickyRejectionReason> = new Set([
   'invalid_target',
   'resolved_absent',
   'delegated_session_read_only',
-  'active_subtasks_present'
+  'active_subtasks_present',
+  'limit_exceeded'
 ])
 
 const RETRYABLE_REASONS: ReadonlySet<RetryableRejectionReason> = new Set([
@@ -295,6 +296,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       const p = cmd.payload
       const interaction = view.getInteraction(p.runId, p.questionId)
       if (!interaction) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      if (interaction.source === 'scry_orchestrator') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       if (interaction.state !== 'open') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
       const run = view.getRun(p.runId)
       const events = [

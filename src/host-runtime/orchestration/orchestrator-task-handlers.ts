@@ -89,7 +89,7 @@ export function decideTaskOrPolicyCommand(
       const total = view.countTotalTasksByParentRun?.(p.parentRunId) ?? 0
       const hostAgentRuns = view.countNonTerminalAgentRuns?.() ?? 0
       if (concurrent >= limits.maxConcurrentPerParentRun) return retryableReject('limit_exceeded')
-      if (total >= limits.maxTotalPerParentRun) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      if (total >= limits.maxTotalPerParentRun) return stickyReject(cmd, 'limit_exceeded', { writeReceipt: true })
       if (hostAgentRuns >= limits.maxHostAgentRuns) return retryableReject('limit_exceeded')
 
       const bodyDescriptor = p.body ? { storage: p.body.storage, sha256: p.body.sha256, bytes: p.body.bytes } : null
@@ -151,29 +151,33 @@ export function decideTaskOrPolicyCommand(
       if (isTerminalTaskStatus(task.status)) {
         return acceptDecision(cmd, [], [], { taskId: task.taskId, status: task.status, alreadyTerminal: true })
       }
-      const parentRun = view.getRun(task.parentRunId)
-      if (!isCallerRunActive(parentRun)) return retryableReject('caller_not_active')
+      const callerRunId = cmd.actorRunId ?? task.parentRunId
+      const callerRun = view.getRun(callerRunId)
+      if (!isCallerRunActive(callerRun) || callerRun?.sessionKey !== p.parentSessionKey) {
+        return retryableReject('caller_not_active')
+      }
       const events: PendingOrchestrationEvent[] = [
         makeEvent(cmd, 0, {
           type: 'task.cancel_requested',
           stream: `session:${task.parentSessionKey}`,
           sessionKey: task.parentSessionKey,
-          runId: task.parentRunId,
+          runId: callerRunId,
           cwd: task.cwd,
           payload: {
             taskId: task.taskId,
             reason: p.reason ?? null,
-            confirmationQuestionId: p.confirmationQuestionId
+            confirmationQuestionId: p.confirmationQuestionId,
+            questionRunId: callerRunId
           }
         }),
         makeEvent(cmd, 1, {
           type: 'run.question_opened',
-          stream: `run:${task.parentRunId}`,
+          stream: `run:${callerRunId}`,
           sessionKey: task.parentSessionKey,
-          runId: task.parentRunId,
+          runId: callerRunId,
           cwd: task.cwd,
           payload: {
-            runId: task.parentRunId,
+            runId: callerRunId,
             questionId: p.confirmationQuestionId,
             kind: 'delegation_cancel_confirmation',
             source: 'scry_orchestrator',
@@ -184,7 +188,8 @@ export function decideTaskOrPolicyCommand(
       return acceptDecision(cmd, events, [], {
         taskId: task.taskId,
         status: task.status,
-        confirmationQuestionId: p.confirmationQuestionId
+        confirmationQuestionId: p.confirmationQuestionId,
+        questionRunId: callerRunId
       })
     }
 
@@ -192,22 +197,28 @@ export function decideTaskOrPolicyCommand(
       return decideTaskConfirm(cmd, view)
 
     case 'task.confirm_cancel': {
-      if (!isPeerActor(cmd.actor)) return retryableReject('device_not_authorized')
+      if (!isPeerActor(cmd.actor) || cmd.scope !== 'local') return retryableReject('device_not_authorized')
       const p = cmd.payload
       const task = view.getTask?.(p.taskId)
       if (!task) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      const interaction = view.getInteraction(task.parentRunId, p.questionId)
-      if (!interaction || interaction.state !== 'open') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      if (!task.cancelConfirmationQuestionId || task.cancelConfirmationQuestionId !== p.questionId) {
+        return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      }
+      const questionRunId = p.questionRunId ?? task.parentRunId
+      const interaction = view.getInteraction(questionRunId, p.questionId)
+      if (!interaction || interaction.state !== 'open' || interaction.kind !== 'delegation_cancel_confirmation') {
+        return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      }
 
       const events: PendingOrchestrationEvent[] = [
         makeEvent(cmd, 0, {
           type: 'run.question_answered',
-          stream: `run:${task.parentRunId}`,
+          stream: `run:${questionRunId}`,
           sessionKey: task.parentSessionKey,
-          runId: task.parentRunId,
+          runId: questionRunId,
           cwd: task.cwd,
           payload: {
-            runId: task.parentRunId,
+            runId: questionRunId,
             questionId: p.questionId,
             answerId: p.answerId,
             answerSha256: p.answerSha256,
@@ -216,12 +227,12 @@ export function decideTaskOrPolicyCommand(
         }),
         makeEvent(cmd, 1, {
           type: 'run.question_closed',
-          stream: `run:${task.parentRunId}`,
+          stream: `run:${questionRunId}`,
           sessionKey: task.parentSessionKey,
-          runId: task.parentRunId,
+          runId: questionRunId,
           cwd: task.cwd,
           payload: {
-            runId: task.parentRunId,
+            runId: questionRunId,
             questionId: p.questionId,
             reason: p.approved ? 'approved' : 'declined'
           }
@@ -280,6 +291,9 @@ export function decideTaskOrPolicyCommand(
     }
 
     case 'task.settle': {
+      if (cmd.actor !== 'system' && !cmd.actor.startsWith('effect:')) {
+        return retryableReject('device_not_authorized')
+      }
       const p = cmd.payload
       const task = view.getTask?.(p.taskId)
       if (!task) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })

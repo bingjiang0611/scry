@@ -306,8 +306,11 @@ export class DelegationService {
     if (isTerminalTaskStatus(row.status)) {
       return { ok: true, data: { taskId: row.taskId, status: row.status } }
     }
-    const clientReqId = typeof args.clientRequestId === 'string' && args.clientRequestId.length > 0
-      ? args.clientRequestId.slice(0, MAX_CLIENT_REQUEST_ID_CHARS)
+    if (args.clientRequestId !== undefined && (typeof args.clientRequestId !== 'string' || args.clientRequestId.length === 0 || args.clientRequestId.length > MAX_CLIENT_REQUEST_ID_CHARS)) {
+      return fail('invalid_request', 'clientRequestId must be a non-empty string <= 256 chars')
+    }
+    const clientReqId = typeof args.clientRequestId === 'string'
+      ? args.clientRequestId
       : `cancel:${row.taskId}:${row.stateVersion}`
     const payload = {
       taskId: row.taskId,
