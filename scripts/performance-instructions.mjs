@@ -73,14 +73,12 @@ function callgrindCount(valgrind, bundle, operation, directory) {
   return Number.isSafeInteger(value) ? value : null
 }
 
-/** Bundle the fixed entry against production src/ without writing into the repository. */
 export async function bundleEntry(directory) {
   const outfile = join(directory, 'entry.mjs')
   await build({ stdin: { contents: entrySource, resolveDir: root, loader: 'ts', sourcefile: 'instructions-entry.ts' }, bundle: true, platform: 'node', format: 'esm', target: 'node20', outfile, logLevel: 'silent' })
   return outfile
 }
 
-/** Run one bundled operation without a counter; proves the measured code path works. */
 export function runOperation(bundle, operation) {
   return spawnSync(process.execPath, [...nodeFlags, bundle, operation], { encoding: 'utf8', env: measuredEnv })
 }

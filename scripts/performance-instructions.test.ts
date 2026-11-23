@@ -10,7 +10,6 @@ afterAll(() => rmSync(directory, { recursive: true, force: true }))
 describe('CPU instruction probe', () => {
   it('bundles production modules and every measured operation returns a real result', async () => {
     const bundle = await bundleEntry(directory)
-    // Production code is in the bundle, not a hand-written stand-in.
     expect(readFileSync(bundle, 'utf8')).toContain('function sessionHistoryPage')
     for (const operation of ['none', ...specs.map(spec => spec.scenario)]) {
       const result = runOperation(bundle, operation)

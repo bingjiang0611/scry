@@ -3,7 +3,6 @@ import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 
-// js-yaml is already installed by the build toolchain; no second YAML parser/config format.
 const { load } = createRequire(import.meta.url)('js-yaml') as { load: (text: string) => unknown }
 interface Step { name?: string; id?: string; if?: string; run?: string }
 const root = resolve(import.meta.dirname, '..')

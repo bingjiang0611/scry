@@ -14,7 +14,6 @@ import { validateObservations, counterPlatform } from './performance-ratchet.mjs
 export const defaultRepeats = 5
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 
-/** Run one fixed operation `times` times; each call returns integer counters by metric. */
 export async function repeatCounters(times, operation) {
   const runs = {}
   for (let index = 0; index < times; index++) {
