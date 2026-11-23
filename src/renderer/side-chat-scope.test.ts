@@ -9,14 +9,12 @@ const conversation = (overrides: Partial<ConversationSummary> = {}): Conversatio
   id: '11111111-2222-4333-8444-555555555555', cwd: '/repo', title: '父会话', revision: 3, turnCount: 8, ...overrides
 })
 
-/** A child of another parent: its own frozen source, nothing of it to freeze again. */
 const childConversation = (): ConversationSummary => conversation({
   sideChat: { source: { kind: 'conversation', conversationId: '99999999-2222-4333-8444-555555555555' },
     parentTitleAtCapture: '祖父', initialTarget: { providerId: 'claude', permissionMode: 'default' },
     throughOrdinal: 2, throughRunId: 'run-2', capturedAt: 1, prefixFingerprint: 'a'.repeat(64), messageCount: 4 }
 })
 
-/** A Provider session row: the chat view, with no logical conversation of its own. */
 function chatScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {}) {
   return sideChatScope({
     draftKey: 'draft-key', view: 'chat', providerId: 'claude', runControls: controls, cwd: '/repo',
@@ -24,7 +22,6 @@ function chatScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {})
   })
 }
 
-/** The conversation view: its parent is the logical conversation. */
 function conversationScope(overrides: Partial<Parameters<typeof sideChatScope>[0]> = {}) {
   return sideChatScope({
     draftKey: 'draft-key', view: 'conversation', providerId: 'claude', runControls: controls, cwd: '/repo',
@@ -53,7 +50,6 @@ describe('side-chat source scope', () => {
     expect(scope.source).toEqual({ kind: 'native-session', providerId: 'pi',
       agentProfileId: 'pi:rotom', cwd: '/repo', nativeSessionId: 'native-1' })
     expect(scope.target).toMatchObject({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
-    // 没有已登记 Profile 时不伪造目标身份，也不会把历史 id 当成 Agent Profile。
     expect(chatScope({ agentProfileId: 'pi:rotom', providerId: 'pi' }).target).not.toHaveProperty('agentProfileId')
   })
 
@@ -103,10 +99,8 @@ describe('side-chat source scope', () => {
 
   it('counts only actual terminal turn evidence, not a live placeholder', () => {
     expect(terminalTurnCount([])).toBe(0)
-    // A running turn, a pending-start placeholder and a finalizing turn are all unproven.
     expect(terminalTurnCount([{ done: false }, { done: false }])).toBe(0)
     expect(terminalTurnCount([{ done: true }])).toBe(1)
-    // `error` is terminal even when the settled flag never arrived.
     expect(terminalTurnCount([{ done: false, error: 'spawn failed' }])).toBe(1)
     expect(terminalTurnCount([{ done: true }, { done: false }, { done: false, error: 'x' }])).toBe(2)
   })

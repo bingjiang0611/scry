@@ -4,8 +4,6 @@ import type { DaemonLockRecord } from '../daemon/ledger-lock'
 import type { ProcessRow } from './process-diagnostics'
 import { backgroundServiceLeftovers, prepareBackgroundServiceStop, stopBackgroundService, type BackgroundServiceStopDeps } from './background-service-stop'
 
-// The §13.2 stop chain: only the daemon.lock holder, only while its identity still
-// verifies, one SIGTERM, a bounded wait, and a named refusal for everything else.
 
 const STATE = '/u/daemon'
 const USER = '/u'
@@ -89,13 +87,11 @@ describe('stopBackgroundService', () => {
     const w = world()
     const outcome = await stopBackgroundService(holder, deps(w, { signal: exitOnSignal(w) }))
     expect(outcome).toEqual({ status: 'stopped', holder, leftovers: [] })
-    // Only the daemon: the supervisor has no identity record and is never signalled.
     expect(w.signals).toEqual([[4242, 'SIGTERM']])
   })
 
   it('sends no signal when the pid changed identity after the user was asked', async () => {
     const w = world()
-    // Between the confirmation and the signal the pid was reused by another process.
     w.rows.set(4242, { ...daemonRow, startedAt: 'linux:boot:999', identityKey: '4242:linux:boot:999', command: '/usr/bin/vim' })
     await expect(stopBackgroundService(holder, deps(w))).resolves.toEqual({ status: 'refused', reason: 'identity-changed' })
     expect(w.signals).toEqual([])

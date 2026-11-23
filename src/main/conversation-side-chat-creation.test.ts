@@ -66,7 +66,6 @@ describe('side-chat creation target and child-owned cleanup', () => {
     const child = await current.service.createSideChat(request(source, preview))
     const refs = await sideChatSnapshotRefs(current.userData, (await current.store.read(child.id))!)
     expect(await current.service.readItem(child.id, refs[0])).toBe('first question')
-    // The child-owned body survived the lost acknowledgement.
     expect((await contentRoots(current.userData)).length).toBe(1)
   })
 

@@ -21,7 +21,6 @@ export interface SideChatViewPosition {
   anchorOrdinal?: number
   /** Scroller top → anchor turn top. Positive when the turn starts below the edge. */
   anchorOffset: number
-  /** Turn count of the window this anchor was recorded against. */
   turnCount: number
 }
 

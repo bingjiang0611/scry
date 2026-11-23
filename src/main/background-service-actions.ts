@@ -4,10 +4,6 @@ import type { LoginStartMutationResult } from '../daemon/login-start'
 import type { PreparedStop, StopOutcome } from './background-service-stop'
 import { loginStartFailureMessage, reasonMessage } from './background-service-copy'
 
-// The three «后台服务» actions (B4-S S0-1): restart, quit with the service, and reconnect
-// after the local grant was revoked. Decisions only; Electron (dialogs, app.quit) and the
-// daemon client are injected by bootstrap/background-service.ts.
-//
 // Order is the rule: identify the holder (daemon.lock + identity) → ask when runs may be
 // interrupted → re-verify and signal once (background-service-stop.ts) → only then
 // launch or enroll. Reconnect also covers a credential the App lost (A6). While a stop is in flight the App launches no daemon of its own
@@ -34,7 +30,6 @@ export interface BackgroundServiceActionDeps {
   requestLocalEnrollment(): Promise<void>
   /** Whether the App still has its stored local credential (the file, not its validity). */
   hasLocalCredential(): Promise<boolean>
-  /** What the stopped daemon left behind, before the App quits. */
   reportLeftovers(leftovers: string[]): Promise<void>
   quitApp(): void
 }

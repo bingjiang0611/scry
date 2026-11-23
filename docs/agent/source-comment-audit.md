@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `2546e40a`, reviewed 950 comment tokens across the direct main conversation, side-chat, and background-service files and the direct renderer `side-chat-*` files. The separate `conversation-side-chat.fixture.ts` file has no comment tokens. Removed 136 redundant or stale comments across 51 files. Comment-free emit and tool directives matched; all 30 affected suites passed 226 tests in Electron Node mode. No live provider or desktop UI was run.
+
 At `8fce71de`, reviewed 706 comment tokens across 79 tracked files: direct main `agent-*`, `provider-*`, `mcp-*`, `trust-*`, `workspace-*`, and `project-*` TypeScript files, plus direct `scripts/session-*` JS/TS files outside the previously reviewed `session-open-*` slice. Removed 65 redundant or historical notes across 28 files. Comment-free emit and tool directives matched; eight focused suites passed 127 tests on Node. No live UI or benchmark run was performed.
 
 At `ac822209`, reviewed 821 comment tokens across 63 tracked files: the 54 direct `src/main/remote/remote-*.ts` sources and tests, and nine direct `scripts/session-open-*` JS/TS files. Removed 144 redundant or stale comments across 32 files. Comment-free emit and tool directives matched. The 12 focused remote suites passed 117 tests in Electron Node mode, and the two session-open helper suites passed 11 tests on Node. No live remote or session-open benchmark was run.

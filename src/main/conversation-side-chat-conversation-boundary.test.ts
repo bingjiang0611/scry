@@ -23,7 +23,6 @@ afterEach(async () => {
 const TARGET: ConversationTarget = { providerId: 'claude', continuationKey: 'identity:claude:default' }
 const SESSION = 'native-boundary-session'
 
-/** One archived turn plus the item refs the conversation record stores for it. */
 function archivedTurn(current: SideChatFixture, runId: string, prompt: string, answer: string,
   status: 'completed' | 'failed' | 'interrupted'): ConversationItemRef[] {
   const items = [modelEvent(runId, answer)]
@@ -105,7 +104,6 @@ describe('conversation source terminal boundary', () => {
     const sealed = await sealedStatuses(current, child.id)
     expect(sealed.texts).toEqual(['question 1', 'answer 1'])
     expect(sealed.statuses).toEqual(['completed', 'completed'])
-    // Selecting the pending turn as the boundary is still refused: it has no terminal.
     await expect(current.service.previewSideChat(source, { terminalThroughOrdinal: 2 })).rejects.toThrow()
   })
 })

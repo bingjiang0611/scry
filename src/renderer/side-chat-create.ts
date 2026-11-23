@@ -25,7 +25,6 @@ export interface SideChatCreateCommand {
 }
 
 const STORAGE_KEY = 'scry.side-chat-create-commands.v1'
-/** Bounded command ledger: older attempts leave the window instead of growing forever. */
 export const MAX_CREATE_COMMANDS = 8
 const HASH = /^[a-f0-9]{64}$/
 
@@ -122,7 +121,6 @@ export function clearCreateCommand(
   }
 }
 
-/** The exact request one durable command may dispatch; identity is pinned, not recomputed. */
 export function createRequestOf(command: SideChatCreateCommand): ConversationSideChatRequest {
   return {
     source: command.source,
@@ -180,7 +178,6 @@ export type CreationResolution =
  */
 export function resolveCreateReceipt(receipt: SideChatCommandReceipt): CreationResolution {
   if (receipt.status === 'found') return { kind: 'created', conversation: receipt.conversation }
-  // The host is still running that create: its result is not known, so the command stays.
   if (receipt.status === 'in-flight') return { kind: 'unknown' }
   return { kind: 'not-created' }
 }
@@ -233,7 +230,6 @@ export async function findCreatedSideChat(
   try {
     return resolveCreateReceipt(await api.findSideChatCommand(command.source, command.commandId))
   } catch {
-    // An unreadable lookup proves nothing about the command.
     return { kind: 'unknown' }
   }
 }
@@ -261,7 +257,6 @@ export async function settleFullLedger(
   return settled
 }
 
-/** One page of the child history of this source. */
 export async function listSideChatPage(
   api: { listSideChats: (request: SideChatListRequest) => Promise<SideChatList> },
   source: SideChatSource,

@@ -14,7 +14,6 @@ afterEach(async () => {
   await Promise.all(fixtures.splice(0).map(fixture => fixture.cleanup()))
 })
 
-// The same shape as a real named Agent Profile; the values are generic.
 const PROFILE = 'pi:rotom'
 const SESSION = 'pi-rotom-termination-session'
 const NO_TERMINAL = '原生会话前缀包含没有终止证据的轮次，不能创建侧聊'
@@ -105,7 +104,6 @@ describe('native side-chat archive termination evidence', () => {
     const sealed = await sealedFacts(current, child.id)
     expect(sealed.throughOrdinal).toBe(3)
     expect(sealed.texts).toEqual(['question a', 'answer a', 'question b', 'partial b', 'question c', 'answer c'])
-    // The interrupted turn keeps its captured status; it is never reported as completed.
     expect(sealed.statuses).toEqual(['completed', 'completed', 'interrupted', 'interrupted', 'completed', 'completed'])
     expect(sealed.ordinals).toEqual([1, 1, 2, 2, 3, 3])
   })
@@ -125,7 +123,6 @@ describe('native side-chat archive termination evidence', () => {
     expect(sealed.throughOrdinal).toBe(2)
     expect(sealed.texts).toEqual(['question a', 'answer a', 'trailing b', 'trailing answer b'])
     expect(sealed.ordinals).toEqual([1, 1, 2, 2])
-    // The interrupted boundary keeps its own status; it never becomes completed.
     expect(sealed.statuses).toEqual(['completed', 'completed', 'interrupted', 'interrupted'])
     // Title and body bytes describe the frozen prefix, including the turn that ended it.
     expect(sealed.title).toBe('question a')
@@ -158,7 +155,6 @@ describe('native side-chat archive termination evidence', () => {
   it('captures an interrupted-only archive with its non-success status', async () => {
     const { current, source, record } = await archiveFixture()
     record({ runId: 'run-a', prompt: 'question a', answer: 'partial a', done: true, status: 'interrupted' })
-    // The turn ended, so it is a stable boundary even though it did not succeed.
     const preview = await current.service.previewSideChat(source)
     expect(preview.throughOrdinal).toBe(1)
     const child = await current.service.createSideChat(createRequest(source, preview, 'termination-only-interrupted'))

@@ -39,7 +39,6 @@ describe('native fork source ownership', () => {
       expectedRevision: childRevision, commandId: 'fork-side-chat', permissionMode: 'default' }))
       .rejects.toThrow('侧聊不能作为原生分支的来源')
     expect(providerCalls).toBe(0)
-    // Nothing was published: no fork record and no extra conversation.
     const after = (await current.store.read(child.id))!
     expect(after.fork).toBeUndefined()
     expect((await current.store.list(current.cwd)).map(item => item.id).sort()).toEqual([parent.id, child.id].sort())

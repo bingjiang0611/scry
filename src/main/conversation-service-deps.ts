@@ -46,11 +46,9 @@ export interface SideChatSourceDeps {
    * spooled, so a single huge tool result never becomes a value in memory.
    */
   streamNativeTurns?: (source: SideChatNativeSource) => Promise<AsyncGenerator<StreamedTurn> | null>
-  /** Optional: a Provider whose own reader only returns whole turns. */
   readNativeTurns?: (source: SideChatNativeSource) => Promise<SideChatNativeTurn[] | null>
 }
 
-/** Narrow view of the service dependencies the local-only side-chat operations use. */
 export type SideChatServiceDeps = Pick<ConversationServiceDeps,
   'store' | 'supportsHistoricalInput' | 'supportsHistoryReader' | 'sideChatSource'>
 

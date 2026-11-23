@@ -47,8 +47,6 @@ describe('durable side-chat creation commands', () => {
     const command = commandFromPreview({ preview: preview(), scopeKey: 'scope-1', commandId: 'command-0001', createdAt: 1_700_000_000_000 })
     expect(writeCreateCommand(command, storage)).toBe(true)
     expect(readCreateCommands(storage)).toEqual([command])
-    // The dispatched request is exactly what was persisted: same source, boundary and
-    // fingerprints, so a source that kept running cannot move the frozen prefix.
     expect(createRequestOf(command)).toEqual({
       source, expectedThroughOrdinal: 8, expectedThroughRunId: 'run-8',
       expectedPrefixFingerprint: hash('a'), expectedManifestFingerprint: hash('b'), commandId: 'command-0001'
@@ -68,9 +66,6 @@ describe('durable side-chat creation commands', () => {
       expect(writeCreateCommand(commandFromPreview({ preview: preview(), scopeKey: `scope-${index}`,
         commandId: `command-${index}0`, createdAt: 1_700_000_000_000 + index }), storage)).toBe(true)
     }
-    // A full ledger once refused every later creation in every parent, including behind
-    // commands of parents that no longer exist. A really created child is still listed in
-    // its source's history, so the oldest row can leave.
     expect(writeCreateCommand(commandFromPreview({ preview: preview(), scopeKey: 'scope-extra',
       commandId: 'command-9990', createdAt: 1_700_000_000_999 }), storage)).toBe(true)
     const rows = readCreateCommands(storage)
@@ -91,10 +86,8 @@ describe('durable side-chat creation commands', () => {
       const status = statuses[commandId] ?? 'found'
       return status === 'found' ? { commandId, status, conversation: summary(commandId) } : { commandId, status } as SideChatCommandReceipt
     }) }
-    // The oldest is still in flight and one lookup fails: both stay. Everything else settles.
     expect(await settleFullLedger(api, storage)).toBe(MAX_CREATE_COMMANDS - 2)
     expect(readCreateCommands(storage).map(row => row.commandId)).toEqual(['command-00', 'command-20'])
-    // Below the bound nothing is read back.
     api.findSideChatCommand.mockClear()
     expect(await settleFullLedger(api, storage)).toBe(0)
     expect(api.findSideChatCommand).not.toHaveBeenCalled()
@@ -126,10 +119,6 @@ describe('create result honesty', () => {
   it('opens a child only for the scope that dispatched it', () => {
     expect(createdOutcome(command, 'scope-1', summary('child-1'), notice))
       .toEqual({ kind: 'open', conversation: summary('child-1'), notice: 'created' })
-    // The parent switched while the create was in flight: the child belongs to the
-    // original parent and must not be inserted into the visible layout.
-    // It still reports which child exists, so the tab can be persisted in that parent's
-    // own layout without being selected in the one on screen.
     expect(createdOutcome(command, 'scope-2', summary('child-1'), notice))
       .toEqual({ kind: 'elsewhere', conversation: summary('child-1'), notice: 'scope-changed' })
   })

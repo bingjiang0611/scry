@@ -73,7 +73,6 @@ export function subset(
     isPrior?.(item) === true)
 }
 
-/** Source identity of a side chat; content read through it is data, never authorization. */
 /** Decode persisted state before using any identity or coverage. Corruption is not empty history. */
 export function decodeConversation(value: unknown): Conversation {
   const data = object(value)
@@ -168,8 +167,6 @@ export function decodeConversation(value: unknown): Conversation {
         '交接引用了不存在或未来的内容')
       const imported = new Set(turn.importedItems.map(item => JSON.stringify([item.runId, item.itemId, item.contentHash])))
       requireValue(turn.omittedItems.every((item) => !imported.has(JSON.stringify([item.runId, item.itemId, item.contentHash]))), '内容同时被标记为导入和省略')
-      // An omitted position and an imported position of the same snapshot may not overlap;
-      // the reason above still names both, since the range is only a compact index form.
       requireValue(turn.importedItems.every(item => omittedRanges.every(range =>
         !isSnapshotRef(item) || positionOf(snapshot, item) < range.from || positionOf(snapshot, item) > range.to)),
         '内容同时被标记为导入和省略')

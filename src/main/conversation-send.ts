@@ -31,7 +31,6 @@ export interface ConversationSendContext {
   settled?: (conversationId: string, runId: string) => void
 }
 
-/** Everything one send needs once the pre-dispatch plan is frozen. */
 interface PreparedDispatch {
   begun: Awaited<ReturnType<ConversationServiceDeps['store']['begin']>>
   prepared: Awaited<ReturnType<ConversationServiceDeps['store']['prepareHandoff']>>
@@ -211,8 +210,6 @@ export async function sendConversationMessage(
     if (intentHash !== existing.intentHash) throw new Error('同一命令 ID 不能替换请求内容或目标')
     return duplicateResult(existing.runId, existing.delivery)
   }
-  // A new command on a deleting conversation is a concurrent-state refusal proven before
-  // dispatch, so it answers like a stale revision instead of an unknown outcome.
   if (conversation.deletion) return { status: 'not_sent', reason: '统一对话正在删除或已删除，不能发送' }
   // Resolved before any durable intent and before the run registers, so its first question
   // already lands on the right row. A side chat whose owner row cannot be read is refused
@@ -348,7 +345,6 @@ export async function sendConversationMessage(
       })
       settled = true
     } catch (settlementError) {
-      // The durable attempt could not be settled: the outcome stays unknown.
       console.error('[scry] failed to record conversation send outcome:', settlementError)
     } finally {
       leaveActive(runId)

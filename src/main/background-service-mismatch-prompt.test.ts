@@ -3,9 +3,6 @@ import type { BackgroundServiceActionResult, BackgroundServiceConnection } from 
 import { createVersionMismatchPrompt, daemonCommandBelongsToCheckout, type VersionMismatchPromptDeps } from './background-service-mismatch-prompt'
 import { MISMATCH_LATER_BUTTON, MISMATCH_RESTART_BUTTON, reasonMessage, versionMismatchPrompt, type BackgroundServicePrompt } from './background-service-copy'
 
-// The startup prompt for a daemon of another version (approved 2026-11-12): shown at most
-// once per App process, 「稍后」 does nothing, 「重启后台服务」 is the settings section's own
-// restart action, and a failed restart is reported once, never retried.
 
 const mismatch: BackgroundServiceConnection = { state: 'version-mismatch', running: '1.0.0', expected: '2.0.0' }
 
@@ -137,7 +134,6 @@ describe('version mismatch prompt', () => {
   })
 
   it('auto-restarts without blocking dialog ONLY when dev build proves target ownership (S2) and live activeRuns === 0 (S1)', async () => {
-    // Dev build + allowed target + live recheck strictly 0 -> auto-restarts silently via restartIdle.
     const devIdle = harness({ autoRestartIdle: true, canAutoRestartTarget: true, recheckActiveRuns: 0 })
     await expect(devIdle.prompt(mismatch, { activeRuns: 0, isPackaged: false })).resolves.toEqual({ status: 'restart', result: { status: 'done' } })
     expect(devIdle.asked).toEqual([])
@@ -172,7 +168,6 @@ describe('version mismatch prompt', () => {
       expect(raced.idleRestarts()).toBe(0)
     }
 
-    // Dev build + active runs > 0 -> must still prompt, never kill active runs silently.
     const devBusy = harness({ autoRestartIdle: true, answers: [MISMATCH_LATER_BUTTON] })
     await expect(devBusy.prompt(mismatch, { activeRuns: 2 })).resolves.toEqual({ status: 'later' })
     expect(devBusy.asked).toHaveLength(1)

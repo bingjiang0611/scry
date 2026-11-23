@@ -250,7 +250,6 @@ export class SideChatSnapshotWriter {
   }
 }
 
-/** The descriptor kept in the conversation record is validated in main, never trusted. */
 export function assertSideChatSnapshotDescriptor(value: unknown): asserts value is SideChatSnapshotDescriptor {
   const descriptor = object(value)
   requireValue(Object.keys(descriptor).every(key => [

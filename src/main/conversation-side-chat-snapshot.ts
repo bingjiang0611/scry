@@ -44,13 +44,11 @@ function origin(conversation: SideChatSnapshotOwner) {
   return conversation.sideChat
 }
 
-/** Format 3 artifact, or undefined for a format 4 record. */
 function artifactOf(conversation: SideChatSnapshotOwner): SideChatSnapshotArtifact | undefined {
   const snapshot = origin(conversation).snapshot
   return snapshot.format === 4 ? undefined : snapshot
 }
 
-/** Format 4 descriptor, or undefined for a legacy format 3 record. */
 function descriptor(conversation: SideChatSnapshotOwner): SideChatSnapshotDescriptor | undefined {
   const snapshot = origin(conversation).snapshot
   if (snapshot.format !== 4) return undefined
@@ -116,7 +114,6 @@ export async function loadSideChatSnapshotMessages(
   return messages
 }
 
-/** Snapshot item by position, for callers that page metadata instead of holding it. */
 export async function readSideChatSnapshotItem(
   userData: string,
   conversation: SideChatSnapshotOwner,

@@ -21,7 +21,6 @@ function request(source: ConversationSideChatRequest['source'], preview: SideCha
     expectedPrefixFingerprint: preview.prefixFingerprint, expectedManifestFingerprint: preview.manifestFingerprint, commandId }
 }
 
-/** Parent plus three children with deterministic, distinct capture times. */
 async function parentWithThreeChildren(): Promise<{ fixture: SideChatFixture; parentId: string; ids: string[] }> {
   const current = await fixture()
   const parent = await current.service.create(current.cwd)
@@ -49,7 +48,6 @@ describe('side-chat history paging', () => {
     const second = await current.service.listSideChats({ source, limit: 2, cursor: first.nextCursor })
     expect(second.items.map(item => item.id)).toEqual([ids[0]])
     expect(second.nextCursor).toBeUndefined()
-    // Default page size is 40 and every child is reachable exactly once.
     const all = await current.service.listSideChats({ source })
     expect(all.items.map(item => item.id)).toEqual([ids[2], ids[1], ids[0]])
     await expect(current.service.listSideChats({ source, limit: 0 })).rejects.toThrow('分页大小')

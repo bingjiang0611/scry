@@ -92,7 +92,6 @@ describe('side-chat snapshot body pages', () => {
     artifactReads.count = 0
     const { pages, texts } = await traverse(fixture, childId)
     expect(texts).toEqual(['first question', 'answer: first question'])
-    // 2 rows, still one artifact load: cost is per page, not per item.
     expect(pages.length).toBe(1)
     expect(artifactReads.count).toBe(1)
   })
@@ -101,7 +100,6 @@ describe('side-chat snapshot body pages', () => {
     const { fixture, childId } = await childWith([LONG_MESSAGE])
     const { pages, texts } = await traverse(fixture, childId)
     expect(texts[0]).toBe(LONG_MESSAGE)
-    // The split happened inside one message and was reported as a continuation.
     expect(pages.length).toBeGreaterThan(1)
     expect(pages[0].items[0].continuation).toBe(true)
     expect(pages[0].nextCursor).toBeDefined()
@@ -110,7 +108,6 @@ describe('side-chat snapshot body pages', () => {
       const bytes = page.items.reduce((total, item) => total + Buffer.byteLength(item.text, 'utf8'), 0)
       expect(bytes).toBeLessThanOrEqual(SIDE_CHAT_BODY_PAGE_BYTES)
     }
-    // No lone surrogate survived the boundary: every page body is valid UTF-8 text.
     for (const page of pages) for (const item of page.items) expect(hasLoneSurrogate(item.text)).toBe(false)
   })
 

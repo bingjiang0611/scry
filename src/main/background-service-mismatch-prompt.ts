@@ -76,7 +76,6 @@ export interface VersionMismatchPromptDeps {
   /** Restart path used only after S2 + S1 pass; still re-checks live activeRuns before SIGTERM. */
   restartIdle?(probeActiveRuns?: () => Promise<number | undefined>): Promise<BackgroundServiceActionResult>
   reportFailure(prompt: BackgroundServicePrompt): Promise<void>
-  /** A «后台服务» action is already running; the user is dealing with the service. */
   actionInProgress(): boolean
 }
 
@@ -103,7 +102,6 @@ export function createVersionMismatchPrompt(
     if (deps.autoRestartIdle && meta?.activeRuns === 0 && deps.restartIdle && deps.canAutoRestartTarget && probeRuns) {
       const targetAllowed = await deps.canAutoRestartTarget({ isPackaged: meta.isPackaged }).catch(() => false)
       if (targetAllowed) {
-        // S1: re-verify live activeRuns immediately before skipping the dialog.
         const liveRuns = await probeRuns().catch(() => undefined)
         idleAutoRestart = liveRuns === 0
       }
