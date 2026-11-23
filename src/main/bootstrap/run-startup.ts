@@ -18,6 +18,7 @@ import type { AppRunStartOptions } from './run-frontdoor'
 import type { PerformanceTrace } from '../performance-timing'
 import { openProviderEventWriter } from '../provider-event-log'
 import { createRunProvider } from './run-provider'
+import type { SessionPermissionRuleAccess } from '../providers/types'
 import { cancelGitTurnDiff } from '../git'
 import { authorizedMcpExecution } from './trust'
 import { storageUserDataDir } from '../storage-paths'
@@ -37,6 +38,7 @@ export type RunStartupDeps = {
   runState: ActiveRun; ingestion: LiveTraceIngestion; firstTracePerf: PerformanceTrace; firstTextPerf: PerformanceTrace
   mainEventId: (prefix: string, runId: string) => string; isRemoteRun: boolean; appSemantics: boolean; permissionModeOverride?: AgentPermissionMode
   mcpExecutionSnapshot: McpExecutionSnapshot | null; conversationStore: () => ConversationStore; catalogCwd: string
+  sessionPermissionRules?: SessionPermissionRuleAccess
   assertLegacyConversationWriteAllowed: (scope: NativeSessionScope) => Promise<void>
   publishQuestionOpened: (request: AgentQuestionRequest) => void
   publishQuestionClosed: (runId: string, questionId: string, intervention?: AgentIntervention) => void
@@ -104,6 +106,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
     isRemoteRun,
     mcpExecutionSnapshot,
     conversationStore,
+    sessionPermissionRules,
     catalogCwd,
     publishQuestionOpened,
     publishQuestionClosed,
@@ -151,7 +154,7 @@ export async function startRunProviderAndRegister(deps: RunStartupDeps) {
   if (options.stopSignal && !options.stopSignal.aborted) options.stopSignal.addEventListener('abort', requestRemoteStop)
   let observedProviderStartedAt: string | undefined
   const runProvider = createRunProvider({
-    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: options.requestUserInput ?? (async (request, signal) => userQuestionBroker.request(request, signal)), askWindow: questionsGoToWindow({ appSemantics, windowCanReceive, hasLedgerInput: Boolean(options.requestUserInput) }), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
+    providerId, runtimeProvider, providerRegistry, piRunDiagnostics, adapter, request, runtimePrompt, managedConversation, runId, cwd, agentProfileId, resume, attachments, codexHookTrust, openCodePluginTrust, managedRecorderEnabled, managedInputTextHash, displayPrompt, eventLog, handle, steering, interrupted: () => interrupted, requestStop, stopLatch, stopSignal: options.stopSignal, requestUserInput: options.requestUserInput ?? (async (request, signal) => userQuestionBroker.request(request, signal)), ...(sessionPermissionRules ? { sessionPermissionRules } : {}), askWindow: questionsGoToWindow({ appSemantics, windowCanReceive, hasLedgerInput: Boolean(options.requestUserInput) }), publishSessionId, emit, runState, ingestion, firstTracePerf, firstTextPerf, mainEventId, userQuestionBroker, permissionModeOverride: options.permissionModeOverride, mcpExecutionSnapshot, conversationStore: conversationStore(), catalogCwd, assertLegacyConversationWriteAllowed: (scope) => assertLegacyConversationWriteAllowed(scope as NativeSessionScope), authorizeMcpExecution: (snapshot) => authorizedMcpExecution(snapshot as McpExecutionSnapshot | null), publishQuestionOpened, publishQuestionClosed, setProviderStartedAt: (value) => { observedProviderStartedAt = value }
   })
 
   let resolveSettled: (() => void) | undefined

@@ -11,6 +11,7 @@ import { createLiveRunState } from './run-live-state'
 import { createRunDiffLifecycle, createRunDiffPreviewer } from './run-diff'
 import { createSessionPublisher } from './run-session'
 import { startRunProviderAndRegister, startProviderAfterBaseline } from './run-startup'
+import { SessionPermissionRuleStore } from '../providers/session-permission-rules'
 import { createRemoteRunState } from './run-remote-state'
 import { attachRunSettlement, createManagedConversationSettlement, type RunSettlementDeps } from './run-settlement'
 import { handleRunCompletion } from './run-completion'
@@ -152,6 +153,8 @@ export async function startRun(
         appSemantics,
         mcpExecutionSnapshot,
         conversationStore,
+        // A2：本会话已接受的规则保存在 userData 下，重开 Provider 进程时重新带上。
+        sessionPermissionRules: SessionPermissionRuleStore.inUserData(storageUserDataDir()),
         catalogCwd,
         publishQuestionOpened,
         publishQuestionClosed,

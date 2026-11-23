@@ -20,6 +20,7 @@ import {
 } from '../shared/runtime'
 import { extractUserText, type NormalizeCtx, normalizeSdkMessage } from './normalize'
 import { sanitizeMcpAuthError } from './providers/mcp-auth-security'
+import { permissionAllowEntries } from './providers/session-permission-rules'
 import { writePrivateMcpConfig } from './providers/private-mcp-config'
 import { captureProcessIdentity, signalProcessTreeWithIdentity, type ProcessIdentity } from './process-diagnostics'
 
@@ -45,6 +46,11 @@ export interface RunOpts {
   env?: Record<string, string>
   settingSources?: Array<'user' | 'project' | 'local'>
   onSessionId?: (sessionId: string) => void
+  /** A2：本会话已接受的规则持久副本；重开 Provider 进程时重新带上。 */
+  sessionPermissionRules?: {
+    rules(sessionId: string | undefined): Array<{ toolName: string; ruleContent: string }>
+    record(sessionId: string, rules: readonly { toolName: string; ruleContent: string }[]): void
+  }
   historyReader?: HistoryReaderConnection
   /** Called immediately before releasing input to the SDK. */
   onInputAttempt?: () => void
@@ -287,6 +293,14 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
     // Claude Agent SDK 的原生档位：文件编辑直接放行，其余工具仍走 canUseTool 审批。
     options.permissionMode = 'acceptEdits'
   }
+  // A2：本会话已接受的规则随会话保存，重开 Provider 进程时按 allow 列表重新带上。
+  const persistedRules = opts.sessionPermissionRules?.rules(opts.resume) ?? []
+  const allowEntries = permissionAllowEntries(persistedRules)
+  if (allowEntries.length > 0) options.settings = { permissions: { allow: allowEntries } }
+  const recordSessionRule = (rules: readonly { toolName: string; ruleContent: string }[]): void => {
+    if (!sessionId || rules.length === 0) return
+    opts.sessionPermissionRules?.record(sessionId, rules)
+  }
   if (opts.model) options.model = opts.model
   if (opts.effort) options.effort = opts.effort
   if (opts.resume) options.resume = opts.resume
@@ -412,6 +426,7 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
         return { behavior: 'deny' as const, message: '用户拒绝了操作', interrupt: false, decisionClassification: 'user_reject' as const }
       }
       const applySessionSuggestions = decision === 'session' && sessionDescription !== undefined
+      if (applySessionSuggestions) recordSessionRule(sessionSuggestions.flatMap((s) => s.rules))
       return {
         behavior: 'allow' as const,
         ...(applySessionSuggestions

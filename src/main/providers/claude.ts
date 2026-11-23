@@ -451,6 +451,7 @@ export function createClaudeAdapter(homeDir = homedir(), login: ClaudeMcpLogin =
           env: request.historyReader ? historyReaderEnvironment(env) : env,
           settingSources,
           onSessionId: request.onExternalSessionId,
+          ...(request.sessionPermissionRules ? { sessionPermissionRules: request.sessionPermissionRules } : {}),
           onInputAttempt: () => history.attempting(prompt),
           captureProviderTurnId: true,
           attachments: request.attachments,

@@ -157,6 +157,13 @@ export interface ProviderRunRequest {
   recordNative?: (type: string, payload: unknown) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
+  /** A2：本会话已接受的规则持久副本，重开 Provider 进程时重新带上。 */
+  sessionPermissionRules?: SessionPermissionRuleAccess
+}
+
+export interface SessionPermissionRuleAccess {
+  rules(sessionId: string | undefined): Array<{ toolName: string; ruleContent: string }>
+  record(sessionId: string, rules: readonly { toolName: string; ruleContent: string }[]): void
 }
 
 export interface ProviderForkLastTurnRequest extends AgentForkLastTurn {
