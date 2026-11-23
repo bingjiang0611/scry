@@ -440,6 +440,6 @@ export function decideCatalogChange(
 export function isWithdrawableSession(session: SessionProjectionRow): boolean {
   if (session.activeRunId || !session.catalog) return false
   if (session.catalog.nativeSessionId === null) return true
-  return session.catalog.preview === null && session.lastRunId === null && session.title === null &&
+  return !session.catalog.preview && session.lastRunId === null && session.title === null &&
     session.pinnedAt === null && session.archivedAt === null && session.conversationId === null
 }

@@ -181,17 +181,21 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     await readSource({ provider, nativeSessionId, path }, { sessionKey, provider, profile, cwd })
   }
 
-  // Earlier builds listed every terminal transcript under a known workspace. Withdraw
-  // the rows that scan created and Scry never ran, named, pinned or archived.
+  // The legacy app catalog mirrored a scan's null preview as an empty string.
+  // Check the creating event so an unrelated blank App row cannot be withdrawn.
   function withdrawExternalOnly(): void {
     if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
     const rows = sink.handle.db.prepare(
       `SELECT session.session_key AS sessionKey FROM orch_p_session AS session
        WHERE session.conversation_id IS NULL AND session.catalog IS NOT NULL
          AND json_extract(session.catalog, '$.nativeSessionId') IS NOT NULL
-         AND json_extract(session.catalog, '$.preview') IS NULL
+         AND COALESCE(json_extract(session.catalog, '$.preview'), '') = ''
          AND session.last_run_id IS NULL AND session.active_run_id IS NULL AND session.title IS NULL
          AND session.pinned_at IS NULL AND session.archived_at IS NULL
+         AND (SELECT event.type = 'session.discovered' AND event.command_id GLOB 'catalog-scan:*'
+                  AND json_type(event.payload, '$.catalog.preview') = 'null'
+              FROM orch_event AS event WHERE event.session_key = session.session_key
+              ORDER BY event.seq LIMIT 1)
          AND NOT EXISTS (SELECT 1 FROM orch_p_run AS run WHERE run.session_key = session.session_key)
          AND NOT EXISTS (SELECT 1 FROM orch_event AS event
            WHERE event.session_key = session.session_key AND event.type = 'session.imported')`

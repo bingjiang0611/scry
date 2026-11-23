@@ -1,9 +1,10 @@
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { expect, it } from 'vitest'
 import { transcriptPath } from '../main/transcript-archive'
 import { createAppSessionStore } from '../main/app-store'
+import { piNativeSessionDirectory } from '../main/pi-native-history'
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { createCatalogScanWork } from './orchestration-catalog-scan'
@@ -230,8 +231,8 @@ it('does not list a terminal transcript and withdraws the rows earlier builds li
       sessionKey: `native:${id}`, provider: 'claude', cwd,
       catalog: { nativeSessionId: id, projectCwd: null, preview: null, runtimeProvider: 'claude_sdk' }
     })
-    execute('session.discover', 'old-scan-1', external(ids[0]!))
-    execute('session.discover', 'old-scan-2', external(ids[1]!))
+    execute('session.discover', 'catalog-scan:old-1', external(ids[0]!))
+    execute('session.discover', 'catalog-scan:old-2', external(ids[1]!))
     execute('session.rename', 'user-rename', { sessionKey: `native:${ids[1]}`, title: '保留' })
     expect(access.read()?.map((row) => row.externalSessionId).sort()).toEqual([ids[0], ids[1]])
 
@@ -250,6 +251,53 @@ it('does not list a terminal transcript and withdraws the rows earlier builds li
     await work.scanCatalog()
     expect(sink.listEvents().filter((event) => event.type === 'session.discovered' && event.sessionKey !== `native:${ids[1]}`)).toHaveLength(discoveredBefore)
     expect(access.read()?.map((row) => row.externalSessionId)).toEqual([ids[1]])
+    expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
+  } finally {
+    sink.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+it('withdraws an old Pi scan row whose catalog mirror stored an empty preview', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'scry-scan-external-pi-')))
+  const userDataDir = join(root, 'userData')
+  const homeDir = join(root, 'home')
+  const cwd = join(root, 'workspace')
+  mkdirSync(cwd)
+  const nativeId = '11111111-1111-4111-8111-111111111111'
+  const appId = '22222222-2222-4222-8222-222222222222'
+  const sessionKey = `native:${nativeId}`
+  const bucket = piNativeSessionDirectory(join(homeDir, '.pi', 'agent', 'sessions'), cwd)
+  mkdirSync(bucket, { recursive: true })
+  const transcript = join(bucket, `terminal_${nativeId}.jsonl`)
+  const header = `${JSON.stringify({ type: 'session', version: 3, id: nativeId, cwd })}\n`
+  writeFileSync(transcript, header)
+  const sink = EventSink.open({ userDataDir, fullfsync: false })
+  try {
+    const access = createOrchestrationCatalogAccess(() => sink)
+    const store = createAppSessionStore(userDataDir, access.beforeMirrorWrite)
+    const payload = { sessionKey, provider: 'pi', cwd,
+      catalog: { nativeSessionId: nativeId, projectCwd: null, preview: null, runtimeProvider: 'pi_rpc' } } as const
+    expect(sink.execute({
+      type: 'session.discover', commandId: `catalog-scan:${sessionKey}:0`, actor: 'system', scope: 'system', at: 10,
+      payload, payloadSha256: sha256Hex(canonicalJson(payload))
+    }).kind).toBe('accepted')
+    const context = { providerId: 'pi', runtimeProvider: 'pi_rpc', cwd, prompt: '' } as const
+    store.record({ ...context, externalSessionId: nativeId })
+    store.record({ ...context, externalSessionId: appId })
+    expect(sink.getSession(sessionKey)?.catalog?.preview).toBe('')
+    expect(sink.getSession(appId)?.catalog?.preview).toBe('')
+
+    const work = createCatalogScanWork({
+      sink, homeDir, userDataDir, workspaces: () => [cwd],
+      isActive: () => false, log: (message) => { throw new Error(message) }
+    })
+    await work.scanCatalog()
+    await work.scanCatalog()
+    expect(access.read()?.map((row) => row.externalSessionId)).toEqual([appId])
+    expect(sink.listEvents().filter((event) => event.type === 'session.withdrawn').map((event) => event.sessionKey))
+      .toEqual([sessionKey])
+    expect(readFileSync(transcript, 'utf8')).toBe(header)
     expect(sink.verifyReplayConsistency()).toEqual({ matches: true })
   } finally {
     sink.close()
