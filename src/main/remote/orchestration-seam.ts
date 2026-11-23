@@ -11,10 +11,29 @@ export interface OrchestrationImmediateDispatchChecks {
   isProviderAuthenticating: (provider: string, profile: string | null) => boolean
 }
 
+/**
+ * B1: the durable effect outbox the dispatcher must claim from. Structurally compatible with
+ * `RemoteDispatcherOutbox`; kept dependency-free for the Layer 3 import boundary.
+ */
+export interface OrchestrationOutboxGate {
+  /** Expired rows are reported with the claim so their runs can be cancelled, never dropped. */
+  claim(owner: string, now: number): {
+    expired: Array<{ effectId: string; runId: string | null }>
+    effect?: { effectId: string; kind: string; runId: string | null; payload: string; attempts: number }
+  }
+  succeed(effectId: string, owner: string, now: number): boolean
+  fail(effectId: string, owner: string, now: number, reason: string): boolean
+  /** Policy deferral: back to pending without spending an attempt. */
+  defer(effectId: string, owner: string, reason: string): boolean
+  retry(effectId: string, owner: string, now: number, reason: string): { status: string; delayMs?: number }
+}
+
 export interface OrchestrationAuthorityHooks {
   currentLogId?(): string | undefined
   /** Rebuilds the transient dispatcher state from the durable log. */
   createLedgerStore(): LedgerStore
+  /** B1: dispatch claims come from the durable outbox, not from in-memory bookkeeping. */
+  outbox(): OrchestrationOutboxGate
   /** Authoritative async submit (durable >16 KiB body written BEFORE SQLite commit). */
   submitAsync(input: {
     peerCertSHA256: string

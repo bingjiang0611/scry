@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import { maybeStartOrchestrationMaintenance } from './orchestration-maintenance'
+import { createOutboxGate } from './orchestration-outbox-gate'
+import { createTransportHandlers } from './orchestration-transport-handlers'
 import { observeAuthorityNativeTranscript } from './orchestration-native-transcript'
 import type { ConversationStore } from '../main/conversation-store'
 import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
@@ -17,9 +19,7 @@ import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
 import { LEGACY_H1_IMPORT_COMPLETE, runAuthorityStartupSequence } from './orchestration-authority-startup'
 import {
   buildAuthorityStatus,
-  createAuthoritySubscribeHandler,
   createAuthoritySubscribeHub,
-  forwardAppHintToSubscribeHub,
   handleAuthorityRunProgress,
   type AppHint,
   type AuthoritySubscribeRuntimeDeps
@@ -235,6 +235,7 @@ function buildAuthorityRuntime<
   }
 
   const hooks: OrchestrationAuthorityHooks = {
+    outbox: () => createOutboxGate(() => sink.handle.db),
     currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: () => createAuthorityLedgerStore(sink),
 
@@ -438,21 +439,14 @@ function buildAuthorityRuntime<
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
   const maintenance = maybeStartOrchestrationMaintenance({
-    sink,
-    log: options.log,
-    ...(options.maintenanceIntervalMs === undefined ? {} : { intervalMs: options.maintenanceIntervalMs })
+    sink, log: options.log, maintenanceIntervalMs: options.maintenanceIntervalMs
   })
 
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
-    createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
-    publishHint: (event) => forwardAppHintToSubscribeHub(subscribeHub, event, resolveCanonical),
+    ...createTransportHandlers({ sink, subscribeHub, resolveCanonical }),
     observeNativeTranscript: (homeDir, run) =>
-      observeAuthorityNativeTranscript(
-        { sink, resolveCanonical, pendingTranscripts, log: options.log },
-        homeDir,
-        run
-      ),
+      observeAuthorityNativeTranscript({ sink, resolveCanonical, pendingTranscripts, log: options.log }, homeDir, run),
     startImport: pausedImport ? () => { void pausedImport.then(startImport) } : startImport,
     status: () => buildAuthorityStatus(sink),
     close: async () => {

@@ -185,6 +185,8 @@ export function createExecution(input: ExecutionDeps): {
   const dispatcher = new RemoteDispatcher({
     ledger,
     ...(deps.orchestration ? {
+      // B1: dispatch claims come from the durable outbox; the ledger still owns intent detail.
+      outbox: deps.orchestration.outbox(),
       beforeDispatch: (runId, detail) => {
         const meta = gateway.runMeta(runId)
         const check = deps.orchestration!.beforeDispatch({

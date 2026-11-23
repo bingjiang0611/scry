@@ -44,8 +44,27 @@ export interface RemoteExecutor {
   execute(input: RemoteExecutorInput): Promise<RemoteExecutionOutcome>
 }
 
+/**
+ * B1: the durable outbox owns dispatch ordering. When provided, `pump()` claims from
+ * `orch_outbox` instead of scanning every recorded intent, so attempts, leases and
+ * per-session FIFO are enforced by the store rather than by in-memory bookkeeping.
+ */
+export interface RemoteDispatcherOutbox {
+  /** Expired rows are reported with the claim so their runs can be cancelled, never dropped. */
+  claim(owner: string, now: number): {
+    expired: Array<{ effectId: string; runId: string | null }>
+    effect?: { effectId: string; kind: string; runId: string | null; payload: string; attempts: number }
+  }
+  succeed(effectId: string, owner: string, now: number): boolean
+  fail(effectId: string, owner: string, now: number, reason: string): boolean
+  /** Policy deferral: back to pending without spending an attempt. */
+  defer(effectId: string, owner: string, reason: string): boolean
+  retry(effectId: string, owner: string, now: number, reason: string): { status: string; delayMs?: number }
+}
+
 export interface RemoteDispatcherDependencies {
   ledger: SessionLedger
+  outbox?: RemoteDispatcherOutbox
   executor: RemoteExecutor
   // Absent => the output callback is a no-op and only the lifecycle is observable.
   outputSink?: RemoteOutputSink
@@ -65,6 +84,8 @@ export class RemoteDispatcher {
   #ledger: SessionLedger
   #executor: RemoteExecutor
   #outputSink?: RemoteOutputSink
+  #outbox?: RemoteDispatcherOutbox
+  #leaseOwner = `dispatcher:${process.pid}`
   #beforeDispatch?: RemoteDispatcherDependencies['beforeDispatch']
   #onSettled?: RemoteDispatcherDependencies['onSettled']
   #inflight = new Set<string>()
@@ -75,6 +96,7 @@ export class RemoteDispatcher {
     this.#ledger = deps.ledger
     this.#executor = deps.executor
     this.#outputSink = deps.outputSink
+    this.#outbox = deps.outbox
     this.#beforeDispatch = deps.beforeDispatch
     this.#onSettled = deps.onSettled
   }
@@ -106,6 +128,7 @@ export class RemoteDispatcher {
   // (e.g. after each recordIntent and once at startup for crash recovery).
   pump(): string[] {
     if (this.#disposed) return []
+    if (this.#outbox) return this.#pumpOutbox()
     const started: string[] = []
     let nextRetryMs: number | undefined
     for (const intent of this.#ledger.recordedIntents()) {
@@ -139,6 +162,68 @@ export class RemoteDispatcher {
       this.#run(intent.runId, intent.detail)
     }
     if (nextRetryMs !== undefined) this.#scheduleRetry(nextRetryMs)
+    return started
+  }
+
+  /**
+   * B1: claims effects from the durable outbox. The claim itself is the exactly-once fence, so
+   * this replaces the "scan every recorded intent" loop; the ledger still owns intent detail.
+   */
+  #pumpOutbox(): string[] {
+    const started: string[] = []
+    const outbox = this.#outbox!
+    for (let i = 0; i < 32; i += 1) {
+      const { expired, effect } = outbox.claim(this.#leaseOwner, Date.now())
+      for (const row of expired) {
+        if (!row.runId) continue
+        // The authority records the terminal cancellation (with evidence); the ledger mirrors it.
+        if (this.#beforeDispatch) this.#beforeDispatch(row.runId, undefined)
+        try { this.#ledger.markCancelled(row.runId) } catch { /* already terminal */ }
+      }
+      if (!effect) break
+      if (effect.kind !== 'provider.run.start' || !effect.runId) {
+        // Other effect kinds are not this dispatcher's job; never strand them in a lease.
+        outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'not_a_run_start_effect')
+        continue
+      }
+      const runId = effect.runId
+      if (this.#inflight.has(runId)) {
+        outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'already_inflight')
+        continue
+      }
+      let detail: string | undefined
+      try {
+        detail = this.#ledger.intentDetail?.(runId)
+      } catch { detail = undefined }
+      if (this.#beforeDispatch) {
+        const gate = this.#beforeDispatch(runId, detail)
+        if (!gate.ok) {
+          if (gate.action === 'fail') {
+            outbox.fail(effect.effectId, this.#leaseOwner, Date.now(), gate.reason)
+            try {
+              if (gate.reason === 'pending_expired' || gate.reason === 'stop_requested') this.#ledger.markCancelled(runId)
+              else this.#ledger.markFailed(runId, gate.detail ?? gate.reason)
+            } catch { /* already terminal */ }
+            continue
+          }
+          // A held gate is not a failure, so it must not consume the attempt budget.
+          outbox.defer(effect.effectId, this.#leaseOwner, gate.reason)
+          this.#scheduleRetry(gate.retryAfterMs ?? 100)
+          continue
+        }
+      }
+      // The durable ledger transition is the second fence: if it fails, another dispatch won.
+      try {
+        this.#ledger.markDispatched(runId)
+      } catch {
+        outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
+        continue
+      }
+      this.#inflight.add(runId)
+      started.push(runId)
+      this.#run(runId, detail)
+      outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
+    }
     return started
   }
 

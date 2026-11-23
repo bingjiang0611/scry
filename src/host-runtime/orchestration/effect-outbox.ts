@@ -42,19 +42,37 @@ function backoffFor(attempts: number): number {
  * only claimable when no earlier row of the same session is pending or running. Expired rows are
  * voided in the same transaction so the pending TTL cannot strand a session queue.
  */
+/** Voids effects past their pending TTL and reports them so the caller can cancel their runs. */
+export function voidExpiredEffects(
+  db: Database.Database,
+  now: number
+): Array<{ effectId: string; runId: string | null }> {
+  return db
+    .prepare(
+      `UPDATE orch_outbox SET state = 'voided', last_error = COALESCE(last_error, 'pending_expired'),
+         completed_at = ?, lease_owner = NULL, claimed_at = NULL
+       WHERE state = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?
+       RETURNING effect_id AS effectId, run_id AS runId`
+    )
+    .all(now, now) as Array<{ effectId: string; runId: string | null }>
+}
+
+export interface ClaimResult {
+  /** Rows past their pending TTL, surfaced so the caller can cancel their runs. */
+  expired: Array<{ effectId: string; runId: string | null }>
+  effect?: ClaimedEffect
+}
+
 export function claimNextEffect(input: {
   db: Database.Database
   owner: string
   now: number
   sessionKey?: string
-}): ClaimedEffect | undefined {
+}): ClaimResult {
   const { db, owner, now } = input
-  return db.transaction((): ClaimedEffect | undefined => {
-    db.prepare(
-      `UPDATE orch_outbox SET state = 'voided', last_error = COALESCE(last_error, 'pending_expired'),
-         completed_at = ?, lease_owner = NULL, claimed_at = NULL
-       WHERE state = 'pending' AND expires_at IS NOT NULL AND expires_at <= ?`
-    ).run(now, now)
+  return db.transaction((): ClaimResult => {
+    // Expiry is reported, not swallowed: the voided effect still owns a run nobody started.
+    const expired = voidExpiredEffects(db, now)
 
     const row = db
       .prepare(
@@ -83,7 +101,7 @@ export function claimNextEffect(input: {
          FROM orch_outbox o JOIN pending ON pending.effect_id = o.effect_id`
       )
       .get({ session: input.sessionKey ?? null }) as RawOutboxRow | undefined
-    if (!row) return undefined
+    if (!row) return { expired }
     const claimed = db
       .prepare(
         `UPDATE orch_outbox
@@ -102,17 +120,20 @@ export function claimNextEffect(input: {
           attempts: number
         }
       | undefined
-    if (!claimed) return undefined
+    if (!claimed) return { expired }
     return {
-      effectId: claimed.effect_id,
-      kind: claimed.kind,
-      policy: claimed.policy,
-      runId: claimed.run_id,
-      sessionKey: row.session_key,
-      causationSeq: claimed.causation_seq,
-      payload: claimed.payload,
-      attempts: claimed.attempts,
-      leaseOwner: owner
+      expired,
+      effect: {
+        effectId: claimed.effect_id,
+        kind: claimed.kind,
+        policy: claimed.policy,
+        runId: claimed.run_id,
+        sessionKey: row.session_key,
+        causationSeq: claimed.causation_seq,
+        payload: claimed.payload,
+        attempts: claimed.attempts,
+        leaseOwner: owner
+      }
     }
   })()
 }
@@ -167,6 +188,29 @@ export function retryEffect(input: {
   })()
 }
 
+/**
+ * Returns a claimed effect to the queue without consuming its retry budget. Policy deferrals
+ * (provider still authenticating, host restarting) are not failures and must not exhaust the
+ * five attempts that bound real errors.
+ */
+export function deferEffect(input: {
+  db: Database.Database
+  effectId: string
+  owner: string
+  reason: string
+}): boolean {
+  return (
+    input.db
+      .prepare(
+        `UPDATE orch_outbox
+         SET state = 'pending', claimed_at = NULL, lease_owner = NULL, last_error = ?,
+             attempts = MAX(0, attempts - 1)
+         WHERE effect_id = ? AND state = 'running' AND lease_owner = ?`
+      )
+      .run(input.reason, input.effectId, input.owner).changes > 0
+  )
+}
+
 /** Fails a claimed effect without further attempts. */
 export function failEffect(input: {
   db: Database.Database
@@ -210,7 +254,7 @@ export function runEffectWorkerPass(options: EffectWorkerPassOptions): EffectWor
   const report: EffectWorkerPassReport = { claimed: 0, completed: 0, retried: 0, failed: 0, leaseLost: 0 }
   const limit = Math.max(1, options.maxEffects ?? 32)
   for (let i = 0; i < limit; i += 1) {
-    const effect = claimNextEffect({ db: options.db, owner: options.owner, now: options.now() })
+    const { effect } = claimNextEffect({ db: options.db, owner: options.owner, now: options.now() })
     if (!effect) break
     report.claimed += 1
     let decoded: ClaimedEffect

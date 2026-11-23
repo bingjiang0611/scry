@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
-import { updateRunStartOutbox } from './authority-dispatch'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import type { Evidence } from '../../shared/turn-record-contracts'
@@ -225,5 +224,4 @@ export function recordTerminalWithSink(
     payload,
     payloadSha256: sha256Hex(canonicalJson(payload))
   })
-  updateRunStartOutbox(sink, at, input.runId, input.step === 'failed' ? 'failed' : 'done')
 }

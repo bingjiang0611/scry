@@ -60,9 +60,10 @@ export function startOrchestrationMaintenance(options: OrchestrationMaintenanceO
 
 /** B2: `intervalMs: null` disables the timer (tests drive retention passes explicitly). */
 export function maybeStartOrchestrationMaintenance(
-  options: Omit<OrchestrationMaintenanceOptions, 'intervalMs'> & { intervalMs?: number | null }
+  options: Omit<OrchestrationMaintenanceOptions, 'intervalMs'> & { maintenanceIntervalMs?: number | null }
 ): OrchestrationMaintenance | undefined {
-  if (options.intervalMs === null) return undefined
-  const { intervalMs, ...rest } = options
+  const intervalMs = options.maintenanceIntervalMs
+  if (intervalMs === null) return undefined
+  const { maintenanceIntervalMs: _ignored, ...rest } = options
   return startOrchestrationMaintenance(intervalMs === undefined ? rest : { ...rest, intervalMs })
 }

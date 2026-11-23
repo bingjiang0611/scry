@@ -45,11 +45,11 @@ it('claims the oldest effect once and hands out a lease with an incremented atte
   withSink((sink) => {
     enqueue(sink, 'e1', { sessionKey: 'sess-a', causationSeq: 1 })
     enqueue(sink, 'e2', { sessionKey: 'sess-b', causationSeq: 2 })
-    const first = claimNextEffect({ db: sink.handle.db, owner: 'worker-a', now: 100 })
+    const first = claimNextEffect({ db: sink.handle.db, owner: 'worker-a', now: 100 }).effect
     expect(first).toMatchObject({ effectId: 'e1', attempts: 1, leaseOwner: 'worker-a' })
-    const second = claimNextEffect({ db: sink.handle.db, owner: 'worker-b', now: 101 })
+    const second = claimNextEffect({ db: sink.handle.db, owner: 'worker-b', now: 101 }).effect
     expect(second).toMatchObject({ effectId: 'e2', attempts: 1, leaseOwner: 'worker-b' })
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'worker-c', now: 102 })).toBeUndefined()
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'worker-c', now: 102 }).effect).toBeUndefined()
   })
 })
 
@@ -58,12 +58,12 @@ it('keeps one in-flight effect per session so a later effect cannot overtake it'
     enqueue(sink, 'a1', { sessionKey: 'sess-a', causationSeq: 1 })
     enqueue(sink, 'a2', { sessionKey: 'sess-a', causationSeq: 2 })
     enqueue(sink, 'b1', { sessionKey: 'sess-b', causationSeq: 3 })
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 10 })?.effectId).toBe('a1')
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 10 }).effect?.effectId).toBe('a1')
     // a2 must wait for a1, but another session is free to run in parallel.
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 11 })?.effectId).toBe('b1')
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 12 })).toBeUndefined()
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 11 }).effect?.effectId).toBe('b1')
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 12 }).effect).toBeUndefined()
     expect(succeedEffect({ db: sink.handle.db, effectId: 'a1', owner: 'w', now: 13, resultSeq: 5 })).toBe(true)
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 14 })?.effectId).toBe('a2')
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 14 }).effect?.effectId).toBe('a2')
   })
 })
 
@@ -87,7 +87,7 @@ it('retries with exponential backoff and gives up after five attempts', () => {
     enqueue(sink, 'e1', { causationSeq: 1 })
     const delays: number[] = []
     for (let attempt = 1; attempt <= 5; attempt += 1) {
-      const claimed = claimNextEffect({ db: sink.handle.db, owner: 'w', now: attempt * 1000 })
+      const claimed = claimNextEffect({ db: sink.handle.db, owner: 'w', now: attempt * 1000 }).effect
       expect(claimed?.attempts).toBe(attempt)
       const outcome = retryEffect({ db: sink.handle.db, effectId: 'e1', owner: 'w', now: attempt * 1000, reason: 'boom' })
       if (outcome.status === 'retry') {
@@ -101,7 +101,7 @@ it('retries with exponential backoff and gives up after five attempts', () => {
     expect(delays).toEqual([100, 200, 400, 800])
     const row = sink.handle.db.prepare('SELECT state, last_error, lease_owner FROM orch_outbox WHERE effect_id = ?').get('e1')
     expect(row).toEqual({ state: 'failed', last_error: 'boom', lease_owner: null })
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 10_000 })).toBeUndefined()
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 10_000 }).effect).toBeUndefined()
   })
 })
 
@@ -139,7 +139,7 @@ it('skips expired effects and reports them as voided', () => {
          VALUES ('expired', 'provider.run.start', 'process_bound', 1, '{"runId":"expired"}', 'pending', 50, NULL)`
       )
       .run()
-    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 100 })).toBeUndefined()
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 100 }).effect).toBeUndefined()
     const row = sink.handle.db.prepare('SELECT state, last_error FROM orch_outbox WHERE effect_id = ?').get('expired')
     expect(row).toEqual({ state: 'voided', last_error: 'pending_expired' })
   })

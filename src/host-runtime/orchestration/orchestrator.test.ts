@@ -82,7 +82,7 @@ function submitCmd(overrides: Partial<Extract<OrchestrationCommand, { type: 'run
 }
 
 describe('P4-0 pure orchestrator decide()', () => {
-  it('accepts immediate run.submit with pre-allocated canonical id and claimed outbox row', () => {
+  it('accepts immediate run.submit with a pre-allocated canonical id and an unclaimed outbox row', () => {
     const decision = decide(submitCmd(), makeView())
     expect(decision.kind).toBe('accepted')
     if (decision.kind !== 'accepted') return
@@ -93,11 +93,13 @@ describe('P4-0 pure orchestrator decide()', () => {
     expect(decision.events[0].actorRunId).toBeNull()
     expect(decision.events[1].payload).toMatchObject({ author: 'user' })
     expect(decision.effects).toHaveLength(1)
+    // B1: dispatch belongs to the outbox worker, so the decision only enqueues.
     expect(decision.effects[0]).toMatchObject({
       kind: 'provider.run.start',
       policy: 'process_bound',
-      state: 'running',
-      leaseOwner: 'daemon-1'
+      state: 'pending',
+      leaseOwner: null,
+      claimedAt: null
     })
     expect(decision.receipt.status).toBe('accepted')
   })

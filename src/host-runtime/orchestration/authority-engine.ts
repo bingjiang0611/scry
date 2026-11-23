@@ -10,10 +10,8 @@ import {
   buildSubmitCommandForAuthority,
   getRunStartExpiryInfo,
   h1DetailDigest,
-  requeueRunStartOutbox,
   runAuthorityPreDispatchRecheck,
   tryRealpath,
-  updateRunStartOutbox,
   type AuthorityBeforeDispatchInput,
   type AuthoritySubmitInput
 } from './authority-dispatch'
@@ -238,7 +236,6 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: ['host.stop_before_dispatch']
       })
-      updateRunStartOutbox(this.sink, this.#clock(), input.runId, 'done')
       return { ok: false, action: 'fail', reason: 'stop_requested' }
     }
     if (preDispatched && run.lifecycle === 'dispatched') return { ok: true }
@@ -255,7 +252,6 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: ['pre_dispatch_recheck:pending_expired']
       })
-      updateRunStartOutbox(this.sink, now, input.runId, 'voided', 'pending_expired')
       return { ok: false, action: 'fail', reason: 'pending_expired' }
     }
 
@@ -264,7 +260,6 @@ export class AuthorityEngine {
     const recheck = runAuthorityPreDispatchRecheck({ ...input, actor: effectiveActor }, preparedRealCwd, run.cwd)
     if (!recheck.ok) {
       if (recheck.action === 'requeue') {
-        requeueRunStartOutbox(this.sink, now, this.#pendingTtlMs, input.runId)
         const retryAfterMs =
           effectiveExpiresAt !== null ? Math.max(10, effectiveExpiresAt - now + 5) : this.#pendingTtlMs
         return { ok: false, action: 'requeue', reason: recheck.reason, retryAfterMs }
@@ -277,7 +272,6 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: [`pre_dispatch_recheck:${recheck.reason}`]
       })
-      updateRunStartOutbox(this.sink, now, input.runId, 'failed', recheck.reason)
       return recheck
     }
 
@@ -387,7 +381,6 @@ export class AuthorityEngine {
       delivery: 'not_sent',
       evidence: ['host.submit_compensation']
     })
-    updateRunStartOutbox(this.sink, this.#clock(), runId, 'voided', reason)
   }
 
   recordTerminal(input: {

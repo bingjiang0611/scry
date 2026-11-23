@@ -151,3 +151,95 @@ describe('RemoteDispatcher', () => {
     expect(ledger.runState(runId)).toBe('cancelled') // settle is refused, not forced
   })
 })
+
+// B1: dispatch order and attempts come from the durable outbox, not from scanning every intent.
+function memoryOutbox(seed: Array<{ effectId: string; runId: string | null; kind?: string; expiresAt?: number }>) {
+  const rows = seed.map((row) => ({
+    effectId: row.effectId,
+    kind: row.kind ?? 'provider.run.start',
+    runId: row.runId,
+    payload: JSON.stringify({ runId: row.runId }),
+    attempts: 0,
+    state: 'pending' as 'pending' | 'done' | 'failed' | 'voided',
+    expiresAt: row.expiresAt
+  }))
+  const settled: string[] = []
+  return {
+    rows,
+    settled,
+    claim(owner: string, now: number) {
+      void owner
+      const expired = rows.filter((r) => r.state === 'pending' && r.expiresAt !== undefined && r.expiresAt <= now)
+      for (const row of expired) row.state = 'voided'
+      const row = rows.find((r) => r.state === 'pending' && (r.expiresAt === undefined || r.expiresAt > now))
+      if (!row) return { expired: expired.map((r) => ({ effectId: r.effectId, runId: r.runId })) }
+      row.state = 'done'
+      row.attempts += 1
+      settled.push(`claim:${row.effectId}`)
+      return {
+        expired: expired.map((r) => ({ effectId: r.effectId, runId: r.runId })),
+        effect: { effectId: row.effectId, kind: row.kind, runId: row.runId, payload: row.payload, attempts: row.attempts }
+      }
+    },
+    succeed(effectId: string) {
+      settled.push(`succeed:${effectId}`)
+      return true
+    },
+    fail(effectId: string) {
+      settled.push(`fail:${effectId}`)
+      return true
+    },
+    retry(effectId: string) {
+      settled.push(`retry:${effectId}`)
+      return { status: 'retry' as const, delayMs: 100 }
+    },
+    defer(effectId: string) {
+      settled.push(`defer:${effectId}`)
+      return true
+    }
+  }
+}
+
+describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
+  it('claims only the durable outbox row and settles it once dispatched', async () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor, calls, gates } = deferredExecutor()
+    const outbox = memoryOutbox([{ effectId: 'eff-1', runId: null }])
+    const runId = randomUUID()
+    outbox.rows[0]!.runId = runId
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
+
+    expect(dispatcher.pump()).toEqual([runId])
+    expect(ledger.runState(runId)).toBe('dispatched')
+    expect(outbox.settled).toEqual(['claim:eff-1', 'succeed:eff-1'])
+    // A second pump cannot claim the same effect again.
+    expect(dispatcher.pump()).toEqual([])
+    gates.get(runId)!.resolve()
+    await dispatcher.idle()
+    expect(calls).toEqual([runId])
+    expect(ledger.runState(runId)).toBe('settled')
+  })
+
+  it('cancels the run whose effect expired instead of dropping it silently', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor } = deferredExecutor()
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    const outbox = memoryOutbox([{ effectId: 'eff-expired', runId, expiresAt: Date.now() - 1 }])
+    const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(ledger.runState(runId)).toBe('cancelled')
+  })
+
+  it('does not take a lease on effects this dispatcher cannot execute', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor } = deferredExecutor()
+    const outbox = memoryOutbox([{ effectId: 'eff-catalog', runId: null, kind: 'catalog.refresh' }])
+    const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-catalog', 'retry:eff-catalog'])
+  })
+})

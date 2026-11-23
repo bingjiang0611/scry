@@ -105,11 +105,18 @@ describe('P4-2 startup recovery and two-ledger reconciliation', () => {
               : undefined
         })
 
-        expect(recovery.dispatchablePendingRunIds).toEqual(['r-pending-ok'])
+        // B1: an immediate submit now enqueues `pending` (the worker claims it later), so a
+        // restart before dispatch re-dispatches it instead of cancelling a run nobody started.
+        expect(recovery.dispatchablePendingRunIds).toEqual([
+          'r-pending-ok',
+          'r-claimed-nodisp',
+          'r-disp-unknown',
+          'r-disp-proven'
+        ])
         expect(sink.getRun('r-pending-exp')?.lifecycle).toBe('cancelled')
         expect(sink.getRun('r-pending-rollback')?.lifecycle).toBe('cancelled')
         expect(sink.getRun('r-pending-conv')?.lifecycle).toBe('cancelled')
-        expect(sink.getRun('r-claimed-nodisp')?.lifecycle).toBe('cancelled')
+        expect(sink.getRun('r-claimed-nodisp')?.lifecycle).toBe('recorded')
         expect(sink.getRun('r-disp-unknown')?.lifecycle).toBe('interrupted')
         expect(sink.getRun('r-disp-unknown')?.settledAt).toBeNull()
         expect(sink.getRun('r-disp-unknown')?.recoveredAt).toBe(t0 + 5_000)

@@ -1,3 +1,4 @@
+import { buildRunStartEffectPayload } from './run-start-effect'
 import { truncatePreview } from './canonical-json'
 import {
   decodeOrchestrationEvent,
@@ -144,19 +145,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           })
         )
       }
-      const effectPayload: Record<string, unknown> = {
-        runId: p.runId,
-        sessionKey: p.sessionKey,
-        provider: p.provider,
-        profile: p.profile,
-        cwd: p.cwd,
-        ...(p.shadowOnly ? { shadowOnly: true } : {}),
-        ...(p.body
-          ? p.body.storage === 'inline'
-            ? { body: { storage: 'inline', sha256: p.body.sha256, bytes: p.body.bytes, inline: p.body.inline } }
-            : { body: { storage: 'external', sha256: p.body.sha256, bytes: p.body.bytes } }
-          : {})
-      }
+      const effectPayload = buildRunStartEffectPayload(p)
       const isImmediate = p.claimMode === 'immediate'
       if (p.dispatchImmediately && isImmediate && !p.shadowOnly && !p.historicalBackfill) {
         const dispatchFields = { stream: `run:${p.runId}`, sessionKey: p.sessionKey, runId: p.runId, cwd: p.cwd, payload: { runId: p.runId } }
@@ -168,10 +157,13 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         kind: 'provider.run.start',
         runId: p.runId,
         payload: effectPayload,
-        state: p.shadowOnly ? 'done' : isImmediate ? 'running' : 'pending',
-        expiresAt: p.shadowOnly || isImmediate ? null : cmd.at + boundedPendingTtlMs,
-        leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : isImmediate ? (p.leaseOwner ?? 'daemon') : null,
-        claimedAt: p.shadowOnly || isImmediate ? cmd.at : null
+        // B1: the outbox owns dispatch. Live submissions enqueue `pending` and a worker claims
+        // them with a lease. Shadow writes and historical backfill replay a record instead of
+        // starting a Provider run, so they are never claimable.
+        state: p.shadowOnly || p.historicalBackfill ? 'done' : 'pending',
+        expiresAt: p.shadowOnly || p.historicalBackfill || isImmediate ? null : cmd.at + boundedPendingTtlMs,
+        leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : p.historicalBackfill ? 'historical:no-dispatch' : null,
+        claimedAt: p.shadowOnly || p.historicalBackfill ? cmd.at : null
       })
       return acceptDecision(cmd, events, [effect], {
         runId: p.runId,
