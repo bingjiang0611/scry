@@ -130,6 +130,41 @@ describe('P6-5 remote subscribe lineage and read-only delegated child sessions',
           lineageKind: 'delegated'
         })
       }
+
+      // B4 regression: private parent cwd must not be leaked to remote peer even if child is in visible cwd
+      const hiddenParentEngine = new SubscribeEngine({
+        sink,
+        hub,
+        hostId: 'host-1',
+        authorizePeer: () => undefined,
+        grantScope: () => 'remote',
+        remoteCwdAuthorizer: () => (candidate) => candidate === '/repo/public-only'
+      })
+      const privPayload = {
+        sessionKey: 'sess-public-fork',
+        provider: 'qoder',
+        cwd: '/repo/public-only',
+        parentSessionKey: 'sess-p1',
+        rootSessionKey: 'sess-p1',
+        lineage: { kind: 'fork' as const, source: { sessionKey: 'sess-p1' } }
+      }
+      expect(sink.execute({
+        type: 'session.fork',
+        commandId: 'fork-priv',
+        actor: LOCAL_PEER,
+        scope: 'local',
+        at: 1005,
+        payload: privPayload,
+        payloadSha256: sha256Hex(canonicalJson(privPayload))
+      }).kind).toBe('accepted')
+      const forkReply = await hiddenParentEngine.subscribe(REMOTE_PEER, { views: ['sessions'], waitMs: 0 })
+      expect(forkReply.mode).toBe('snapshot')
+      if (forkReply.mode === 'snapshot') {
+        const forked = forkReply.snapshot.sessions?.rows.find((r) => r.sessionKey === 'sess-public-fork')
+        expect(forked).toBeDefined()
+        expect(forked?.parentSessionKey).toBeUndefined()
+        expect(forked?.lineageKind).toBeUndefined()
+      }
     } finally {
       hub.close()
       sink.close()

@@ -33,11 +33,7 @@ struct ChatView: View {
   private var hasTurn: Bool { !completedTurns.isEmpty || run.prompt != nil || run.runId != nil || run.lifecycle != .unknown }
   private var runBusy: Bool { run.isBusy }
   private var isDelegatedChildSession: Bool {
-    guard let id = run.activeSessionIdentity else { return false }
-    return run.sessions.first(where: {
-      $0.providerId == id.providerId && $0.cwd == id.cwd &&
-      ($0.externalSessionId == id.externalSessionId || $0.sessionId == id.externalSessionId)
-    })?.isDelegatedChild == true
+    run.activeSessionIdentity.map(run.isDelegatedChildSession) == true
   }
 
   var body: some View {
@@ -193,6 +189,7 @@ struct ChatView: View {
                                            agentProfileId: run.chosenProvider?.agentProfileId, force: true)
                         }
                       }) {
+        guard !isDelegatedChildSession else { return }
         guard let providerId = run.chosenProvider?.id, let project = run.chosen else { return }
         let payload = attachments.map(\.wireValue)
         let currentDraft = composer

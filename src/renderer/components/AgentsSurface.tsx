@@ -56,7 +56,7 @@ export function AgentsSurface({
   isLocalHost?: boolean
 }) {
   const rows = useMemo(() => deriveAgentRows(turns, { busy }), [busy, turns])
-  const delegation = useDelegationState(cwd, sessionKey)
+  const delegation = useDelegationState(isLocalHost ? cwd : null, isLocalHost ? sessionKey : null)
   const activeDelegatedCount = delegation.state.tasks.filter(
     (t) => !['completed', 'failed', 'cancelled', 'interrupted', 'unavailable', 'declined'].includes(t.status)
   ).length

@@ -243,7 +243,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
               : <EmptyState size="card" picture="folder" title={WORKBENCH_EMPTY_COPY.remoteFilesUnavailable} />,
             'source-control': catalog?.workbench === 1 ? <SourceControlPanel cwd={cwd} api={workbench.sourceControl} active={surface.state.visible && surface.state.activeId === 'source-control'} /> : upgradeWorkbench,
             terminal: catalog?.workbench === 1 ? <Suspense fallback={<DelayedSkeletonRows loading rows={4} label={TERMINAL_EMPTY_COPY.restoring} />}><TerminalSurface cwd={cwd} scopeId={surface.scopeId} api={workbench.terminal} machineLabel={host} active={surface.state.visible && surface.state.activeId === 'terminal'} /></Suspense> : upgradeWorkbench,
-            agents: <AgentsSurface turns={displayTurns} busy={pollFresh && runActive} />,
+            agents: <AgentsSurface turns={displayTurns} busy={pollFresh && runActive} isLocalHost={false} />,
             diff: diffReview ? <TurnDiffReviewPanel review={diffReview} onClose={() => dispatchSurface({ type: 'close', kind: 'diff' })} />
               : <EmptyState size="card" picture="diff" title={WORKBENCH_EMPTY_COPY.diffUnavailable} />
           }}

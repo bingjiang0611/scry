@@ -7,8 +7,21 @@ import type { SessionProjectionRow } from './types'
 export function projectSubscribeSession(
   mapped: SessionProjectionRow,
   canReadCwd: (cwd: string | null) => boolean,
-  scope: 'remote' | 'local'
+  scope: 'remote' | 'local',
+  canReadParentSession?: (parentKey: string) => boolean
 ): SubscribeSessionRow {
+  const parentVisible =
+    scope === 'local' ||
+    Boolean(mapped.parentSessionKey && canReadParentSession?.(mapped.parentSessionKey))
+  // B4: on remote scope, never leak unauthorized parentSessionKey or private fork/side_chat lineage;
+  // always keep lineageKind='delegated' so read-only enforcement never fails open.
+  const exposeParentKey = Boolean(mapped.parentSessionKey && parentVisible)
+  const exposeLineageKind =
+    mapped.lineage?.kind === 'delegated'
+      ? 'delegated'
+      : parentVisible
+        ? mapped.lineage?.kind
+        : undefined
   return {
     sessionKey: mapped.sessionKey,
     conversationId: mapped.conversationId,
@@ -25,8 +38,8 @@ export function projectSubscribeSession(
     pendingQuestions: mapped.pendingQuestions,
     legacy: mapped.legacy,
     revSeq: mapped.revSeq,
-    ...(mapped.parentSessionKey ? { parentSessionKey: mapped.parentSessionKey } : {}),
-    ...(mapped.lineage?.kind ? { lineageKind: mapped.lineage.kind } : {}),
+    ...(exposeParentKey ? { parentSessionKey: mapped.parentSessionKey } : {}),
+    ...(exposeLineageKind ? { lineageKind: exposeLineageKind } : {}),
     ...(mapped.catalog ? { catalog: visibleCatalog(mapped.catalog, canReadCwd) } : {})
   }
 }
@@ -91,6 +104,16 @@ export function readSessionsSnapshot(
             .iterate()
   ) as Iterable<Record<string, unknown>>
 
+  const parentCwdStmt = scope === 'remote'
+    ? db.prepare('SELECT cwd FROM orch_p_session WHERE session_key = ?')
+    : null
+  const canReadParentSession = parentCwdStmt
+    ? (parentKey: string): boolean => {
+        const row = parentCwdStmt.get(parentKey) as { cwd: string | null } | undefined
+        return Boolean(row && canReadCwd(row.cwd))
+      }
+    : undefined
+
   const visible: SubscribeSessionRow[] = []
   let hasMore = false
   for (const raw of allRows) {
@@ -99,7 +122,7 @@ export function readSessionsSnapshot(
       hasMore = true
       break
     }
-    visible.push(projectSubscribeSession(mapSessionRow(raw), canReadCwd, scope))
+    visible.push(projectSubscribeSession(mapSessionRow(raw), canReadCwd, scope, canReadParentSession))
   }
 
   let total: number | 'unavailable' = 'unavailable'

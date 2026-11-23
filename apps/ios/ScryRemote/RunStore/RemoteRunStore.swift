@@ -52,6 +52,19 @@ final class RemoteRunStore {
     }
   }
   var catalog: CatalogState = .idle
+
+  /// P6-5 (B1/B2): resolves whether a session identity corresponds to a read-only delegated child session.
+  func isDelegatedChildSession(_ identity: SessionIdentity) -> Bool {
+    let matches: ([G0Transport.RunSessionRef]) -> Bool = { list in
+      list.contains {
+        $0.isDelegatedChild && $0.providerId == identity.providerId && $0.cwd == identity.cwd &&
+        ($0.externalSessionId == identity.externalSessionId || $0.sessionId == identity.externalSessionId)
+      }
+    }
+    if case .loaded(let list) = catalog, matches(list) { return true }
+    if case .loaded(let list) = archivedCatalog, matches(list) { return true }
+    return false
+  }
   enum CatalogEvidence: Equatable {
     case none
     case unverifiedCache(Date?)
