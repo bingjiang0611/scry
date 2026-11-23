@@ -26,8 +26,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     mkdirSync(dirname(target), { recursive: true })
     copyFileSync(join(candidate, file), target)
   }
-  // The frozen config names the test-isolation setup, so the baseline worktree needs it to boot
-  // even when its own revision predates it. Not hashed: it changes no measurement.
+  // The frozen Vitest config requires this setup, even in a baseline that predates it.
   if (existsSync(join(candidate, 'src/test-support'))) {
     cpSync(join(candidate, 'src/test-support'), join(baseline, 'src/test-support'), { recursive: true, force: true })
   }

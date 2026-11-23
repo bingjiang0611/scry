@@ -49,6 +49,8 @@ npm run build
 - 每个 Vitest 文件经 `src/test-support/user-home-isolation.ts` 拿到自己的临时 `HOME` 与 `SCRY_GRANT_DIR`：recorder grant、CLI 更新状态和 Provider 配置发现都从 `HOME` 推导路径，继承真实环境会把测试写进开发者的 `~/.scry/grants`。同一文件还快照真实 `~/.scry`，规则按环境分开：`CI` 下任何新增、修改、删除都让该文件失败；本地只有能归因到测试（授权文件里的工作区在本轮临时根目录或系统临时目录下）才失败，归因不到的真实会话、其他 checkout 与并发写入只在整次运行结束时汇总告警一次。删除的条目读不出工作区，按归因不到处理。成本每文件约 10ms（两次快照加一个临时目录，全量约 10s）。`~/.pi` 会话文件太多不计入，只靠 `HOME` 隔离；`SCRY_TEST_GUARD_DIR` 可把被监视目录换成 fixture，供守卫自身用例使用。需要断言落点的 fixture 仍显式传 env，用 `src/test-support/isolated-env.ts` 把 fixture 根目录当 `HOME`。
 - Vitest 的全局 setup 先创建一个运行根目录，子进程继承它；每个测试文件再分配自己的 HOME，全局 teardown 汇总告警后清理根目录。临时路径用 `realpath` 统一 macOS 的目录别名。守卫不跟随符号链接，也不把子项变动导致的目录 mtime 当作第二处泄漏；本地归因检查同时比较原始规范化路径和可解析的真实路径。一次文件检查可能同时报告无法归因的告警和已归因的失败。
 
+- ABAB 和 counter 基线使用候选提交的冻结 Vitest 配置，也会复制其 `src/test-support/`，让尚无这些文件的基线能启动。这些文件不在性能 harness 哈希中；变更隔离方式时须重新核对对照条件，不能只凭哈希相同就认定测量等价。
+
 ## 验证与交付
 
 ### 任务收敛与验证成本

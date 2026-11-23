@@ -50,8 +50,6 @@ async function fixture() {
     commitHook: { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
   }))
   const dataRoot = join(root, '.scry')
-  // Grants and CLI state belong to this fixture. An empty env, or one inherited from the runner,
-  // resolves to whoever runs the suite: commitHookGrantPath falls back to $HOME/.scry/grants.
   const env = { HOME: root, XDG_STATE_HOME: join(root, 'state'), SCRY_GRANT_DIR: join(root, 'grants') }
   const seed = async (provider: 'claude' | 'codex' | 'qoder', sessionId: string, deferDelivery = false) => {
     await handleRecorderHook({
