@@ -39,6 +39,8 @@
 
 ## t3code 对照
 
+> 2026-11-23 复核：本表漏掉了持久化核心、ProviderSession、提示词队列、谱系、检查点等差异，完整清单与要做的事见 [V2-alignment](V2-alignment.md)。
+
 参考 `pingdotgg/t3code` `8cf97b5f`（2026-11-18）的 `docs/orchestration-v2/`、`docs/internals/` 与 `apps/server/src/orchestration-v2/`，只读，不拷代码。首稿有两处说错，已改（decisions §12）。
 
 | 概念 | t3code | 本设计 |
