@@ -13,4 +13,6 @@ Normalize Provider events into a shared trace, but do not retrofit missing evide
 
 Use Provider command catalogs and current runtime MCP observations, not guesses. Match SDK usage to message identity when present; final result and separate run metering snapshots are not extra model turns. Use durable references for captured assistant/reasoning bodies and bounded inline previews. Skill activation or injection is not tool execution: prefer the genuine call, otherwise keep a single activation/injection (prefer injection when it carries content). A file path appearing in a read, diff or Git output is not a call. Risk annotations observe, not block. The Codex shell-read projection identifies only candidate concrete read paths and marks them inferred, not confirmed; see [ADR 006](006-observed-file-operations.md).
 
+For Qoder, a locally assigned user-message UUID identifies the intended native transcript entry but is not a receipt. Only persisted matching native input establishes it. Adapter diagnostics describe the adapter rather than proving execution. Codex child thread usage and completion do not settle or add to the root turn.
+
 See [trace.ts](../../src/shared/trace.ts), [trace.test.ts](../../src/shared/trace.test.ts), and the [evidence checklist](../agent/change-checklists.md#trace--usage--evidence-改动).

@@ -8,10 +8,6 @@ import { newId } from './qoder-shared'
 import { qoderContextTokensFromUsage, qoderTrace } from './qoder-evidence'
 import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
 
-/**
- * `/plugins reload` 是 Qoder 原生控制命令，不投递模型输入，因此没有输入回执。
- * 统一对话一旦需要可验证回执，就走普通 run 由 HistoricalInput 拒绝斜杠命令。
- */
 export function runQoderPluginReload(
   request: ProviderRunRequest,
   onPluginsReloaded: () => void

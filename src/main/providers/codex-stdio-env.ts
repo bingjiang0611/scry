@@ -77,7 +77,6 @@ export function codexStdioLauncherEnv(config: Record<string, unknown>): Record<s
   return Object.fromEntries(entries) as Record<string, string>
 }
 
-/** `NAME='value'` lines; inside single quotes only `'` itself needs escaping. */
 export function codexStdioEnvFile(env: Record<string, string>): string {
   return Object.entries(env).map(([name, value]) => `${name}='${value.replaceAll("'", "'\\''")}'\n`).join('')
 }

@@ -8,4 +8,6 @@ Independently released Provider CLIs require a revisable compatibility policy, n
 
 Distinguish intentionally disabled Providers from configured Providers whose adapter could not be described; keep the latter visible with unavailable capabilities. Report account verification separately. List exact OAuth targets only for Provider-native flows the App can drive. Experimental Providers are enabled by default; an explicit list selects which of them to enable. Only cancel a diagnostic if it owns the process it would cancel; stopping the wait on a shared server is not cancellation. Bulk deletion progress is observed, not predicted, and changed catalogs invalidate the confirmation.
 
+Codex stdio launch files use single-quoted assignments and are read on each server start; retain them for that launch lifetime and clean them up afterward. HTTP header values go in the server environment and the CLI config contains references by name, not the values. Preserve the adapter's configured home when the launcher supplies a minimal environment.
+
 See [build-identity.ts](../../src/shared/build-identity.ts), [provider-compatibility.ts](../../src/shared/provider-compatibility.ts) and [provider.ts](../../src/shared/provider.ts).

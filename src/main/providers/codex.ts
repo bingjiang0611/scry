@@ -63,8 +63,6 @@ export function codexAccess(mode: AgentPermissionMode | undefined): {
   sandbox: 'workspace-write' | 'danger-full-access'
 } {
   if (mode === 'auto_accept_edits') {
-    // Codex 的 workspace-write 沙箱本就让工作区内编辑免审批，与 default 完全同义；
-    // 再提供一个同义档位只会让用户以为选到了不同的权限，所以显式拒绝而不是静默等同。
     throw unsupportedPermissionMode('Codex', '自动接受编辑', 'workspace-write 沙箱下的默认审批已经等价，Codex 没有独立的编辑放行档位')
   }
   if (mode === 'full_access') {
@@ -149,9 +147,7 @@ function tomlInline(value: unknown): string {
 
 export interface CodexMcpConfig {
   args: string[]
-  /** Added to the app-server env: header values `env_http_headers` refers to by name. */
   env: Record<string, string>
-  /** Removes the stdio env files; present when there are any. Codex reads them on each server (re)start. */
   dispose?: () => void
 }
 
@@ -312,7 +308,6 @@ const explicitSkillMention = (prompt: string): { name: string; text: string } | 
   return match ? { name: match[1], text: prompt.slice(match[0].length).trimStart() } : undefined
 }
 
-/** Encode the native UserInput union once for both initial turns and same-turn steering. */
 const codexInput = (prompt: string, attachments: ProviderRunRequest['attachments']): unknown[] => {
   const input: unknown[] = []
   if (prompt) input.push({ type: 'text', text: prompt, text_elements: [] })
@@ -727,8 +722,6 @@ export function createCodexAdapter(
   const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
   const runtimeEnvironment = (): Record<string, string> => {
     const env = runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'codex' })
-    // runtimeCliEnv may be a deliberately minimal test/launcher environment; keep the
-    // adapter's configured home explicit so source-home derivation uses the same env key.
     return { ...env, HOME: env.HOME ?? homeDir }
   }
   const sourceHomeFor = (env: Readonly<Record<string, string>>): string => {
@@ -1479,7 +1472,6 @@ export function createCodexAdapter(
                 llmCallPendingToolHooks += 1
               }
             } else if (method === 'thread/tokenUsage/updated') {
-              // Child threads report their own cumulative usage. It must not be added to the root turn.
               if (!isRoot) return
               const usage = record(params.tokenUsage) as unknown as ThreadTokenUsage
               const total = tokenUsage(usage.total)
@@ -1526,7 +1518,6 @@ export function createCodexAdapter(
               lastRequestUsage = usage.last ? last : undefined
               modelContextWindow = usageNumber(usage.modelContextWindow) ?? modelContextWindow
             } else if (method === 'turn/completed') {
-              // A descendant finishing is not the root turn finishing.
               if (!isRoot) {
                 const turn = record(params.turn)
                 if (child?.parentToolUseId) {
