@@ -159,6 +159,8 @@ export interface DesktopRemoteCatalog {
   traceDelta?: 1
   // Absent on older hosts or when experimental host CLI approval is disabled (P5-7).
   hostAdminNotices?: 1
+  // P8: the host can answer the read-only machine summary. Absent => 「请升级」.
+  hostMetrics?: 1
   subscribe?: 1
   hostAdminNoticeItems?: HostAdminNotice[]
   // Client-local attention projection from the connection baseline and host
@@ -201,7 +203,7 @@ export type DesktopHostRead =
   | { kind: 'trace'; context: DesktopRemoteContext; runId: string; images?: true; delta?: { after?: DesktopTraceCursor }; byteChunks?: true; chunk?: { id: string; offset: number }; archive?: true }
   | { kind: 'image'; context: DesktopRemoteContext; historyScope?: 'session'; runId: string; providerTurnId?: string; index: number; chunk?: { id: string; offset: number } }
 export type DesktopHostReadResult =
-  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; subscribe?: 1; attachments?: DesktopRemoteAttachmentCapability }
+  | { kind: 'info'; protocol: number; hostId: string; execution: 'canonical'; providerDiscovery?: 2; managedWorktrees?: 1; directorySelection?: true; workbench?: 1; workbenchOps?: { openPath: boolean; trashItem: boolean }; sessionActions?: true; sessionFork?: true; sessionDelete?: true; traceDelta?: 1; hostAdminNotices?: 1; hostMetrics?: 1; subscribe?: 1; attachments?: DesktopRemoteAttachmentCapability }
   | { kind: 'workspaceChoices'; value: ScRead<WorkspaceChoices> }
   | { kind: 'validateWorkspaceBranch'; value: ScRead<{ name: string }> }
   | { kind: 'history'; history: DesktopRemoteHistory }
@@ -343,6 +345,8 @@ export interface DesktopRemoteAPI {
   liveRun(connectionId: string, context: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null>
   stop(connectionId: string, runId: string): Promise<void>
   answer(connectionId: string, runId: string, response: AgentQuestionResponse): Promise<void>
+  // P8 machine management: the target's own resource summary (remote scope only).
+  hostMetrics(connectionId: string): Promise<import('./host-metrics').HostMetricsSnapshot>
   files(connectionId: string, context: DesktopRemoteContext, path: string, cursor?: string): Promise<WorkspaceListResult>
   file(connectionId: string, context: DesktopRemoteContext, path: string, offset?: number, snapshot?: string): Promise<WorkspaceFilePage>
 }

@@ -161,6 +161,11 @@
       "channel": "desktopRemote:workspaceChoices",
       "route": "main",
       "why": "DesktopRemoteClient：本 App 连接其他宿主的客户端"
+    },
+    {
+      "channel": "desktopRemote:hostMetrics",
+      "route": "main",
+      "why": "DesktopRemoteClient：本 App 连接其他宿主时读取该主机的资源汇总（P8 §5），只在目标声明 hostMetrics: 1 时请求"
     }
   ]
 }

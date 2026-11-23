@@ -212,6 +212,7 @@ export class HostController {
       canSessionFork: d.sessionFork !== undefined,
       canSessionDelete: d.sessionDelete !== undefined,
       hasHostAdminNotices: d.listHostAdminNotices !== undefined,
+      canHostMetrics: d.readHostMetrics !== undefined,
       workspace: this.#workspace, sessionAction: d.sessionAction, sessionFork: d.sessionFork, sessionDelete: d.sessionDelete,
       isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(d.macRuns ? { macRuns: d.macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: d.macRuns,
       interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanupTempDirs } from './host-process.fixtures'
 import { startTestDaemon } from './host-process.harness'
 import { HOST_METRICS_CACHE_MS } from '../shared/host-metrics'
+import { generateDesktopDeviceIdentity } from '../main/remote/desktop-transport'
 
 afterEach(cleanupTempDirs)
 
@@ -44,6 +45,29 @@ describe('host metrics on a real daemon', () => {
       expect(first.result.sampledAt).toBeGreaterThan(Date.now() - HOST_METRICS_CACHE_MS - 60_000)
     } finally {
       await daemon.dispose()
+    }
+  })
+
+  it('declares hostMetrics: 1 to a Desktop, and serves it when asked', async () => {
+    const saved = process.env.SCRY_REMOTE_HOST
+    process.env.SCRY_REMOTE_HOST = '1'
+    const daemon = await startTestDaemon()
+    try {
+      const begun = await daemon.localOp('localPairing', 'begin', [])
+      const { pairingId, secret } = begun.result as { pairingId: string; secret: string }
+      const dev = await generateDesktopDeviceIdentity()
+      await daemon.host.service.authority.prove({ pairingId, secret, csrPEM: dev.csrPEM, deviceLabel: 'Paired Desktop' }, dev.publicKeySHA256)
+      await daemon.localOp('localPairing', 'confirm', [pairingId, dev.publicKeySHA256])
+      const peer = daemon.host.service.authority.inspectLocal().grants.find((grant) => grant.publicKeySHA256 === dev.publicKeySHA256)!.certificateSHA256
+      const info = await daemon.host.service.controller.readDesktop(peer, { kind: 'info' })
+      expect(info).toMatchObject({ kind: 'info', hostMetrics: 1 })
+      const reply = await daemon.request({ op: 'hostMetrics' })
+      expect(reply.error).toBeUndefined()
+      expect(reply.hostMetrics.scry.daemon).not.toHaveProperty('pid')
+    } finally {
+      await daemon.dispose()
+      if (saved === undefined) delete process.env.SCRY_REMOTE_HOST
+      else process.env.SCRY_REMOTE_HOST = saved
     }
   })
 
