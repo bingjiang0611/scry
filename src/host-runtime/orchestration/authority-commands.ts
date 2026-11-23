@@ -3,6 +3,7 @@ import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../ma
 import { updateRunStartOutbox } from './authority-dispatch'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
+import type { Evidence } from '../../shared/turn-record-contracts'
 import { OrchestrationStoreError } from './types'
 
 export function resolveIntentWithSink(options: {
@@ -179,24 +180,30 @@ export function recordTerminalWithSink(
     detail?: string
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
+    /** A3: recorder-derived outcome (`exact`); absent falls back to an inferred outcome. */
+    outcome?: Evidence<string>
   }
 ): void {
   if (sink.isWriteIndeterminate()) return
   const at = clock()
   const outcome =
-    input.step === 'interrupted'
-      ? {
-          status: 'unavailable' as const,
-          quality: 'unavailable' as const,
-          source: input.evidence ?? ['host.recovery'],
-          omissionReason: input.reason ?? 'host_restarted'
-        }
-      : {
-          status: 'available' as const,
-          quality: 'exact' as const,
-          source: input.evidence ?? ['provider'],
-          value: input.step
-        }
+    input.outcome
+      ? input.outcome
+      : input.step === 'interrupted'
+        ? {
+            status: 'unavailable' as const,
+            quality: 'unavailable' as const,
+            source: input.evidence ?? ['host.recovery'],
+            omissionReason: input.reason ?? 'host_restarted'
+          }
+        : {
+            // The Provider's own exit is real evidence of how the run ended, but no recorder
+            // archive confirms it: label it `inferred` instead of fabricating `exact`.
+            status: 'available' as const,
+            quality: 'inferred' as const,
+            source: input.evidence ?? ['provider'],
+            value: input.step
+          }
   const payload = {
     runId: input.runId,
     step: input.step,

@@ -24,6 +24,7 @@ import {
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
+import { createAuthorityRunTerminalHandler } from './orchestration-run-terminal'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
@@ -33,6 +34,7 @@ import {
 } from '../host-runtime/orchestration/mode'
 import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
+import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
 const MAX_LEDGER_CANONICAL_MAP = 4_096
@@ -156,6 +158,8 @@ function buildAuthorityRuntime<
   const { options, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
   let deferredPlan = ctx.deferredPlan
   const { importComplete, resolveImportComplete } = ctx
+  // A3: live-run terminal outcomes read the same committed recorder evidence as startup recovery.
+  const findRecorderEvidence = createRecorderEvidenceFinder(options.userDataDir, sink)
 
   const engine = new AuthorityEngine({
     sink,
@@ -378,23 +382,25 @@ function buildAuthorityRuntime<
         abortLive: input.abortLive
       }),
 
-    onRunTerminal: (runId, step, detail) => {
-      const canonicalRunId = resolveCanonical(runId)
-      const binding = subscribeHub.liveRunMeta(canonicalRunId)
-      engine.recordTerminal({
-        runId: canonicalRunId,
-        step,
-        ...(binding?.admitted && binding.scryRunId ? { appRunId: binding.scryRunId } : {}),
-        ...(detail ? { reason: detail } : {}),
-        evidence: [step === 'cancelled' ? 'host.run_completion' : 'provider']
-      })
-      const transcript = pendingTranscripts.get(canonicalRunId)
-      pendingTranscripts.delete(canonicalRunId)
-      if (transcript) transcriptWrites.enqueue(canonicalRunId, transcript)
-      subscribeHub.noteRunTerminal(canonicalRunId)
-      trustGate.delete(canonicalRunId)
-      ledgerToCanonical.delete(runId)
-    },
+    onRunTerminal: createAuthorityRunTerminalHandler({
+      engine,
+      liveRunMeta: (runId) => subscribeHub.liveRunMeta(runId),
+      resolveCanonical,
+      findRecorderEvidence,
+      schedule: (fn, ms) => {
+        const timer = setTimeout(fn, ms)
+        timer.unref?.()
+      },
+      evidenceFor: (step) => [step === 'cancelled' ? 'host.run_completion' : 'provider'],
+      releaseRun: (canonicalRunId, dispatchRunId) => {
+        const transcript = pendingTranscripts.get(canonicalRunId)
+        pendingTranscripts.delete(canonicalRunId)
+        if (transcript) transcriptWrites.enqueue(canonicalRunId, transcript)
+        subscribeHub.noteRunTerminal(canonicalRunId)
+        trustGate.delete(canonicalRunId)
+        ledgerToCanonical.delete(dispatchRunId)
+      }
+    }),
 
     isWriteIndeterminate: () => sink.isWriteIndeterminate()
   }

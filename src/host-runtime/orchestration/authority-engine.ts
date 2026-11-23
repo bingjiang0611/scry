@@ -19,6 +19,7 @@ import {
 } from './authority-dispatch'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
+import type { Evidence } from '../../shared/turn-record-contracts'
 import { findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 import { parseLedgerIntentRouting, type ShadowCommitSample } from './shadow-routing'
 import {
@@ -397,6 +398,7 @@ export class AuthorityEngine {
     detail?: string
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
+    outcome?: Evidence<string>
   }): void {
     this.#preDispatchedRuns.delete(input.runId)
     this.#preparedRealCwdByRun.delete(input.runId)

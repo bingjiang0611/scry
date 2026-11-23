@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { Evidence } from '../../shared/turn-record'
 import { canonicalJson } from './canonical-json'
+import { mergeTurnEvidence, promoteLastRunOutcomeToExact } from './projection-evidence'
 import type { OrchestrationEventRow } from './types'
 
 export {
@@ -172,13 +173,10 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
       }
       if (event.runId) {
         db.prepare(
-          'UPDATE orch_p_turn SET content_ref = COALESCE(?, content_ref), evidence = COALESCE(?, evidence), rev_seq = ? WHERE run_id = ?'
-        ).run(
-          (p.contentRef as string | null) ?? null,
-          event.evidence ? canonicalJson(event.evidence) : null,
-          event.seq,
-          event.runId
-        )
+          'UPDATE orch_p_turn SET content_ref = COALESCE(?, content_ref), rev_seq = ? WHERE run_id = ?'
+        ).run((p.contentRef as string | null) ?? null, event.seq, event.runId)
+        mergeTurnEvidence(db, event.runId, event.evidence)
+        promoteLastRunOutcomeToExact(db, event.runId, event.evidence, event.seq)
       }
       return
     }
@@ -254,17 +252,16 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
          SET delivery = ?,
              outcome = COALESCE(?, outcome),
              settled_at = COALESCE(?, settled_at),
-             evidence = COALESCE(?, evidence),
              rev_seq = ?
          WHERE run_id = ?`
       ).run(
         String(p.delivery),
         p.outcome ? canonicalJson(p.outcome) : null,
         p.settledAt === undefined ? null : (p.settledAt as number | null),
-        event.evidence ? canonicalJson(event.evidence) : null,
         event.seq,
         String(p.runId)
       )
+      mergeTurnEvidence(db, String(p.runId), event.evidence)
       return
     }
 

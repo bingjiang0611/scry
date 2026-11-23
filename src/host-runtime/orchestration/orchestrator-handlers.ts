@@ -3,7 +3,7 @@ import { assertBoundedPayload, assertNoUsageNumbersInEvent } from './canonical-j
 import { getEffectPolicy, type EffectKind } from './effect-policy'
 import { scopedNativeSessionKey, type NativeSessionIdentity } from './native-session-lookup'
 import type { OrchestrationCommand, RunEffectResultPayload } from './orchestrator-commands'
-import { canTransitionRun } from './run-transitions'
+import { canTransitionRun, isTerminalRunLifecycle } from './run-transitions'
 import {
   isReservedEvidenceRef,
   OrchestrationStoreError,
@@ -331,7 +331,11 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, [event], [], { runId: run.runId })
     }
     case 'finalized': {
-      if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      // A3: the trace archive can become durable after the run settled; `finalized` only adds
+      // archive evidence for the same run, so a terminal lifecycle is allowed.
+      if (run.lifecycle !== 'dispatched' && !isTerminalRunLifecycle(run.lifecycle)) {
+        return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      }
       events.push(
         makeEvent(cmd, 0, {
           ...common,
