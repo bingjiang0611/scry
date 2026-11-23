@@ -13,6 +13,7 @@ import { getEffectPolicy } from './effect-policy'
 import { findNativeSession } from './native-session-lookup'
 import {
   deleteSessionInDb,
+  executeWalCheckpoint,
   pruneEventsInDb,
   resumeBodyErasure,
   stopRunBypassingFenceInRegistry,
@@ -94,6 +95,7 @@ export class EventSink {
   #workerCheckpointActive = false
   #onCheckpoint?: (sample: WalCheckpointSample) => void
   #onCommit?: (seq: number) => void
+  #commitListeners = new Set<(seq: number) => void>()
   #sessionDeleteEpoch = new Map<string, number>()
   #delegationLimits: DelegationLimits
   #stmts: EventSinkStatements
@@ -119,14 +121,21 @@ export class EventSink {
     this.#onCommit = observer
   }
 
+  addCommitListener(listener: (seq: number) => void): () => void {
+    this.#commitListeners.add(listener)
+    return () => { this.#commitListeners.delete(listener) }
+  }
+
   #maxSeqStatement: { get(): unknown } | undefined
 
   #notifyCommitted(): void {
-    if (!this.#onCommit || !this.handle.db.open) return
+    if ((!this.#onCommit && this.#commitListeners.size === 0) || !this.handle.db.open) return
     try {
       this.#maxSeqStatement ??= this.handle.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM orch_event')
       const row = this.#maxSeqStatement.get() as { seq: number }
-      this.#onCommit(Number(row.seq))
+      const seq = Number(row.seq)
+      this.#onCommit?.(seq)
+      for (const listener of [...this.#commitListeners]) listener(seq)
     } catch {
       // Observer notification must never break commit semantics.
     }
@@ -164,32 +173,11 @@ export class EventSink {
   checkpointTruncate(): WalCheckpointResult { return this.runCheckpoint('truncate') }
 
   private runCheckpoint(mode: 'passive' | 'truncate'): WalCheckpointResult {
-    if (this.#writeIndeterminate || !this.handle.db.open) {
-      return { busy: 0, log: 0, checkpointed: 0 }
-    }
-    if (this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
-    const walBytesBefore = this.handle.walFileBytes()
-    const started = performance.now()
-    try {
-      const result = mode === 'truncate' ? this.handle.checkpointTruncate() : this.handle.checkpointPassive()
-      const durationMs = Number((performance.now() - started).toFixed(2))
-      this.#checkpointCount += 1
-      this.#onCheckpoint?.({
-        mode,
-        durationMs,
-        walBytesBefore,
-        walBytesAfter: this.handle.walFileBytes(),
-        result,
-        executor: 'main',
-        threadId: 0
-      })
-      return result
-    } catch {
-      return { busy: 1, log: 0, checkpointed: 0 }
-    }
+    if (this.#writeIndeterminate || !this.handle.db.open) return { busy: 0, log: 0, checkpointed: 0 }
+    if (this.#checkpointTimer) { clearTimeout(this.#checkpointTimer); this.#checkpointTimer = null }
+    const { result, ok } = executeWalCheckpoint(this.handle, mode, this.#onCheckpoint)
+    if (ok) this.#checkpointCount += 1
+    return result
   }
 
   getSessionDeleteEpoch(sessionKey: string): number {
@@ -243,29 +231,12 @@ export class EventSink {
     })
   }
 
-  getTask(taskId: string): TaskProjectionRow | undefined {
-    return readTaskRaw(this.#stmts, taskId)
-  }
-
-  listTasksByParentRun(parentRunId: string): TaskProjectionRow[] {
-    return listTasksByParentRunRaw(this.#stmts, parentRunId)
-  }
-
-  listTasksByParentSession(sessionKey: string): TaskProjectionRow[] {
-    return listTasksByParentSessionRaw(this.#stmts, sessionKey)
-  }
-
-  isProjectDelegationEnabled(cwd: string): boolean {
-    return readDelegationPolicyEnabledRaw(this.#stmts, 'project', cwd)
-  }
-
-  isSessionFullAccessEnabled(sessionKey: string): boolean {
-    return readDelegationPolicyEnabledRaw(this.#stmts, 'session', sessionKey)
-  }
-
-  countNonTerminalAgentRuns(): number {
-    return (this.#stmts.countNonTerminalAgentRuns.get() as { count: number }).count
-  }
+  getTask(taskId: string): TaskProjectionRow | undefined { return readTaskRaw(this.#stmts, taskId) }
+  listTasksByParentRun(parentRunId: string): TaskProjectionRow[] { return listTasksByParentRunRaw(this.#stmts, parentRunId) }
+  listTasksByParentSession(sessionKey: string): TaskProjectionRow[] { return listTasksByParentSessionRaw(this.#stmts, sessionKey) }
+  isProjectDelegationEnabled(cwd: string): boolean { return readDelegationPolicyEnabledRaw(this.#stmts, 'project', cwd) }
+  isSessionFullAccessEnabled(sessionKey: string): boolean { return readDelegationPolicyEnabledRaw(this.#stmts, 'session', sessionKey) }
+  countNonTerminalAgentRuns(): number { return (this.#stmts.countNonTerminalAgentRuns.get() as { count: number }).count }
 
   execute(command: OrchestrationCommand, txExtras?: EventSinkTxExtras): DecisionResult {
     if (this.#writeIndeterminate) {
