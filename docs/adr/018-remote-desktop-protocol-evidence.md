@@ -10,6 +10,8 @@ Recording a submit is not execution. Main owns the durable pending receipt and d
 
 A remote run's catalog-write notice prompts a local session-list refresh; it does not focus or start a local run. Question attention exposes bounded counts, not transcript content. A duplicate start receipt reuses the run ID from the first accepted command.
 
+Remote prompt queues belong to the App, not the current view. Track an in-flight prompt by message ID because draining may skip an edited row. After a submit throws with unknown delivery, retain the claimed row and hold later prompts; never resend based on a missing reply. The current UI asks the operator to remove the unknown row, but the queue guard refuses that action ([#179](https://github.com/bingjiang0611/scry/issues/179)).
+
 Only the primary enrolled App can receive and complete forwarded execution-target work; the daemon does not own the App's stored Desktop credentials. An absent App yields gateway-only discovery and a clear refusal for targeted calls. A replacement poll supersedes the older poll; a still-open control lane is not proof that work is being read. Keep the forwarding deadline longer than the downstream watch/status wait and give submits a separate budget for receipt persistence. Reserve frame headroom so a too-large reply can fail the pending call explicitly rather than leaving it to time out. Test disconnect and recovery, wrong-owner replies, and queue saturation separately.
 
 Daemon session actions preserve the workspace and grant checks used in-process. Device deletion requires explicit confirmation and an archived session. Workbench shell actions require an active primary App; validate paths before forwarding. Test refusal with a live poll and check that no work was queued.

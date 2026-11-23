@@ -10,15 +10,9 @@ export interface RunStopStatus {
   tone: 'running' | 'stopping' | 'unsettled' | 'finalizing'
   label: string
   hint: string
-  /** Provider 已确认终止之前，这一轮不能显示成完成。 */
   providerSettled: boolean
 }
 
-/**
- * The renderer's own record of a stop press, before main reports a stop phase.
- * It only says the request is on its way or that sending it failed; it never
- * claims the run has stopped.
- */
 export type StopRequest =
   | { runId: string; status: 'sending' }
   | { runId: string; status: 'failed'; reason: string }
@@ -30,10 +24,6 @@ const RUNNING: RunStopStatus = {
   providerSettled: false
 }
 
-/**
- * 把 main 的停止阶段翻译成不夸大的 UI 文案：请求过停止不等于已经停下，
- * forceKill 也只是「已发出」；只有 Provider settle 才有终止证据。
- */
 export function runStopStatus(state: AgentStopState | undefined, providerEnded = false, request?: StopRequest): RunStopStatus {
   if (providerEnded) return {
     tone: 'finalizing',
@@ -42,7 +32,6 @@ export function runStopStatus(state: AgentStopState | undefined, providerEnded =
     providerSettled: true
   }
   if (!state) {
-    // Main's phase is authoritative once it exists; until then show the press at once.
     if (request?.status === 'sending') return {
       tone: 'stopping', label: RUN_STOP_COPY.requesting.label, hint: RUN_STOP_COPY.requesting.hint, providerSettled: false
     }

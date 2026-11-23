@@ -81,8 +81,6 @@ export function useAppPromptStart(
       currentContext.agentProfileId === draftOwner.agentProfileId &&
       currentChoice && !('invalid' in currentChoice) && currentChoice.operationId === prepared.operationId
 
-    // Preparation can outlive the selected draft. Bind its queued follow-ups, but never move the
-    // user's newer text/choice or focus a different draft just because this run was accepted.
     draftStore.update(current => consumeWorkspaceDraft(
       current, sourceDraftKey, prepared.operationId, ownsSelection ? draftOwner.key : undefined, submittedDraft
     ))
@@ -97,14 +95,10 @@ export function useAppPromptStart(
     selectSessionId(ownerSessionId)
     const isCurrent = () => sessionSelectionSeqRef.current === selectionSequence && cwdRef.current === prepared.cwd
     try {
-      // The already-authorized target becomes the selected workspace only after the start ACK.
-      // Update renderer context before yielding so a subsequent New Conversation uses this cwd.
       await window.scry.setCwd(prepared.cwd)
       if (!isCurrent()) return
       const adopted = await session.adoptStartedRun(runId)
       if (!isCurrent() || adopted.status === 'superseded') return
-      // A completed run may have published its native identity before the start ACK, when no
-      // renderer owner existed yet. Resolve the exact catalog alias before migrating or opening it.
       const externalSessionId = adopted.status === 'focused' ? adopted.run.externalSessionId
         : await workspaceRunSession({
           providerId: draftOwner.providerId, agentProfileId: draftOwner.agentProfileId, cwd: prepared.cwd
@@ -115,7 +109,6 @@ export function useAppPromptStart(
         integrations.migrateSessionModel(draftOwner.key, key)
         migrateRightSurface(draftOwner.key, key)
         draftStore.update(current => {
-          // A native session event may already have migrated this draft during focus replay.
           const draft = current.get(draftOwner.key)
           if (!draft || current.has(key)) return current
           const next = new Map(current)
@@ -131,7 +124,6 @@ export function useAppPromptStart(
       }
       if (adopted.status === 'unavailable') await openWorkspaceRun(prepared.cwd, externalSessionId!, runId)
     } catch (error) {
-      // The Provider already started. Do not reject into submit's draft-restoration/retry path.
       if (isCurrent()) setComposerError(workspaceCopy.boundError(error instanceof Error ? error.message : String(error)))
     }
   }, [

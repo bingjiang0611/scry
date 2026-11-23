@@ -32,4 +32,8 @@ Only catalog metadata (pin, archive, and title) updates the sidebar optimistical
 
 An invalid saved workspace selection blocks a new start but keeps the composer text; it must not silently select the current directory. Consume only the acknowledged operation and submitted draft content, preserving newer edits and leaving an occupied destination draft alone. Resolve a workspace start to its exact run’s catalog alias, not the latest session in that directory. If the start reply is lost, recover from the recorded operation and matching command receipt rather than sending the write again.
 
+A new conversation has no native binding: keep its draft with the workspace across Provider choices until there is a session, then key it by Provider/profile. A start receipt may arrive after another draft has taken focus. Bind already-queued follow-ups to the accepted run, but do not take the newer draft or change focus. Adopt the acknowledged workspace before further async work; a run that completed before acknowledgement may need its exact catalog alias looked up. Once the Provider started, later UI reconciliation failure must not lead to restoring and retrying the submitted prompt.
+
+Treat a loaded empty page, no readable history, and live evidence awaiting archival as different states. Catalog refresh failures must not block the other refresh. On archive acknowledgement, update the sidebar before awaiting catalog refresh in reset; the Provider may still be settling. Undo only restores catalog visibility, not execution.
+
 See [workspace-selection.ts](../../src/shared/workspace-selection.ts), [source-control.ts](../../src/shared/source-control.ts), [tool-panel.ts](../../src/shared/tool-panel.ts), and [tool-content.ts](../../src/shared/tool-content.ts).
