@@ -68,6 +68,28 @@ describe('Desktop host metrics forwarding', () => {
     }
   })
 
+  it('keeps an unmeasured queue as null instead of refusing the whole snapshot', async () => {
+    // 真机 daemon 报 `queued: null`（排队数在 W20 的编排投影里，第一版没接）。
+    // 这不是坏数据，界面就显示「排队 不可用」。当成非法值会把整台主机的资源读取废掉。
+    const unmeasured = { ...SNAPSHOT, runs: { active: 2, queued: null } }
+    const { fixture, connectionId } = await connect(unmeasured)
+    try {
+      await expect(fixture.client.hostMetrics(connectionId)).resolves.toEqual(unmeasured)
+    } finally {
+      await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true })
+    }
+  })
+
+  it('still refuses a queue count that is not a count', async () => {
+    const broken = { ...SNAPSHOT, runs: { active: 0, queued: 1.5 } }
+    const { fixture, connectionId } = await connect(broken)
+    try {
+      await expect(fixture.client.hostMetrics(connectionId)).rejects.toThrow('invalid_host_metrics')
+    } finally {
+      await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true })
+    }
+  })
+
   it('cannot carry a PID into the Desktop, even from a host that sends one', async () => {
     const withPid = { ...SNAPSHOT, scry: { daemon: { ...SNAPSHOT.scry.daemon, pid: 4242 }, providers: SNAPSHOT.scry.providers } }
     const { fixture, connectionId } = await connect(withPid)
