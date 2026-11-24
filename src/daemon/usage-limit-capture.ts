@@ -61,3 +61,30 @@ export function recordQuotaFailure(scheduler: UsageLimitScheduler, input: QuotaF
     limit
   })
 }
+
+/** The daemon's one-line entry: resolve the run's session, then record the classified failure. */
+export function recordQuotaFailureForRun(
+  db: Database.Database,
+  scheduler: UsageLimitScheduler,
+  runId: string,
+  detail: string | undefined,
+  now: number
+): boolean {
+  const identity = quotaFailureIdentity(db, runId)
+  if (!identity) return false
+  return recordQuotaFailure(scheduler, { ...identity, detail, now })
+}
+
+/** The terminal handler's hook: report a failure, let this decide what it means. */
+export function createQuotaFailureHook(
+  sink: () => { handle: { db: Database.Database } } | undefined,
+  scheduler: () => UsageLimitScheduler | undefined,
+  now: () => number = Date.now
+): (failure: { runId: string; detail: string | undefined }) => void {
+  return (failure) => {
+    const active = scheduler()
+    const db = sink()?.handle.db
+    if (!active || !db?.open) return
+    recordQuotaFailureForRun(db, active, failure.runId, failure.detail, now())
+  }
+}
