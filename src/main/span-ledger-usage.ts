@@ -3,6 +3,7 @@ import type { UsageAnalytics, UsageAnalyticsAggregate, UsageAnalyticsRangeDays }
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
 import { usageIdentity, type UsageAgentId } from '../shared/usage-identity'
 import { estimatedCostFromPrice, priceForRow, type ModelPrice } from '../shared/model-price'
+import { tokenCacheAccounting, uncachedInputTokens } from '../shared/token-accounting'
 import { officialApiCost } from './official-api-cost'
 import { localDay, startOfLocalDay } from './span-ledger-analytics'
 
@@ -301,8 +302,16 @@ export function buildUsageAnalytics(args: {
     return value
   }
 
+  // 统一成「输入不含缓存 + 输出」：Codex 的输入含缓存，读的时候减掉，不改写账本。
+  const normalizeInput = (row: UsageAnalyticsTokenRow): UsageAnalyticsTokenRow => {
+    // 只在明确记录了 Codex app-server 运行时才减缓存：没有 runtime 的历史行
+    // 无法判断输入是否含缓存，保持原值，不猜。
+    const accounting = tokenCacheAccounting({ runtimeProvider: row.runtimeProvider })
+    const inputTokens = uncachedInputTokens(row.inputTokens ?? null, row.cacheReadTokens ?? null, accounting)
+    return inputTokens === row.inputTokens ? row : { ...row, inputTokens }
+  }
   // 0 Token 的记录不成行，也不计入轮次：它没有可展示的量。
-  const tokens = args.tokens.filter(tokenRowHasUsage)
+  const tokens = args.tokens.filter(tokenRowHasUsage).map(normalizeInput)
   for (const row of tokens) {
     const day = localDay(row.tsStart)
     const identity = usageIdentity(row)

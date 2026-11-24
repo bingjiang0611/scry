@@ -21,7 +21,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
       { day: '2026-08-05', ...aggregate },
       { day: '2026-09-03', ...aggregate }
     ],
-    dailyByProvider: [
+    dailyByAgent: [], byAgent: [], dailyByProvider: [
       { day: '2026-08-05', provider: 'anthropic' as const, ...aggregate },
       { day: '2026-09-03', provider: 'anthropic' as const, ...aggregate },
       { day: '2026-08-05', provider: 'codex' as const, ...aggregate },
@@ -234,7 +234,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
         analytics={{
           ...analytics,
           days: ['2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08', '2026-08-09'],
-          dailyByProvider: [
+          dailyByAgent: [], byAgent: [], dailyByProvider: [
             { day: '2026-08-05', provider: 'codex', ...aggregate },
             { day: '2026-08-06', provider: 'codex', ...aggregate },
             // 有记录但没有成本证据：不能当成当天花销为 0。
@@ -256,7 +256,7 @@ describe('AnalyticsView 渲染：T3 风格用量分析', () => {
         analytics={{
           ...analytics,
           days: ['2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
-          dailyByProvider: [
+          dailyByAgent: [], byAgent: [], dailyByProvider: [
             { day: '2026-08-05', provider: 'codex', ...aggregate },
             { day: '2026-08-08', provider: 'codex', ...aggregate }
           ],

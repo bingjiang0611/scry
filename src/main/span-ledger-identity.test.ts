@@ -110,3 +110,25 @@ describe('Codex 定价（Q6）', () => {
     expect(analytics.byModel[0].costUsd).toBeNull()
   })
 })
+
+describe('Token 缓存口径（Q5）', () => {
+  it('Codex 的输入把缓存减掉，Pi 与 Claude 的输入本来就不含缓存', () => {
+    const analytics = buildUsageAnalytics({
+      nowMs: now,
+      rangeDays: 7,
+      tokens: [
+        // Codex app-server：输入 1000 里含 800 缓存。
+        row({ tsStart: at(0), provider: 'codex', runtimeProvider: 'codex_cli', model: 'model-x', inputTokens: 1000, outputTokens: 100, cacheReadTokens: 800, runId: 'run-1' }),
+        // Pi 走 openai-codex：输入与缓存分开报，不减。
+        row({ tsStart: at(0), provider: 'codex', runtimeProvider: 'pi_rpc', upstreamProvider: 'openai-codex', model: 'model-x', inputTokens: 1000, outputTokens: 100, cacheReadTokens: 800, runId: 'run-2' })
+      ],
+      costs: []
+    })
+
+    const codex = analytics.byModel.find((entry) => entry.agent === 'codex')
+    const pi = analytics.byModel.find((entry) => entry.agent === 'pi')
+    expect(codex).toMatchObject({ inputTokens: 200, cacheReadTokens: 800 })
+    expect(pi).toMatchObject({ inputTokens: 1000, cacheReadTokens: 800 })
+    expect(analytics.totals.inputTokens).toBe(1200)
+  })
+})

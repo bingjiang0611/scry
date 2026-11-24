@@ -149,8 +149,9 @@ export interface UsageAnalyticsDailyProviderRow extends UsageAnalyticsDayRow {
 export interface UsageAnalyticsBreakdownRow extends UsageAnalyticsAggregate {
   provider: BillingProvider
   model: string | null
-  /** Identity used by the page: the agent owns the row, the provider does not. */
-  agent: UsageAgentId
+  /** Identity used by the page: the agent owns the row, the provider does not.
+   *  可选以兼容 dev/HMR 中的旧 preload；页面缺失时按 stored provider 推导。 */
+  agent?: UsageAgentId
   /** Upstream name (openai-codex, cc-switch…); absent when none was recorded. */
   gateway?: string
 }

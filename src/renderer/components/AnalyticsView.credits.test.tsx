@@ -26,7 +26,7 @@ function render(credits: number | null | undefined, view: { rangeDays?: 7 | 30; 
     byProvider: [{ ...row, provider: 'qoder', model: null }],
     byModel: [{ ...aggregate, provider: 'qoder', model: 'ultimate' }],
     byDay: [{ ...row, day: '2026-09-09' }],
-    dailyByProvider: [{ ...row, day: '2026-09-09', provider: 'qoder' }]
+    dailyByAgent: [], byAgent: [], dailyByProvider: [{ ...row, day: '2026-09-09', provider: 'qoder' }]
   }
   return renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={view.rangeDays ?? 7} loading={view.loading ?? false} error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
 }
@@ -59,7 +59,7 @@ describe('AnalyticsView Qoder Credits', () => {
       days: ['2026-09-09'], totals: aggregate,
       byProvider: [{ ...aggregate, costUsd: 1, costKnownRows: 1, provider, model: null }],
       byModel: [{ ...aggregate, provider, model: 'claude-opus-5' }],
-      byDay: [{ ...aggregate, day: '2026-09-09' }], dailyByProvider: []
+      byDay: [{ ...aggregate, day: '2026-09-09' }], dailyByAgent: [], byAgent: [], dailyByProvider: []
     }
     const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
       error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
@@ -114,7 +114,7 @@ describe('AnalyticsView Qoder Credits', () => {
         { ...aggregate, provider: 'anthropic', model: 'unpriced-model' },
         { ...known, provider: 'anthropic', model: null }
       ],
-      byDay: [{ ...known, day: '2026-09-09' }], dailyByProvider: []
+      byDay: [{ ...known, day: '2026-09-09' }], dailyByAgent: [], byAgent: [], dailyByProvider: []
     }
     const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
       error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
@@ -134,7 +134,7 @@ describe('AnalyticsView Qoder Credits', () => {
       status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
       days: ['2026-09-09'], totals: { ...aggregate, costUsd: 12, costKnownRows: 2 },
       byProvider: [known('qoder', 0), known('unknown', null), known('cc-switch', 2), known('codex', 10)],
-      byModel: [], byDay: [], dailyByProvider: []
+      byModel: [], byDay: [], dailyByAgent: [], byAgent: [], dailyByProvider: []
     }
     const before = JSON.stringify(data)
     const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
@@ -156,7 +156,7 @@ describe('AnalyticsView Qoder Credits', () => {
       status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
       days: ['2026-09-09'], totals: row,
       byProvider: [{ ...row, provider: 'antigravity', model: null }],
-      byModel: [], byDay: [], dailyByProvider: []
+      byModel: [], byDay: [], dailyByAgent: [], byAgent: [], dailyByProvider: []
     }
     const html = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false}
       error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
@@ -171,7 +171,7 @@ describe('AnalyticsView Qoder Credits', () => {
       status: 'ready', rangeDays: 7, fromDay: '2026-09-09', toDay: '2026-09-09', observedAt: 1,
       days: ['2026-09-09'], totals: aggregate,
       byProvider: [{ ...aggregate, provider: 'qoder', model: null }],
-      byModel: [], byDay: [], dailyByProvider: []
+      byModel: [], byDay: [], dailyByAgent: [], byAgent: [], dailyByProvider: []
     }
     const pending = renderToStaticMarkup(<AnalyticsView analytics={data} rangeDays={7} loading={false} creditsPending
       error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
