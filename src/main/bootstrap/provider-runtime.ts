@@ -26,6 +26,8 @@ export function createProviderRuntime(deps: {
   codexSessions?: SessionLifecycleObserver
   /** C1: OpenCode reports the same pool lifecycle. */
   openCodeSessions?: SessionLifecycleObserver
+  /** C1: Qoder reports the same pool lifecycle. */
+  qoderSessions?: SessionLifecycleObserver
   homeDir: string
   userDataDir: string
   appPath: string
@@ -77,7 +79,8 @@ export function createProviderRuntime(deps: {
     userDataDir,
     providerSessions,
     deps.codexSessions,
-    deps.openCodeSessions
+    deps.openCodeSessions,
+    deps.qoderSessions
   )
   /**
    * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；

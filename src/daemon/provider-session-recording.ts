@@ -79,6 +79,7 @@ export function createProviderSessionObservers(getSink: () => EventSink | undefi
     providerSessions: createDaemonProviderSessions(getSink),
     piSessions: createProcessSessionObserver(getSink),
     codexSessions: createProcessSessionObserver(getSink),
-    openCodeSessions: createProcessSessionObserver(getSink)
+    openCodeSessions: createProcessSessionObserver(getSink),
+    qoderSessions: createProcessSessionObserver(getSink)
   }
 }

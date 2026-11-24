@@ -7,6 +7,7 @@ import { createAntigravityAdapter } from './antigravity'
 import { createClaudeAdapter } from './claude'
 import { createCodexAdapter } from './codex'
 import { createQoderAdapter } from './qoder'
+import { createQoderSessionPool } from './qoder-session-pool'
 import { createOpenCodeAdapter } from './opencode'
 import { createPiAdapter } from './pi'
 import type { PiRunDiagnostics } from './pi-run-diagnostics'
@@ -36,12 +37,16 @@ export function createBuiltInProviderAdapters(
   /** C1: Codex keeps one app-server per session key and reports open/release here. */
   codexSessions?: SessionLifecycleObserver,
   /** C1: OpenCode keeps one server per workspace and reports the same lifecycle. */
-  openCodeSessions?: SessionLifecycleObserver
+  openCodeSessions?: SessionLifecycleObserver,
+  /** C1: Qoder keeps one CLI session per conversation and reports the same lifecycle. */
+  qoderSessions?: SessionLifecycleObserver
 ): ProviderAdapter[] {
   return withDeclaredCapabilities([
     createClaudeAdapter(homeDir),
     createCodexAdapter(codexHomeDir, homeDir, codexSessions),
-    createQoderAdapter(homeDir),
+    createQoderAdapter(homeDir, qoderSessions
+      ? { qoderSessions: createQoderSessionPool({ provider: 'qoder_cli', observer: qoderSessions }) }
+      : {}),
     createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory, openCodeSessions),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : []),
     ...(isExperimentalProviderEnabled('antigravity')
