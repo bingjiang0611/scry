@@ -15,7 +15,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, type C
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.84'
+export const RECORDER_VERSION = '0.2.85'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -34,6 +34,11 @@ export interface RecorderHealth {
   openTurns: number
   /** Those open turns that wrote nothing for the stale window: the ones to look at first. */
   staleOpenTurns: number
+  /**
+   * Sessions every pass fails the same way, so a reader does not mistake them for quiet work. Their
+   * evidence is untouched and they are retried hourly; see `session-failures.ts`.
+   */
+  suspendedSessions?: number
   recoveredRecords: number
 }
 
@@ -320,6 +325,7 @@ const EMPTY_HEALTH: RecorderHealth = {
   oldestPendingAgeMs: 0,
   openTurns: 0,
   staleOpenTurns: 0,
+  suspendedSessions: 0,
   recoveredRecords: 0
 }
 
