@@ -117,6 +117,8 @@ it('D1: a held run does not dispatch, and dispatches after the release', () => {
       expect(released).toMatchObject({ kind: 'accepted' })
       // The mapper omits a false flag rather than reporting it; either way the hold is gone.
       expect(sink.getRun('run-queued')?.queueHeld ?? false).toBe(false)
+      // Releasing does not move the entry: it keeps the slot the user is looking at.
+      expect(sink.getRun('run-queued')).toMatchObject({ lifecycle: 'queued', queuePosition: 1 })
       expect(sessionQueueBlocksDispatch(sink, 'run-queued')).toBe(false)
     } finally {
       sink.close()

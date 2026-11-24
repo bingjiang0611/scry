@@ -18,9 +18,9 @@ export function applyQueueEvent(db: Database.Database, event: OrchestrationEvent
     return true
   }
   if (event.type === 'run.queue_released') {
-    db.prepare(
-      'UPDATE orch_p_run SET queue_held = 0, queue_position = NULL, rev_seq = ? WHERE run_id = ?'
-    ).run(event.seq, event.runId)
+    // Releasing clears the hold only: the entry keeps its slot, because it has not moved in the queue —
+    // the user just allowed it to go. Clearing the position would send it to the back of the panel.
+    db.prepare('UPDATE orch_p_run SET queue_held = 0, rev_seq = ? WHERE run_id = ?').run(event.seq, event.runId)
     return true
   }
   return false
