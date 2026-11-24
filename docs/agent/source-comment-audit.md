@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `b96af32f`, matched all 976 lexical tokens in [146 JS/TS paths without a verified historical blob match](source-comment-audit-b96af32f.md) to contextual review recommendations. Removed six assertion restatements from `src/main/session-diff.test.ts`; the test's 40 cases passed. Other removal, ADR, and issue candidates remain in place. This closes the intake for that JS/TS slice, not the remaining dispositions or non-JS/TS reconciliation.
+
 At `488a0834`, reconciled 623 lexical tokens in 62 `src/main/remote/` paths whose current blobs lacked a verified historical match. Removed five redundant comments from `desktop-client-intent-rules.ts` and `desktop-lane.test.ts`. Kept wire, trust, and receipt evidence boundaries. Remaining ADR and wording candidates were not applied in this batch. Comment-free emit and directives matched, 31 focused tests passed, and the ratchet passed. No live remote session was run.
 
 At `cb7934a5`, reconciled 209 lexical tokens across 25 Provider files whose current blobs still lacked a verified historical match. Removed one redundant transcript-read comment in `qoder-run.ts`. Kept the Qoder receipt-versus-outcome distinction and the Antigravity permission-mode explanation, which links the local `null` result to a separate launch path. Other wording and ADR candidates remain in place. Comment-free emit and directives matched; all 124 focused tests and the ratchet passed.

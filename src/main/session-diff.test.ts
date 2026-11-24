@@ -138,8 +138,8 @@ describe('SessionDiffBaselineRegistry', () => {
     const second = registry.ensure({ key: 'claude\0/repo', revision: 1, cwd: '/repo' })
     expect(second.capture).not.toBe(first.capture)
     await Promise.resolve()
-    expect(cancelled).toHaveLength(1) // 旧基线被取消回收
-    expect(registry.get('claude\0/repo', 0)).toBeUndefined() // 旧 revision 认不回来
+    expect(cancelled).toHaveLength(1)
+    expect(registry.get('claude\0/repo', 0)).toBeUndefined()
   })
 
   it('切到不同 session id 时重锚，不把别的会话净 diff 算到当前会话', () => {
@@ -410,7 +410,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     expect(clock.pending()).toBe(1)
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await Promise.all([first, ...rest])
-    expect(calls).toBe(2) // 首个 + 一次合并后的 trailing
+    expect(calls).toBe(2)
     expect(maxConcurrent).toBe(1)
   })
 
@@ -546,7 +546,7 @@ describe('RunDiffPreviewer 发布策略', () => {
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS * 4)
     await previewer.idle()
-    expect(calls).toBe(1) // 封口后一次都没再采集
+    expect(calls).toBe(1)
     expect(events).toHaveLength(1)
   })
 
@@ -1013,8 +1013,8 @@ describe('终态收口封口时序（finalize）', () => {
     w.publishTerminal(TURN_DIFF_STAGE)
     w.publishTerminal(SESSION_DIFF_STAGE)
 
-    expect(w.previewCalls()).toBe(1) // trailing 没有跨过终态边界
-    expect(w.stages).toEqual([TURN_DIFF_STAGE, SESSION_DIFF_STAGE]) // 终态之外一条预览都没有
+    expect(w.previewCalls()).toBe(1)
+    expect(w.stages).toEqual([TURN_DIFF_STAGE, SESSION_DIFF_STAGE])
   })
 
   it('根因对照：只 seal turn 时 session 链继续跑并发预览，终态边界形同虚设', async () => {
