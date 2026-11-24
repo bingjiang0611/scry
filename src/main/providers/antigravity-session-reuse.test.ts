@@ -82,3 +82,65 @@ it('C1: without a session host every turn still owns its own process', async () 
   ).promise
   expect(spawnCount(dir)).toBe(2)
 })
+
+it('C1: a reused session applies the new turn model on the same process without session/new', async () => {
+  const { dir, binPath } = installFakeAgy()
+  process.env.SCRY_AGY_PATH = binPath
+  const host = new ProviderSessionHost<AntigravityProcessSession>({ maxSessions: 4 })
+  const homeDir = makeTempDir('scry-home-model-')
+  const cwd = makeTempDir('scry-ws-model-')
+  const first = await runAntigravity(
+    { runId: 'c1-m1', prompt: 'hi', cwd, attachments: [], permissionMode: 'default', emit: () => undefined },
+    { homeDir, sessions: host }
+  ).promise
+  const before = JSON.parse(readFileSync(join(dir, 'recorded.json'), 'utf8')) as {
+    requests: Array<{ method: string; params?: { configId?: string; value?: string } }>
+  }
+  expect(before.requests.filter((r) => r.method === 'session/new')).toHaveLength(1)
+
+  // The second turn switches the model online: same process, no `session/new`, config re-sent.
+  const nativeEvents: string[] = []
+  await runAntigravity(
+    {
+      runId: 'c1-m2', prompt: 'again', cwd, attachments: [], permissionMode: 'default',
+      resume: first.externalSessionId, model: { id: 'model-b' } as never,
+      emit: () => undefined,
+      recordNative: (_t, payload) => nativeEvents.push(payload)
+    },
+    { homeDir, sessions: host }
+  ).promise
+  const after = JSON.parse(readFileSync(join(dir, 'recorded.json'), 'utf8')) as {
+    requests: Array<{ method: string; params?: { configId?: string; value?: string } }>
+  }
+  expect(after.requests.filter((r) => r.method === 'session/new')).toHaveLength(1)
+  expect(after.requests.filter((r) => r.method === 'session/set_config_option' && r.params?.value === 'model-b').length)
+    .toBeGreaterThan(0)
+  expect(spawnCount(dir)).toBe(1)
+  await host.closeAll()
+})
+
+it('C1: a crashed Provider process is rebuilt for the next turn of the same session', async () => {
+  const { dir, binPath } = installFakeAgy()
+  process.env.SCRY_AGY_PATH = binPath
+  const host = new ProviderSessionHost<AntigravityProcessSession>({ maxSessions: 4 })
+  const homeDir = makeTempDir('scry-home-crash-')
+  const cwd = makeTempDir('scry-ws-crash-')
+  const first = await runAntigravity(
+    { runId: 'c1-x1', prompt: 'hi', cwd, attachments: [], permissionMode: 'default', emit: () => undefined },
+    { homeDir, sessions: host }
+  ).promise
+  const pid = Number(readFileSync(join(dir, 'spawns.log'), 'utf8').trim().split('\n')[0])
+  process.kill(pid, 'SIGKILL')
+  await new Promise((resolve) => setTimeout(resolve, 200))
+
+  const second = await runAntigravity(
+    {
+      runId: 'c1-x2', prompt: 'again', cwd, attachments: [], permissionMode: 'default',
+      resume: first.externalSessionId, emit: () => undefined
+    },
+    { homeDir, sessions: host }
+  ).promise
+  expect(second.status).toBe('completed')
+  expect(spawnCount(dir)).toBe(2)
+  await host.closeAll()
+})
