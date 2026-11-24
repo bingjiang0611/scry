@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 10
+export const ORCHESTRATION_SCHEMA_VERSION = 11
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -353,7 +353,17 @@ const ORCH_DDL_V10: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS idx_orch_provider_session_released ON orch_provider_session(released_at)'
 ]
 
+/**
+ * D1: the prompt queue lives on the host, not in a renderer's `useState`. Position and the held
+ * flag are projection columns so a restart or a second device reads the same queue.
+ */
+const ORCH_DDL_V11: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN queue_position INTEGER',
+  'ALTER TABLE orch_p_run ADD COLUMN queue_held INTEGER NOT NULL DEFAULT 0',
+  'CREATE INDEX IF NOT EXISTS idx_orch_p_run_queue ON orch_p_run(session_key, queue_held, queue_position)'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
   ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
-  ORCH_DDL_V9, ORCH_DDL_V10
+  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11
 ]

@@ -109,3 +109,21 @@ it('C1: the daemon status exposes each Provider session with its release reason'
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+it('D1: the run projection carries queue position and the held flag after the V11 migration', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { openOrchestrationDatabase } = await import('./db')
+  const dir = mkdtempSync(join(tmpdir(), 'scry-queue-columns-'))
+  const handle = openOrchestrationDatabase({ userDataDir: dir })
+  try {
+    const columns = handle.db.prepare('PRAGMA table_info(orch_p_run)').all() as Array<{ name: string }>
+    const names = columns.map((column) => column.name)
+    expect(names).toContain('queue_position')
+    expect(names).toContain('queue_held')
+  } finally {
+    handle.db.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
