@@ -71,7 +71,6 @@ describe('content-free catalog performance', () => {
       const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
       expect(() => process.kill(pid, 0)).not.toThrow()
       assertPrivate([profile.id, profile.executable, cwd, 'fixture-menu'])
-      // The parked process answers the next catalog read without a second spawn.
       await registry.listCommands(context)
       expect(starts()).toHaveLength(1)
       expect(samples.filter(s => s.name === 'pi.catalog.probe')).toHaveLength(2)
@@ -108,7 +107,6 @@ describe('content-free catalog performance', () => {
       const probe = samples.find(s => s.name === 'pi.catalog.probe')!
       expect(probe.outcome).toBe('error')
       expect(probe.checkpoints.map(p => p.stage)).toContain('first_response')
-      // A failed read is never parked: the child is closed before the probe settles.
       expect(probe.checkpoints.at(-1)?.stage).toBe('closed')
       expect(samples.find(s => s.name === 'provider.catalog.run_controls')?.outcome).toBe('unavailable')
       const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))

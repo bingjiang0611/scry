@@ -175,7 +175,6 @@ try {
     fail('daemonReady', `enroll.sock not ready; exit=${supervisor.exitCode}`)
   }
 
-  // 4. Enroll, verify build/version handshake, and verify daemon self-report.
   const credentials = await enrollLocalDevice(stateDirectory)
   const info = await frame(stateDirectory, credentials, { op: 'daemonInfo' })
   if (info?.op !== 'daemonInfo' || info.version !== expectedVersion) {

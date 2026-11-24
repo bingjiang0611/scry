@@ -81,7 +81,6 @@ describe('host continuation identity', () => {
     expect(await qoderKey(other)).not.toBe(base)
     const otherIdentity = await qoderKey(workspace, { executable: otherBin })
     expect(otherIdentity).not.toBe(base)
-    // Same path, mutated content: the cached digest must not outlive the file.
     await writeFile(otherBin, '#!/bin/sh\necho mutated\n')
     await chmod(otherBin, 0o755)
     expect(await qoderKey(workspace, { executable: otherBin })).not.toBe(otherIdentity)

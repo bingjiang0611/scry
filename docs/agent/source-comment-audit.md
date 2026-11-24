@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `37a4fd11`, reconciled 663 lexical tokens across 117 direct scripts and Provider files in four slices. The scripts covered E–Z with already-prioritized prefixes excluded; the Provider slice excluded the named adapter families. Removed 19 redundant or stale tokens in 11 files. Comment-free emit and tool directives matched; four focused suites passed all 23 tests and the ratchet passed against the branch's merge base. Live UI, login-service and performance scenarios were not run.
+
 At `b30fe80d`, verified four slices of direct `.ts`/`.tsx` files in `src/renderer/`: 141 files and 441 lexical tokens, excluding the literal `app-`, `format-`, `machines-`, and `side-chat-` prefixes. These overlap earlier reviews and exclude nested files. Removed 26 redundant comments from 12 files; preserved tool directives, trust and evidence rationale. Comment-free emit matched, eight focused suites passed all 155 tests, and the source-comment ratchet passed.
 
 At `79f5df21`, reviewed 84 tokens in all eight `scripts/b4v/scenarios/*.mjs` files. Removed two stale claims about the switch-off control: the CLI always sets `noControls`, and the scenarios record the comparison as not run. Preserved the fixture, process-scope, and evidence-limit notes. Comment-free emit and tool directives matched; 13 CLI and outcome unit tests and the source-comment ratchet passed. The B4V scenarios themselves were not run.

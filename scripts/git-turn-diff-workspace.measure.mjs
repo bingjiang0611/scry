@@ -94,7 +94,6 @@ async function cleanup(records) {
   }))
 }
 
-/** One turn for one build: discovery, then the capture of every repository. */
 async function measureTurn(build, order) {
   const discoveryStarted = process.hrtime.bigint()
   const discovery = await build.config.discoverRepositories(layout, build.enablement.config)
