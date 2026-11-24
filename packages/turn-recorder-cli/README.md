@@ -8,10 +8,10 @@ Scry 的独立本地轮次记录 CLI。Provider 的生命周期 hook 调用它,�
 
 ## 安装与接入
 
-如果你配置的 npm registry 已发布 `0.2.85`，可用以下命令安装。未发布时，请使用发布方提供的同版本 tarball。
+如果你配置的 npm registry 已发布 `0.2.86`，可用以下命令安装。未发布时，请使用发布方提供的同版本 tarball。
 
 ```bash
-npm install -g scry-turn-recorder@0.2.85
+npm install -g scry-turn-recorder@0.2.86
 
 cd /path/to/project      # 必须是 Git 仓库根目录
 scry init                # 自动检测 claude / codex / qoder / opencode
@@ -70,7 +70,7 @@ i=0; until scry status >/dev/null 2>&1; do i=$((i+1)); [ "$i" -ge 30 ] && break;
 
 `status` 的三个阶段不可互相代替:`configured` 只证明配置写入,`hookSeen` 证明 hook 真的到达 recorder,`recordSeen` 才证明轮次已提交。`trusted` 永远是 `unknown` —— Codex 需要交互式确认,其余 Provider 不向 CLI 暴露信任状态;写 `n/a` 等于声称"不需要信任"。
 
-`openTurnsPending`（本工作区还没有 record 的轮次：等待收尾的 + 仍 open 的）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。健康计数里 `pendingCount` 只数等待收尾的条目，`openTurns` / `staleOpenTurns` 单独数仍 open 的轮次（后者已静默超过 30 分钟）。`suspendedSessions` 数的是连续 3 次失败、已改为每小时重探的会话：它们被跳过，但 `open.json`、标记和证据都没有改动。
+`openTurnsPending`（本工作区还没有 record 的轮次：等待收尾的 + 仍 open 的）与 `notifyBacklog`（当前 hook 身份的自动待投递数，含退避项、不含死信）是两个不同指标，不要混用。健康计数里 `pendingCount` 只数等待收尾的条目，`openTurns` / `staleOpenTurns` 单独数仍 open 的轮次（后者已静默超过 30 分钟）。`suspendedSessions` 数的是连续 3 次失败、已改为每小时重探的会话：它们被跳过，但 `open.json`、标记和证据都没有改动。同样被跳过的还有“静默超过 30 分钟且文件没再变”的未收尾会话（恢复轮询每小时看一眼，任何 hook 或文件变化立即恢复常规频率）；它们仍计入 `openTurns` / `staleOpenTurns`，跳过的只是重复判断。记录过 `host` 进程的轮次和 managed 轮次不跳。
 
 Agent、skill 与提示词不应主动调用这些命令。
 

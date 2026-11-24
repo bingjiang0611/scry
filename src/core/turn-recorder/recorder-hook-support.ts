@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { captureToolContent, isFullToolContentPolicy } from './tool-content.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
-import { findRecordById, listRecords, updateHealth, safeKey, stableHash } from './store.js'
+import { findRecordById, listRecordSummaries, updateHealth, safeKey, stableHash } from './store.js'
 import { recorderOpenPath as openPath, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { storeLifecycleEvent } from './recorder-turn-state.js'
@@ -173,8 +173,8 @@ export async function isCommittedProviderTurn(
 ): Promise<boolean> {
   const state = await readJson<SessionState>(statePath(root))
   if (state?.committedProviderTurnIds?.includes(providerTurnId)) return true
-  return (await listRecords(dataRoot)).some((record) =>
-    record.provider.id === provider &&
+  return (await listRecordSummaries(dataRoot)).some((record) =>
+    record.provider === provider &&
     record.sessionId === sessionId &&
     record.providerTurnId === providerTurnId
   )

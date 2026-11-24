@@ -10,12 +10,14 @@ import { applyRecordContentBudget, recordTransportBytes, RECORDER_TRANSPORT_MAX_
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
 import { pruneStaleTemps } from './temp-prune.js'
+import { appendRecordSummary } from './store-summary.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
+export { listRecordSummaries, recordSummaryPath, type RecordSummary } from './store-summary.js'
 export { type RecordCommittedNotification, type CommitNotificationStatus, type CommitNotificationScope, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.85'
+export const RECORDER_VERSION = '0.2.86'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -92,6 +94,8 @@ export async function commitRecord(
     if (uploadEnvironment !== undefined) await persistUploadEnvironment(dataRoot, record.recordId, uploadEnvironment)
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
     invalidateRecordIndex(dataRoot)
+    // Derived cache only: it may be stale, missing or unwritable, and none of that may fail a commit.
+    await appendRecordSummary(dataRoot, record).catch(() => undefined)
     // 中断的写入会留下永不 rename 上屏的 `.tmp`（0 字节也算）：它们不是记录，但会被按目录枚举的
     // 脚本读到。提交是所有写入方唯一的收敛点，所以在这里按天清理一次；失败只影响这次卫生。
     await pruneStaleTemps(dataRoot).catch(() => undefined)
