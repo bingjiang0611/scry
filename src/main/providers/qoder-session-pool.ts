@@ -14,14 +14,23 @@ export interface QoderSessionLease {
   beginTurn(): QoderTurnChannel
   /** Hands the next user message to the SDK; the session's prompt stream stays open for the next turn. */
   send(message: unknown): void
+  /** The native session this CLI reported, so the observer can bind it to the key. */
+  recordNativeSession(nativeSessionId: string): void
   /** The turn ended; the session may now wait for its idle window. */
   release(): void
   close(): Promise<void>
 }
 
+export interface QoderOpenedSession {
+  query: Query
+  /** Owned by the session, not the turn: a per-session MCP config file outlives one turn. */
+  dispose?: () => void
+}
+
+/** Creates the SDK query for a new session; the pool supplies the prompt stream and owns its reader. */
+export type QoderSessionOpener = (prompt: AsyncIterable<unknown>, signal: AbortSignal) => QoderOpenedSession
+
 export interface QoderSessionPoolOptions {
-  /** Creates the SDK query for a new session; the pool owns its single reader and prompt stream. */
-  open: (key: string, prompt: AsyncIterable<unknown>, signal: AbortSignal) => Query
   provider: string
   observer?: SessionLifecycleObserver
   idleMs?: number
@@ -30,7 +39,8 @@ export interface QoderSessionPoolOptions {
 }
 
 export interface QoderSessionPool {
-  acquire(key: string): QoderSessionLease
+  /** `open` runs only when no live session holds the key; the key alone decides reuse. */
+  acquire(key: string, open: QoderSessionOpener): QoderSessionLease
   /** Every live key, for a caller that must report what the pool holds. */
   keys(): string[]
   disposeAll(reason?: SessionReleaseReason): Promise<void>
@@ -40,6 +50,7 @@ interface Entry {
   lease: QoderSessionLease
   session: QoderSession
   prompt: ReturnType<typeof createPromptStream>
+  dispose: (() => void) | undefined
   controller: AbortController
   idleTimer: ReturnType<typeof setTimeout> | undefined
   lastUsed: number
@@ -65,6 +76,7 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
     if (entry.idleTimer) clearTimeout(entry.idleTimer)
     entry.controller.abort()
     entry.prompt.close()
+    try { entry.dispose?.() } catch { /* the session is gone either way */ }
     options.observer?.onReleased?.(key, reason, now())
     await entry.session.close()
   }
@@ -91,7 +103,7 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
   }
 
   return {
-    acquire(key) {
+    acquire(key, open) {
       const existing = entries.get(key)
       if (existing && existing.idleTimer !== undefined) {
         if (existing.idleTimer) clearTimeout(existing.idleTimer)
@@ -101,19 +113,21 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
       }
       const controller = new AbortController()
       const prompt = createPromptStream()
-      const query = options.open(key, prompt.stream, controller.signal)
-      const session = createQoderSession(query)
+      const opened = open(prompt.stream, controller.signal)
+      const session = createQoderSession(opened.query)
       const entry: Entry = {
         controller,
         prompt,
+        dispose: opened.dispose,
         session,
         idleTimer: undefined,
         lastUsed: now(),
         lease: {
           key,
-          query,
+          query: opened.query,
           beginTurn: () => session.beginTurn(),
           send: (message) => prompt.push(message),
+          recordNativeSession: (nativeSessionId) => options.observer?.onNativeSessionId?.(key, nativeSessionId),
           release: () => {
             entry.lastUsed = now()
             startIdle(key, entry)

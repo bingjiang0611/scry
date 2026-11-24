@@ -5,7 +5,8 @@ import {
   query,
   type McpServerStatus,
   type Query,
-  type QueryTransportCreateOptions
+  type QueryTransportCreateOptions,
+  type SDKUserMessage
 } from '@qoder-ai/qoder-agent-sdk'
 import type { TraceEvent } from '../../shared/trace'
 import type { NormalizeCtx } from '../normalize-core'
@@ -34,6 +35,8 @@ import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
 import { applyQoderLogFallback } from './qoder-log-fallback'
 import { settleQoderTurn } from './qoder-turn-settlement'
+import type { QoderSessionPool } from './qoder-session-pool'
+import type { QoderTurnChannel } from './qoder-session'
 import { newId } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
 import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
@@ -42,6 +45,28 @@ export interface QoderRunDependencies {
   homeDir: string
   /** Adapter-level diagnostics read by `describe()`; not execution evidence. */
   hookFallback: QoderHookFallbackState
+  /**
+   * C1: when the host supplies a pool, one CLI session serves the conversation instead of one
+   * process per turn. Without it every turn keeps its own process, as before.
+   */
+  qoderSessions?: QoderSessionPool
+}
+
+/**
+ * Reuse is safe only when the next turn asks for exactly what the session was opened with. The key
+ * therefore carries the continuation identity and every turn option that the SDK fixes at open time.
+ */
+function qoderSessionKey(request: ProviderRunRequest): string {
+  return [
+    // Without a consumer-supplied identity, the conversation is still identified by where it runs.
+    request.expectedContinuationKey ?? `unverified:${request.cwd ?? ''}`,
+    request.resume ?? 'fresh',
+    request.permissionMode ?? 'default',
+    request.requestUserInput ? 'ask' : 'no_ask',
+    request.model?.id ?? 'default',
+    request.effort ?? 'default',
+    JSON.stringify(request.mcpExecution ?? null)
+  ].join('|')
 }
 
 export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies): ProviderRunHandle {
@@ -167,17 +192,16 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     // The run-owned UUID is the only user identity Scry can later match in the
     // native transcript; it is not a receipt by itself.
     const outgoingText = history.text(providerPrompt)
-    const prompt = livePrompt(outgoingText, submittedUserUuid)
-    releaseProviderPrompt = prompt.release
     // Written before the attempt is recorded: a failed write sends nothing.
-    mcpLaunch = qoderMcpLaunch(request.mcpExecution)
+    const mcp = qoderMcpLaunch(request.mcpExecution)
+    mcpLaunch = mcp
     // The CLI consumes this stream as soon as the transport starts, so the
     // attempt observation must precede query(), not the transcript read.
     history.attempting(outgoingText)
-    q = query({
+    const openQuery = (promptStream: AsyncIterable<SDKUserMessage>): Query => query({
       // Keep control-response stdin open while Qoder-owned Agents or Bash
       // tasks are active, including model-policy requests on notification turns.
-      prompt: prompt.stream,
+      prompt: promptStream,
       options: {
         transport: {
           create(options: QueryTransportCreateOptions) {
@@ -197,7 +221,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           },
           request.permissionMode,
           request.managedRecorder === true,
-          mcpLaunch.options,
+          mcp.options,
           request.managedRecorderIdentity,
           stderrTail
         ),
@@ -214,13 +238,37 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
         abortController: controller
       } as never
     })
+    let turnChannel: QoderTurnChannel | undefined
+    const sessions = deps.qoderSessions
+    const lease = sessions
+      ? sessions.acquire(qoderSessionKey(request), (promptStream) => ({ query: openQuery(promptStream as AsyncIterable<SDKUserMessage>) }))
+      : undefined
+    if (lease) {
+      q = lease.query
+      // The session's prompt stream stays open across turns; each turn contributes one user message.
+      lease.send({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: outgoingText }] },
+        parent_tool_use_id: null,
+        // Scry-owned identity for the submitted message: the native transcript must keep it.
+        uuid: submittedUserUuid
+      })
+      // The root result ends the turn, not the session: the channel hands the reader back.
+      const turn = lease.beginTurn()
+      turnChannel = turn
+      releaseProviderPrompt = () => turn.end()
+    } else {
+      const prompt = livePrompt(outgoingText, submittedUserUuid)
+      releaseProviderPrompt = prompt.release
+      q = openQuery(prompt.stream)
+    }
     let statuses: McpServerStatus[] | undefined
     let terminalError: unknown
     try {
       try {
         await Promise.race([
           (async () => {
-            for await (const message of q!) {
+            for await (const message of turnChannel ?? q!) {
               const raw = message as unknown as Record<string, unknown>
               request.recordNative?.(typeof raw.type === 'string' ? raw.type : 'unknown', raw)
               credits.observe(raw)
@@ -231,6 +279,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
                 // A resumed run must never accept input into a different native session.
                 history.verifySession(raw.session_id)
                 request.onExternalSessionId?.(raw.session_id)
+                lease?.recordNativeSession(raw.session_id)
               }
               if (raw.type === 'system' && raw.subtype === 'init' && Array.isArray(raw.mcp_servers)) {
                 statuses = (raw.mcp_servers as Array<{ name: string; status: McpServerStatus['status'] }>).map((server) => ({
@@ -289,10 +338,15 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       backgroundMonitor.pause()
       releaseProviderPrompt()
       if (exitTimer) clearTimeout(exitTimer)
-      try {
-        await q.close()
-      } catch (error) {
-        if (!providerFailureSeen && terminalError == null) terminalError = error
+      if (lease) {
+        // The turn is over; the session stays open for the next turn under the shared idle window.
+        lease.release()
+      } else {
+        try {
+          await q.close()
+        } catch (error) {
+          if (!providerFailureSeen && terminalError == null) terminalError = error
+        }
       }
     }
     if (await applyQoderLogFallback({
@@ -323,7 +377,8 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       status: stopped ? 'interrupted' : providerStatus,
       mcp: statuses ? qoderMcpSnapshot(statuses) : undefined
     }
-  })().finally(() => mcpLaunch?.dispose())
+    // A session-owned MCP config outlives the turn; only a per-turn launch is disposed here.
+  })().finally(() => { if (!deps.qoderSessions) mcpLaunch?.dispose() })
   const interrupt = (): void => {
     stopped = true
     backgroundMonitor.pause()
