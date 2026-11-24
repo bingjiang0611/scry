@@ -80,7 +80,7 @@ export function parseConversationFork(input: unknown): ConversationForkRequest {
     permissionMode: value.permissionMode as AgentStartRequest['permissionMode'] ?? 'default' }
 }
 
-/** Read-only source: a Scry conversation or a verified native session scope. */
+/** Validates source shape, not existence or authorization. */
 export function parseSideChatSource(input: unknown): SideChatSource {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('侧聊来源请求无效')
   sideChatSource(input)

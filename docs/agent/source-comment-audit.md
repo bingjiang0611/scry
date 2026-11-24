@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `0da3a6d8`, corrected four side-chat comments: source parsing checks shape rather than existence or authorization; the pending create command includes source and target metadata; tab restoration can infer absence only for the bounded IDs in a successful request. No validation or storage behavior changed. Both files had identical comment-free emit and directives; 34 focused tests and the ratchet passed.
+
 At `66da271f`, removed 11 inline restatements from `src/main/session-diff.test.ts`. Kept the setup rationale and did not change any assertions. Comment-free emit and directives matched, all 40 focused tests passed, and the ratchet passed.
 
 At `f140e5ea`, removed two redundant comments in `scripts/ui-campaign.mjs` and `src/renderer/machines-view-model.test.ts`; comment-free output and directives matched, 18 focused tests and the ratchet passed. A separate recorder measurement invocation hit its outer timeout. Left `scripts/recorder-engine-bench.mjs` unchanged; no conclusion about its performance follows.
