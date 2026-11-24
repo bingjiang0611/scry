@@ -1,5 +1,3 @@
-// 机器页（P8 §2）：本机、执行目标、已配对的设备。
-// 三块内容都复用原来的组件；这个文件只负责页面骨架、一次性读取和本机卡片。
 import { useEffect, useId, useState } from 'react'
 import type { HostMetricsSnapshot } from '@shared/host-metrics'
 import { MACHINES_COPY as copy } from '../constants/machines-copy'

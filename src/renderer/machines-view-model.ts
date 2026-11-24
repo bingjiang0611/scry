@@ -1,4 +1,3 @@
-// 机器页的纯投影：把一份 HostMetricsSnapshot 变成卡片上的文字和条。
 // 规则只有一条来源：读不到的数值是 null，界面写「不可用」，绝不写 0。
 import {
   hostMetricsPercent, hostMetricsTone,

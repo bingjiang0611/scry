@@ -114,7 +114,6 @@ export interface AppShellProps {
   toggleOverviewPanel: () => void
   changeView: (view: AppView) => boolean
   openRemoteLocation: (connectionId: string, cwd: string, session?: import('@shared/desktop-remote').RemoteSessionRef) => void
-  /** 侧栏「机器」页：设置里的远程分区搬到这里（P8 §2）。 */
   openMachines: () => void
   setShowSkills: (show: boolean) => void
   setShowMcp: (show: boolean) => void
