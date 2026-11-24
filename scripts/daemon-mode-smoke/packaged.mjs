@@ -35,7 +35,6 @@ export function parseSmokeArguments(argv) {
   return { ok: true, ...options }
 }
 
-// The inverse of packagedAppLayout: the bundle or unpacked directory that holds it.
 export function appPathOfExecutable(executable, platform = process.platform) {
   return platform === 'darwin' ? dirname(dirname(dirname(executable))) : dirname(executable)
 }

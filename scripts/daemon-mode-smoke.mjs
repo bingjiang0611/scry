@@ -16,7 +16,7 @@
 // renderer (window.scry), so the path exercised is exactly the shipped one: renderer ->
 // typed preload -> main IPC -> daemon surface -> unix socket -> daemon -> Provider.
 //
-//   stop -> cancelled
+//   stop accepted -> run settles
 //
 // No screenshot and no DOM clicking: the runner asserts run evidence, not pixels. A
 // failure exits non-zero with the step name; nothing is reported as passed unrun.
