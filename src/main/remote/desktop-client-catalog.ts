@@ -219,8 +219,11 @@ function hostMetricsSnapshot(value: unknown): HostMetricsSnapshot {
       return { providerId: entry.providerId as string, processes: processes as number, cpuPercent: percent(entry.cpuPercent), rssBytes: providerRss as number }
     }) : fail('invalid_host_metrics')
   const active = count(runs.active)
-  const queued = count(runs.queued)
-  if (active === null || queued === null) fail('invalid_host_metrics')
+  // 排队数可以是 null：宿主没接编排投影时报不出这个数。那是「不可用」，不是坏数据，
+  // 拒绝整个快照会让这台主机的资源读取永远失败。非空但不成数才算坏。
+  const unmeasuredQueue = runs.queued === null || runs.queued === undefined
+  const queued = unmeasuredQueue ? null : count(runs.queued)
+  if (active === null || (queued === null && !unmeasuredQueue)) fail('invalid_host_metrics')
   return {
     sampledAt: sampledAt as number,
     uptimeSec: count(value.uptimeSec),
@@ -231,6 +234,6 @@ function hostMetricsSnapshot(value: unknown): HostMetricsSnapshot {
     },
     disks,
     scry: { daemon: { cpuPercent: percent(daemon.cpuPercent), rssBytes: rssBytes as number }, providers },
-    runs: { active: active as number, queued: queued as number }
+    runs: { active: active as number, queued: queued as number | null }
   }
 }
