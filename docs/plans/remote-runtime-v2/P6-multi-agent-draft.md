@@ -1,6 +1,14 @@
 # P6 · 多 Agent 编排（草案）
 
+> **暂停（维护者 2026-11-23）**：先完成 [V2 对齐](V2-alignment.md)（任务单 W20），再按其 §E 更新依赖后恢复。
+
 状态：**草案，未批准**，不含实现。维护者 2026-11-18 决定先在 P4 设计里预留钩子（[P4-orchestration-core](P4-orchestration-core.md) §2.10），再仿 t3code 的编排 MCP 写本草案；2026-11-19 独立评审之后，维护者裁定了一批问题（[decisions](P6-multi-agent-decisions.md) §9.1），状态仍是草案。行号以分支 `claude/scry-performance-optimization-46ngcf` 的 `53117a8f` 为准；它与首稿所据的 `306e194d` 之间 `src/` 没有改动。
+
+V2 对齐（W20）完成后，恢复本草案前需要补进设计的规则：
+
+- 提问只唤醒父会话一次：同级多个子任务同时提问时，父会话只收到一次唤醒，其余并进同一批。
+- 同级子任务的结果批量送达：同一父会话下同级子任务的结果合并成一批，不逐个唤醒。
+- `DispatchModeLimit`：派发模式要有并发与频次上限，超限退回排队，不静默丢弃。
 
 参考 `pingdotgg/t3code` `8cf97b5f`：`docs/orchestration-v2/` 的 `orchestrator-mcp-server.md`、`thread-lineage-and-context-transfer.md`、`feature-lifecycles.md`、`entity-ids-and-correlation.md`、`provider-capability-system.md`、`provider-switching-and-context.md`；`docs/user/` 的 `thread-sidebar.md`、`permission-modes.md`、`portable-handoffs.md`、`remote-access.md`、`providers-pi.md`；契约 `packages/contracts/src/orchestratorMcp.ts`。只读，不拷代码。
 

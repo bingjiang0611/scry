@@ -211,3 +211,8 @@ describe('B4: receipt growth', () => {
     })
   })
 })
+
+it('B2: the production event window is 30 days, not the 7 the code shipped with', async () => {
+  const { DEFAULT_EVENT_RETENTION_MS } = await import('./orchestration-retention')
+  expect(DEFAULT_EVENT_RETENTION_MS).toBe(30 * 24 * 3_600_000)
+})

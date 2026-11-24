@@ -3,7 +3,8 @@ import { canonicalJson } from './canonical-json'
 
 export const OUTBOX_DONE_RETENTION_MS = 72 * 3_600_000
 export const OUTBOX_DEAD_RETENTION_MS = 30 * 24 * 3_600_000
-export const DEFAULT_EVENT_RETENTION_MS = 7 * 24 * 3_600_000
+/** 决定 C: events stay 30 days, and anything still retained must decode under the current build. */
+export const DEFAULT_EVENT_RETENTION_MS = 30 * 24 * 3_600_000
 const DEFAULT_BATCH_SIZE = 500
 
 export interface PruneOptions {

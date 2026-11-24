@@ -1,5 +1,7 @@
 # P6 · §S 安全模型（草案）
 
+> **暂停（维护者 2026-11-23）**：先完成 [V2 对齐](V2-alignment.md)（任务单 W20），再按其 §E 更新依赖后恢复。
+
 属于 [P6 草案](P6-multi-agent-draft.md)。状态：草案，未批准；评审后修订 2026-11-19。行号说明见草案开头。证据与用量移到 [evidence](P6-multi-agent-evidence.md)。
 
 多 Agent 打开的是「一个 Agent 能启动 Agent」。Scry 不是沙箱（AGENTS 开头）：子 run 照样以本机用户权限运行。本节能保证的只有五件事：同一 Provider 内不升权；每个写操作由用户在 Scry 里确认；每个子 run 照常过授权与 trust gate，且仓库配置与用户最近一次亲自运行时相同；谁做的如实记录；规模有上限。同一 uid 的并发攻击者不在模型内（AGENTS §3）。

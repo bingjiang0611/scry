@@ -48,7 +48,7 @@
 | 串行决策，不做 I/O | `Orchestrator.ts`（overview「Durable intent and side effects」） | 照搬。Node 单线程 + 同步事务，串行是天然的；异步准备在决策之前（core §2.3） |
 | 一个事务提交事件、projection、回执、outbox | `EventSink.ts` | 照搬 |
 | 重复命令 id 返回同一回执 | 回执不随事件裁剪：「Receipts stay for idempotency」（`ProjectionMaintenance.ts:256`），只删已导入旧线程的回执（`:186-245`） | 照搬：回执与 `resolveIntent` 墓碑永久保留，约 200 B/条（data §4.3） |
-| outbox 的地位 | README「Tracked Follow-Up: Durable Effect Outbox」把它定为基础设施改进，**不是**第一切片的前提（`docs/orchestration-v2/README.md:166`） | 第一批就要：今天 H1 已有派发栅栏（`remote-dispatcher.ts:68-80`），是迁移而不是新增负担 |
+| outbox 的地位 | README:166「Tracked Follow-Up: Durable Effect Outbox」说它不是第一切片的前提，**那句已过时**：代码里已有完整的 `EffectOutboxV2`（`apps/server/src/orchestration-v2/EffectOutbox.ts:269`）与 `EffectWorker`（`EffectWorker.ts`） | 第一批就要：今天 H1 已有派发栅栏（`remote-dispatcher.ts:68-80`），是迁移而不是新增负担 |
 | 进程丢失 | `EffectOutbox.ts:142-163`、`reconcileAfterProcessLoss` 连 `pending` 的 `provider-turn.start` 也取消 | 已领取的一律作废，与 t3 一致；只有排队中的 pending 在 TTL 内经复核派发（决定 B） |
 | 重连补发 | 缺口 ≤128 事件（`ThreadStream.ts:18`），且编码字节与原始载荷各 ≤1 MiB（`:20`、`:23`），否则快照 | 照搬 128；字节上限 256 KB（同 `app-event-feed.ts:47`，比 t3 严）；每次回答的上限与快照阈值统一（protocol §5.2） |
 | 推送前合并 | 50 ms（`ThreadLiveEventCoalescer.ts:18`） | 只用于易失提示，且第一条立即发（前沿触发）；持久事件不合并 |
@@ -58,6 +58,7 @@
 | 命令输出 | 不进事件（`CommandOutputHub.ts`） | 同理：run 输出与 trace 走内容通道 |
 | 推送通道 | WebSocket（`ws.ts`） | **不同**：沿用 mTLS lane 上的长轮询 |
 | App id 为主 | README 不变量 1 | 照搬；顺带消掉台账 id 与 canonical id 两套（core §2.7） |
+| 持久化核心、Provider 会话、提示词队列、谱系、检查点、详情分页 | 见 `docs/orchestration-v2/` 与 `apps/server/src/orchestration-v2/` 各自模块 | 本表只列协议与证据口径；这些差异单独列在 [V2-alignment](V2-alignment.md) 的 B、C、D 节 |
 | 旧数据导入 | `legacy-orchestration-migration.md` | 只导入会话目录元数据，不导入 turn 正文；每次启动增量导入旧台账（决定 E、plan §9） |
 
 ## 2. 目标架构（daemon 内）
