@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `17a961b6`, reviewed seven comments in `src/renderer/components/machines-view.css` and 91 in the three JS files under `experiments/remote-g0/verify/`. Removed five redundant section labels and two repeated acceptance headings. PostCSS rules and JS comment-free emit matched; the summary verifier passed seven isolated tests. Cryptographic, redaction, missing-evidence and filesystem trust rationale remains in place. No device or relay was used.
+
 After merging main at `975b917b`, reviewed 150 comment tokens in the 20 host-metrics and machines JS/TS files at `7b08371b`. Removed ten redundant or overstated comments; kept the privacy, missing-data, and measurement contracts. Comment-free emit and tool directives matched, five suites passed 56 tests, and the source-comment ratchet passed. This does not cover adjacent files changed by the feature, CSS, or UI mockups.
 
 At `cc8bea5f`, reviewed 822 tokens in 210 direct JS/TS files: 87 renderer components starting N–Z, all 80 renderer hooks, all 22 `scripts/performance-counters/` files, and the 21 direct `scripts/b4v/*.mjs` files (nested files excluded). Removed 23 redundant comments in the renderer and build verification scripts after matching comment-free emit and tool directives; seven short suites passed 56 tests. Removed seven more redundant comments in the counter files. The initial mixed run hit a Node-interpreter lookup failure and timed out. After host load recovered, the Pi fixture passed in standalone Node (one test) and the trace counter fixtures passed in Electron Node mode (23 tests). No benchmark conclusions follow.

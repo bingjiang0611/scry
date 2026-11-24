@@ -93,7 +93,6 @@ export function evaluate({ checks, scenarios, probes }) {
   const rules = []
   const rule = (id, required, status, detail) => rules.push({ id, required, status, detail })
 
-  // R1: automated checks.
   if (!checks) rule('R1-checks', true, 'blocked', 'checks.json missing: run local-verify.sh checks')
   else {
     const failed = checks.stages.filter((stage) => stage.status === 'fail').map((stage) => stage.name)
@@ -108,7 +107,6 @@ export function evaluate({ checks, scenarios, probes }) {
   }
 
   const normal = Object.entries(scenarios).filter(([label]) => label !== 'host-quit' && !label.startsWith('baseline'))
-  // R2: every normal scenario completed without failures.
   if (normal.length === 0) rule('R2-netbench-clean', true, 'blocked', 'no netbench scenario besides host-quit')
   for (const [label, s] of normal) {
     if (!s.complete) rule(`R2-netbench-clean:${label}`, true, 'fail', 'no done event: the run crashed or was cut off')
