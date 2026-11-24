@@ -44,6 +44,7 @@ import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 import { ledgerLifecycleFor } from './orchestration-intent-status'
+import { TERMINAL_RUN_LIFECYCLES } from '../host-runtime/orchestration/run-transitions'
 import { sessionQueueBlocksDispatch } from './orchestration-dispatch-queue'
 import { createCanonicalRunIds } from './orchestration-canonical-run-ids'
 
@@ -284,8 +285,10 @@ function buildAuthorityRuntime<
     recoveredRunLifecycle: (runId) => {
       const run = sink.getRun(resolvePersistedCanonical(runId))
       if (!run) return undefined
-      if (run.lifecycle === 'settled' || run.lifecycle === 'failed' || run.lifecycle === 'cancelled' || run.lifecycle === 'interrupted') {
-        return run.lifecycle
+      // One list decides what "terminal" means. `rolled_back` is terminal for the orchestration log but
+      // has no H1 lifecycle, so the ledger keeps reporting it as cancelled — the old explicit behaviour.
+      if (run.lifecycle !== 'rolled_back' && TERMINAL_RUN_LIFECYCLES.has(run.lifecycle)) {
+        return run.lifecycle as 'settled' | 'failed' | 'cancelled' | 'interrupted'
       }
       return undefined
     },

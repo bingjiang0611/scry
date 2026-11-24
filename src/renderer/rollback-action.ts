@@ -25,7 +25,7 @@ export function rollbackDecision(context: RollbackContext): RollbackDecision {
   if (!context.available) return { allowed: false, reason: ROLLBACK_COPY.unavailable }
   if (!context.runId) return { allowed: false, reason: ROLLBACK_COPY.noRun }
   if (context.hasCheckpoint === false) return { allowed: false, reason: ROLLBACK_COPY.noCheckpoint }
-  if (context.busy) return { allowed: false, reason: ROLLBACK_COPY.working }
+  if (context.busy) return { allowed: false, reason: ROLLBACK_COPY.busy }
   return { allowed: true }
 }
 

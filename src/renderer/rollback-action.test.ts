@@ -13,7 +13,7 @@ describe('rollbackDecision', () => {
     [{ runId: null, hasCheckpoint: true, available: true, busy: false }, ROLLBACK_COPY.noRun],
     [{ runId: 'r1', hasCheckpoint: false, available: true, busy: false }, ROLLBACK_COPY.noCheckpoint],
     [{ runId: 'r1', hasCheckpoint: true, available: false, busy: false }, ROLLBACK_COPY.unavailable],
-    [{ runId: 'r1', hasCheckpoint: true, available: true, busy: true }, ROLLBACK_COPY.working]
+    [{ runId: 'r1', hasCheckpoint: true, available: true, busy: true }, ROLLBACK_COPY.busy]
   ])('refuses %o with its reason', (context, reason) => {
     expect(rollbackDecision(context)).toEqual({ allowed: false, reason })
   })

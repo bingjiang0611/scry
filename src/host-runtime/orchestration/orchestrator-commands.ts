@@ -78,7 +78,6 @@ export interface RunCheckpointPayload {
   cwd?: string | null
 }
 
-/** D5: a user asked to put the worktree back to a captured checkpoint. */
 /**
  * D1: release one held queue entry. The hold exists so a stop does not let the queue keep firing; the
  * user has to say go once more, and this is that command.
@@ -88,6 +87,7 @@ export interface RunReleaseQueuePayload {
   reason?: string
 }
 
+/** D5: a user asked to put the worktree back to a captured checkpoint. */
 export interface RunRollbackPayload {
   runId: string
   ref: string

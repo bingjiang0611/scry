@@ -9,6 +9,7 @@ export const ROLLBACK_COPY = {
   confirmAction: '确认倒回',
   cancelAction: '取消',
   working: '正在倒回',
+  busy: '这一轮还在跑，结束后才能倒回',
   done: '已倒回检查点',
   refused: (reason: string) => `宿主拒绝倒回：${reason}`,
   unknown: '结果未知：请先核对宿主，重复提交可能导致第二次重写',
