@@ -139,7 +139,7 @@ export class RelayRoom {
       try {
         if (alive) server.close(CLOSE_NO_HOST_LEG, 'no_host_leg')
         else server.close(CLOSE_HOST_OFFLINE, 'host_offline')
-      } catch { /* closing */ }
+      } catch {}
       return new Response(null, { status: 101, webSocket: client, headers: { 'x-scry-relay-wait-ms': String(waitedMs) } })
     }
     const deviceId = newId()
@@ -193,14 +193,14 @@ export class RelayRoom {
       if (!att) continue
       if (!att.authed) {
         if (now - (att.openedAt ?? 0) > this.limits.freshMs) {
-          try { ws.close(1008, 'auth_timeout') } catch { /* closing */ }
+          try { ws.close(1008, 'auth_timeout') } catch {}
         }
         continue
       }
       if (att.mode !== mode || att.deviceId) continue
       const { pinging, last } = this.#liveness(ws, att)
       if ((pinging || roomPings) && now - last > this.limits.freshMs) {
-        try { ws.close(1011, 'stale_leg') } catch { /* closing */ }
+        try { ws.close(1011, 'stale_leg') } catch {}
         continue
       }
       // Proven-live legs first, newest evidence first; legacy legs keep
@@ -243,7 +243,7 @@ export class RelayRoom {
 
   async webSocketMessage(ws, message) {
     const att = ws.deserializeAttachment()
-    if (!att) { try { ws.close(1011, 'no_state') } catch { /* closing */ } return }
+    if (!att) { try { ws.close(1011, 'no_state') } catch {} return }
     if (att.role === 'host') {
       // Runtimes without auto-response deliver the ping here. Never forward
       // it: the device side carries only inner-TLS bytes. Record pingedAt even
@@ -252,7 +252,7 @@ export class RelayRoom {
         att.pingedAt = Date.now()
         ws.serializeAttachment(att)
         if (att.authed) this.hostPings = true
-        try { ws.send(HOST_PONG) } catch { /* closing */ }
+        try { ws.send(HOST_PONG) } catch {}
         return
       }
       if (!att.authed) {
@@ -263,7 +263,7 @@ export class RelayRoom {
           ok = creds && typeof creds.token === 'string' &&
             await this.#tokenOk(creds.token, creds.enroll === true)
         } catch { ok = false }
-        if (!ok) { try { ws.close(1008, 'host_unauthorized') } catch { /* closing */ } return }
+        if (!ok) { try { ws.close(1008, 'host_unauthorized') } catch {} return }
         if (ws.readyState !== WebSocket.OPEN) return
         // Re-read attachment after await so a ping arriving mid-auth is preserved.
         const latest = ws.deserializeAttachment() ?? att
@@ -278,7 +278,6 @@ export class RelayRoom {
       if (att.deviceId) this.#forward(ws, att.deviceId, message)
       return
     }
-    // Device -> host leg.
     this.#forward(ws, att.hostId, message)
   }
 
@@ -305,12 +304,12 @@ export class RelayRoom {
       if (att.role === 'host') this.hostActivityAt = Date.now()
       const peerId = att.role === 'host' ? att.deviceId : att.hostId
       const peer = this.#find(peerId)
-      if (peer) { try { peer.close(1000, 'peer_closed') } catch { /* closing */ } }
+      if (peer) { try { peer.close(1000, 'peer_closed') } catch {} }
     }
     try {
       if (closeCode !== undefined) ws.close(closeCode, closeReason)
       else ws.close()
-    } catch { /* closing */ }
+    } catch {}
   }
 
   async #tokenOk(candidate, enroll) {

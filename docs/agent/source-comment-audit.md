@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `9d6bc939`, reviewed 103 lexical comments across `experiments/remote-g0/cf-relay/src/worker.js` and `experiments/remote-g0/cf-relay-pages/public/_worker.js`. Removed nine redundant catch and forwarding labels, preserving transport, admission, and liveness rationale. Comment-free emit and tooling directives matched, four local Worker tests passed, and the ratchet passed. No deployment was performed.
+
 At `69e75745`, reviewed 515 lexical comments across 38 direct JS/TS files in `experiments/remote-g0/`, excluding the three previously reviewed `verify-*.test.mjs` files and all nested files. Removed 12 redundant comments in seven files. Comment-free emit and tool directives matched. The first test attempt could not resolve `ws`; after installing the locked dependencies offline in this worktree, 20 targeted relay tests passed and the source-comment ratchet passed. No deployed relay, real device or live Provider was used.
 
 At `88b75ca7`, reconciled all 171 lexical comment tokens in 27 direct A–D JS/TS scripts, excluding `b4v-*`, `check-*`, `ci-*`, `concurren*`, `daemon-*`, and `desktop-*`. Removed three comments that repeated an empty catch or the adjacent assertions. Kept executable examples, fixture notes and the eight wording follow-ups pending verification. The two edited files emitted identical comment-free JS and preserved tool directives; no live launchd or UI smoke was run. The local ratchet CLI timed out; replaying the same predicate and inputs over 279 paths found no added prose.
