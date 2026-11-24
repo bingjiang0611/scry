@@ -94,11 +94,6 @@ function rowsMatchFiles(rows: SummaryRow[], names: string[]): boolean {
   return rows.length === names.length && rows.every((row, index) => row[0] === names[index])
 }
 
-/**
- * The same information `listRecords()` would give, without parsing the records unless the cache is
- * unusable. Name-valid records whose content cannot be read still throw, exactly as they do there:
- * silently dropping them would report broken evidence as an absent turn.
- */
 export async function listRecordSummaries(dataRoot: string): Promise<RecordSummary[]> {
   const files = await recordFiles(dataRoot)
   const rows = await readSummaryRows(dataRoot)

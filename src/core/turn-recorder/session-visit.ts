@@ -56,11 +56,6 @@ async function openPointers(sessionDir: string): Promise<{
   }
 }
 
-/**
- * Everything this pass reacts to, plus when it last moved. Sizes and mtimes are enough: a hook that
- * rewrites a state file or queues inbox work changes one of them, a directory's own stat changes
- * when entries appear in it, and a transcript only ever grows.
- */
 async function evidence(sessionDir: string, now: number): Promise<{ fingerprint: string; quietMs: number; hostRecorded: boolean }> {
   const { generation, transcriptPath, hostRecorded } = await openPointers(sessionDir)
   const turnDir = generation === null ? null : join(sessionDir, 'turns', String(generation))
@@ -88,10 +83,6 @@ export function forgetSessionVisit(dataRoot: string, provider: ProviderId, sessi
   visits.get(dataRoot)?.delete(sessionFailureKey(provider, sessionKey))
 }
 
-/**
- * True when this pass can skip the session: a previous pass already judged it unresolved, its files
- * have not moved since, and they had already been still for the whole stale window back then.
- */
 export async function deferQuietSession(
   dataRoot: string,
   provider: ProviderId,
@@ -108,7 +99,6 @@ export async function deferQuietSession(
   return current.fingerprint === previous.fingerprint
 }
 
-/** Remember what this pass saw. Only a still-unresolved, already-quiet session becomes deferrable. */
 export async function recordSessionVisit(
   dataRoot: string,
   provider: ProviderId,
