@@ -86,3 +86,42 @@ it('D1: once the live run settles the queued run is dispatchable', () => {
     rmSync(userData, { recursive: true, force: true })
   }
 })
+
+// B3 (review): the projection has to make the hold real, not just record a flag nobody reads.
+it('D1: a held run does not dispatch, and dispatches after the release', () => {
+  const userData = mkdtempSync(join(tmpdir(), 'scry-d1-held-'))
+  try {
+    const sink = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
+    try {
+      expect(sink.execute(submit({ commandId: 'h1', runId: 'run-live', claimMode: 'immediate' })).kind).toBe('accepted')
+      expect(sink.execute(effect('h-dispatch', 'run-live', 'dispatched', 1_700_000_000_010)).kind).toBe('accepted')
+      expect(sink.execute(submit({ commandId: 'h2', runId: 'run-queued', claimMode: 'queued' })).kind).toBe('accepted')
+      expect(sessionQueueBlocksDispatch(sink, 'run-queued')).toBe(true)
+
+      // Stopping the live run holds the queued one: that is the promise the copy makes.
+      const stopPayload = { runId: 'run-live' }
+      expect(sink.execute({
+        type: 'run.stop', commandId: 'h3', actor: PEER_A, scope: 'local', at: 1_700_000_000_020,
+        payload: stopPayload, payloadSha256: sha256Hex(canonicalJson(stopPayload))
+      }).kind).toBe('accepted')
+      expect(sink.execute(effect('h-settle', 'run-live', 'settled', 1_700_000_000_030)).kind).toBe('accepted')
+      expect(sink.getRun('run-queued')).toMatchObject({ lifecycle: 'queued', queueHeld: true })
+      // The live run is gone, so the only thing keeping it back is the hold.
+      expect(sessionQueueBlocksDispatch(sink, 'run-queued')).toBe(true)
+
+      const releasePayload = { runId: 'run-queued' }
+      const released = sink.execute({
+        type: 'run.release_queue', commandId: 'h4', actor: PEER_A, scope: 'local', at: 1_700_000_000_040,
+        payload: releasePayload, payloadSha256: sha256Hex(canonicalJson(releasePayload))
+      })
+      expect(released).toMatchObject({ kind: 'accepted' })
+      // The mapper omits a false flag rather than reporting it; either way the hold is gone.
+      expect(sink.getRun('run-queued')?.queueHeld ?? false).toBe(false)
+      expect(sessionQueueBlocksDispatch(sink, 'run-queued')).toBe(false)
+    } finally {
+      sink.close()
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true })
+  }
+})

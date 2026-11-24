@@ -61,6 +61,8 @@ export interface ChatViewProps {
   sessionCacheVisible?: boolean
   /** D1: the host's queue for this session; the composer shows it above its own queue. */
   hostQueue?: HostQueueState
+  /** D1: the release action for a held entry; absent means the panel stays read-only. */
+  hostQueueRelease?: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string; title?: string; retry?: () => void; retrying?: boolean } | null
   /**
    * What an empty but selected conversation is. A side chat is a new conversation with a

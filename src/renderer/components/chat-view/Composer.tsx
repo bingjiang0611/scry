@@ -20,7 +20,7 @@ export function Composer({
   runControls, runControlCatalog, runControlsLoading = false, runControlsReason = null, input, composerScopeKey,
   sendBlockedReason = null, showSendBlockedReason = false, composerError = null, detectionIssue = null, detectionRetrying = false, onRetryDetection,
   submitting = false, sessionLoading = false, sessionCacheVisible = false, sessionEvidenceGap = null, busy,
-  queueWhileBusy = true, hostQueue, draftAttachments, queuedPrompts, steerCapability = null, steerEvidenceByMessageId = new Map(),
+  queueWhileBusy = true, hostQueue, hostQueueRelease, draftAttachments, queuedPrompts, steerCapability = null, steerEvidenceByMessageId = new Map(),
   steerInFlightMessageIds = new Set(), onSteerQueuedPrompt, editingQueuedId = null, movedQueuedId = null,
   onEditQueuedPrompt, onCancelQueuedPromptEdit, slashOpen: slashRequested, slashLoading, slashCmds, slashReason = null,
   slashSel, pendingQuestions = [], stopStates = {}, stopRequest, traceHealth,
@@ -162,7 +162,10 @@ export function Composer({
             </div>
           </div>
         )}
-        {hostQueue !== undefined && <HostQueuePanel state={hostQueue} />}
+        {hostQueue !== undefined && (
+          <HostQueuePanel state={hostQueue} onRelease={hostQueueRelease?.release}
+            releasingRunId={hostQueueRelease?.releasingRunId} releaseError={hostQueueRelease?.releaseError} />
+        )}
         <ComposerQueue
           queuedPrompts={queuedPrompts} steerEvidenceByMessageId={steerEvidenceByMessageId}
           steerInFlightMessageIds={steerInFlightMessageIds} steerCapability={steerCapability}

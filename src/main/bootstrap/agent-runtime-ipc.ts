@@ -57,6 +57,11 @@ export function registerAgentRuntimeHandlers({
     const args = [{ runId: value.runId, ...(typeof value.reason === 'string' && value.reason ? { reason: value.reason } : {}) }]
     return await daemon.localOp({ op: 'checkpoints', method: 'rollbackRun', args, read: false })
   })
+  // D1: a held queue entry only moves when the user says so; the run id is the only input.
+  handleTrusted('agent:releaseQueuedRun', async (_e, runId: unknown) => {
+    if (typeof runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) throw new Error('invalid_run_id')
+    return await daemon.localOp({ op: 'checkpoints', method: 'releaseQueuedRun', args: [{ runId }], read: false })
+  })
   let detailOwner: IpcMainInvokeEvent['sender'] | undefined
   const clearDetailOwner = () => { detailOwner = undefined; daemon.watchDetail?.(null) }
   handleTrusted('agent:watchSessionDetail', (event, key: unknown): boolean => {

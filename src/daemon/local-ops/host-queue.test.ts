@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventSink } from '../../host-runtime/orchestration/event-sink'
-import { hostQueueLocalOps } from './host-queue'
+import { hostQueueLocalOps, queueReleaseLocalOps } from './host-queue'
 
 let dirs: string[] = []
 afterEach(() => {
@@ -85,5 +85,36 @@ describe('agent:hostQueue', () => {
     }
     const withoutReader = hostQueueLocalOps({} as never)['agent:hostQueue']
     await expect(withoutReader({ sessionId: 's' })).rejects.toThrow('orchestration_unavailable')
+  })
+})
+
+// B3 (review): releasing is a write with a receipt, so the op must reject a bad id before touching the
+// authority and report a refusal instead of pretending the queue moved.
+function releaseOps(run: (command: unknown) => { kind: string; reason?: string }) {
+  return queueReleaseLocalOps({ orchestrationReader: () => ({ execute: run }) } as never) as Record<
+    string,
+    (input: unknown) => Promise<unknown>
+  >
+}
+
+describe('agent:releaseQueuedRun', () => {
+  it('rejects a malformed run id before reaching the authority', async () => {
+    let called = 0
+    const ops = releaseOps(() => { called += 1; return { kind: 'accepted' } })
+    await expect(ops['agent:releaseQueuedRun']({ runId: '../etc/passwd' })).rejects.toThrow('invalid_run_id')
+    await expect(ops['agent:releaseQueuedRun']({})).rejects.toThrow('invalid_run_id')
+    expect(called).toBe(0)
+  })
+
+  it('reports the authority refusal and does not claim success', async () => {
+    const ops = releaseOps(() => ({ kind: 'rejected', reason: 'illegal_transition' }))
+    expect(await ops['agent:releaseQueuedRun']({ runId: 'run-1' })).toEqual({ ok: false, reason: 'illegal_transition' })
+  })
+
+  it('accepts one release and passes only the run id', async () => {
+    const seen: unknown[] = []
+    const ops = releaseOps((command) => { seen.push(command); return { kind: 'accepted' } })
+    expect(await ops['agent:releaseQueuedRun']({ runId: 'run-1', reason: 'user' })).toEqual({ ok: true })
+    expect(seen[0]).toMatchObject({ type: 'run.release_queue', payload: { runId: 'run-1', reason: 'user' } })
   })
 })

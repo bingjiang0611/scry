@@ -29,3 +29,32 @@ describe('HostQueuePanel', () => {
     expect(renderToStaticMarkup(<HostQueuePanel state={{ status: 'idle', items: [] }} />)).toBe('')
   })
 })
+
+// B3 (review): the copy promises a held entry will not send itself, so the panel has to offer the only
+// way it can move. Without this the hold is a dead end the user cannot leave.
+describe('host queue panel: releasing a held entry', () => {
+  it('offers the action only for a held entry and calls back with its run id', () => {
+    const held = { status: 'ready' as const, items: [
+      { runId: 'a', position: 1, positionLabel: HOST_QUEUE_COPY.position(1), text: '第一条', note: HOST_QUEUE_COPY.held },
+      { runId: 'b', position: 2, positionLabel: HOST_QUEUE_COPY.position(2), text: '第二条', note: null }
+    ] }
+    const html = renderToStaticMarkup(<HostQueuePanel state={held} onRelease={() => {}} />)
+    expect(html).toContain(HOST_QUEUE_COPY.releaseLabel(1))
+    expect(html).not.toContain(HOST_QUEUE_COPY.releaseLabel(2))
+    expect(html).toContain(HOST_QUEUE_COPY.release)
+
+    // The host refused: the reason is shown instead of a silent no-op.
+    const refused = renderToStaticMarkup(<HostQueuePanel state={held} onRelease={() => {}}
+      releaseError={HOST_QUEUE_COPY.releaseRefused('illegal_transition')} />)
+    expect(refused).toContain(HOST_QUEUE_COPY.releaseRefused('illegal_transition'))
+  })
+
+  it('shows the in-flight state and stays read-only with no handler', () => {
+    const held = { status: 'ready' as const, items: [
+      { runId: 'a', position: 1, positionLabel: HOST_QUEUE_COPY.position(1), text: '第一条', note: HOST_QUEUE_COPY.held }
+    ] }
+    expect(renderToStaticMarkup(<HostQueuePanel state={held} onRelease={() => {}} releasingRunId="a" />))
+      .toContain(HOST_QUEUE_COPY.releasing)
+    expect(renderToStaticMarkup(<HostQueuePanel state={held} />)).not.toContain(HOST_QUEUE_COPY.release)
+  })
+})

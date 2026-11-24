@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { HostQueueRequest } from '../../shared/host-queue'
 import { hostQueueItems, hostQueueRequestFor, type HostQueueItem } from './host-queue-model'
+import { HOST_QUEUE_COPY } from '../constants/host-queue-copy'
 
 export type HostQueueState =
   /** The host answered: these are its entries, in its order. */
@@ -47,6 +48,53 @@ export function useHostQueue(request: HostQueueRequest | null, refreshKey = 0): 
 function errorText(reason: unknown): string {
   if (reason instanceof Error) return reason.message
   return typeof reason === 'string' ? reason : '未知原因'
+}
+
+/**
+ * D1: releasing a held entry is the only way it moves. The hook keeps the in-flight run and the host's
+ * refusal, and asks for a re-read afterwards — the host is the authority, so the panel shows its answer
+ * rather than assuming the release worked.
+ */
+export function useQueuedRunRelease(onReleased: () => void): {
+  releasingRunId: string | null
+  releaseError: string | null
+  release: (runId: string) => void
+} {
+  const [releasingRunId, setReleasing] = useState<string | null>(null)
+  const [releaseError, setReleaseError] = useState<string | null>(null)
+  const [releasedCount, setReleasedCount] = useState(0)
+  useEffect(() => { if (releasedCount > 0) onReleased() }, [releasedCount])
+  const release = (runId: string): void => {
+    setReleasing(runId)
+    setReleaseError(null)
+    void window.scry.releaseQueuedRun(runId).then(
+      (answer) => {
+        setReleasing(null)
+        if (!answer.ok) { setReleaseError(HOST_QUEUE_COPY.releaseRefused(answer.reason ?? '')); return }
+        setReleasedCount((n) => n + 1)
+      },
+      (reason: unknown) => { setReleasing(null); setReleaseError(errorText(reason)) }
+    )
+  }
+  return { releasingRunId, releaseError, release }
+}
+
+/**
+ * D1: the queue for the session on screen plus the one action that can move a held entry. The host owns
+ * the answer, so a release triggers a re-read rather than a local list edit.
+ */
+export function useSessionHostQueueWithRelease(session: {
+  sessionId: string | null
+  providerId?: string | null
+  cwd?: string | null
+}): {
+  state: HostQueueState
+  release: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
+} {
+  const [refreshKey, setRefreshKey] = useState(0)
+  const state = useSessionHostQueue(session, refreshKey)
+  const release = useQueuedRunRelease(() => setRefreshKey((n) => n + 1))
+  return { state, release }
 }
 
 /** The wiring the App needs: the queue for whatever session is on screen. */

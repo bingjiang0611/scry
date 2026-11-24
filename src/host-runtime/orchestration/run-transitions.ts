@@ -1,4 +1,8 @@
 import { RUN_LIFECYCLE_NEXT } from '../../main/remote/session-ledger'
+import {
+  TERMINAL_RUN_LIFECYCLE_NAMES,
+  TERMINAL_RUN_LIFECYCLE_SQL as TERMINAL_RUN_LIFECYCLE_SQL_SHARED
+} from '../../shared/run-lifecycle'
 import type { H1RunLifecycle, RunLifecycleState } from './types'
 
 /**
@@ -31,20 +35,16 @@ export const ORCH_RUN_NEXT: Readonly<Record<RunLifecycleState, readonly RunLifec
   rolled_back: []
 }
 
-export const TERMINAL_RUN_LIFECYCLES: ReadonlySet<RunLifecycleState> = new Set([
-  'settled',
-  'failed',
-  'cancelled',
-  'interrupted',
-  'rolled_back'
-])
+export const TERMINAL_RUN_LIFECYCLES: ReadonlySet<RunLifecycleState> = new Set(
+  TERMINAL_RUN_LIFECYCLE_NAMES as RunLifecycleState[]
+)
 
 /**
  * The same terminal set as a SQL literal list. Every query that asks "is this run still active?" must
  * use it: a lifecycle added to the set but forgotten in one query leaves a run that can never be
  * dispatched past, which is how `rolled_back` wedged a session.
  */
-export const TERMINAL_LIFECYCLE_SQL = `(${[...TERMINAL_RUN_LIFECYCLES].map((state) => `'${state}'`).join(', ')})`
+export const TERMINAL_LIFECYCLE_SQL = TERMINAL_RUN_LIFECYCLE_SQL_SHARED
 
 export function canTransitionRun(from: RunLifecycleState, to: RunLifecycleState): boolean {
   return ORCH_RUN_NEXT[from].includes(to)

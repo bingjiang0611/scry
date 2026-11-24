@@ -1,11 +1,18 @@
 import type { HostQueueState } from '../../hooks/useHostQueue'
 import { HOST_QUEUE_COPY } from '../../constants/host-queue-copy'
+import { Button } from '../primitives/Button'
 
 /**
  * D1: what the host is actually holding for this session. It reuses the composer queue's own
  * classes on purpose — same block, same tokens, so the two never look like different features.
  */
-export function HostQueuePanel({ state }: { state: HostQueueState }) {
+export function HostQueuePanel({ state, onRelease, releasingRunId, releaseError }: {
+  state: HostQueueState
+  /** D1: a held entry only moves when the user says so; without this the hold would be a dead end. */
+  onRelease?: (runId: string) => void
+  releasingRunId?: string | null
+  releaseError?: string | null
+}) {
   const items = state.items
   // "unknown" and "unavailable" are not empty: saying nothing there would look like "nothing queued".
   if (state.status === 'idle') return null
@@ -30,12 +37,19 @@ export function HostQueuePanel({ state }: { state: HostQueueState }) {
         <span className="queue-count">{items.length}</span>
         <span className="queue-hint">{HOST_QUEUE_COPY.hint}</span>
       </div>
+      {releaseError !== null && releaseError !== undefined && <div className="queue-hint" role="alert">{releaseError}</div>}
       <div className="queue-list" role="list">
         {items.map((item) => (
           <div className="queue-row" role="listitem" key={item.runId} aria-label={HOST_QUEUE_COPY.rowLabel(item.position, item.note === HOST_QUEUE_COPY.held)}>
             <span className="queue-index" aria-hidden="true">{item.position}</span>
             <span className="queue-text" title={item.text}>{item.text}</span>
             {item.note !== null && <small className="queue-steer-reason">{item.note}</small>}
+            {onRelease && item.note === HOST_QUEUE_COPY.held && (
+              <Button size="sm" variant="quiet" aria-label={HOST_QUEUE_COPY.releaseLabel(item.position)}
+                disabled={releasingRunId === item.runId} onClick={() => onRelease(item.runId)}>
+                {releasingRunId === item.runId ? HOST_QUEUE_COPY.releasing : HOST_QUEUE_COPY.release}
+              </Button>
+            )}
           </div>
         ))}
       </div>

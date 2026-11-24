@@ -16,6 +16,14 @@
       "method": "rollbackRun",
       "path": "controls",
       "why": "D5 倒回会改工作树，只能由持有 git 与检查点的宿主执行"
+    },
+    {
+      "channel": "agent:releaseQueuedRun",
+      "route": "new-op",
+      "op": "checkpoints",
+      "method": "releaseQueuedRun",
+      "path": "controls",
+      "why": "D1 挂起的队列只能由宿主放行；是否可放行由权威判定"
     }
   ]
 }

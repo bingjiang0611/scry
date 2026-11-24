@@ -207,6 +207,8 @@ const api = {
   hostQueue: (request: HostQueueRequest): Promise<HostQueueAnswer> => ipcRenderer.invoke('agent:hostQueue', request),
   // D5: rewrite a run's worktree back to its checkpoint. The host decides what may be reset.
   rollbackRun: (runId: string): Promise<unknown> => ipcRenderer.invoke('agent:rollbackRun', { runId }),
+  // D1: say "go" for one held queue entry; the host decides whether it may move.
+  releaseQueuedRun: (runId: string): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('agent:releaseQueuedRun', runId),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   forkSession: (request: AgentForkSessionRequest): Promise<AgentForkSessionResult> => ipcRenderer.invoke('agent:forkSession', request),
   invalidateProviderContext: (context: ProviderContext): Promise<true> => ipcRenderer.invoke('agent:invalidateProviderContext', context),

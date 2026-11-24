@@ -79,6 +79,15 @@ export interface RunCheckpointPayload {
 }
 
 /** D5: a user asked to put the worktree back to a captured checkpoint. */
+/**
+ * D1: release one held queue entry. The hold exists so a stop does not let the queue keep firing; the
+ * user has to say go once more, and this is that command.
+ */
+export interface RunReleaseQueuePayload {
+  runId: string
+  reason?: string
+}
+
 export interface RunRollbackPayload {
   runId: string
   ref: string
@@ -243,6 +252,7 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'run.stop'; payload: RunStopPayload })
   | (BaseCommand & { type: 'run.checkpoint'; payload: RunCheckpointPayload })
   | (BaseCommand & { type: 'run.rollback'; payload: RunRollbackPayload })
+  | (BaseCommand & { type: 'run.release_queue'; payload: RunReleaseQueuePayload })
   | (BaseCommand & { type: 'session.stop_subtasks'; payload: SessionStopSubtasksPayload })
   | (BaseCommand & { type: 'run.effect_result'; payload: RunEffectResultPayload })
   | (BaseCommand & { type: 'turn.record_delivery'; payload: TurnRecordDeliveryPayload })

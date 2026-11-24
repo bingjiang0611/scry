@@ -108,3 +108,33 @@ it('D1: stopping a session holds its queued runs instead of letting them fire', 
   expect(held?.payload?.heldBy).toBe('busy-run')
 })
 
+
+// B3 (review): a hold that changes nothing is worse than no hold — the copy promises the entry will not
+// send itself. Release is its own command, and a second release is refused rather than clearing more.
+it('D1: a held entry can be released, and releasing it twice is refused', () => {
+  const held = { ...busyRun(), runId: 'queued-run', lifecycle: 'queued' as const, queuePosition: 1, queueHeld: true }
+  const release: OrchestrationCommand = {
+    type: 'run.release_queue',
+    commandId: 'cmd-release',
+    actor: PEER_A,
+    scope: 'local',
+    at: 3_000,
+    payloadSha256: sha256Hex('release'),
+    payload: { runId: 'queued-run' }
+  } as OrchestrationCommand
+  const withHeld = { ...view(), getRun: (runId: string) => (runId === 'queued-run' ? (held as never) : undefined) } as unknown as OrchestratorReadView
+  const first = decide(release, withHeld)
+  expect(first.kind).toBe('accepted')
+  if (first.kind !== 'accepted') return
+  expect(first.events.map((event) => event.type)).toEqual(['run.queue_released'])
+
+  const released = { ...held, queueHeld: false }
+  const afterRelease = { ...view(), getRun: (runId: string) => (runId === 'queued-run' ? (released as never) : undefined) } as unknown as OrchestratorReadView
+  expect(decide({ ...release, commandId: 'cmd-release-2' } as OrchestrationCommand, afterRelease))
+    .toMatchObject({ kind: 'rejected', reason: 'invalid_target' })
+
+  const dispatched = { ...held, lifecycle: 'dispatched' as const }
+  const notQueued = { ...view(), getRun: (runId: string) => (runId === 'queued-run' ? (dispatched as never) : undefined) } as unknown as OrchestratorReadView
+  expect(decide({ ...release, commandId: 'cmd-release-3' } as OrchestrationCommand, notQueued))
+    .toMatchObject({ kind: 'rejected', reason: 'illegal_transition' })
+})

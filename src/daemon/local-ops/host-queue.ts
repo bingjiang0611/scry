@@ -1,3 +1,4 @@
+import { canonicalJson, sha256Hex } from '../../host-runtime/orchestration/canonical-json'
 import { findNativeSession } from '../../host-runtime/orchestration/native-session-lookup'
 import { hostQueueEntries, type HostQueueAnswer, type HostQueueRow } from '../../shared/host-queue'
 import type { DaemonLocalOpGroup } from './deps'
@@ -63,3 +64,32 @@ function readRequest(input: unknown): HostQueueRequest {
     ...(cwd === undefined ? {} : { cwd })
   }
 }
+
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+
+/**
+ * D1: a stop holds the queue, so the queue needs an explicit "go" to resume. The op carries only a run
+ * id; whether that run is queued and held is the authority's decision, not this handler's.
+ */
+export const queueReleaseLocalOps: DaemonLocalOpGroup = (deps) => ({
+  'agent:releaseQueuedRun': async (input: unknown) => {
+    const value = (input ?? {}) as { runId?: unknown; reason?: unknown }
+    if (typeof value.runId !== 'string' || !RUN_ID.test(value.runId)) throw new Error('invalid_run_id')
+    const sink = deps.orchestrationReader?.()
+    if (!sink || !('execute' in sink)) throw new Error('orchestration_unavailable')
+    const reason = typeof value.reason === 'string' && value.reason ? value.reason : undefined
+    const payload = { runId: value.runId, ...(reason ? { reason } : {}) }
+    const commandId = `release:${value.runId}:${Date.now()}`
+    const result = (sink as unknown as { execute: (command: unknown) => { kind: string; reason?: string } }).execute({
+      type: 'run.release_queue',
+      commandId,
+      actor: 'user',
+      scope: 'local',
+      at: Date.now(),
+      payload,
+      payloadSha256: sha256Hex(canonicalJson(payload))
+    })
+    // The release is a write with a receipt: the caller must see whether the authority accepted it.
+    return result.kind === 'rejected' ? { ok: false, reason: result.reason ?? 'release_rejected' } : { ok: true }
+  }
+})

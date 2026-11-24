@@ -14,7 +14,7 @@ import { billingLocalOps } from './local-ops/billing'
 import { pairingLocalOps } from './local-ops/pairing'
 import { backgroundServiceLocalOps } from './local-ops/background-service'
 import { checkpointLocalOps } from './local-ops/checkpoints'
-import { hostQueueLocalOps } from './local-ops/host-queue'
+import { hostQueueLocalOps, queueReleaseLocalOps } from './local-ops/host-queue'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -51,6 +51,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...backgroundServiceLocalOps(deps),
       ...checkpointLocalOps(deps),
       ...hostQueueLocalOps(deps),
+      ...queueReleaseLocalOps(deps),
       ...deps.terminal.localOps
     }),
     ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),
