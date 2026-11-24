@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { ProviderId } from '../../shared/provider.js'
+import { PROVIDER_LABELS, type ProviderId } from '../../shared/provider.js'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import { readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { readRecordFile, recordFiles } from './store-index.js'
@@ -37,7 +37,10 @@ export interface RecordSummary {
 const SUMMARY_SCHEMA = 1
 const SUMMARY_FILE = 'records-summary.json'
 const SUMMARY_LOCK = 'records-summary.lock'
-const PROVIDERS = new Set<string>(['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'])
+// Derived, never hand-listed: `PROVIDER_LABELS` is a `Record<ProviderId, string>`, so adding a host
+// to the shared union fails that map to compile until it is added here too. A subset would reject
+// the new host's rows and silently drop the cache to a full parse on every read.
+const PROVIDERS = new Set<string>(Object.keys(PROVIDER_LABELS))
 
 /**
  * One row per record, in file order. The file name carries both sequence and record id, so it is

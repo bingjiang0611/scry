@@ -2,6 +2,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { PROVIDER_LABELS } from '../../shared/provider.js'
 import { listRecords, listRecordSummaries, recordSummaryPath } from './store.js'
 import { commitRecord } from './store.js'
 
@@ -127,6 +128,22 @@ describe('the cache is thrown away whenever it cannot be trusted', () => {
     await rm(recordSummaryPath(root), { force: true })
     await expect(listRecords(root)).rejects.toThrow()
     await expect(listRecordSummaries(root)).rejects.toThrow()
+  })
+
+  it('accepts a cached row for every host the shared definition knows', async () => {
+    const root = await dataRoot()
+    const providers = Object.keys(PROVIDER_LABELS)
+    for (const [index, provider] of providers.entries()) {
+      await commitRecord(root, draft(index + 1, { provider: { id: provider } }) as never)
+    }
+    await listRecordSummaries(root)
+    // Same file names, unreadable bytes: only a usable cache can answer. A hand-listed subset of
+    // hosts would reject the rows of whichever host was added last and fall through to a parse that
+    // fails here - so this test fails the day such a list reappears.
+    for (const name of await readdir(join(root, 'records'))) {
+      await writeFile(join(root, 'records', name), '{"schemaVersion":1}')
+    }
+    await expect(listRecordSummaries(root)).resolves.toHaveLength(providers.length)
   })
 
   it('never parses the records on a warm read, which is the whole cost it removes', async () => {
