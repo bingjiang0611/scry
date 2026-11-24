@@ -462,7 +462,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     expect(calls).toBe(1)
 
     clock.set(1_000)
-    await previewer.notifyChange() // 纯节流窗口内的最后一次写
+    await previewer.notifyChange()
     expect(calls).toBe(1)
     expect(clock.pending()).toBe(1)
 
@@ -565,11 +565,11 @@ describe('RunDiffPreviewer 发布策略', () => {
 
     await previewer.notifyChange()
     clock.set(1_000)
-    await previewer.notifyChange() // 排下延迟刷新
+    await previewer.notifyChange()
     expect(clock.pending()).toBe(1)
 
     clock.set(DIFF_PREVIEW_MIN_INTERVAL_MS) // 窗口自然到期，但 timer 还没被跑到
-    await previewer.notifyChange() // 这条 notify 自己就读了最新状态
+    await previewer.notifyChange()
     expect(calls).toBe(2)
     expect(clock.pending()).toBe(0) // 延迟刷新被新链取代
 
@@ -774,7 +774,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       minIntervalMs: DIFF_PREVIEW_MIN_INTERVAL_MS,
       preview: async (capture, deadlineMs, options) => {
         const call = ++calls
-        if (call === 1) await gate.promise // 挂住首个 preview
+        if (call === 1) await gate.promise
         const result = await previewGitTurnDiff(capture, deadlineMs, options)
         if (call === 1) firstCompleted.resolve()
         return result
@@ -1004,7 +1004,7 @@ describe('终态收口封口时序（finalize）', () => {
     await w.started()
     void w.previewer.notifyChange() // 在途期间又落盘一次 → trailing 待办
 
-    w.previewer.sealAll() // 终态第一次收口
+    w.previewer.sealAll()
     const idle = w.previewer.idle()
     w.gate.resolve()
     await Promise.all([inFlight, idle]) // 不死等：封口后链不再续 trailing
@@ -1041,9 +1041,9 @@ describe('终态收口封口时序（finalize）', () => {
     const idle = w.previewer.idle()
     w.gate.resolve()
     await Promise.all([inFlight, idle])
-    await w.previewer.notifyChange() // 取消之后迟到的写入
+    await w.previewer.notifyChange()
 
-    expect(w.previewCalls()).toBe(1) // 在途那次算完也被丢弃
+    expect(w.previewCalls()).toBe(1)
     expect(w.stages).toEqual([])
     expect(w.previewer.isSealed('turn')).toBe(true)
     expect(w.previewer.isSealed('session')).toBe(true)
