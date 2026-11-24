@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `488a0834`, reconciled 623 lexical tokens in 62 `src/main/remote/` paths whose current blobs lacked a verified historical match. Removed five redundant comments from `desktop-client-intent-rules.ts` and `desktop-lane.test.ts`. Kept wire, trust, and receipt evidence boundaries. Remaining ADR and wording candidates were not applied in this batch. Comment-free emit and directives matched, 31 focused tests passed, and the ratchet passed. No live remote session was run.
+
 At `cb7934a5`, reconciled 209 lexical tokens across 25 Provider files whose current blobs still lacked a verified historical match. Removed one redundant transcript-read comment in `qoder-run.ts`. Kept the Qoder receipt-versus-outcome distinction and the Antigravity permission-mode explanation, which links the local `null` result to a separate launch path. Other wording and ADR candidates remain in place. Comment-free emit and directives matched; all 124 focused tests and the ratchet passed.
 
 At `8ba80167`, reconciled 228 lexical tokens in all 49 tracked JS/TS files matching `scripts/daemon-mode-*`, `scripts/desktop-remote-host-smoke*`, and `scripts/desktop-remote-ui-smoke*`, including their subdirectories. Removed one redundant helper comment and narrowed the stop-step description to request acceptance and settlement; [#195](https://github.com/bingjiang0611/scry/issues/195) tracks the missing cancellation assertion. Preserved serialized programs and fixture and artifact boundaries. Comment-free emit and directives matched, 13 targeted tests and the ratchet passed; no live smoke or benchmark was run.

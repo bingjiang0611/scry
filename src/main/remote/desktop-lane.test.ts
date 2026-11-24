@@ -293,7 +293,6 @@ describe('DesktopLanes', () => {
       return { seq }
     }))
     const lanes = new DesktopLanes(connect)
-    // Same lane: the second call queues behind the first instead of owning a channel.
     const first = lanes.request('watch', 'c1', { endpoint, request: { op: 'watch' }, replayable: true })
     await vi.waitFor(() => expect(calls).toBe(1))
     const controller = new AbortController()

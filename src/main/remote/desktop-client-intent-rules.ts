@@ -6,11 +6,6 @@ import { parseWorkspaceStartSelection } from '../../shared/workspace-selection-i
 import { DESKTOP_ATTACHMENT_MAX_COUNT } from './desktop-attachments'
 import { context, digest, fail, record, text, type StoredConnection } from './desktop-client-validation'
 
-// What the desktop client decides without a connection: how a failure is classified
-// (outcome unknown, refused before dispatch, explicitly unknown intent), whether a
-// submit is well formed, the execution-target binding of a saved host, and what a
-// recorded intent's detail says. Split from desktop-client-base.ts by responsibility.
-
 export function isUnknownFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return true
   return !/^(?:invalid_|desktop_protocol|desktop_capability|desktop_remote_|stop_not_confirmed|answer_not_confirmed|device_not_authorized|pairing_|device_certificate|unknown_|desktop_not_connected|desktop_client)/i.test(error.message)
