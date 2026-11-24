@@ -121,6 +121,7 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 一次 recovery pass 以前会把每个仍有 open 轮次的会话重新判一遍，包括那些结论不会再变、证据也没动过的会话。工作区里存在几十个陈旧轮次时，这份重复劳动是常驻 CPU 的主要来源。
 - 现在：某次 pass 判过“仍然开着、且它自己的文件已经超过 stale 窗口没动静”的会话，会记住当时的文件指纹，之后**一小时**才复查一次；任何 hook 到达、或任何它读的文件发生变化（`open.json`、`session.json`、当前 generation 目录与 `events/`、`inbox/`、transcript），下一次 pass 立即恢复常规频率。
 - 只改调度。不收尾轮次、不动 marker、不删证据；记录在内存里，进程重启后第一遍复查全部——偏向安全的一侧。
+- 两类会话永不延迟：`open.json` 里记录了 `host` 进程的轮次（宿主退出不会改变任何文件，下一遍就能收尾），以及 managed 轮次（它们的恢复靠一条只在“循环看见了 managed 轮”时才跑的 pass）。
 - 只对尚未收敛的会话生效：已收尾的会话不留记录；操作者用 `recover --session` 点名的会话永远照常复查。`--expire-open` 等显式动作不受影响。
 - 实测（45 个陈旧会话，两个模式用同一个 `npm run bench:quiet-revisit`，`--mode=visit` 在每遍之间改 `open.json` 的 mtime，就是改动前“每遍重新判一遍”的行为）：
   - 合成 fixture（45 个会话，每轮 64 KB transcript）：整遍约 0.9 s → 约 0.2 s CPU（同机负载波动约 ±30%）。剩下的 0.2 s 里几乎全部是每遍结束时的 health 扫描（45 × 约 4 ms），与本节无关。
