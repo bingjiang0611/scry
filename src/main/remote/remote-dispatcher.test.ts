@@ -242,4 +242,58 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
     expect(dispatcher.pump()).toEqual([])
     expect(outbox.settled).toEqual(['claim:eff-orpan', 'fail:eff-orpan'])
   })
+
+  it('runs a stop effect through the effect executor instead of the run executor', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor, calls } = deferredExecutor()
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    const outbox = memoryOutbox([{ effectId: 'eff-stop', runId, kind: 'provider.run.stop' }])
+    const executed: string[] = []
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      executor,
+      outbox,
+      effectExecutor: (effect) => {
+        executed.push(`${effect.kind}:${effect.runId}`)
+        return 'done'
+      }
+    })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(executed).toEqual([`provider.run.stop:${runId}`])
+    expect(calls).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-stop', 'succeed:eff-stop'])
+    // The stop path never marks the run dispatched: only the worker's outcome decides that.
+    expect(ledger.runState(runId)).toBe('recorded')
+  })
+
+  it('fails an effect kind with no executor so it cannot sit in the queue forever', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor } = deferredExecutor()
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    const outbox = memoryOutbox([{ effectId: 'eff-write', runId, kind: 'conversation.writeback' }])
+    const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-write', 'fail:eff-write'])
+  })
+
+  it('retries a stop effect whose executor asks for another pass', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor } = deferredExecutor()
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    const outbox = memoryOutbox([{ effectId: 'eff-stop', runId, kind: 'provider.run.stop' }])
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      executor,
+      outbox,
+      effectExecutor: () => 'retry'
+    })
+
+    dispatcher.pump()
+    expect(outbox.settled).toEqual(['claim:eff-stop', 'retry:eff-stop'])
+  })
 })

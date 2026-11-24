@@ -62,9 +62,23 @@ export interface RemoteDispatcherOutbox {
   retry(effectId: string, owner: string, now: number, reason: string): { status: string; delayMs?: number }
 }
 
+/**
+ * B1/A4: effects that are not a run start (stop, answer, writeback, catalog) are executed by the
+ * daemon through this hook. Returning `undefined` means this build cannot run that kind, so the
+ * row is failed with a reason instead of blocking its session queue forever.
+ */
+export type RemoteEffectExecutor = (effect: {
+  effectId: string
+  kind: string
+  runId: string | null
+  payload: string
+  attempts: number
+}) => 'done' | 'retry' | 'failed'
+
 export interface RemoteDispatcherDependencies {
   ledger: SessionLedger
   outbox?: RemoteDispatcherOutbox
+  effectExecutor?: RemoteEffectExecutor
   executor: RemoteExecutor
   // Absent => the output callback is a no-op and only the lifecycle is observable.
   outputSink?: RemoteOutputSink
@@ -85,6 +99,7 @@ export class RemoteDispatcher {
   #executor: RemoteExecutor
   #outputSink?: RemoteOutputSink
   #outbox?: RemoteDispatcherOutbox
+  #effectExecutor?: RemoteEffectExecutor
   #leaseOwner = `dispatcher:${process.pid}`
   #beforeDispatch?: RemoteDispatcherDependencies['beforeDispatch']
   #onSettled?: RemoteDispatcherDependencies['onSettled']
@@ -97,6 +112,7 @@ export class RemoteDispatcher {
     this.#executor = deps.executor
     this.#outputSink = deps.outputSink
     this.#outbox = deps.outbox
+    this.#effectExecutor = deps.effectExecutor
     this.#beforeDispatch = deps.beforeDispatch
     this.#onSettled = deps.onSettled
   }
@@ -181,6 +197,10 @@ export class RemoteDispatcher {
         try { this.#ledger.markCancelled(row.runId) } catch { /* already terminal */ }
       }
       if (!effect) break
+      if (effect.kind !== 'provider.run.start') {
+        this.#runNonStartEffect(outbox, effect)
+        continue
+      }
       if (!effect.runId) {
         // A run-start effect without a run cannot be executed; park it instead of leaking a lease.
         outbox.fail(effect.effectId, this.#leaseOwner, Date.now(), 'run_start_without_run')
@@ -225,6 +245,33 @@ export class RemoteDispatcher {
       outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
     }
     return started
+  }
+
+  /**
+   * B1: stop/answer/writeback effects never mark a run dispatched. Their outcome is the worker's,
+   * and an unhandled kind fails loudly instead of retrying forever.
+   */
+  #runNonStartEffect(
+    outbox: RemoteDispatcherOutbox,
+    effect: { effectId: string; kind: string; runId: string | null; payload: string; attempts: number }
+  ): void {
+    const outcome = this.#effectExecutor?.(effect) ?? 'failed'
+    const now = Date.now()
+    if (outcome === 'done') {
+      outbox.succeed(effect.effectId, this.#leaseOwner, now)
+      return
+    }
+    if (outcome === 'retry') {
+      const retried = outbox.retry(effect.effectId, this.#leaseOwner, now, 'effect_retry')
+      if (retried.delayMs !== undefined) this.#scheduleRetry(retried.delayMs)
+      return
+    }
+    outbox.fail(
+      effect.effectId,
+      this.#leaseOwner,
+      now,
+      this.#effectExecutor ? 'effect_failed' : `unhandled_effect_kind:${effect.kind}`
+    )
   }
 
   #run(runId: string, detail?: string): void {

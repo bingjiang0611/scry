@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { RemoteGateway } from './remote-gateway'
 import type { RemoteCommandSource, RemoteHistoryPreviewSource, RemoteHistorySource, RemoteHistoryTurnsPageSource, RemoteHistoryVersionSource } from './remote-gateway'
 import { RemoteDispatcher } from './remote-dispatcher'
@@ -5,7 +6,7 @@ import type { RemoteExecutor, RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor } from './remote-run-policy'
 import { readRemoteWorkspace } from './remote-workspace'
 import type { RemoteFileDownloads } from './remote-file-download'
-import type { RemoteInteractionBroker } from './remote-interaction-broker'
+import type { RemoteInteractionBroker, RemoteQuestionAnswer } from './remote-interaction-broker'
 import type { LedgerEvent, SessionLedger } from './session-ledger'
 import type { RunOutputLog } from './run-output-log'
 import type { PairingAuthority } from './pairing'
@@ -204,6 +205,28 @@ export function createExecution(input: ExecutionDeps): {
       },
       onSettled: (runId, lifecycle, detail) => {
         deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
+      },
+      // B1/A4: stop and answer effects must reach completion from the durable queue, not only
+      // from the in-memory request path, so a restart cannot lose them.
+      effectExecutor: (effect) => {
+        if (effect.kind === 'provider.run.stop') {
+          const controller = effect.runId ? stops.get(effect.runId) : undefined
+          controller?.abort()
+          // A stop for a run that is no longer live already has its outcome; nothing to wait for.
+          return 'done'
+        }
+        if (effect.kind === 'question.respond') {
+          if (!effect.runId) return 'failed'
+          try {
+            const response = JSON.parse(effect.payload).response as RemoteQuestionAnswer['response']
+            interactions.answer(effect.runId, { answerId: randomUUID(), response })
+            return 'done'
+          } catch {
+            // A question the Provider already closed is not a retryable failure.
+            return 'failed'
+          }
+        }
+        return 'failed'
       }
     } : {}),
     executor: { execute: async (executorInput) => {
