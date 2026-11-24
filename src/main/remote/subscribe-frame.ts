@@ -1,7 +1,7 @@
 import { DESKTOP_HISTORY_CHUNK_BYTES, DESKTOP_HISTORY_MAX_BYTES } from '../../shared/desktop-remote'
 import { SUBSCRIBE_MAX_TRACKED_RUN_IDS, SUBSCRIBE_VIEWS, type SubscribeRequest, type SubscribeView } from '../../shared/orchestration-subscribe'
 
-const BODY_KEYS = ['op', 'views', 'session', 'known', 'sessionsCursor', 'waitMs', 'eventSet', 'chunk', 'historyFormat', 'historyOnly']
+const BODY_KEYS = ['op', 'views', 'session', 'known', 'sessionsCursor', 'detailCursor', 'waitMs', 'eventSet', 'chunk', 'historyFormat', 'historyOnly']
 const TRANSPORT_KEYS = ['keepAlive', 'protocol', 'deviceLabel']
 
 function text(value: unknown, maximum: number): value is string {
@@ -19,7 +19,7 @@ export function parseSubscribeFrame(
       ...(transport === 'desktop' ? ['subscriptionId'] : [])]
   if (Object.keys(request).some((key) => !keys.includes(key))) return undefined
   const network = transport !== 'local'
-  const { views, session, known, sessionsCursor, detailWatch, waitMs, eventSet, chunk, historyFormat, historyOnly, subscriptionId, trackedRunIds } = request
+  const { views, session, known, sessionsCursor, detailCursor, detailWatch, waitMs, eventSet, chunk, historyFormat, historyOnly, subscriptionId, trackedRunIds } = request
   if (!Array.isArray(views) || views.length === 0 || views.length > 3 ||
       !views.every((v): v is SubscribeView => typeof v === 'string' && SUBSCRIBE_VIEWS.has(v as SubscribeView))) {
     return undefined
@@ -29,6 +29,10 @@ export function parseSubscribeFrame(
   if (sessionsCursor !== undefined && (typeof sessionsCursor !== 'string' || sessionsCursor.length === 0 || sessionsCursor.length > 512)) {
     return undefined
   }
+  // D6: continuing the detail page is only meaningful while reading detail, and the cursor is
+  // the engine's own opaque form, so an unparseable value is rejected instead of ignored.
+  if (detailCursor !== undefined && (typeof detailCursor !== 'string' || !/^d6:\d{1,15}$/.test(detailCursor) ||
+      !views.includes('detail'))) return undefined
   if (trackedRunIds !== undefined && (views.length !== 1 || views[0] !== 'activeRuns' || waitMs !== 0 ||
       known !== undefined || sessionsCursor !== undefined || !Array.isArray(trackedRunIds) || trackedRunIds.length === 0 ||
       trackedRunIds.length > SUBSCRIBE_MAX_TRACKED_RUN_IDS || !trackedRunIds.every(id => text(id, 256)) ||
@@ -92,6 +96,7 @@ export function parseSubscribeFrame(
     ...(detailWatch ? { detailWatch } : {}),
     ...(Array.isArray(trackedRunIds) ? { trackedRunIds } : {}),
     ...(sessionsCursor !== undefined ? { sessionsCursor: sessionsCursor as string } : {}),
+    ...(detailCursor !== undefined ? { detailCursor: detailCursor as string } : {}),
     ...(eventSet !== undefined ? { eventSet: eventSet as number } : {})
   }
 }

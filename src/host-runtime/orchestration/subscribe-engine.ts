@@ -14,6 +14,7 @@ import type { HostAdminNotice } from '../../shared/host-admin'
 import type { EventSink } from './event-sink'
 import type { CatalogSubscriptionScans } from './catalog-subscription-scans'
 import { mapEventRow } from './event-sink-statements'
+import { readDetailPage } from './subscribe-detail-page'
 import { mapTurnRow } from './projection-mappers'
 import type { SubscribeHub } from './subscribe-hub'
 import { deviceEventPayload, deviceHintKey, deviceOutcome, deviceTurn } from './subscribe-device-fields'
@@ -289,7 +290,7 @@ export class SubscribeEngine {
       snapshot.activeRuns = { rows }
     }
     if (views.has('detail') && request.session && !(access.scope === 'local' && request.detailWatch)) {
-      snapshot.detail = this.#readDetailSnapshot(access, this.#detailSession(access, request.session))
+      snapshot.detail = this.#readDetailSnapshot(access, this.#detailSession(access, request.session), request.detailCursor)
     }
     const hints = request.sessionsCursor || request.trackedRunIds ? [] : this.#drainHints(peer, access, views, request, true, !request.known)
     return {
@@ -384,19 +385,22 @@ export class SubscribeEngine {
     return session
   }
 
-  #readDetailSnapshot(access: SubscribeAccess, session: SessionProjectionRow | undefined): NonNullable<SubscribeSnapshot['detail']> {
+  #readDetailSnapshot(
+    access: SubscribeAccess,
+    session: SessionProjectionRow | undefined,
+    cursor?: string
+  ): NonNullable<SubscribeSnapshot['detail']> {
     if (!session) return { turns: [] }
-    const db = this.#sink.handle.db
-    const rows = db
-      .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? ORDER BY ordinal ASC')
-      .all(session.sessionKey) as Array<Record<string, unknown>>
-    const turns = rows.map(raw => {
+    const page = readDetailPage(this.#sink.handle.db, session.sessionKey, cursor)
+    const turns = page.rows.map(raw => {
       const turn = mapTurnRow(raw)
       return access.scope === 'local' ? turn : deviceTurn(turn)
     })
     return {
       turns,
-      ...(session.legacy ? { legacyBefore: true as const } : {})
+      ...(session.legacy ? { legacyBefore: true as const } : {}),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      ...(page.truncated ? { truncated: true as const } : {})
     }
   }
 

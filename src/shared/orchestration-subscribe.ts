@@ -50,6 +50,8 @@ export interface SubscribeRequest {
   session?: SubscribeSessionRef
   known?: SubscribeKnownCursor
   sessionsCursor?: string
+  /** D6: continue an older page of `detail.turns`; absent asks for the newest page. */
+  detailCursor?: string
   /** Gateway-supplied hint cursor scope. It grants no read authority. */
   subscriptionId?: string
   historyFormat?: 'turns'
@@ -180,6 +182,10 @@ export interface SubscribeSnapshot {
     turns: unknown[]
     legacyBefore?: true
     firstPage?: SubscribeHistoryPage
+    /** Older turns exist; pass as `detailCursor` to read them. */
+    nextCursor?: string
+    /** The page stopped early because one or more turns did not fit the byte budget. */
+    truncated?: true
   }
 }
 
