@@ -14,3 +14,13 @@ export function retryHistoryFor(
     .flatMap((project) => project.sessions.map((row) => ({ cwd: row.cwd ?? project.cwd, row })))
     .find((entry) => entry.row.sessionId === activeSessionId && entry.cwd === cwd)
 }
+
+/** The same lookup, only while the evidence gap is an error: otherwise there is nothing to retry. */
+export function retryHistoryAction(
+  projects: readonly ProjectMeta[],
+  activeSessionId: string | null,
+  cwd: string | null,
+  gapStatus: string | undefined
+) {
+  return gapStatus === 'error' ? retryHistoryFor(projects, activeSessionId, cwd) : undefined
+}

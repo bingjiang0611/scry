@@ -17,7 +17,7 @@ export type HostQueueState =
  * changes through the session subscription, so a timer here would only add load and risk showing a
  * stale dispatch order.
  */
-export function useHostQueue(request: HostQueueRequest | null, refreshKey = 0): HostQueueState {
+export function useHostQueue(request: HostQueueRequest | null, refreshKey: string | number = 0): HostQueueState {
   const [state, setState] = useState<HostQueueState>({ status: 'idle', items: [] })
   const sessionId = request?.sessionId ?? null
   const providerId = request?.providerId ?? null
@@ -87,18 +87,19 @@ export function useSessionHostQueueWithRelease(session: {
   sessionId: string | null
   providerId?: string | null
   cwd?: string | null
-}): {
+}, refreshKey: string | number | undefined = 0): {
   state: HostQueueState
   release: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
 } {
-  const [refreshKey, setRefreshKey] = useState(0)
-  const state = useSessionHostQueue(session, refreshKey)
-  const release = useQueuedRunRelease(() => setRefreshKey((n) => n + 1))
+  const [released, setReleased] = useState(0)
+  // Both keys are opaque: the projection key changes, or a release bumps the counter.
+  const state = useSessionHostQueue(session, `${refreshKey ?? ''}:${released}`)
+  const release = useQueuedRunRelease(() => setReleased((n) => n + 1))
   return { state, release }
 }
 
 /** The wiring the App needs: the queue for whatever session is on screen. */
-export function useSessionHostQueue(session: { sessionId: string | null; providerId?: string | null; cwd?: string | null }, refreshKey = 0): HostQueueState {
+export function useSessionHostQueue(session: { sessionId: string | null; providerId?: string | null; cwd?: string | null }, refreshKey: string | number = 0): HostQueueState {
   const request = hostQueueRequestFor(session)
   return useHostQueue(request, refreshKey)
 }

@@ -25,7 +25,7 @@ import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
 import { useSessionHostQueueWithRelease } from './hooks/useHostQueue'
-import { retryHistoryFor } from './retry-history'
+import { retryHistoryAction } from './retry-history'
 const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 type AppInteractionContext = { state: ReturnType<typeof import('./app-state').useAppState> }
 export function useAppInteraction(context: AppInteractionContext) {
@@ -186,11 +186,11 @@ export function useAppInteraction(context: AppInteractionContext) {
   })
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
-  const retryHistory = activeEvidenceGap?.status === 'error' ? retryHistoryFor(projects, activeSessionId, cwd) : undefined
+  const retryHistory = retryHistoryAction(projects, activeSessionId, cwd, activeEvidenceGap?.status)
   // D1: the queue is host state, so releasing a held entry asks again instead of editing the list here.
-  const { state: hostQueue, release: hostQueueRelease } = useSessionHostQueueWithRelease({
-    sessionId: activeSessionId, providerId: integrations.selectedId, cwd
-  })
+  // D1: re-read when the projection moves, not only when the session changes.
+  const { state: hostQueue, release: hostQueueRelease } = useSessionHostQueueWithRelease({ sessionId: activeSessionId,
+    providerId: integrations.selectedId, cwd }, session.historyWindow?.projectionKey)
   const chatProps = createAppChatProps({
     workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
