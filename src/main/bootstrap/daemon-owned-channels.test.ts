@@ -5,8 +5,6 @@ import {
 import { daemonOwnedChannels, registerDaemonOwnedChannels } from './daemon-owned-channels'
 import type { TrustedRegistrar } from './agent-runtime-ipc'
 
-// The channels the App registers only so the daemon gate can forward them: every channel
-// the daemon answers, minus those the App answers or serves itself, each exactly once.
 
 describe('daemon-owned channels', () => {
   it('lists every daemon channel except the ones the App answers or serves itself', () => {

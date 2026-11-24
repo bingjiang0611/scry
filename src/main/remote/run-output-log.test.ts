@@ -213,7 +213,6 @@ describe('RunOutputLog (live output content cache)', () => {
     expect((await log.since('run-1', 0)).chunks).toEqual([])
     for (let i = 0; i < 4001; i++) log.append('run-1', { kind: 'output', text: 'y' })
     const chunks = await log.since('run-1', 0, 200)
-    // Reading a bounded page; walk to the end to find the terminal marker.
     let cursor = 0
     let last = chunks
     const kinds: string[] = []

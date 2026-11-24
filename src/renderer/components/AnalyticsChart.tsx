@@ -141,7 +141,6 @@ export function modelBreakdownRows(analytics: UsageAnalytics): UsageAnalyticsBre
   const qoder = analytics.byProvider.find((row) => row.provider === 'qoder')
   if (qoder && (qoder.costUsd != null || tokensOf(qoder) != null)) rows.push(qoder)
   return rows.sort((a, b) => {
-    // 已知成本优先按金额降序；未知成本排在后面，按已观测 Token 降序。
     const costDelta = (b.costUsd ?? -1) - (a.costUsd ?? -1)
     return costDelta !== 0 ? costDelta : (tokensOf(b) ?? 0) - (tokensOf(a) ?? 0)
   })

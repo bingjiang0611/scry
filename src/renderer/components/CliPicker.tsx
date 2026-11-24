@@ -1,4 +1,3 @@
-// Composer Agent 选择器：本机检测到的 Provider，以及 Pi Profile 的增删。
 import { useEffect, useId, useRef, useState } from 'react'
 import { useMenuDismiss, usePickerOpen, type PickerOpenProps } from './picker-state'
 import { providerIdForAgentId } from '@shared/runtime'

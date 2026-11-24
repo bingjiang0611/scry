@@ -104,7 +104,6 @@ describe('daemon run surface start reconciliation', () => {
       await runtime.applySubscribeSnapshot([row({ scryRunId: canonicalId, admitted: true })])
       await expect(start).resolves.toEqual({ runId: canonicalId, commandStatus: 'executed' })
       expect(send).toHaveBeenCalledWith('agent:focusedRun', expect.objectContaining({ runId: canonicalId }))
-      // The admitted row starts the run's own trace read; nothing is submitted again.
       await vi.waitFor(() => expect(request.mock.calls.map(([frame]) => frame.op)).toEqual(['submit', 'intentStatusAtLog', 'subscribe', 'desktop']))
     } finally {
       runtime.dispose()
@@ -159,7 +158,6 @@ describe('daemon run surface controls', () => {
     const { value, frames } = surface({ live: [run('run-abc-1'), run('run-def-2')] })
     await expect(value.adopt('run-abc-1')).resolves.toMatchObject({ runId: 'run-abc-1' })
     expect(frames[0]).toEqual({ method: 'adopt', runId: 'run-abc-1' })
-    // Adopting is a view decision: the focused read now answers with that run.
     await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'run-abc-1' })
   })
 

@@ -5,7 +5,6 @@ import { describeActionResult, formatUptime } from '../background-service-view'
 import { BackgroundServicePanel } from './BackgroundServiceSettings'
 import { SettingsModal } from './Modals'
 
-// Unknown values display as 未知; available actions follow the connection state.
 
 const NOW = 1_700_000_000_000
 
@@ -40,7 +39,6 @@ describe('BackgroundServicePanel', () => {
     expect(html).toContain('后台服务的版本（1.0.0）与本 App（2.0.0）不一致')
     expect(html).toContain('class="btn primary"')
     expect(html.match(/class="unknown"/g)?.length).toBe(3)
-    // Unknown is never a count.
     expect(html).not.toContain('0 台')
     expect(html).not.toContain('0 个')
   })

@@ -12,17 +12,13 @@ function tempDir(): string {
 }
 afterAll(() => { for (const dir of roots.splice(0)) rmSync(dir, { recursive: true, force: true }) })
 
-// Launching the background service is the only place the App starts a process it does
-// not own. These assertions keep the two packaging shapes and the failure path honest.
 
 describe('daemon launch', () => {
   it('resolves the supervisor entry inside the app path for both shapes', () => {
-    // Packaged: appPath is the asar, and the entry is inside it.
     expect(daemonLaunchTarget({ isPackaged: true, appPath: '/Applications/Scry.app/Contents/Resources/app.asar', execPath: '/Applications/Scry.app/Contents/MacOS/Scry' })).toEqual({
       executable: '/Applications/Scry.app/Contents/MacOS/Scry',
       supervisorEntry: '/Applications/Scry.app/Contents/Resources/app.asar/out/main/daemon-supervisor.js'
     })
-    // Development: the same entry, resolved from the project root.
     expect(daemonLaunchTarget({ isPackaged: false, appPath: '/repo', execPath: '/usr/local/bin/electron' })).toEqual({
       executable: '/usr/local/bin/electron',
       supervisorEntry: '/repo/out/main/daemon-supervisor.js'

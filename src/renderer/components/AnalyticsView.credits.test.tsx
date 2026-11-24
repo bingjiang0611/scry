@@ -45,7 +45,6 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(html).not.toContain('<small title=')
     expect(html.match(/<dt>/g)).toHaveLength(5)
     const metrics = html.slice(html.indexOf('usage-metrics'), html.indexOf('usage-breakdown'))
-    // 缺报的 Token 在数值下方给一行可见提示；除此之外不堆说明行。
     expect(metrics.match(/<small/g)).toHaveLength(1)
     expect(metrics).toContain('已知下界：部分明细未上报')
     const visibleText = html.replace(/<[^>]*>/g, '')
@@ -93,7 +92,6 @@ describe('AnalyticsView Qoder Credits', () => {
     for (const credits of [null, undefined]) {
       const html = render(credits)
       const details = html.slice(html.indexOf('<section class="usage-breakdown">'), html.indexOf('<footer'))
-      // 成 Credits 未知不等于没有用量：行保留，金额为“—”，Token 照实显示。
       expect(details).toContain('—')
       expect(details).toContain('1.00K')
       expect(details).not.toContain('当前范围没有可展示的明细')
@@ -122,7 +120,6 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(details).toContain('claude-opus-5-5')
     expect(details).toContain('>$6.90</td><td>100.0%</td>')
     expect(details).toContain('官方 API 标准价换算')
-    // 有 Token 但没有价格的模型仍列出：金额为“—”，不隐藏已发生的用量。
     expect(details).toContain('unpriced-model')
     expect(details).toContain('<td title="成本不可用">—</td>')
     expect(details).not.toContain('未归因')
@@ -143,7 +140,6 @@ describe('AnalyticsView Qoder Credits', () => {
     expect(providers.match(/class="usage-provider-row"/g)).toHaveLength(4)
     expect(providers.indexOf('>Codex</b>')).toBeLessThan(providers.indexOf('>cc-switch</b>'))
     expect(providers.indexOf('>cc-switch</b>')).toBeLessThan(providers.indexOf('>Qoder</b>'))
-    // 未知成本排在已知成本之后，金额显示“—”，不写成 $0。
     expect(providers.indexOf('>Qoder</b>')).toBeLessThan(providers.indexOf('>unknown</b>'))
     expect(providers).toContain('>$0.00</strong>')
     expect(providers).toContain('83.3%')
@@ -177,7 +173,6 @@ describe('AnalyticsView Qoder Credits', () => {
       error={null} onRangeChange={() => {}} onRefresh={() => {}} />)
     expect(pending).toContain('正在计算 Credit')
     expect(pending).not.toContain('Credit 不可用')
-    // 未完成的投影仍然不显示任何 Credit 数量，也不把成本当成已知。
     expect(pending).not.toContain('Credits<')
     expect(pending).toMatch(/<strong title="[^"]*">—<\/strong>/)
     // 同一条目在 Credit 确定后改回精确证据；不可用不能再写成“正在计算”。
@@ -188,7 +183,6 @@ describe('AnalyticsView Qoder Credits', () => {
   it('distinguishes unknown, measured zero and tiny positive credits', () => {
     expect(render(null)).toContain('Credit 不可用')
     expect(render(null)).not.toContain('>0 Credits<')
-    // 没有成本证据时保留 Provider 行，金额为“—”；不写成 0，也不冒充已知成本。
     expect(render(undefined)).toContain('class="usage-provider-row"')
     expect(render(null)).toContain('class="usage-provider-row"')
     expect(render(null)).toMatch(/<strong title="[^"]*">—<\/strong>/)

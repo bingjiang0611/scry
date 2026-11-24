@@ -1,7 +1,6 @@
 import { useCopyFeedback } from '../hooks/useCopyFeedback'
 import { useAsyncAction } from '../hooks/useAsyncAction'
 import { BusyLabel } from './primitives/BusyLabel'
-// Remote building blocks shared by the hosts page and remote conversations.
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import type { TraceEvent } from '@shared/trace'
 import type { Turn } from '../format'

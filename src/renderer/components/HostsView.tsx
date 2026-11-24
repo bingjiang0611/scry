@@ -19,8 +19,6 @@ import './hosts-view.css'
 import { Button } from './primitives/Button'
 import { Notice } from './primitives/Notice'
 
-// Connect-time refusals include the version gate: say which end to upgrade
-// instead of showing a raw protocol code.
 function errorText(error: unknown): string {
   const message = copy.errorText(error)
   if (message.includes('desktop_protocol_host_older')) return REMOTE_SESSION_COPY.protocolHostOlder('远端主机')

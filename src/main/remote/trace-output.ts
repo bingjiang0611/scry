@@ -25,11 +25,9 @@ export function traceEventToOutputChunk(ev: TraceEvent): RemoteOutputChunk | nul
     return { kind: 'reasoning', text: ev.thinking }
   }
   if (ev.kind === 'tool' && ev.toolUseId && typeof ev.output === 'string' && ev.output.length > 0) {
-    // A tool_result carries observable output text for its tool_use.
     return { kind: 'tool_result', text: ev.output }
   }
   if (ev.kind === 'tool' && ev.tool && ev.output === undefined) {
-    // A tool_use: surface the tool name (+ a short input hint) as activity.
     const hint = ev.filePath ? ` ${ev.filePath}` : ''
     return { kind: 'tool', text: `${ev.tool}${hint}` }
   }

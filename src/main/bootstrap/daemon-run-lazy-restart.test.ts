@@ -29,7 +29,6 @@ describe('lazy daemon surface: restart and held launches', () => {
     expect(create).toHaveBeenCalledTimes(1)
     expect((await lazy.restart()).status).toBe('ready')
     expect(create).toHaveBeenCalledTimes(2)
-    // The mismatched client is closed, not left holding a socket.
     expect(dispose).toHaveBeenCalledTimes(1)
     expect((await lazy.ready()).status).toBe('ready')
     lazy.dispose()
@@ -48,7 +47,6 @@ describe('lazy daemon surface: restart and held launches', () => {
     lazy.onOutcome(() => { throw new Error('an observer failing must not break the run surface') })
     await lazy.ready()
     await lazy.ready()
-    // Remembered for the session: no second connect, no second notice.
     expect(seen).toEqual(['version-mismatch'])
     // A restart the user asked for reports through its own action, not here.
     expect((await lazy.restart()).status).toBe('version-mismatch')
@@ -70,7 +68,6 @@ describe('lazy daemon surface: restart and held launches', () => {
     await expect(seen!.launch!()).resolves.toEqual({ status: 'failed', reason: 'daemon_stopping' })
     const second = lazy.holdLaunches()
     release()
-    // Two holders: still held until both release.
     await expect(seen!.launch!()).resolves.toEqual({ status: 'failed', reason: 'daemon_stopping' })
     second()
     second()

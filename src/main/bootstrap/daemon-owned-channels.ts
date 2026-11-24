@@ -15,7 +15,6 @@ export function daemonOwnedChannels(): string[] {
     .filter((channel) => !DAEMON_MODE_IN_PROCESS_CHANNELS.has(channel) && !DAEMON_MODE_SERVED_CHANNELS.has(channel))
 }
 
-/** Registers the daemon's channels the App has not registered itself, once each. */
 export function registerDaemonOwnedChannels(handleTrusted: TrustedRegistrar, registered: ReadonlySet<string>): void {
   for (const channel of daemonOwnedChannels()) {
     if (registered.has(channel)) continue

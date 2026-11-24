@@ -95,7 +95,6 @@ export function CapabilitiesModal({
   const loadingMcpConfig = mcpConfigRefreshing && !mcpCapability
   const loadingMcp = loadingMcpConfig || mcpRefreshing
   const [cancelState, setCancelState] = useState<'idle' | 'requested' | 'unavailable'>('idle')
-  // Each check starts with a fresh cancel control.
   useEffect(() => { if (!mcpRefreshing) setCancelState('idle') }, [mcpRefreshing])
   const skillsReadStarted = useReadStarted(skillsRefreshing)
   const mcpReadStarted = useReadStarted(mcpConfigRefreshing)

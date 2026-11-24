@@ -5,7 +5,6 @@ import { connectForRunMode, createDaemonRunMode, retryAfterReconnect } from './d
 
 // Either the daemon is usable and owns the runs, or the reason it is not is returned:
 // there is no in-process pipeline to fall back to.
-// None of these paths may start a second daemon or write a credential it cannot protect.
 
 afterEach(() => { vi.unstubAllEnvs() })
 
@@ -20,7 +19,6 @@ const base = { userDataDir: '/tmp/scry-user', daemonStateDirectory: '/tmp/scry-s
 describe('daemon reconnect policy', () => {
   it('retries a replayable read after the daemon it talked to is gone', () => {
     expect(retryAfterReconnect(new DaemonClientError('daemon_not_running'), true)).toBe(true)
-    // The transport relays the same reason wrapped in its own error type.
     expect(retryAfterReconnect(new DaemonRunError('daemon_not_running'), true)).toBe(true)
     expect(retryAfterReconnect(new DaemonRunError('daemon_outcome_unknown'), true)).toBe(true)
   })
@@ -44,7 +42,6 @@ describe('daemon run mode', () => {
       ...base, probe, credentialCipher: () => ({ ok: false, reason: 'basic_text_plaintext_backend' })
     })
     expect(result).toEqual({ status: 'credential-unavailable', reason: 'basic_text_plaintext_backend' })
-    // No daemon was contacted at all: the refusal happens before any handshake.
     expect(probe).not.toHaveBeenCalled()
   })
 
@@ -76,7 +73,6 @@ describe('daemon run mode', () => {
     const probe = vi.fn(async () => { throw new DaemonClientError('daemon_device_not_authorized') })
     const result = await createDaemonRunMode({ ...base, credentialCipher: cipher, launch, probe })
     expect(result).toEqual({ status: 'device-not-authorized', reason: 'daemon_device_not_authorized' })
-    // The daemon already answered; launching another one would only be refused again.
     expect(launch).not.toHaveBeenCalled()
   })
 
@@ -97,8 +93,6 @@ describe('daemon run mode', () => {
     vi.stubEnv('SCRY_HOST_DAEMON', '1')
     let probes = 0
     const launch = vi.fn(async () => ({ status: 'started' as const }))
-    // Not answering at first (absence), then up without a secret: the wait stops there
-    // instead of running out as daemon_ready_timeout.
     const probe = vi.fn(async () => {
       probes += 1
       if (probes === 1) return undefined

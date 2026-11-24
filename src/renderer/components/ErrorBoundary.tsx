@@ -19,7 +19,6 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error): void {
-    // 留个 console 方便 dev 排查（read_console_messages 能捞）
     console.error('[scry] 渲染异常被 ErrorBoundary 捕获：', error)
   }
 

@@ -6,7 +6,6 @@ import { processIdentityKey, type ProcessRow } from '../process-diagnostics'
 // userData, and the App only stops it on the user's explicit choice.
 
 export type SignalCheckFailure =
-  /** The holder released the lock on its own; nothing to signal. */
   | 'lock-released'
   /** The process is gone or a zombie; its record is stale and the takeover rules apply. */
   | 'holder-exited'
@@ -16,7 +15,6 @@ export type SignalCheckFailure =
   | 'identity-changed'
   /** The pid's identity could not be read, so it cannot be proven to be the daemon. */
   | 'identity-unreadable'
-  /** The record carries no identity key to compare with. */
   | 'identity-unrecorded'
 
 export type SignalCheck = { ok: true } | { ok: false; reason: SignalCheckFailure }
