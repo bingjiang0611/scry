@@ -24,7 +24,6 @@ export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export const packageRoot = join(repoRoot, 'packages', 'turn-recorder-cli')
 export const INTERNAL_PACKAGE = '@ali/scry-turn-recorder'
 export const INTERNAL_REGISTRY = 'https://registry.anpm.alibaba-inc.com/'
-/** What the package manager ships, in the order a reader expects. */
 export const SHIPPED = ['dist', 'integrations', 'docs', 'README.md']
 
 export function internalManifest(manifest, { name = INTERNAL_PACKAGE, registry = INTERNAL_REGISTRY } = {}) {
