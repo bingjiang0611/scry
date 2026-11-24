@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `ba60d312`, reviewed all three `experiments/remote-g0/verify-*.test.mjs` files: nine tokens in the private-directory suite and none in the redaction or summary suites. Removed one comment that repeated the fixture assertion; retained the platform and account-boundary rationale. Comment-free emit matched, all 17 isolated tests passed, and the source-comment ratchet passed.
+
 At `9a6eacfd`, confirmed two redundant section labels in `src/renderer/constants/side-chat-copy.ts` and removed them without changing any user-facing copy. Comment-free emit and tool directives matched; four focused tests and the source-comment ratchet passed. The broader intake of 148 tokens across renderer constants, B4V scenarios, and managed-turn tests is an inventory, not a completed review of those directories.
 
 At `17a961b6`, reviewed seven comments in `src/renderer/components/machines-view.css` and 91 in the three JS files under `experiments/remote-g0/verify/`. Removed five redundant section labels and two repeated acceptance headings. PostCSS rules and JS comment-free emit matched; the summary verifier passed seven isolated tests. Cryptographic, redaction, missing-evidence and filesystem trust rationale remains in place. No device or relay was used.
