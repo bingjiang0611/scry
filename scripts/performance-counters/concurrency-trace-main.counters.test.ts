@@ -128,7 +128,6 @@ describe('concurrency trace single-run main projection work counters', () => {
     })
     const applied = mergeRemoteTrace(baseline.view, realRead)
     if (applied.kind !== 'applied' || !applied.view) throw new Error('the real delta must apply to the baseline view')
-    // The narrowed view is captured in a local so the callback below keeps the check the guard already made.
     const appliedView = applied.view
     // The healthy delta reproduces the independent oracle, so the control below fails for the missing patch.
     expect(() => assertMatchesOracle(appliedView.run, baseline.run, 'real delta')).not.toThrow()
