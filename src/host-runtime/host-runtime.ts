@@ -137,7 +137,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
       }
     },
     ...(runtime.sessionRefFromRequest && runtime.changeLegacySessionMetadata ? {
-      sessionAction: async (context: DesktopRemoteContext, action: import('../shared/desktop-remote').DesktopRemoteSessionAction, authorize: () => void) => {
+      sessionAction: async (context: DesktopRemoteContext, action: import('../shared/desktop-remote').DesktopRemoteSessionAction, authorize: () => void, actor?: string) => {
         const ref = runtime.sessionRefFromRequest!(context)
         if (!ref) throw new Error('无效的远程会话操作请求')
         return runtime.changeLegacySessionMetadata!(ref, () => {
@@ -147,7 +147,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
           return action.archived
             ? archiveSessionAndStop(runtime.appSessionStore(), ref, runtime.runs.activeStates(), runtime.requestRunStop)
             : runtime.appSessionStore().setArchived(ref, false)
-        })
+        }, { change: action, actor: actor ?? 'system' })
       }
     } : {}),
     ...(runtime.forkSessionWithAuthority ? {
@@ -157,7 +157,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
     toolPanels: inputs.toolPanels,
     ...(inputs.createOutputStore ? { createOutputStore: inputs.createOutputStore } : {}),
     ...(runtime.sessionRefFromRequest && runtime.deleteOneSession ? {
-      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote') => {
+      sessionDelete: async (request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote', actor?: string) => {
         const ref = runtime.sessionRefFromRequest!(request)
         if (!ref) throw new Error('无效的远程会话删除请求')
         // The App's own grant keeps the App's semantics: main already asked the user,
@@ -173,7 +173,7 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
           if (!current?.archivedAt) throw new Error('远程删除只允许已存档会话')
         }
         authorizeArchived()
-        return runtime.deleteOneSession!(ref, { confirm: false, notifyFailure: false, authorize: authorizeArchived })
+        return runtime.deleteOneSession!(ref, { confirm: false, notifyFailure: false, authorize: authorizeArchived, ...(actor ? { actor } : {}) })
       }
     } : {}),
     sessionCatalogRevision: () => createHash('sha256').update(JSON.stringify(canonicalRemoteProjectRoots(runtime.knownProjectDirectories()))).digest('hex'),

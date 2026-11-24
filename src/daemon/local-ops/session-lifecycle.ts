@@ -41,12 +41,14 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
       }
     },
     publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
+    // D4: rename/pin/archive are recorded by the authority once the catalog write succeeded.
+    recordSessionMetadata: (input) => deps.getOrchestrationAuthority?.()?.recordSessionMetadata?.(input),
     // The archived purge's real count, forwarded to the App's window as in process.
     publishDeleteProgress: (progress) => publishHint({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
   })
   deps.links.deleteOneSession = (request, options) => lifecycle.deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof lifecycle.deleteOneSession>[1])
   deps.links.sessionRefFromRequest = (value) => lifecycle.sessionRefFromRequest(value)
-  deps.links.changeLegacySessionMetadata = (ref, change) => lifecycle.changeLegacySessionMetadata(ref, change)
+  deps.links.changeLegacySessionMetadata = (ref, change, meta) => lifecycle.changeLegacySessionMetadata(ref, change, meta)
   return {
     // The App confirmed; the daemon reports a failure in the result, never a dialog.
     'agent:deleteSession': (request: unknown) => lifecycle.deleteOneSession(request as SessionDeletionRequest, { confirm: false, notifyFailure: false }),

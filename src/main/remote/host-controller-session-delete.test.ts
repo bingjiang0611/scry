@@ -54,7 +54,8 @@ describe('runSessionDelete re-checks the device grant during the delete', () => 
     expect(sessionDelete).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: '/workspace', externalSessionId: 'sess-1', confirmed: true }),
       expect.any(Function),
-      'remote'
+      'remote',
+      'peer:peer-a'
     )
   })
 })

@@ -279,6 +279,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       requestRunStop,
       forkSessionWithAuthority: (request) => forkOperations!.forkSessionWithAuthority(request),
       remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
+      getOrchestrationAuthority: () => orchestrationAuthority,
       startupManagedRecovery: () => startupManagedRecovery,
       userDataDir: options.userDataDir,
       appVersion: options.appVersion,

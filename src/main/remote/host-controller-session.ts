@@ -49,7 +49,7 @@ export async function runSessionAction(deps: SessionActionDeps, peer: string, in
       deps.authorizeDevice(peer)
       if (deps.workspace.authorize(context.cwd) !== canonicalCwd) throw new Error('workspace_context_mismatch')
     }
-    const result = await deps.sessionAction(context, action, authorize)
+    const result = await deps.sessionAction(context, action, authorize, `peer:${peer}`)
     authorize()
     return result
 }
@@ -108,7 +108,7 @@ export async function runSessionDelete(deps: SessionActionDeps, peer: string, in
     }
     // Delete semantics differ by scope: the App may delete an unarchived session
     // after its own confirmation dialog, a device may only delete archived ones.
-    const result = await deps.sessionDelete(request, authorize, deps.gateway.grantScope(peer))
+    const result = await deps.sessionDelete(request, authorize, deps.gateway.grantScope(peer), `peer:${peer}`)
     authorize()
     return result
 }

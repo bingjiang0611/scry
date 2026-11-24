@@ -3,6 +3,8 @@ import type { BackgroundServiceOrchestrationStatus } from '../shared/background-
 import { maybeStartOrchestrationMaintenance } from './orchestration-maintenance'
 import { createOutboxGate } from './orchestration-outbox-gate'
 import { recordSessionLineage } from './orchestration-lineage'
+import { runDeferredLegacyImport } from './orchestration-deferred-import'
+import { recordSessionMetadata } from './orchestration-session-metadata'
 import { createTransportHandlers } from './orchestration-transport-handlers'
 import { observeAuthorityNativeTranscript } from './orchestration-native-transcript'
 import type { ConversationStore } from '../main/conversation-store'
@@ -15,9 +17,9 @@ import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { createConversationOrdinalResolver } from '../host-runtime/orchestration/conversation-ordinal-lookup'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
-import { startDeferredLegacyImport, type LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
+import type { LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
-import { LEGACY_H1_IMPORT_COMPLETE, runAuthorityStartupSequence } from './orchestration-authority-startup'
+import { runAuthorityStartupSequence } from './orchestration-authority-startup'
 import {
   buildAuthorityStatus,
   createAuthoritySubscribeHub,
@@ -57,6 +59,7 @@ export interface DaemonOrchestrationAuthority {
   createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
   /** D3: record the lineage of a fork or side chat that already exists natively. */
   recordSessionLineage(input: Parameters<NonNullable<OrchestrationAuthorityHooks['recordSessionLineage']>>[0]): { status: 'recorded' | 'unavailable'; reason?: string }
+  recordSessionMetadata(input: Parameters<NonNullable<OrchestrationAuthorityHooks['recordSessionMetadata']>>[0]): { status: 'recorded' | 'unavailable'; reason?: string }
   publishHint(event: AppHint): void
   observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
@@ -216,6 +219,7 @@ function buildAuthorityRuntime<
   const hooks: OrchestrationAuthorityHooks = {
     outbox: () => createOutboxGate(() => sink.handle.db),
     recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
+    recordSessionMetadata: (input) => recordSessionMetadata(sink, input, Date.now()),
     currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: () => createAuthorityLedgerStore(sink),
 
@@ -396,27 +400,16 @@ function buildAuthorityRuntime<
   let closed = false
   const pausedImport = options.pauseDeferredImport
   const startImport = (): void => {
-    const ctrl = ctx.getDeferredControl()
-    if (!deferredPlan || ctrl.deferredStarted || closed || sink.isWriteIndeterminate()) {
+    const plan = deferredPlan
+    if (!plan) {
       resolveImportComplete?.()
       return
     }
-    ctrl.setStarted()
-    const targetPlan = deferredPlan
-    deferredPlan = undefined
-    const handle = startDeferredLegacyImport({
-      sink, userDataDir: options.userDataDir, pendingTtlMs,
-      reconcileOpenRuns: true, shadowOnly: false, plan: targetPlan, resolveTurnOrdinal
+    const began = runDeferredLegacyImport({
+      sink, plan, closed, pendingTtlMs, userDataDir: options.userDataDir, resolveTurnOrdinal,
+      control: ctx.getDeferredControl(), log: options.log, resolveImportComplete
     })
-    ctx.setDeferredControl(handle.cancel)
-    handle.promise
-      .then((s) => {
-        if (closed || sink.isWriteIndeterminate() || s.legacyLedgerSeq < targetPlan.lastSeq) return
-        sink.setMeta(LEGACY_H1_IMPORT_COMPLETE, '1')
-        options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`)
-      })
-      .catch((e) => options.log(`daemon.orchestration-on-import-failed ${e instanceof Error ? e.message : String(e)}`))
-      .finally(() => resolveImportComplete?.())
+    if (began) deferredPlan = undefined
   }
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
@@ -428,6 +421,7 @@ function buildAuthorityRuntime<
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
     recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
+    recordSessionMetadata: (input) => recordSessionMetadata(sink, input, Date.now()),
     ...createTransportHandlers({ sink, subscribeHub, resolveCanonical }),
     observeNativeTranscript: (homeDir, run) =>
       observeAuthorityNativeTranscript({ sink, resolveCanonical, pendingTranscripts, log: options.log }, homeDir, run),

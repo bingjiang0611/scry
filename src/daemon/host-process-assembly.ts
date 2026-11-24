@@ -132,9 +132,9 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     requestRunStop: deps.requestRunStop,
     // W17: reuse daemon's local-ops session lifecycle & native fork with identical remote authority.
     sessionRefFromRequest: (value) => deps.sessionLinks.sessionRefFromRequest ? deps.sessionLinks.sessionRefFromRequest(value) : null,
-    changeLegacySessionMetadata: (ref, change) => {
+    changeLegacySessionMetadata: (ref, change, meta) => {
       if (!deps.sessionLinks.changeLegacySessionMetadata) throw new Error('daemon_capability_unavailable:session-metadata')
-      return deps.sessionLinks.changeLegacySessionMetadata(ref, change)
+      return deps.sessionLinks.changeLegacySessionMetadata(ref, change, meta)
     },
     deleteOneSession: (request, options) => {
       if (!deps.sessionLinks.deleteOneSession) throw new Error('daemon_capability_unavailable:session-delete')

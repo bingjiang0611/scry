@@ -7,8 +7,6 @@ import type { ConversationStore } from '../conversation-store'
 import type { ContextAdmission } from '../context-admission'
 import type { SessionDiffBaselineRegistry } from '../session-diff'
 import type { ActiveRun } from '../../shared/trace'
-import { isSessionProviderId } from '../app-store'
-import { archiveSessionAndStop } from '../session-archive'
 import { deleteTranscriptCopies, traceArchiveRunIds } from '../transcript-archive'
 import { resolveSessionRunIds, deleteSessionData, deleteTurnOutboxSessionRows, turnOutboxSessionRunIds } from '../db'
 import { usageSessionRunIds, deleteUsageSessionRows } from '../usage-jsonl'
@@ -18,6 +16,7 @@ import { traceProgressSessionRunIds, deleteTraceTurnProgressArtifacts } from '..
 import { deleteOwnedSessionData } from '../session-deletion'
 import type { SideChatCascade } from './conversation-delete'
 import { createSessionSideChats } from './session-side-chats'
+import { createSessionMetadataOps, sessionRefFromRequest } from './session-lifecycle-metadata'
 import { archivedDeletionPrompt, sessionDeletionPrompt, untouchedDeletion } from './session-deletion-prompts'
 
 // Session delete, rename, pin, archive and archived purge, free of Electron so main and
@@ -50,7 +49,16 @@ export interface SessionLifecycleDependencies {
   prepareConversationDeletion: (conversation: Conversation) => Promise<ConversationDeletionPreview>
   /** A Provider session's side chats, deleted with it (they live only in its panel). */
   sideChatCascade: SideChatCascade
-  deleteNativeProjection?: (ref: AppSessionRef, runIds: ReadonlySet<string>) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
+  deleteNativeProjection?: (ref: AppSessionRef, runIds: ReadonlySet<string>, actor?: string) => { status: 'deleted' | 'not_present' | 'unavailable'; error?: string }
+  /** D4: the authority records rename/pin/archive so the projection and devices see them. */
+  recordSessionMetadata?: (input: {
+    externalSessionId: string
+    providerId: string
+    agentProfileId?: string | undefined
+    cwd: string
+    change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+    actor: string
+  }) => unknown
   publishDataUpdated: (event: AgentDataUpdated) => void
   /** The real count of archived sessions handled so far, for the renderer to show in place. */
   publishDeleteProgress?: (progress: DeleteArchivedProgress) => void
@@ -65,12 +73,32 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
   const { getRuns, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery, providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions, appUserDataDir, requestRunStop, prepareConversationDeletion, assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, publishDataUpdated, sideChatCascade } = deps
   const sessionSideChats = createSessionSideChats({ appSessionStore, sideChatCascade, notifyFailure: deps.notifyFailure })
   const { deleteNativeProjection } = deps
+  // D4: the metadata operations and their event recording live in their own module.
+  const { changeLegacySessionMetadata, renameSession, setSessionPinned, setSessionArchived } = createSessionMetadataOps({
+    appSessionStore,
+    conversationStore,
+    getStartupManagedRecovery,
+    providerSessionKey: deps.providerSessionKey,
+    adoptingSessionKeys,
+    getRuns: () => ({ activeStates: () => getRuns().activeStates() }),
+    requestRunStop,
+    dockBadge,
+    ...(deps.recordSessionMetadata ? { recordSessionMetadata: deps.recordSessionMetadata } : {})
+  })
 
   // 删除一个历史会话。工作区 .scry/ 是独立 canonical evidence，明确保留。
   // confirm / notifyFailure 由调用方决定：单条删除各弹一次系统弹窗，批量删除只在批次首尾各弹一次。
   async function deleteOneSession(
     p: SessionDeletionRequest,
-    options: { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
+    options: {
+      confirm: boolean
+      notifyFailure: boolean
+      conversationId?: string
+      runIds?: readonly string[]
+      authorize?: () => void
+      /** D4: the caller that asked for the delete, so the tombstone event names it. */
+      actor?: string
+    }
   ): Promise<DeleteSessionResult> {
     const empty = untouchedDeletion
     if (!p.externalSessionId || p.providerId === 'legacy_unknown') {
@@ -204,7 +232,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
           deleteProjection: deleteNativeProjection
             ? (runIds) => {
                 options.authorize?.()
-                return deleteNativeProjection({ providerId, agentProfileId, cwd, externalSessionId }, runIds)
+                return deleteNativeProjection({ providerId, agentProfileId, cwd, externalSessionId }, runIds, options.actor)
               }
             : undefined,
           deleteCatalog: () => sessionStore.remove({ providerId, agentProfileId, cwd, externalSessionId })
@@ -229,53 +257,6 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
     } finally {
       deletingSessions.delete(deletionKey)
     }
-  }
-
-  function sessionRefFromRequest(p: unknown): AppSessionRef | null {
-    if (!p || typeof p !== 'object') return null
-    const request = p as Partial<AppSessionRef>
-    if (typeof request.externalSessionId !== 'string' || !request.externalSessionId) return null
-    if (!isSessionProviderId(request.providerId)) return null
-    if (request.agentProfileId != null && typeof request.agentProfileId !== 'string') return null
-    return {
-      providerId: request.providerId,
-      agentProfileId: request.agentProfileId,
-      cwd: typeof request.cwd === 'string' ? request.cwd : '',
-      externalSessionId: request.externalSessionId
-    }
-  }
-
-  async function changeLegacySessionMetadata(ref: AppSessionRef, change: () => boolean): Promise<boolean> {
-    if (ref.providerId === 'legacy_unknown') return change()
-    await getStartupManagedRecovery()
-    await conversationStore().assertLegacyWriteAllowed({ ...ref, providerId: ref.providerId, nativeSessionId: ref.externalSessionId })
-    if (adoptingSessionKeys.has(providerSessionKey(ref.providerId, ref.cwd, ref.externalSessionId, ref.agentProfileId))) {
-      throw new Error('会话已归属统一对话或正在迁移，请从统一对话管理')
-    }
-    // Do not queue ordinary legacy archiving behind start preparation: it must
-    // retain the existing persist-first fence and stop its registered owner.
-    return change()
-  }
-
-  // 名称、置顶与存档只改 catalog，不动 Provider transcript 或 turn/usage/trace 数据。
-  const renameSession = (p: unknown, title: unknown): Promise<boolean> | boolean => {
-    const ref = sessionRefFromRequest(p)
-    if (!ref || typeof (p as AppSessionRef).cwd !== 'string') throw new Error('无效的会话重命名请求')
-    return changeLegacySessionMetadata(ref, () => appSessionStore().rename(ref, title))
-  }
-
-  const setSessionPinned = (p: unknown, pinned: unknown): Promise<boolean> | boolean => {
-    const ref = sessionRefFromRequest(p)
-    if (!ref || typeof pinned !== 'boolean') throw new Error('无效的置顶请求')
-    return changeLegacySessionMetadata(ref, () => appSessionStore().setPinned(ref, pinned))
-  }
-
-  const setSessionArchived = (p: unknown, archived: unknown): Promise<boolean> | boolean => {
-    const ref = sessionRefFromRequest(p)
-    if (!ref || typeof archived !== 'boolean') throw new Error('无效的存档请求')
-    return changeLegacySessionMetadata(ref, () => archived
-      ? archiveSessionAndStop(appSessionStore(), ref, getRuns().activeStates(), requestRunStop, (key) => dockBadge.remove(key))
-      : appSessionStore().setArchived(ref, false))
   }
 
   const listArchivedSessions = () => appSessionStore().listArchivedProjects()

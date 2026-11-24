@@ -48,6 +48,18 @@ export interface OrchestrationAuthorityHooks {
    * `unavailable` instead of claiming the row was written.
    */
   recordSessionLineage?(input: SessionLineageRecord): { status: 'recorded' | 'unavailable'; reason?: string }
+  /**
+   * D4: rename, pin and archive are decided by the authority so the projection and every device
+   * see the change, and the event names the caller that asked for it.
+   */
+  recordSessionMetadata?(input: {
+    externalSessionId: string
+    providerId: string
+    agentProfileId?: string | undefined
+    cwd: string
+    change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+    actor: string
+  }): { status: 'recorded' | 'unavailable'; reason?: string }
   /** Rebuilds the transient dispatcher state from the durable log. */
   createLedgerStore(): LedgerStore
   /** B1: dispatch claims come from the durable outbox, not from in-memory bookkeeping. */
