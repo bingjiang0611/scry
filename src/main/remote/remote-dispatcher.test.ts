@@ -312,3 +312,57 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
     expect(dispatcher.pump()).toEqual([runId])
   })
 })
+
+// C4: the restart note belongs to exactly one turn of a session. The dispatcher asks for the rewrite
+// before executing, so the executor sees the note once and the next turn does not.
+describe('RemoteDispatcher restart note', () => {
+  it('rewrites the detail for one turn and leaves the next turn alone', async () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const seen: (string | undefined)[] = []
+    let note: string | undefined = '（宿主重启提示）后台任务已取消'
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      rewriteDetail: (_runId, detail) => {
+        const current = note
+        note = undefined
+        if (!current || !detail) return detail
+        return JSON.stringify({ ...JSON.parse(detail), prompt: `${current}\n\n${JSON.parse(detail).prompt}` })
+      },
+      executor: {
+        execute(input) {
+          seen.push(JSON.parse(input.detail ?? '{}').prompt)
+          return Promise.resolve()
+        }
+      }
+    })
+    const detail = JSON.stringify({ providerId: 'codex', cwd: '/w', prompt: '继续修测试' })
+    const first = randomUUID()
+    const second = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId: first, detail })
+    dispatcher.pump()
+    await dispatcher.idle()
+    ledger.recordIntent({ intentId: randomUUID(), runId: second, detail })
+    dispatcher.pump()
+    await dispatcher.idle()
+
+    expect(seen[0]).toBe('（宿主重启提示）后台任务已取消\n\n继续修测试')
+    expect(seen[1]).toBe('继续修测试')
+  })
+
+  it('dispatches unchanged when the rewrite throws', async () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const seen: (string | undefined)[] = []
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      rewriteDetail: () => { throw new Error('note unavailable') },
+      executor: { execute: (input) => { seen.push(input.detail); return Promise.resolve() } }
+    })
+    const runId = randomUUID()
+    const detail = JSON.stringify({ providerId: 'codex', cwd: '/w', prompt: 'tasks' })
+    ledger.recordIntent({ intentId: randomUUID(), runId, detail })
+    dispatcher.pump()
+    await dispatcher.idle()
+    expect(seen).toEqual([detail])
+    expect(ledger.runState(runId)).toBe('settled')
+  })
+})
