@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { HostQueueRequest } from '../../shared/host-queue'
 import { hostQueueItems, hostQueueRequestFor, type HostQueueItem } from './host-queue-model'
 import { HOST_QUEUE_COPY } from '../constants/host-queue-copy'
@@ -23,11 +23,14 @@ export function useHostQueue(request: HostQueueRequest | null, refreshKey: strin
   const providerId = request?.providerId ?? null
   const cwd = request?.cwd ?? null
   const agentProfileId = request?.agentProfileId ?? null
+  // The entries belong to one session: while the new session's answer is in flight, showing the previous
+  // session's rows would be a lie about whose queue this is.
+  const shownFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!sessionId) {
-      setState({ status: 'idle', items: [] })
-      return
-    }
+    const stale = shownFor.current !== sessionId
+    shownFor.current = sessionId
+    if (!sessionId || stale) setState({ status: 'idle', items: [] })
+    if (!sessionId) return
     const ask = hostQueueRequestFor({ sessionId, providerId, cwd, agentProfileId })
     if (!ask) return
     let live = true
