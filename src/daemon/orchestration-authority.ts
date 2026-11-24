@@ -38,9 +38,10 @@ import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
 import { ledgerLifecycleFor } from './orchestration-intent-status'
+import { sessionQueueBlocksDispatch } from './orchestration-dispatch-queue'
+import { createCanonicalRunIds } from './orchestration-canonical-run-ids'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
-const MAX_LEDGER_CANONICAL_MAP = 4_096
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
@@ -187,37 +188,11 @@ function buildAuthorityRuntime<
   )
   let progressCounter = 0
 
-  const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
-  const resolvePersistedCanonical = (runId: string): string => {
-    const active = ledgerToCanonical.get(runId)
-    if (active || !sink.handle.db.open) return active ?? runId
-    const alias = canonicalForAlias.get(runId) as { run_id: string } | undefined
-    return alias?.run_id ?? runId
-  }
-  const trackCanonical = (ledgerRunId: string, canonicalRunId: string): void => {
-    if (ledgerRunId === canonicalRunId) return
-    if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
-      try {
-        sink.handle.db
-          .prepare('INSERT OR IGNORE INTO orch_legacy_run (ledger_run_id, run_id) VALUES (?, ?)')
-          .run(ledgerRunId, canonicalRunId)
-      } catch {
-        // Ignore if mapping already present or sink fenced.
-      }
-    }
-    ledgerToCanonical.delete(ledgerRunId)
-    ledgerToCanonical.set(ledgerRunId, canonicalRunId)
-    while (ledgerToCanonical.size > MAX_LEDGER_CANONICAL_MAP) {
-      const oldest = ledgerToCanonical.keys().next().value
-      if (oldest === undefined) break
-      ledgerToCanonical.delete(oldest)
-    }
-  }
-
+  const canonicalIds = createCanonicalRunIds(sink, ledgerToCanonical)
+  const { resolveCanonical, resolvePersistedCanonical, trackCanonical } = canonicalIds
   const aliasForCanonical = sink.handle.db.prepare(
     'SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?'
   )
-  const canonicalForAlias = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
   const ledgerIdForSubmit = (runId: string, duplicate: boolean): string => {
     if (duplicate) {
       const alias = aliasForCanonical.get(runId) as { ledger_run_id: string } | undefined
@@ -323,6 +298,11 @@ function buildAuthorityRuntime<
 
     beforeDispatch: (input) => {
       const canonicalRunId = resolveCanonical(input.runId)
+      // D1: a queued run waits for the session's live run instead of running beside it. The gate
+      // defers (no attempt spent) rather than failing, so the queue drains when the head finishes.
+      if (sessionQueueBlocksDispatch(sink, canonicalRunId)) {
+        return { ok: false as const, action: 'requeue' as const, reason: 'session_run_active', retryAfterMs: 1_000 }
+      }
       const routing = parseLedgerIntentRouting(canonicalRunId, input.detail)
       const actor = input.peerCertSHA256 ? `peer:${input.peerCertSHA256}` : 'system'
       let trustGateDetail: string | undefined

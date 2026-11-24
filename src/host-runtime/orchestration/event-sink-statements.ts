@@ -15,6 +15,7 @@ export interface EventSinkStatements {
   nextOrdinal: Database.Statement
   readInteraction: Database.Statement
   hasActiveSessionRun: Database.Statement
+  nextQueuePosition: Database.Statement
   activeRunCount: Database.Statement
   listNonTerminalChildRuns: Database.Statement
   listNonTerminalChildRunsBySession: Database.Statement
@@ -63,6 +64,9 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
       `SELECT 1 FROM orch_p_run
        WHERE session_key = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')
        LIMIT 1`
+    ),
+    nextQueuePosition: db.prepare(
+      'SELECT COALESCE(MAX(queue_position), 0) + 1 AS next_position FROM orch_p_run WHERE session_key = ?'
     ),
     activeRunCount: db.prepare(
       "SELECT COUNT(*) AS count FROM orch_p_run WHERE lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')"

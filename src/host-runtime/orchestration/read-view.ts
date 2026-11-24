@@ -38,6 +38,7 @@ export function createOrchestratorReadView(input: OrchestratorReadViewInput): Or
     listNonTerminalChildRuns: (parentRunId) => listNonTerminalChildRunsRaw(stmts, parentRunId),
     listNonTerminalChildRunsBySession: (sessionKey) => listNonTerminalChildRunsBySessionRaw(stmts, sessionKey),
     hasActiveRunForSession: (sessionKey) => Boolean(stmts.hasActiveSessionRun.get(sessionKey)),
+    nextQueuePosition: (sessionKey) => stmts.nextQueuePosition.get(sessionKey) as number,
     activeRunCount: () => (stmts.activeRunCount.get() as { count: number }).count,
     maxActiveRuns: () => input.maxActiveRuns,
     isProviderAuthenticating: (provider, profile) => input.isProviderAuthenticating(provider, profile)

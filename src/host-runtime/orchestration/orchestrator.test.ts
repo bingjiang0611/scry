@@ -42,6 +42,7 @@ function makeView(overrides: Partial<{
     getInteraction: (runId, questionId) => interactions.get(`${runId}\0${questionId}`),
     listNonTerminalChildRuns: () => [],
     listNonTerminalChildRunsBySession: () => [],
+    nextQueuePosition: () => 1,
     hasActiveRunForSession: (sessionKey) =>
       [...runs.values()].some(
         (run) =>

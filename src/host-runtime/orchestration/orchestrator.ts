@@ -17,6 +17,7 @@ import {
   type OrchestratorReadView
 } from './orchestrator-handlers'
 import { isTerminalRunLifecycle } from './run-transitions'
+import { decideSubmitQueue, queuedRunEvent } from './orchestrator-queue'
 import {
   DEFAULT_PENDING_TTL_MS,
   PROMPT_PREVIEW_MAX_CHARS,
@@ -82,9 +83,8 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
   switch (cmd.type) {
     case 'run.submit': {
       const p = cmd.payload
-      if (p.sessionKey && !p.historicalBackfill && view.hasActiveRunForSession(p.sessionKey)) {
-        return retryableReject('session_run_active')
-      }
+      const queueDecision = decideSubmitQueue(view, p)
+      if (queueDecision === 'reject') return retryableReject('session_run_active')
       if (!p.historicalBackfill && view.activeRunCount() >= view.maxActiveRuns()) {
         return retryableReject('capacity_exceeded')
       }
@@ -145,6 +145,7 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
           })
         )
       }
+      if (queueDecision === 'queued') events.push(queuedRunEvent(cmd, events.length, p, view))
       const effectPayload = buildRunStartEffectPayload(p)
       const isImmediate = p.claimMode === 'immediate'
       if (p.dispatchImmediately && isImmediate && !p.shadowOnly && !p.historicalBackfill) {
