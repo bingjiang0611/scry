@@ -19,6 +19,8 @@ export function canTransitionH1Run(from: H1RunLifecycle, to: H1RunLifecycle): bo
  */
 export const ORCH_RUN_NEXT: Readonly<Record<RunLifecycleState, readonly RunLifecycleState[]>> = {
   recorded: ['admitted', 'dispatched', 'cancelled', 'failed'],
+  // D1: a queued run becomes dispatchable once the session's live run reaches a terminal state.
+  queued: ['admitted', 'dispatched', 'cancelled', 'failed'],
   admitted: ['dispatched', 'cancelled', 'failed'],
   dispatched: ['settled', 'failed', 'cancelled', 'interrupted'],
   settled: [],

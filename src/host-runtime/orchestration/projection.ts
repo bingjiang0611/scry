@@ -4,6 +4,7 @@ import { canonicalJson } from './canonical-json'
 import { mergeTurnEvidence, promoteLastRunOutcomeToExact } from './projection-evidence'
 import { projectSessionBinding } from './native-session-bindings'
 import type { OrchestrationEventRow } from './types'
+import { applyQueueEvent } from './projection-queue'
 
 export {
   mapInteractionRow,
@@ -83,6 +84,13 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
         typeof p.intentDetailSha256 === 'string' ? p.intentDetailSha256 : null
       )
       ensureSessionForRun(db, event, p)
+      return
+    }
+
+    case 'run.queued':
+    case 'run.queue_held':
+    case 'run.queue_released': {
+      applyQueueEvent(db, event)
       return
     }
 

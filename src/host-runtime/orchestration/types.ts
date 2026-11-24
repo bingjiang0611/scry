@@ -22,6 +22,8 @@ export type TurnDeliveryState = 'pending' | 'accepted' | 'not_sent' | 'unknown'
 
 export type RunLifecycleState =
   | 'recorded'
+  /** D1: accepted while another run of the same session is live; position ordering decides release. */
+  | 'queued'
   | 'admitted'
   | 'dispatched'
   | 'settled'
@@ -44,6 +46,9 @@ export interface SessionLineage {
 
 export type OrchestrationEventType =
   | 'run.intent_recorded'
+  | 'run.queued'
+  | 'run.queue_released'
+  | 'run.queue_held'
   | 'run.admitted'
   | 'run.dispatched'
   | 'run.session_bound'

@@ -205,6 +205,10 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
       // Reconstruct a real v5 database so reopening exercises the V6–V8 migrations.
       sink.handle.db.exec(`
         DROP TABLE IF EXISTS orch_binding;
+        DROP TABLE IF EXISTS orch_provider_session;
+        DROP INDEX IF EXISTS idx_orch_p_run_queue;
+        ALTER TABLE orch_p_run DROP COLUMN queue_position;
+        ALTER TABLE orch_p_run DROP COLUMN queue_held;
         DROP INDEX IF EXISTS idx_orch_outbox_fifo;
         ALTER TABLE orch_p_run DROP COLUMN intent_command_id;
         ALTER TABLE orch_p_run DROP COLUMN intent_at;

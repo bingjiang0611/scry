@@ -37,6 +37,7 @@ import {
 import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
+import { ledgerLifecycleFor } from './orchestration-intent-status'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
 const MAX_LEDGER_CANONICAL_MAP = 4_096
@@ -294,9 +295,7 @@ function buildAuthorityRuntime<
       const runId = receipt?.result?.runId
       const run = typeof runId === 'string' ? sink.getRun(runId) : undefined
       if (!run) throw new Error('unknown_intent')
-      const state = run.lifecycle === 'admitted' ? 'dispatched'
-        : run.lifecycle === 'interrupted' ? 'cancelled' : run.lifecycle
-      return { runId: ledgerIdForSubmit(run.runId, true), state }
+      return { runId: ledgerIdForSubmit(run.runId, true), state: ledgerLifecycleFor(run.lifecycle) }
     },
 
     compensateSubmitFailure: (runId, reason) => {
