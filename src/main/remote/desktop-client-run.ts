@@ -12,13 +12,18 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     const subscription = await this.statusSubscription(connectionIdValue)
     const row = subscription.runs().get(runIdValue)
     const lifecycle = row?.lifecycle
-    const state: DesktopRemoteRunStatus['state'] = lifecycle === 'recorded' ? 'recorded' : lifecycle === 'admitted' || lifecycle === 'dispatched' ? 'dispatched'
+    const state: DesktopRemoteRunStatus['state'] = lifecycle === 'recorded' ? 'recorded'
+      : lifecycle === 'queued' ? 'queued'
+      : lifecycle === 'admitted' || lifecycle === 'dispatched' ? 'dispatched'
       : lifecycle === 'settled' ? 'settled' : lifecycle === 'failed' || lifecycle === 'cancelled' || lifecycle === 'interrupted'
         ? 'failed' : 'unknown'
     const outputSeq = row?.outputSeq ?? undefined
     // The host projects live worktree preparation onto the run row before admission.
     const workspaceProgress = parseWorkspacePrepareProgress(row?.workspaceProgress)
+    const queuePosition = state === 'queued' ? row?.queuePosition ?? undefined : undefined
+    const queueHeld = state === 'queued' && row?.queueHeld ? true : undefined
     const changed = state !== watch.state || row?.revSeq !== watch.revSeq ||
+      queuePosition !== watch.queuePosition || queueHeld !== watch.queueHeld ||
       outputSeq !== watch.outputSeq || row?.traceRunId !== watch.scryRunId ||
       JSON.stringify(workspaceProgress) !== JSON.stringify(watch.workspaceProgress)
     watch.state = state
@@ -28,6 +33,8 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     watch.externalSessionId = row?.externalSessionId
     watch.cwd = row?.cwd ?? undefined
     watch.workspaceProgress = workspaceProgress
+    watch.queuePosition = queuePosition
+    watch.queueHeld = queueHeld
     this.runWatch.set(key, watch)
     if (state === 'settled' || state === 'failed' || watch.externalSessionId) {
       const stateData = await this.state()
@@ -51,7 +58,9 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
       }
     }
     return { state, changed, ...(watch.outputSeq !== undefined ? { outputSeq: watch.outputSeq } : {}), ...(watch.scryRunId ? { scryRunId: watch.scryRunId } : {}), ...(watch.externalSessionId ? { externalSessionId: watch.externalSessionId } : {}), ...(watch.cwd ? { cwd: watch.cwd } : {}),
-      ...(watch.workspaceProgress ? { workspaceProgress: watch.workspaceProgress } : {}) }
+      ...(watch.workspaceProgress ? { workspaceProgress: watch.workspaceProgress } : {}),
+      ...(watch.queuePosition !== undefined ? { queuePosition: watch.queuePosition } : {}),
+      ...(watch.queueHeld ? { queueHeld: true } : {}) }
   }
 
   // Finds the host’s live run for the selected session.

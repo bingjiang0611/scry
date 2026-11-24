@@ -267,7 +267,12 @@ export interface DesktopRemoteIntent {
   origin?: DesktopRemoteIntentOrigin
 }
 export interface DesktopRemoteRunStatus {
-  state: 'recorded' | 'dispatched' | 'settled' | 'failed' | 'unknown'
+  /** `queued`: the host accepted the turn and is holding it behind the session's live run (D1). */
+  state: 'recorded' | 'queued' | 'dispatched' | 'settled' | 'failed' | 'unknown'
+  /** Host-assigned 1-based slot while `state === 'queued'`. */
+  queuePosition?: number
+  /** The queue entry is held and will not dispatch on its own (stop or explicit hold). */
+  queueHeld?: boolean
   scryRunId?: string
   outputSeq?: number
   externalSessionId?: string

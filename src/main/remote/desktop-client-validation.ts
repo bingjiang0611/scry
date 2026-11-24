@@ -67,6 +67,9 @@ export interface RunStatusCursor {
   workspaceProgress?: WorkspacePrepareProgress
   // Last lifecycle state handed back to the caller, for change detection.
   state?: string
+  // D1: queue slot and hold, so a moved position counts as a change.
+  queuePosition?: number
+  queueHeld?: boolean
 }
 
 export { parseWorkspacePrepareProgress } from '../../shared/workspace-selection-input'
