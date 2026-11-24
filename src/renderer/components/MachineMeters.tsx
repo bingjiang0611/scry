@@ -56,7 +56,6 @@ export function ScryUsageLine({ snapshot }: { snapshot: HostMetricsSnapshot }): 
   )
 }
 
-/** 明细里的表：按 Provider 汇总进程数、CPU、内存，最后一行合计。 */
 export function ScryUsageTable({ snapshot }: { snapshot: HostMetricsSnapshot }): JSX.Element {
   const providers = providerUsageRows(snapshot)
   const totals = scryUsageTotals(snapshot)

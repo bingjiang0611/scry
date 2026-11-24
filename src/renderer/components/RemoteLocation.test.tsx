@@ -68,7 +68,6 @@ describe('saved host projection', () => {
     list.mockResolvedValue([host])
     await refreshDesktopConnections()
     const html = hosts()
-    // 三块从上到下：本机、执行目标、已配对的设备。
     expect(html).toContain('aria-label="本机"')
     expect(html).toContain('aria-label="执行目标"')
     expect(html).toContain('aria-label="已配对的设备"')
@@ -82,7 +81,6 @@ describe('saved host projection', () => {
     expect(html).toContain(`-remote-tab" type="button" role="tab" aria-selected="true"`)
     expect(html).toContain('连接与设备已移到侧栏「机器」')
     expect(html).toContain('打开「机器」')
-    // 设置里不再有出站主机列表或入站设备：它们都在机器页。
     expect(html).not.toContain('class="remote-connections-settings"')
     expect(html).not.toContain('class="remote-pairing"')
     expect(html).not.toContain('modal-foot')

@@ -12,7 +12,6 @@ export async function runSettings({ driver, options }) {
     const heads = [...document.querySelectorAll(".machines-page h2")].map(node => node.textContent)
     return JSON.stringify(heads) === JSON.stringify(['本机', '执行目标', '已配对的设备'])
   })()`), 'Machines page sections are not 本机 / 执行目标 / 已配对的设备')
-  // 设置里只剩一行指引，按钮跳回机器页。
   await click('.sb-settings')
   await click('.settings-rail [role="tab"]', '远程访问')
   await wait('document.querySelector(".settings-migrated") != null', 'settings keeps a one-line pointer to the machines page')

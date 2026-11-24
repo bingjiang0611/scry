@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `d2b91e62`, reviewed 58 retained comment tokens introduced by the machines feature outside the dedicated host-metrics and machines files. Matched current lexical comments against the upstream trees before and after the feature, then read the surrounding source. Removed five redundant or overstated notes, preserving privacy and missing-data contracts. Comment-free emit and tool directives matched, 44 focused tests passed, and the ratchet passed. No live UI was run.
+
 At `3da3b861`, reviewed all 21 lexical comments in the three direct `scripts/structure-*.mjs` files. Removed four repeated or overstated labels in the App and side-chat checks. Preserved the catalog-preview contract and the structure fixture function serialized as executable source. Comment-free emit and tool directives matched, 17 fixture-wiring tests and the ratchet passed. The native App smoke was not run.
 
 At `2c1c78ef`, reconciled all 176 lexical comment tokens in 25 direct `scripts/concurrent-diff*`, `scripts/concurrent-performance*` and `scripts/daemon-*` JS/TS files (excluding `daemon-mode-*`). Removed two redundant labels and kept the operator, fixture, and evidence contracts. Comment-free emit and tool directives matched; both focused suites passed all 22 tests and the ratchet passed. No live App or performance benchmark was run.

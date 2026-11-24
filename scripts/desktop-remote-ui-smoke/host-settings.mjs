@@ -28,7 +28,6 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   check(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture desktop")'), 'Remote settings omitted saved host')
   check(!(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')
   check(!(await read('document.querySelector(".hosts-view") || document.querySelector(".remote-client-settings") || document.querySelector(".sb-hosts")')), 'Legacy hosts page or jump remains')
-  // 机器页要显示这台机器和这个目标的真实读数，不是占位。
   await wait('document.querySelector(".machine-card--local")?.textContent.includes("34%")', 'local machine CPU from the metrics read')
   check(await read('document.querySelector(".machine-card--local").textContent.includes("已用 9.1 GB / 16 GB") && document.querySelector(".machine-card--local").textContent.includes("剩余 212 GB")'), 'Local card omitted memory or disk numbers')
   check(await read('document.querySelector(".machine-card--local").textContent.includes("在线")'), 'Local card did not report the machine as online')
