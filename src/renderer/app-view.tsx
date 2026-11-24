@@ -201,9 +201,15 @@ export function useAppView(context: AppViewContext) {
     setShowMcp(false)
     setShowLlmPerformance(false)
   }
+  // 原来这里打开设置里的「远程」标签页；P8 之后连接与设备都在侧栏「机器」页，
+  // 位置菜单的「管理远程访问」直接跳到那一页。
   const openRemoteAccessSettings = (): void => {
     closeOverlays()
-    setSettingsTab('remote')
+    changeView('machines')
+  }
+  const openMachines = (): void => {
+    closeOverlays()
+    changeView('machines')
   }
   const setRemoteDraft = (key: string, value: string): void => {
     setSessionDrafts((current) => updateSessionComposerDraft(current, key, (draft) => ({ ...draft, input: value }), releaseDraft))
@@ -367,6 +373,7 @@ export function useAppView(context: AppViewContext) {
     selectChatAgent,
     closeOverlays,
     openRemoteAccessSettings,
+    openMachines,
     setRemoteDraft,
     openRemoteLocation,
     pickRemoteLocation,

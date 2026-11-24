@@ -13,6 +13,7 @@ import { OverviewPanel } from './components/OverviewPanel'
 import { AppShellModals } from './components/AppShellModals'
 import { BackgroundServiceNoticeStrip } from './components/BackgroundServiceNoticeStrip'
 import { RemoteView } from './components/RemoteView'
+import { MachinesView } from './components/MachinesView'
 import { DiffInspector } from './components/DiffInspector'
 import { WorkspacePanel } from './components/WorkspacePanel'
 import { RightSurfacePanel } from './components/RightSurfacePanel'
@@ -50,7 +51,7 @@ export function AppShell(props: AppShellProps) {
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo, sessionSaves,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, unreadRevision, backgroundWorkByRun,
     catalogHealth, catalogHealthError, projectsError, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
-    setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, setShowSkills, setShowMcp,
+    setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, openMachines, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
   // Measured narrow layout and the side-chat tabs of this session. No child transcript
@@ -82,7 +83,8 @@ export function AppShell(props: AppShellProps) {
   const mainLiveVisible = primaryPaneVisible || evidenceSurfaceVisible
   useLegacyDiffPreviewDemand(session.currentRunId, view === 'chat' && mainLiveVisible)
   useConversationAttention(view === 'conversation' && mainLiveVisible ? logicalConversation?.id : undefined)
-  useEffect(() => window.scry?.onHostAdminOpenDevices?.(() => setSettingsTab('remote')), [setSettingsTab])
+  // 系统通知里的「设备页」指向已配对的设备，也就是「机器」页的第三块。
+  useEffect(() => window.scry?.onHostAdminOpenDevices?.(openMachines), [openMachines])
   const backgroundNotices = useBackgroundNoticeOpening({
     unreadSessionKeys, unreadRevision, projects, runningRunIds, waitingQuestionRunIds, pickConversation,
     pickSession: (sidebarActions as Pick<ComponentProps<typeof Sidebar>, 'onPick'>).onPick
@@ -98,7 +100,7 @@ export function AppShell(props: AppShellProps) {
         runningRunIds={runningRunIds} waitingQuestionRunIds={waitingQuestionRunIds} unreadSessionKeys={unreadSessionKeys}
         backgroundNotices={backgroundNotices.notices} onOpenBackgroundNotice={backgroundNotices.open} onDismissBackgroundNotice={backgroundNotices.dismiss}
         backgroundWorkByRun={backgroundWorkByRun} archiveUndo={archiveUndo} sessionSaves={sessionSaves}
-        analyticsActive={view === 'analytics'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth}
+        analyticsActive={view === 'analytics'} machinesActive={view === 'machines'} metaPromptsActive={view === 'meta-prompts'} catalogHealth={catalogHealth}
         catalogHealthError={catalogHealthError} projectsError={projectsError} projectsLoading={!workspace.hydrated}
         onRetryProjects={() => { void loadProjects() }} onChooseFolder={() => { void workspace.chooseFolder() }} />
       <PaneSplitter className="sidebar-resizer" label="调整左侧栏宽度" controls="sidebar-pane" min={sidebarMin} max={sidebarMax}
@@ -130,7 +132,9 @@ export function AppShell(props: AppShellProps) {
             {view === 'meta-prompts' && <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div>}
           </> : view === 'analytics' ? <div className="main-content main-content--single"><Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
             <AnalyticsView analytics={integrations.analytics} rangeDays={integrations.analyticsRange} loading={integrations.analyticsLoading} creditsPending={integrations.analyticsCreditsLoading} error={integrations.analyticsError} onRangeChange={integrations.setAnalyticsRange} onRefresh={() => integrations.loadAnalytics()} onBack={() => { changeView('chat') }} />
-          </Suspense></div> : view === 'meta-prompts' ? <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div> : <>
+          </Suspense></div> : view === 'machines' ? <div className="main-content main-content--single">
+            <MachinesView onNewSession={(connectionId, machinesCwd) => openRemoteLocation(connectionId, machinesCwd)} />
+          </div> : view === 'meta-prompts' ? <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div> : <>
             <ViewChrome cwd={cwd} showSummary={summaryVisible} showPanel={panelVisible} onToggleSummary={summary.toggle}
               onTogglePanel={chatProps.showSendBlockedReason ? undefined : toggleOverviewPanel} />
             <div className="main-content"><SessionChatView {...chatProps} /></div>
@@ -194,7 +198,7 @@ export function AppShell(props: AppShellProps) {
         cwd={cwd} integrations={integrations} showLlmPerformance={showLlmPerformance} setShowLlmPerformance={setShowLlmPerformance}
         showSkills={showSkills} showMcp={showMcp} openSkills={openSkills} openMcp={openMcp} setShowSkills={setShowSkills} setShowMcp={setShowMcp}
         settingsTab={settingsTab} setSettingsTab={setSettingsTab} theme={theme} changeTheme={changeTheme}
-        setArchiveUndo={setArchiveUndo} workspace={workspace} openRemoteLocation={openRemoteLocation}
+        setArchiveUndo={setArchiveUndo} workspace={workspace} openMachines={openMachines}
       />
     </div>
   )

@@ -1,4 +1,5 @@
 import type { DesktopDirectoryPage, DesktopRemoteCatalog, DesktopRemoteContext, DesktopRemoteSessionAction, DesktopRemoteForkSessionRequest, DesktopRemoteDeleteSessionRequest, RemoteCommandCatalog, RemoteProviderRef, RemoteProjectRef } from '../../shared/desktop-remote'
+import type { HostMetricsSnapshot, HostProviderUsage } from '../../shared/host-metrics'
 import { isHostAdminNotice, type HostAdminNotice } from '../../shared/host-admin'
 import type { DeleteSessionResult } from '../../shared/provider'
 import type { ScRead } from '../../shared/source-control'
@@ -98,6 +99,20 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     return { commands, ...(text(raw.reason, 512) ? { reason: raw.reason } : {}) }
   }
 
+  /**
+   * P8 §5: one execution target's resource summary. Only a host that declared
+   * `hostMetrics: 1` is asked; an older host is named as such so the card can say
+   * 「请升级」 instead of drawing an empty machine.
+   */
+  async hostMetrics(connectionIdValue: string): Promise<HostMetricsSnapshot> {
+    if (!text(connectionIdValue, 128)) fail('invalid_connection')
+    const item = this.connection(await this.state(), connectionIdValue)
+    const info = await this.desktop(connectionIdValue, { kind: 'info' })
+    if (validateInfo({ desktop: info }, item.hostId).hostMetrics !== 1) fail('desktop_host_metrics_unsupported')
+    const raw = await this.catalogRequest<unknown>(connectionIdValue, { op: 'hostMetrics' }, 'hostMetrics')
+    return hostMetricsSnapshot(raw)
+  }
+
   async sessionAction(connectionIdValue: string, value: DesktopRemoteContext, action: DesktopRemoteSessionAction): Promise<boolean> {
     const query = context(value)
     if (!query.externalSessionId || !record(action)) fail('invalid_session_action')
@@ -163,4 +178,59 @@ export abstract class DesktopRemoteClientCatalog extends DesktopRemoteClientConn
     return validateProject(result.project)
   }
 
+}
+
+// The only fields the Desktop keeps from a host's answer: anything else (a PID, a
+// process name, a path) is dropped rather than forwarded to the renderer.
+function hostMetricsSnapshot(value: unknown): HostMetricsSnapshot {
+  if (!record(value)) fail('invalid_host_metrics')
+  const count = (entry: unknown, max = Number.MAX_SAFE_INTEGER): number | null =>
+    typeof entry === 'number' && Number.isSafeInteger(entry) && entry >= 0 && entry <= max ? entry : null
+  const sampledAt = count(value.sampledAt)
+  if (sampledAt === null) fail('invalid_host_metrics')
+  const cpu = record(value.cpu) ? value.cpu : fail('invalid_host_metrics')
+  const memory = record(value.memory) ? value.memory : fail('invalid_host_metrics')
+  const scry = record(value.scry) ? value.scry : fail('invalid_host_metrics')
+  const daemon = record(scry.daemon) ? scry.daemon : fail('invalid_host_metrics')
+  const runs = record(value.runs) ? value.runs : fail('invalid_host_metrics')
+  const cores = count(cpu.cores, 4096)
+  const rssBytes = count(daemon.rssBytes)
+  const totalBytes = count(memory.totalBytes)
+  if (cores === null || cores < 1 || rssBytes === null || totalBytes === null || totalBytes < 1) fail('invalid_host_metrics')
+  const percent = (entry: unknown): number | null =>
+    typeof entry === 'number' && Number.isFinite(entry) && entry >= 0 && entry <= 100 ? entry : null
+  const pressure = memory.pressure === undefined || memory.pressure === null
+    ? null
+    : memory.pressure === 'low' || memory.pressure === 'medium' || memory.pressure === 'high' ? memory.pressure : fail('invalid_host_metrics')
+  const disks = Array.isArray(value.disks) ? value.disks.slice(0, 64).map((disk): HostMetricsSnapshot['disks'][number] => {
+    if (!record(disk) || (disk.role !== 'data' && disk.role !== 'workspace')) fail('invalid_host_metrics')
+    const total = count(disk.totalBytes)
+    const free = count(disk.freeBytes)
+    if (total === null || free === null) fail('invalid_host_metrics')
+    return { role: disk.role, totalBytes: total as number, freeBytes: free as number }
+  }) : fail('invalid_host_metrics')
+  const providers: HostProviderUsage[] | null = scry.providers === null || scry.providers === undefined
+    ? null
+    : Array.isArray(scry.providers) ? scry.providers.slice(0, 64).map((entry): HostProviderUsage => {
+      if (!record(entry) || !text(entry.providerId, 64)) fail('invalid_host_metrics')
+      const processes = count(entry.processes)
+      const providerRss = count(entry.rssBytes)
+      if (processes === null || providerRss === null) fail('invalid_host_metrics')
+      return { providerId: entry.providerId as string, processes: processes as number, cpuPercent: percent(entry.cpuPercent), rssBytes: providerRss as number }
+    }) : fail('invalid_host_metrics')
+  const active = count(runs.active)
+  const queued = count(runs.queued)
+  if (active === null || queued === null) fail('invalid_host_metrics')
+  return {
+    sampledAt: sampledAt as number,
+    uptimeSec: count(value.uptimeSec),
+    cpu: { percent: percent(cpu.percent), cores: cores as number, load1: typeof cpu.load1 === 'number' && Number.isFinite(cpu.load1) && cpu.load1 >= 0 ? cpu.load1 : null },
+    memory: {
+      totalBytes: totalBytes as number, usedBytes: count(memory.usedBytes), pressure,
+      swapUsedBytes: count(memory.swapUsedBytes), swapTotalBytes: count(memory.swapTotalBytes)
+    },
+    disks,
+    scry: { daemon: { cpuPercent: percent(daemon.cpuPercent), rssBytes: rssBytes as number }, providers },
+    runs: { active: active as number, queued: queued as number }
+  }
 }

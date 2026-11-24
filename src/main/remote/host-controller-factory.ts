@@ -30,6 +30,7 @@ export interface HostControllerBinding {
 
 export interface HostControllerFactoryDependencies {
   readDesktop?: HostControllerDependencies['readDesktop']
+  readHostMetrics?: HostControllerDependencies['readHostMetrics']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerDependencies['desktopDirectories']
   // Directory under Scry's userData; pairing and output subdirs are created.
@@ -118,6 +119,7 @@ export async function createHostController(deps: HostControllerFactoryDependenci
   }
   const controllerDeps: HostControllerDependencies = {
     ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
+    ...(deps.readHostMetrics ? { readHostMetrics: deps.readHostMetrics } : {}),
     ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
     ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
     pairing: {

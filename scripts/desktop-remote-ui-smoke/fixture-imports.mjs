@@ -5,7 +5,7 @@ export function fixtureImports(root) {
 import { createRoot } from 'react-dom/client'
 import { useRef, useState } from 'react'
 import { RemoteHostPanel } from ${JSON.stringify(join(root, 'src/renderer/components/DesktopRemote.tsx'))}
-import { RemotePairing } from ${JSON.stringify(join(root, 'src/renderer/components/RemotePairing.tsx'))}
+import { InboundDevices } from ${JSON.stringify(join(root, 'src/renderer/components/RemotePairing.tsx'))}
 import { RemoteChat, remoteDraftKey } from ${JSON.stringify(join(root, 'src/renderer/components/RemoteChat.tsx'))}
 import { App } from ${JSON.stringify(join(root, 'src/renderer/App.tsx'))}
 import { unavailableWorkspaceSelection } from ${JSON.stringify(join(root, 'scripts/fixtures/workspace-selection-unavailable.ts'))}

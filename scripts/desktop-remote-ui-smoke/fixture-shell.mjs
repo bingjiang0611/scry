@@ -33,6 +33,16 @@ window.scry = {
     return state.phoneEnabled ? { enabled: true, hostId: 'local-host', anchorSHA256: 'local-anchor', relayConfigured: state.relayConfigured,
       pending: [], devices: [{ deviceId: 'phone', deviceLabel: 'Fixture iPhone', confirmedAt: 1, expiresAt: 4102444800000, revoked: false }] } : { enabled: false }
   },
+  async hostMetricsRead() {
+    if (state.localMetricsFailure) throw new Error("Error invoking remote method 'hostMetrics:read': Error: fixture metrics unavailable")
+    return { sampledAt: Date.now() - 4000, uptimeSec: 3 * 86400, cpu: { percent: 34, cores: 10, load1: 2.5 },
+      memory: { totalBytes: 17179869184, usedBytes: 9761284096, pressure: 'medium', swapUsedBytes: 2147483648, swapTotalBytes: 4294967296 },
+      disks: [{ role: 'data', totalBytes: 1073741824000, freeBytes: 227633152000 }],
+      scry: { daemon: { cpuPercent: 0.8, rssBytes: 220200960, pid: 4242 }, providers: [
+        { providerId: 'claude', processes: 2, cpuPercent: 12, rssBytes: 1258291200 },
+        { providerId: 'qoder', processes: 1, cpuPercent: 2, rssBytes: 314572800 }] },
+      runs: { active: 2, queued: 1 } }
+  },
   remoteBeginPairing: async () => { state.phonePairingCalls++; return { pairingId: 'fixture-pairing', secret: 'fixture-secret', hostId: 'local-host', anchorSHA256: 'local-anchor', expiresAt: Date.now() + 120000, deviceCode: 'scry1:fixture' } },
   copyText: async () => {},
   clipboardImage: async () => { state.clipboardImageCalls++; return { kind: 'image', name: 'clipboard.png', mimeType: 'image/png', dataBase64: 'aQ==', size: 1 } },
@@ -69,7 +79,7 @@ function VisibilityPollingFixture() {
   const textareaRef = useRef(null)
   useConnectedCatalogLoader([connection], null)
   return <>
-    <RemotePairing onNewSession={() => {}} />
+    <InboundDevices />
     {${visibilityPollingCheck} && <PollingSidebar />}
     <RemoteChat connectionId={connection.id} cwd="/fixture/project-a" draftStore={createComposerDraftStore(new Map(${visibilityPollingCheck} ? [[remoteDraftKey(connection.id, '/fixture/project-a'), { input: 'visibility draft', attachments: [] }]] : []))}
       queueStore={new RemotePromptQueueStore()} onDraftInput={() => {}} scrollRef={scrollRef} textareaRef={textareaRef}

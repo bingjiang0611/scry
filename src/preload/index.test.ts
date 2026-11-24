@@ -125,6 +125,7 @@ const invokeChannels = {
   steer: 'agent:steer',
   traceAck: 'agent:traceAck',
   traceResynchronized: 'agent:traceResynchronized',
+  hostMetricsRead: 'hostMetrics:read',
   remoteStatus: 'remote:status',
   remoteBeginPairing: 'remote:pairing:begin',
   remoteConfirmPairing: 'remote:pairing:confirm',
@@ -149,7 +150,7 @@ const desktopChannels = {
   forkSession: 'desktopRemote:forkSession', deleteSession: 'desktopRemote:deleteSession',
   intents: 'desktopRemote:intents', submit: 'desktopRemote:submit', intentStatus: 'desktopRemote:intentStatus', resolveIntent: 'desktopRemote:resolveIntent',
   runStatus: 'desktopRemote:runStatus', liveRun: 'desktopRemote:liveRun', stop: 'desktopRemote:stop', answer: 'desktopRemote:answer',
-  files: 'desktopRemote:files', file: 'desktopRemote:file', workbench: 'desktopRemote:workbench'
+  files: 'desktopRemote:files', file: 'desktopRemote:file', workbench: 'desktopRemote:workbench', hostMetrics: 'desktopRemote:hostMetrics'
 } as const satisfies Record<keyof ScryApi['desktopRemote'], string>
 
 const listenerChannels = {

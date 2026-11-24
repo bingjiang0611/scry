@@ -16,6 +16,8 @@ export interface RemoteHostServiceDependencies {
   // turns it off); absent here means no listener, e.g. in tests.
   lan?: { port?: number; host?: string }
   readDesktop?: HostControllerFactoryDependencies['readDesktop']
+  // P8 §5: the machines summary a remote reader may ask for (already remote scope).
+  readHostMetrics?: HostControllerFactoryDependencies['readHostMetrics']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']
   // Directory under Scry userData; identity/pairing/output subdirs live here.
@@ -85,6 +87,7 @@ export function hostControllerDependencies(
   return {
     stateDirectory: deps.stateDirectory,
     ...(deps.readDesktop ? { readDesktop: deps.readDesktop } : {}),
+    ...(deps.readHostMetrics ? { readHostMetrics: deps.readHostMetrics } : {}),
     ...(deps.desktopWorkbench ? { desktopWorkbench: deps.desktopWorkbench } : {}),
     ...(deps.desktopDirectories ? { desktopDirectories: deps.desktopDirectories } : {}),
     hostId: identity.hostId,

@@ -13,6 +13,7 @@ import { mcpLocalOps } from './local-ops/mcp'
 import { billingLocalOps } from './local-ops/billing'
 import { pairingLocalOps } from './local-ops/pairing'
 import { backgroundServiceLocalOps } from './local-ops/background-service'
+import { hostMetricsLocalOps } from './local-ops/host-metrics'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -43,6 +44,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...billingLocalOps(deps),
       ...pairingLocalOps(deps),
       ...backgroundServiceLocalOps(deps),
+      ...hostMetricsLocalOps(deps),
       ...deps.terminal.localOps
     }),
     ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),

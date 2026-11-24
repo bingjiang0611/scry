@@ -20,7 +20,9 @@ export const QUERY_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:listCommands': { op: 'providerCommands', method: 'listCommands', read: true },
   // Read for this window's workspace (main's agent:setCwd): the App appends it after the
   // request (recorder-content-daemon.ts) and the daemon re-validates it.
-  'agent:recorderContentPage': { op: 'recorderContent', method: 'recorderContentPage', read: true }
+  'agent:recorderContentPage': { op: 'recorderContent', method: 'recorderContentPage', read: true },
+  // P8 host metrics: only the daemon may run `ps` (main has no child_process).
+  'hostMetrics:read': { op: 'localHostMetrics', method: 'read', read: true }
 }
 
 export const QUERY_FORWARDS: DaemonForwardTable = {}

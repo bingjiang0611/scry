@@ -60,6 +60,7 @@
     "bench:git-diff": "node scripts/git-turn-diff-bench.mjs",
     "bench:session-history": "vitest bench src/main/session-history.bench.ts src/main/transcript-archive.bench.ts --run",
     "bench:renderer": "vitest bench src/renderer/performance.bench.tsx --run",
+    "bench:host-metrics": "node scripts/host-metrics-p95.mjs",
     "soak:performance": "node scripts/performance-soak.mjs",
     "design:audit": "node scripts/design-system-audit.mjs",
     "performance:inventory": "node scripts/performance-report.mjs inventory",

@@ -17,6 +17,7 @@
 | `desktopRemote:forget` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:forkSession` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:history` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
+| `desktopRemote:hostMetrics` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主时读取该主机的资源汇总（P8 §5），只在目标声明 hostMetrics: 1 时请求 |
 | `desktopRemote:intents` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:intentStatus` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |
 | `desktopRemote:list` | main | `—` | — | — | DesktopRemoteClient：本 App 连接其他宿主的客户端 |

@@ -41,6 +41,8 @@ const rendererTimerExceptions: Readonly<Record<string, readonly string[]>> = {
     "import { createVisibilityPollingController } from './useVisibilityPolling'",
     'const polling = createVisibilityPollingController(refreshDesktopConnections, 3000, undefined, () => {'
   ],
+  // 机器页页头的「x 秒前更新」时钟：只让这一个标签重渲染，不读任何数据。
+  'src/renderer/hooks/useMachines.ts': ['const timer = setInterval(() => setNow(Date.now()), 1_000)'],
   'src/renderer/hooks/useVisibilityPolling.ts': [
     'setInterval: (callback: () => void, delay: number) => TimerHandle',
     'setInterval: (callback, delay) => window.setInterval(callback, delay),',

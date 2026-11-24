@@ -5,8 +5,10 @@ export async function runSidebarActivity({ driver, options }) {
     { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }
   ] })
   await wait("!matchMedia('(prefers-reduced-motion: reduce)').matches && !matchMedia('(forced-colors: active)').matches")
-  await click('.settings-modal .modal-x')
-  check(await read('document.activeElement === document.querySelector(".location-button")'), 'Closing settings did not return focus to the location picker')
+  // 连接管理已搬到「机器」整页视图，前面的流程不会留下打开的设置对话框，
+  // 并且焦点要回到用户最后按下的那个侧栏按钮，而不是掉到 body 上。
+  check(!(await read('document.querySelector(".settings-modal")')), 'Settings dialog stayed open after the machines page flow')
+  check(await read('document.activeElement === document.querySelector(".sb-new")'), 'Machines page round trip did not return focus to the sidebar new-chat button')
   await click('textarea[aria-label="描述任务"]'); await read('document.querySelector(\'textarea[aria-label="描述任务"]\').select()'); await key('Backspace')
   const projectOrder = () => read('Array.from(document.querySelectorAll(".sb-proj .pname"), node => node.textContent)')
   check(JSON.stringify(await projectOrder()) === JSON.stringify(['Pinned local', 'Recent local', 'Project A', 'Older local', 'Project B']), 'Remote project was appended instead of sorted by recent activity')
