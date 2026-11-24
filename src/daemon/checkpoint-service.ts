@@ -1,14 +1,18 @@
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import { gitCommand } from '../core/turn-recorder/git-command'
 import { createCheckpointGit } from './checkpoint-git'
+import { isManagedWorktreePath } from '../main/app-store'
 import { applyRunRollback, recordRunCheckpoint, type CheckpointRecordResult, type CheckpointRestoreResult } from './checkpoint-recorder'
 import type { CheckpointGit } from './checkpoint-refs'
 
 export interface CheckpointService {
   /** D5: capture the finished run's worktree. Never throws: a settlement must not fail on git. */
   capture(input: { runId: string; cwd: string }): Promise<CheckpointRecordResult | undefined>
-  /** D5: restore a captured tree. `managed` decides whether Scry may rewrite this worktree. */
-  rollback(input: { runId: string; cwd: string; managed: boolean; reason?: string }): Promise<CheckpointRestoreResult>
+  /**
+   * D5: restore a captured tree. The run's cwd comes from the projection, and Scry only rewrites a
+   * worktree it manages — the user's own checkout is not ours to reset.
+   */
+  rollback(input: { runId: string; reason?: string }): Promise<CheckpointRestoreResult>
 }
 
 /**
@@ -18,6 +22,7 @@ export interface CheckpointService {
 export function createCheckpointService(deps: {
   sink: () => EventSink | undefined
   git: CheckpointGit
+  isManagedWorktree: (cwd: string) => boolean
   now?: () => number
   warn?: (message: string, error: unknown) => void
 }): CheckpointService {
@@ -32,7 +37,16 @@ export function createCheckpointService(deps: {
       }
     },
     async rollback(input) {
-      return applyRunRollback(deps.sink(), deps.git, input, now())
+      const sink = deps.sink()
+      if (!sink) return { status: 'unavailable', reason: 'orchestration_unavailable' }
+      const run = sink.getRun(input.runId)
+      if (!run?.cwd) return { status: 'unavailable', reason: 'checkpoint_run_cwd_unknown' }
+      return applyRunRollback(deps.sink(), deps.git, {
+        runId: input.runId,
+        cwd: run.cwd,
+        managed: deps.isManagedWorktree(run.cwd),
+        ...(input.reason ? { reason: input.reason } : {})
+      }, now())
     }
   }
 }
@@ -43,10 +57,12 @@ export function createCheckpointService(deps: {
  */
 export function createHostCheckpointService(deps: {
   sink: () => EventSink | undefined
+  userDataDir: string
   log: (line: string) => void
 }): CheckpointService {
   return createCheckpointService({
     sink: deps.sink,
+    isManagedWorktree: (cwd) => isManagedWorktreePath(deps.userDataDir, cwd),
     git: createCheckpointGit({
       git: (args, options) =>
         gitCommand(args, { cwd: options.cwd, ...(options.env ? { env: options.env } : {}), deadline: Date.now() + 20_000 })

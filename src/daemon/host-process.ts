@@ -98,7 +98,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     ...options.terminal
   })
   const pi = createPiProfileRuntime({ userDataDir: options.userDataDir })
-  // C1: Provider session lifetime is daemon-owned so the release reason can be stored.
+  // C1: session lifetime is daemon-owned so the release reason can be stored.
   let userDataAuthority: EventSink | undefined
   const { providerSessions, piSessions } = createProviderSessionObservers(() => userDataAuthority)
   const providers = createProviderRuntime({
@@ -153,7 +153,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     registeredWorkspaceRun: (runId, cwd) => pipeline.runs.get(runId)?.state.cwd === cwd
   })
 
-  const checkpoints = createHostCheckpointService({ sink: () => userDataAuthority, log })
+  const checkpoints = createHostCheckpointService({ sink: () => userDataAuthority, userDataDir: options.userDataDir, log })
 
   const remoteRunIds = new Set<string>()
   const remoteRunLedgerIds = new Map<string, string>()
@@ -289,8 +289,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       userDataDir: options.userDataDir,
       appVersion: options.appVersion,
       isPackaged: options.isPackaged,
-      sourceControl,
-      providerDiscovery,
+      sourceControl, checkpoints, providerDiscovery,
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
       links: sessionLinks,
