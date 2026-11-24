@@ -87,7 +87,6 @@ describe('daemon run surface start reconciliation', () => {
       expect(request).toHaveBeenCalledWith({ op: 'intentStatusAtLog', intentId: submit?.intentId }, undefined)
       expect(send.mock.calls.filter(([channel]) => channel === 'agent:focusedRun'))
         .toEqual([['agent:focusedRun', expect.objectContaining({ runId: canonicalId })]])
-      // Recovery follows the same run as a fresh start: its live trace is read, not adopted once.
       await vi.waitFor(() => expect(request.mock.calls.some(([frame]) => frame.op === 'desktop')).toBe(true))
     } finally {
       runtime.dispose()

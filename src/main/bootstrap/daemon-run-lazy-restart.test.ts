@@ -2,10 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { createLazyDaemonRunSurface } from './daemon-run-lazy'
 import type { DaemonRunModeDeps, DaemonRunModeResult } from './daemon-run-mode'
 
-// B4-S S0-1: the «后台服务» actions replace the session's daemon decision only when the
-// user asked (restart, reconnect), and nothing launches a daemon while one is being
-// stopped, not even a retried read through the run mode's own reconnect.
-
 function baseDeps(launch: DaemonRunModeDeps['launch']): DaemonRunModeDeps {
   return {
     userDataDir: '/tmp/user', daemonStateDirectory: '/tmp/state', appVersion: '2.0.0',
