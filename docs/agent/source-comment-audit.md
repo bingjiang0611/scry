@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `1ca13a36`, reviewed the 21 tracked TypeScript files under `src/renderer/constants/` and the five under `src/main/managed-turn-tests/` (53 and nine tokens respectively). Removed one repeated file heading. Kept the copy notes that distinguish missing evidence, runtime outcomes and user actions, and the managed-turn fixture notes on replay, archive reads and asynchronous receipt cleanup. Comment-free emit matched and 17 targeted tests passed. The ratchet CLI timed out under host load; a batch replay of its production predicate and identical inputs found no new prose in 279 files. This does not count B4V scenarios as reviewed.
+
 At `ba60d312`, reviewed all three `experiments/remote-g0/verify-*.test.mjs` files: nine tokens in the private-directory suite and none in the redaction or summary suites. Removed one comment that repeated the fixture assertion; retained the platform and account-boundary rationale. Comment-free emit matched, all 17 isolated tests passed, and the source-comment ratchet passed.
 
 At `9a6eacfd`, confirmed two redundant section labels in `src/renderer/constants/side-chat-copy.ts` and removed them without changing any user-facing copy. Comment-free emit and tool directives matched; four focused tests and the source-comment ratchet passed. The broader intake of 148 tokens across renderer constants, B4V scenarios, and managed-turn tests is an inventory, not a completed review of those directories.
