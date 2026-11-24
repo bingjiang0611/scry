@@ -20,6 +20,8 @@ export interface RunControlDeps {
   ledger: SessionLedger
   gateway?: RemoteGateway
   orchestration?: OrchestrationAuthorityHooks
+  /** B1: stop and answer are queued effects, so the caller must pump the outbox after queuing. */
+  pump?: () => void
 }
 
 export interface AnswerInput { runId: string; answerId: string; response: AgentQuestionResponse }
@@ -55,6 +57,8 @@ export function answerRunQuestion(deps: RunControlDeps, peerCertSHA256: string, 
               answerId: validated.answerId,
               answerSha256: validated.answerSha256
             })
+            // The answer is a queued effect; without a pump it would sit unclaimed.
+            deps.pump?.()
           }
         : undefined
     )
@@ -88,6 +92,7 @@ export function stopRun(deps: RunControlDeps, peerCertSHA256: string, input: { r
           return true
         }
       })
+      if (res.status === 'requested') deps.pump?.()
       if (res.status === 'requested' && !deps.orchestration.isWriteIndeterminate()) {
         try { deps.ledger.markProgress(input.runId, JSON.stringify({ event: 'stop_requested' })) } catch { /* terminal */ }
       }

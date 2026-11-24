@@ -12,7 +12,10 @@ import type { OrchestrationOutboxGate } from '../main/remote/orchestration-seam'
 export function createOutboxGate(db: () => Database.Database): OrchestrationOutboxGate {
   return {
     claim: (owner, now) => {
-      const { expired, effect } = claimNextEffect({ db: db(), owner, now, kind: 'provider.run.start' })
+      // Every kind this dispatcher can execute, not just run starts: stop and question answers are
+      // queued effects too. A kind it cannot run is failed by name instead of sitting unclaimed
+      // (A4: `unhandled_effect_kind:<kind>`), so filtering here would strand stop forever.
+      const { expired, effect } = claimNextEffect({ db: db(), owner, now })
       return effect ? { expired, effect } : { expired }
     },
     succeed: (effectId, owner, now) => succeedEffect({ db: db(), effectId, owner, now }),

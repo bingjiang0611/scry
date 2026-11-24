@@ -206,7 +206,8 @@ export class HostController {
       hasHostAdminNotices: d.listHostAdminNotices !== undefined,
       workspace: this.#workspace, sessionAction: d.sessionAction, sessionFork: d.sessionFork, sessionDelete: d.sessionDelete,
       isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(d.macRuns ? { macRuns: d.macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: d.macRuns,
-      interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch
+      interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch,
+      pump: () => { this.#dispatcher?.pump() }
     }
   }
 
