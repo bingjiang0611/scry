@@ -73,3 +73,23 @@ describe('performance distributions', () => {
     expect(after.waitSummary?.median).toBe(2)
   })
 })
+
+describe('daily buckets (Q10)', () => {
+  it('starts a 7-day bucket at local midnight, not UTC midnight', () => {
+    // 本地 01:30 的样本必须落在当天，而不是前一天或后一天。
+    const local = new Date(2026, 10, 24, 1, 30).getTime()
+    const intervals = metricIntervals([
+      sample(local, 10), sample(local + 60_000, 20), sample(local + 120_000, 30)
+    ], local - 86_400_000, local + 86_400_000, INTERVAL_MS[168])
+    expect(intervals).toHaveLength(1)
+    expect(intervals[0].start).toBe(new Date(2026, 10, 24).getTime())
+    expect(intervals[0].stop).toBe(new Date(2026, 10, 25).getTime())
+    expect(intervals[0].individual).toBe(false)
+  })
+
+  it('keeps short ranges on fixed sub-day intervals', () => {
+    expect(INTERVAL_MS[1]).toBe(600_000)
+    expect(INTERVAL_MS[24]).toBe(7_200_000)
+    expect(INTERVAL_MS[720]).toBe(INTERVAL_MS[168])
+  })
+})

@@ -1,6 +1,6 @@
 export const LLM_PERFORMANCE_COPY = {
   title: 'LLM 性能',
-  ranges: { 1: '1 小时', 24: '24 小时', 168: '7 天' },
+  ranges: { 1: '1 小时', 24: '24 小时', 168: '7 天', 720: '30 天' },
   rangeLabel: '时间范围',
   metricLabel: '时间图指标',
   metrics: {
@@ -29,7 +29,7 @@ export const LLM_PERFORMANCE_COPY = {
   sparseDistribution: (values: string) => `TPS 实测值：${values} token/s`,
   distributionLabel: (min: string, q1: string, median: string, q3: string, max: string) => `TPS 分布：最小 ${min}，P25 ${q1}，中位数 ${median}，P75 ${q3}，最大 ${max} token/s`,
   valueList: (values: string[]) => values.join('、'),
-  intervals: { 1: '每 10 分钟', 24: '每 2 小时', 168: '每天' },
+  intervals: { 1: '每 10 分钟', 24: '每 2 小时', 168: '每天', 720: '每天' },
   intervalHelp: '每个区间显示中位数、中间 50% 和完整测量范围；少于 3 轮时保留实际测量点。没有测量的时间留空，不补零或连线。',
   rounds: (complete: number, running: number) => running ? `${complete} 轮 · ${running} 暂计` : `${complete} 轮`,
   failedRounds: (count: number) => `${count} 轮未成功`,

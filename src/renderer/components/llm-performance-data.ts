@@ -1,8 +1,21 @@
 import { LLM_METRICS, quantile, type LlmComparisonRound, type LlmMetric, type LlmMetricSample } from '@shared/llm-performance'
 import type { ProviderId } from '@shared/provider'
 
-export type RangeHours = 1 | 24 | 168
-export const INTERVAL_MS: Record<RangeHours, number> = { 1: 600_000, 24: 7_200_000, 168: 86_400_000 }
+export type RangeHours = 1 | 24 | 168 | 720
+const DAY_MS = 86_400_000
+// 7 天与 30 天视图按本地 0 点分桶；1 小时与 24 小时用固定的小时级窗口。
+export const INTERVAL_MS: Record<RangeHours, number> = { 1: 600_000, 24: 7_200_000, 168: DAY_MS, 720: DAY_MS }
+
+const localMidnight = (ts: number): number => {
+  const date = new Date(ts)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+/** 日级窗口从本地 0 点开始，其余按固定跨度对齐。 */
+export function bucketStart(ts: number, span: number): number {
+  return span >= DAY_MS ? localMidnight(ts) : Math.floor(ts / span) * span
+}
 
 export function metricDistribution(samples: readonly LlmMetricSample[]) {
   if (!samples.length) return null
@@ -53,7 +66,7 @@ export function metricIntervals(samples: readonly LlmMetricSample[], from: numbe
   const buckets = new Map<number, LlmMetricSample[]>()
   for (const sample of samples) {
     if (sample.ts < from || sample.ts > to) continue
-    const start = Math.floor(sample.ts / span) * span
+    const start = bucketStart(sample.ts, span)
     const group = buckets.get(start)
     if (group) group.push(sample)
     else buckets.set(start, [sample])
