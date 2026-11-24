@@ -169,11 +169,6 @@ it('always visits a session an operator names, and leaves its turn and marker un
   expect(transcriptReadStats().bytesRead).toBeGreaterThan(0)
 })
 
-/**
- * Managed turns are recovered by their own pass, and that pass only runs because the session loop
- * reported seeing one. A deferred managed session would silently stop managed recovery, so it must
- * keep full frequency - even though its own files are as quiet as any other stale session.
- */
 it('never defers a managed session: its recovery pass only runs because the loop saw one', async () => {
   const root = await managedWorkspace()
   await handleRecorderHook({
@@ -191,8 +186,6 @@ it('never defers a managed session: its recovery pass only runs because the loop
     ...turns.map((name) => join(sessionDir, 'turns', name))
   ], 120 * MINUTE)
 
-  // The managed pass reports the turn as pending, and only runs at all when the session loop saw a
-  // managed turn. Every pass has to keep saying so - its own files say nothing new.
   await expect(recoverRecorder(root, {}, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ pending: 1 })
   await expect(recoverRecorder(root, {}, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ pending: 1 })
   await expect(deferQuietSession(dataRoot, 'codex', sessionDir)).resolves.toBe(false)

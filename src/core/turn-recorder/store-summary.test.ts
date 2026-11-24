@@ -19,7 +19,6 @@ async function dataRoot(): Promise<string> {
 
 const empty = () => ({ status: 'available' as const, quality: 'exact' as const, source: ['fixture'], value: [] })
 
-/** A record that passes the strict commit validator; the fields the summary reads vary per call. */
 function draft(sequence: number, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schemaVersion: 1, recordKind: 'agent_turn', recordId: `${sequence}`.padStart(2, '0').repeat(16), recorderVersion: '0.2.85',

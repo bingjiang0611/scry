@@ -51,7 +51,6 @@ async function statKey(path: string): Promise<{ key: string; mtimeMs: number }> 
   }
 }
 
-/** The open turn's own pointers, read once so the fingerprint can reach the current generation. */
 async function openPointers(sessionDir: string): Promise<{
   generation: number | null
   transcriptPath: string | null
