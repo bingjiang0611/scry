@@ -248,7 +248,12 @@ export class AuthorityEngine {
 
     const now = this.#clock()
     const { intentAt, expiresAt } = getRunStartExpiryInfo(this.sink, input.runId, run.intentSeq)
-    const effectiveExpiresAt = expiresAt ?? (intentAt !== null ? intentAt + this.#pendingTtlMs : null)
+    // D1: a queued run waits as long as the head takes. The pending TTL bounds a dispatch nobody will
+    // claim, so it must not be recomputed from the intent time here — that cancelled a queue entry the
+    // moment the head cleared after more than a minute, which is exactly what the queue exists for.
+    const effectiveExpiresAt = run.lifecycle === 'queued'
+      ? null
+      : expiresAt ?? (intentAt !== null ? intentAt + this.#pendingTtlMs : null)
     if ((intentAt !== null && now < intentAt) || (effectiveExpiresAt !== null && now > effectiveExpiresAt)) {
       this.recordTerminal({
         runId: input.runId,

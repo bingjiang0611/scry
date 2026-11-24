@@ -238,3 +238,37 @@ describe('P4-2 startup recovery and two-ledger reconciliation', () => {
 
 
 })
+
+// D1 (review): a queue entry whose effect was claimed when the process died had its effect closed while
+// the run stayed `queued`, so nothing could ever dispatch it and the session was wedged for good.
+describe('D1 queue entry claimed at the moment of a hard kill', () => {
+  it('gives the effect back instead of closing it', async () => {
+    await withTempDir(async (userData) => {
+      const sink = EventSink.open({ userDataDir: userData, checkpointIntervalMs: 0 })
+      try {
+        const t0 = 1_700_000_000_000
+        const insert = (runId: string) => {
+          sink.handle.db.prepare(
+            `INSERT INTO orch_p_run (run_id, session_key, owner_actor, scope, provider, profile, cwd, origin,
+               prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body, rev_seq, queue_position, queue_held)
+             VALUES (?, 'sess-kill', 'system', 'system', 'codex', NULL, '/w', 'user', ?, 'queued', NULL, NULL, ?, '{}', 1, 1, 0)`
+          ).run(runId, runId, 1)
+          sink.handle.db.prepare(
+            `INSERT INTO orch_outbox (effect_id, kind, policy, run_id, causation_seq, payload, state, attempts,
+               lease_owner, claimed_at, completed_at, expires_at, session_key)
+             VALUES (?, 'provider.run.start', 'run_start_reconcile', ?, 1, '{}', 'running', 1, 'dead-daemon', ?, NULL, NULL, 'sess-kill')`
+          ).run(`eff-${runId}`, runId, t0)
+        }
+        insert('run-killed')
+
+        recoverOrchestrationOnStartup({ sink, leaseOwner: 'daemon:restarted', now: t0 + 5_000 })
+        expect(sink.getRun('run-killed')?.lifecycle).toBe('queued')
+        const row = sink.handle.db.prepare("SELECT state FROM orch_outbox WHERE run_id = 'run-killed'")
+          .get() as { state: string }
+        expect(row.state).toBe('pending')
+      } finally {
+        sink.close()
+      }
+    })
+  })
+})

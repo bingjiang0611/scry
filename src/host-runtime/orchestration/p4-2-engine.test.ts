@@ -124,6 +124,49 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
     })
   })
 
+  // D1 (review): clearing the outbox expiry was not enough — the gate recomputed a TTL from the intent
+  // time, so a queue entry that waited over a minute was cancelled `pending_expired` the moment its
+  // session head cleared. The queue is allowed to wait.
+  it('D1: a queued run older than the pending TTL still dispatches', async () => {
+    await withTempDir(async (userData) => {
+      const ws = join(userData, 'ws')
+      mkdirSync(ws, { recursive: true })
+      const realWs = realpathSync(ws)
+      const sink = EventSink.open({
+        userDataDir: userData, checkpointIntervalMs: 0, authorizedActors: [`peer:${PEER_A}`]
+      })
+      let clock = 1_700_000_000_000
+      const engine = new AuthorityEngine({ sink, leaseOwner: 'daemon:test', clock: () => clock })
+      const submit = (runId: string, claimMode: 'immediate' | 'queued') => {
+        const payload = {
+          runId, sessionKey: 'sess-old-queue', provider: 'codex' as const, profile: null, cwd: realWs,
+          promptPreview: runId, claimMode, leaseOwner: 'daemon:test'
+        }
+        expect(sink.execute({
+          type: 'run.submit', commandId: `cmd-${runId}`, actor: `peer:${PEER_A}`, scope: 'local',
+          at: clock, payload, payloadSha256: sha256Hex(canonicalJson(payload))
+        }).kind).toBe('accepted')
+      }
+      try {
+        submit('run-head', 'immediate')
+        submit('run-queued', 'queued')
+        expect(sink.getRun('run-queued')?.lifecycle).toBe('queued')
+        // Five minutes of queue wait, then the head finishes.
+        clock += 5 * 60_000
+        engine.recordTerminal({ runId: 'run-head', step: 'settled', evidence: ['provider:codex'] })
+        const dispatched = engine.beforeDispatch({
+          runId: 'run-queued', cwd: realWs, provider: 'codex', profile: null, actor: `peer:${PEER_A}`,
+          authorizeWorkspace: (p) => p, isPeerAuthorized: (p) => p === PEER_A,
+          isProviderAuthenticating: () => false, verifyTrustGate: () => true
+        })
+        expect(dispatched).toEqual({ ok: true })
+        expect(sink.getRun('run-queued')?.lifecycle).toBe('dispatched')
+      } finally {
+        sink.close()
+      }
+    })
+  })
+
   it('rejects dispatch when cwd symlink target changed, grant revoked, or trust gate failed', async () => {
     await withTempDir(async (userData) => {
       const ws1 = join(userData, 'ws1')

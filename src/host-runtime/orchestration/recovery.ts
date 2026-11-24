@@ -172,6 +172,13 @@ export function recoverOrchestrationOnStartup(
       }
 
       // row.state === 'running'
+      if (run.lifecycle === 'queued') {
+        // D1: the process died between claiming a queue entry and deferring it. Marking the effect done
+        // would leave the run `queued` with nothing left to dispatch it — the session would never move.
+        updateOutbox.run('pending', null, null, null, row.effectId)
+        summary.requeuedReplayableEffects += 1
+        continue
+      }
       if (run.lifecycle === 'recorded') {
         // Claimed without run.dispatched -> void effect + cancel (host_restarted_before_dispatch)
         insertEffectVoided.run(
