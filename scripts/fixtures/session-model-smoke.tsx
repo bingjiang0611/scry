@@ -131,7 +131,6 @@ Object.defineProperty(window, 'scry', { value: {
       preview: request.prompt, count: 1
     })
     // Production start publishes the provisional/resumed session before replying.
-    // The fixture used to expose its mutated catalog by reference instead.
     emit('session', { runId, sessionId: run.externalSessionId ?? runId, providerId: 'claude',
       ...(run.externalSessionId ? { externalSessionId: run.externalSessionId } : { pending: true }) })
     update()

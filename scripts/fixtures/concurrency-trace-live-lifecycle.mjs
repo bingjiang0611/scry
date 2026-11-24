@@ -66,7 +66,6 @@ export function ownedChild({ name, child, childClose, snapshots, inspect, stopPr
       }
     },
 
-    /** Called when the launcher observed a fault for this process (never swallows it). */
     fault(phase, error) {
       record.faults.push({ phase, error: describe(error) })
     },

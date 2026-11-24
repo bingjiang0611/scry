@@ -48,7 +48,6 @@ export function markerId(runId) {
   return `${runId}:concurrency-trace-ready`
 }
 
-/** The 1000 expected events, from 1 to SEED_COUNT in order. */
 export function buildSeedOracle(runId) {
   if (typeof runId !== 'string' || runId.length === 0) throw new Error('concurrency-trace-live oracle needs a run id')
   return Array.from({ length: SEED_COUNT }, (_, offset) => {

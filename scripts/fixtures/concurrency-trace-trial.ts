@@ -333,7 +333,6 @@ export async function runConcurrencyTraceTrial(config: TrialConfig): Promise<Tri
       : [errorMessage(error)]))
   }
 
-  // Pure construction lives in the report module: this file only hands over what it observed.
   const report = buildCellReport({
     enqueueMs,
     queueDepthAtDispatch,

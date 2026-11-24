@@ -210,7 +210,6 @@ export function createHost({ root, electron, temp, workspaces, log }) {
     for (const dir of [userData, home, tmp]) mkdirSync(dir, { recursive: true })
     // The production workspace authorizer accepts only known projects.
     writeFileSync(join(userData, 'recent-folders.json'), JSON.stringify(workspaces.map((workspace) => resolve(workspace))))
-    // The real entry point comes from the package metadata; its extension is not guessed.
     const metadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
     if (typeof metadata.main !== 'string' || metadata.main.length === 0) throw new Error('package.json has no main entry for the built App')
     const mainPath = join(root, metadata.main)
