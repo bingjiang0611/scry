@@ -1,4 +1,3 @@
-// Real React/DOM interaction fixture, run in an isolated Electron window by the colocated test.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Sidebar } from '../Sidebar'
@@ -155,7 +154,6 @@ async function run(): Promise<void> {
   assert(savedIdentity === '/fixture:qoder::q1', 'rename must retain source identity')
   await wait(() => document.activeElement === row)
 
-  // Pinned sessions use the same menu; keyboard cancel and click cancel never persist.
   button('会话操作：置顶标题').click()
   await wait(() => !!document.querySelector('[role="menu"]'))
   button('重命名').click()

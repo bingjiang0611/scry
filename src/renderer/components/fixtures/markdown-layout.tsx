@@ -1,4 +1,3 @@
-// Real Chromium layout/interaction fixture, run in an isolated Electron window by the colocated test.
 import { createRoot } from 'react-dom/client'
 import MarkdownImpl, { WorkspaceFileLinkProvider } from '../MarkdownImpl'
 import type { WorkspaceFileTarget } from '../../workspace-links'
