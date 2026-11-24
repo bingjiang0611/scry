@@ -83,6 +83,9 @@ export type OrchestrationEventType =
 export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = [
   'run.intent_recorded',
   'run.admitted',
+  'run.queued',
+  'run.queue_held',
+  'run.queue_released',
   'run.dispatched',
   'run.session_bound',
   'run.stop_requested',
@@ -268,6 +271,10 @@ export interface RunProjectionRow {
   revSeq: number
   /** R5 reserved column. */
   parentRunId: string | null
+  /** D1: 1-based slot while a run waits in its session's queue. */
+  queuePosition?: number | null
+  /** D1: a stop holds the queue entry until something explicitly releases it. */
+  queueHeld?: boolean
 }
 
 export interface InteractionProjectionRow {
