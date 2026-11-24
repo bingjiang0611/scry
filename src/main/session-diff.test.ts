@@ -90,7 +90,6 @@ describe('SessionDiffBaselineRegistry', () => {
     const first = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo' })
     expect(first.origin).toBe('session_start')
     registry.bind('claude\0/repo', 0, 'ses_abc')
-    // 拿到原生 session id 后的续接轮：同 revision + 同 session → 复用同一 capture。
     const second = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo', sessionId: 'ses_abc' })
     expect(second.capture).toBe(first.capture)
     expect(second.origin).toBe('session_start')
@@ -99,7 +98,6 @@ describe('SessionDiffBaselineRegistry', () => {
 
   it('恢复/选择会话后进程内无基线：当场重锚并标 origin=resumed', () => {
     const registry = new SessionDiffBaselineRegistry(async () => fakeCapture('c'), async () => undefined)
-    // 应用重启 / loadSession 后第一轮就带着 resume id 进来，且此前没有基线。
     const entry = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo', sessionId: 'ses_resumed' })
     expect(entry.origin).toBe('resumed')
   })
@@ -430,8 +428,8 @@ describe('RunDiffPreviewer 发布策略', () => {
     })
     const first = previewer.notifyChange()
     await Promise.resolve()
-    void previewer.notifyChange() // trailing 排上
-    previewer.sealAll() // 终态收口
+    void previewer.notifyChange()
+    previewer.sealAll()
     const idle = previewer.idle()
     gate.resolve(snap())
     await Promise.all([first, idle])
@@ -460,7 +458,7 @@ describe('RunDiffPreviewer 发布策略', () => {
       }
     })
 
-    await previewer.notifyChange() // t=0：首轮预览发布
+    await previewer.notifyChange()
     expect(calls).toBe(1)
 
     clock.set(1_000)
@@ -473,7 +471,7 @@ describe('RunDiffPreviewer 发布策略', () => {
 
     expect(calls).toBe(2)
     expect(events).toHaveLength(2)
-    expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/last.ts') // 最后一次写发出去了
+    expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/last.ts')
     expect(new Set(events.map((e) => e.id)).size).toBe(1) // 仍是固定 id 原地替换
     expect(clock.pending()).toBe(0)
   })
@@ -508,7 +506,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     for (const at of [1_000, 2_000, 3_000, 4_000]) {
       clock.set(at)
       await previewer.notifyChange()
-      expect(clock.pending()).toBe(1) // 窗口内的每次 notify 都并进同一个延迟刷新
+      expect(clock.pending()).toBe(1)
     }
     expect(calls).toBe(1)
 
@@ -540,8 +538,8 @@ describe('RunDiffPreviewer 发布策略', () => {
     await previewer.notifyChange()
     expect(clock.pending()).toBe(1)
 
-    previewer.sealAll() // 终态收口
-    expect(clock.pending()).toBe(0) // 悬挂的延迟刷新当场取消
+    previewer.sealAll()
+    expect(clock.pending()).toBe(0)
     await previewer.idle() // 不死等 timer
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS * 4)
@@ -653,7 +651,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
 
     const preview = events.at(-1)?.snapshot
     expect(preview?.status).toBe('captured')
-    expect(fileNames(preview!)).toEqual(['feature.ts']) // untracked 纳入，预存脏改动 base.ts 排除
+    expect(fileNames(preview!)).toEqual(['feature.ts'])
     expect(preview!.files[0].added).toBe(2)
 
     // 终态：封口预览，用同一基线算净 diff。终态一发布，后续预览一律被丢弃。
@@ -834,7 +832,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     clock.set(1_000)
     await writeFile(join(root, 'second.ts'), 'b\nc\n')
     await previewer.notifyChange()
-    expect(events).toHaveLength(1) // 当场被节流
+    expect(events).toHaveLength(1)
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await previewer.idle()
@@ -914,7 +912,7 @@ describe('终态 diff enrichment 的 renderer 发布门控', () => {
     const w = wire('run-1')
     w.runs.register(w.state, { runId: 'run-1' })
 
-    await w.previewer.notifyChange() // 运行中：预览先到 UI
+    await w.previewer.notifyChange()
     expect(w.published.map((event) => event.stage)).toEqual(['turn_diff_preview', 'session_diff_preview'])
 
     w.state.done = true // Provider 终态先翻 done，随后才落终态 diff
