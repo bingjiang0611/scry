@@ -82,7 +82,6 @@ export function providerCommandChannelHandlers(deps: {
   withProviderOperation: <T>(providerId: ProviderContext['providerId'], operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
 }) {
   return {
-    // An unavailable catalog stays `data: null` with its reason, never an empty list.
     'agent:listCommands': (context: ProviderContext) =>
       deps.withProviderOperation(context.providerId, () => deps.providerRegistry.listCommands(context), context.agentProfileId)
   } satisfies ChannelHandlers

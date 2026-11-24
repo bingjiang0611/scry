@@ -35,7 +35,6 @@ export interface WarmPoolInvalidation {
   profileId?: string
 }
 
-// Key order must never depend on the caller's property order.
 export function providerWarmKey(parts: Readonly<Record<string, string | undefined>>): string {
   return Object.keys(parts).sort().map(name => `${name}=${parts[name] ?? ''}`).join('\u0000')
 }

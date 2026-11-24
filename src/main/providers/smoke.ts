@@ -10,7 +10,6 @@ import { emitLargeTrace, emitLongStream, emitPacedStream, isLargeTracePrompt, is
 import { runSmokePostToolScenarios, runSmokePromptScenarios } from './smoke-scenarios'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
-/** Providers the packaged fixture can impersonate. Order is irrelevant; the gate is not. */
 export type SmokeFixtureProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */

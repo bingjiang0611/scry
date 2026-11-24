@@ -58,7 +58,6 @@ export function formatSampleAge(sampledAt: number | null | undefined, now: numbe
   return `${Math.floor(elapsed / 86_400_000)} 天前更新`
 }
 
-/** Full timestamp of the sample, e.g. 「采样于 16:42:07」. */
 export function formatSampleTime(sampledAt: number | null | undefined): string {
   if (sampledAt === null || sampledAt === undefined || !Number.isFinite(sampledAt)) return ''
   const date = new Date(sampledAt)

@@ -2,12 +2,9 @@ import { createHash } from 'node:crypto'
 
 /** Explicit smoke-only reader gate: the fixture advertises and uses a real reader. */
 export const smokeHistoryReaderGate = process.env.SCRY_ELECTRON_SMOKE_READER === '1'
-/** Where the fixture records what the reader actually served this run. */
 export const smokeHistoryReadsPath = process.env.SCRY_ELECTRON_SMOKE_READS
-/** The adapter facet the gate enables; without it the fixture claims no reader. */
 export const smokeHistoryReaderFacet = smokeHistoryReaderGate ? { historyReader: true as const } : {}
 
-/** The reader work of one run: nothing at all unless the gate, a connection and a log exist. */
 export function smokeReaderRead(request: { runId: string; historyReader?: { url: string; token: string; snapshotId: string } }): Promise<void> {
   return smokeHistoryReaderGate && request.historyReader && smokeHistoryReadsPath
     ? readFrozenHistory(request.historyReader, request.runId, smokeHistoryReadsPath)
