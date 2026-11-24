@@ -237,7 +237,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     await previewer.notifyChange()
     await previewer.notifyChange()
     expect(events).toHaveLength(2)
-    expect(new Set(events.map((e) => e.id)).size).toBe(1) // 同一个 id
+    expect(new Set(events.map((e) => e.id)).size).toBe(1)
     expect(events[0].id).toBe('dp-run-1')
     expect(events[0].stage).toBe('turn_diff_preview')
   })
@@ -435,8 +435,8 @@ describe('RunDiffPreviewer 发布策略', () => {
     const idle = previewer.idle()
     gate.resolve(snap())
     await Promise.all([first, idle])
-    expect(calls).toBe(1) // trailing 不再执行
-    expect(events).toHaveLength(0) // 在途那次算完也丢弃
+    expect(calls).toBe(1)
+    expect(events).toHaveLength(0)
   })
 
   // 纯节流窗口的最后一次写：首轮预览已经算完，第二次 notify 落在窗口里且之后再没有第三次通知。
@@ -465,8 +465,8 @@ describe('RunDiffPreviewer 发布策略', () => {
 
     clock.set(1_000)
     await previewer.notifyChange() // 纯节流窗口内的最后一次写
-    expect(calls).toBe(1) // 当场不采集（节流仍然有效）
-    expect(clock.pending()).toBe(1) // 但排了一次到期补发
+    expect(calls).toBe(1)
+    expect(clock.pending()).toBe(1)
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS) // 窗口到期，没有第三次 notify
     await previewer.idle()
@@ -475,7 +475,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     expect(events).toHaveLength(2)
     expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/last.ts') // 最后一次写发出去了
     expect(new Set(events.map((e) => e.id)).size).toBe(1) // 仍是固定 id 原地替换
-    expect(clock.pending()).toBe(0) // 到期即摘掉，不留悬挂 timer
+    expect(clock.pending()).toBe(0)
   })
 
   it('节流窗口内多次 notify 只合并成一次延迟刷新：不并发、不叠加 timer', async () => {
@@ -515,7 +515,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await previewer.idle()
 
-    expect(calls).toBe(2) // 首轮 + 一次合并后的延迟刷新
+    expect(calls).toBe(2)
     expect(maxConcurrent).toBe(1)
   })
 
@@ -577,7 +577,7 @@ describe('RunDiffPreviewer 发布策略', () => {
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS * 4)
     await previewer.idle()
-    expect(calls).toBe(2) // 没有多余采集
+    expect(calls).toBe(2)
   })
 })
 
@@ -797,7 +797,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     await Promise.all([first, second])
 
     expect(calls).toBe(2)
-    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts']) // 最后一次写没被吞
+    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts'])
     previewer.sealAll()
     registry.disposeAll()
   }, 35_000)
@@ -840,7 +840,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     await previewer.idle()
 
     expect(events).toHaveLength(2)
-    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts']) // 到期读的是最新 Git 状态
+    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts'])
     previewer.sealAll()
     registry.disposeAll()
   }, 35_000)
@@ -861,7 +861,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
 
     await writeFile(join(root, 'after-resume.ts'), 'new\n')
     const settled = await snapshotSessionNetDiff(baselineCapture)
-    expect(fileNames(settled)).toEqual(['after-resume.ts']) // earlier.ts 不在净 diff 里
+    expect(fileNames(settled)).toEqual(['after-resume.ts'])
 
     await cancelGitTurnDiff(baselineCapture)
     registry.disposeAll()

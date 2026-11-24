@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `66da271f`, removed 11 inline restatements from `src/main/session-diff.test.ts`. Kept the setup rationale and did not change any assertions. Comment-free emit and directives matched, all 40 focused tests passed, and the ratchet passed.
+
 At `f140e5ea`, removed two redundant comments in `scripts/ui-campaign.mjs` and `src/renderer/machines-view-model.test.ts`; comment-free output and directives matched, 18 focused tests and the ratchet passed. A separate recorder measurement invocation hit its outer timeout. Left `scripts/recorder-engine-bench.mjs` unchanged; no conclusion about its performance follows.
 
 At `752b8a44`, corrected the two Git turn-diff benchmark headers. The probes do not enforce a performance threshold, but can still fail; interleaving reduces order bias without guaranteeing equal load. Both scripts preserved comment-free output, tool directives and shebangs; `node --check` and the ratchet passed. No benchmark was run.
