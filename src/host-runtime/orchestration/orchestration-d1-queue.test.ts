@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { EventSink } from './event-sink'
+import { voidExpiredEffects } from './effect-outbox'
 import { sessionQueueBlocksDispatch } from '../../daemon/orchestration-dispatch-queue'
 import type { OrchestrationCommand } from './orchestrator-commands'
 
@@ -120,6 +121,28 @@ it('D1: a held run does not dispatch, and dispatches after the release', () => {
       // Releasing does not move the entry: it keeps the slot the user is looking at.
       expect(sink.getRun('run-queued')).toMatchObject({ lifecycle: 'queued', queuePosition: 1 })
       expect(sessionQueueBlocksDispatch(sink, 'run-queued')).toBe(false)
+    } finally {
+      sink.close()
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true })
+  }
+})
+
+// D1: "用户排的队在重启后保留（不受 pending 的 60 秒 TTL 约束）". A queued submit still carried the
+// pending TTL, so a queue that waited a minute was voided as `pending_expired` and its run cancelled.
+it('D1: a queued run is not voided by the pending TTL', () => {
+  const userData = mkdtempSync(join(tmpdir(), 'scry-d1-ttl-'))
+  try {
+    const sink = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
+    try {
+      expect(sink.execute(submit({ commandId: 't1', runId: 'run-live', claimMode: 'immediate' })).kind).toBe('accepted')
+      expect(sink.execute(effect('t-dispatch', 'run-live', 'dispatched', 1_700_000_000_010)).kind).toBe('accepted')
+      expect(sink.execute(submit({ commandId: 't2', runId: 'run-waiting', claimMode: 'queued' })).kind).toBe('accepted')
+      // Two minutes later the queue has not moved yet.
+      const expired = voidExpiredEffects(sink.handle.db, 1_700_000_000_000 + 120_000)
+      expect(expired.map((row) => row.runId)).not.toContain('run-waiting')
+      expect(sink.getRun('run-waiting')).toMatchObject({ lifecycle: 'queued' })
     } finally {
       sink.close()
     }

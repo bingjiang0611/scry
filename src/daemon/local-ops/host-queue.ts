@@ -80,11 +80,13 @@ export const queueReleaseLocalOps: DaemonLocalOpGroup = (deps) => ({
     const reason = typeof value.reason === 'string' && value.reason ? value.reason : undefined
     const payload = { runId: value.runId, ...(reason ? { reason } : {}) }
     const commandId = `release:${value.runId}:${Date.now()}`
+    // P4 has no `user` actor: a host-initiated command is `system`, exactly like the rollback write.
+    // The human intent is the trusted IPC call this handler serves, not a forged actor string.
     const result = (sink as unknown as { execute: (command: unknown) => { kind: string; reason?: string } }).execute({
       type: 'run.release_queue',
       commandId,
-      actor: 'user',
-      scope: 'local',
+      actor: 'system',
+      scope: 'system',
       at: Date.now(),
       payload,
       payloadSha256: sha256Hex(canonicalJson(payload))

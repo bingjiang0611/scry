@@ -105,7 +105,10 @@ describe('P4-0 pure orchestrator decide()', () => {
     expect(decision.receipt.status).toBe('accepted')
   })
 
-  it('queues pending run.submit with bounded TTL when claimMode is queued', () => {
+  // The old name said "when claimMode is queued", but a queued entry has no TTL under D1 — and this view
+  // has no active run, so the old code was really asserting the TTL of a submit that never queued. The
+  // TTL still applies to a submit that names no claim mode: it is a plain dispatch, not a queue entry.
+  it('bounds pendingTtlMs for a submit with no claim mode', () => {
     const cmd = submitCmd({
       payload: {
         runId: 'remote-run-2',
@@ -113,9 +116,10 @@ describe('P4-0 pure orchestrator decide()', () => {
         provider: 'claude',
         profile: 'default',
         cwd: '/tmp/ws',
-        promptPreview: 'queued',
-        body: { storage: 'inline', sha256: sha256Hex('queued'), bytes: 6, inline: 'queued' },
-        claimMode: 'queued',
+        promptPreview: 'plain',
+        body: { storage: 'inline', sha256: sha256Hex('plain'), bytes: 5, inline: 'plain' },
+        // A client that predates claimMode: the daemon must still bound its pending dispatch.
+        claimMode: undefined as unknown as 'immediate',
         pendingTtlMs: 60_000
       }
     })
@@ -138,8 +142,8 @@ describe('P4-0 pure orchestrator decide()', () => {
         provider: 'claude',
         profile: 'default',
         cwd: '/tmp/ws',
-        promptPreview: 'queued',
-        claimMode: 'queued',
+        promptPreview: 'plain',
+        claimMode: undefined as unknown as 'immediate',
         pendingTtlMs: 3_600_000
       }
     })

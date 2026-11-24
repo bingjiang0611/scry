@@ -82,6 +82,48 @@ describe('P4-2 AuthorityEngine submit, pre-dispatch recheck, resolveIntent, and 
     })
   })
 
+  // D1 (review): a queued run was never dispatchable. `run.queued` projects lifecycle 'queued', the
+  // gate only accepted 'recorded', so the first time the head cleared the queued run failed with
+  // illegal_transition and stayed 'queued' forever — wedging every later send in that session.
+  it('D1: dispatches a queued run once the session head has settled', async () => {
+    await withTempDir(async (userData) => {
+      const ws = join(userData, 'ws')
+      mkdirSync(ws, { recursive: true })
+      const realWs = realpathSync(ws)
+      const sink = EventSink.open({
+        userDataDir: userData, checkpointIntervalMs: 0, authorizedActors: [`peer:${PEER_A}`]
+      })
+      const engine = new AuthorityEngine({ sink, leaseOwner: 'daemon:test' })
+      const dispatchOf = (runId: string) => engine.beforeDispatch({
+        runId, cwd: realWs, provider: 'codex', profile: null, actor: `peer:${PEER_A}`,
+        authorizeWorkspace: (p) => p, isPeerAuthorized: (p) => p === PEER_A,
+        isProviderAuthenticating: () => false, verifyTrustGate: () => true
+      })
+      const submit = (runId: string, claimMode: 'immediate' | 'queued') => {
+        const payload = {
+          runId, sessionKey: 'sess-queued', provider: 'codex' as const, profile: null, cwd: realWs,
+          promptPreview: runId, claimMode, leaseOwner: 'daemon:test'
+        }
+        expect(sink.execute({
+          type: 'run.submit', commandId: `cmd-${runId}`, actor: `peer:${PEER_A}`, scope: 'local',
+          at: Date.now(), payload, payloadSha256: sha256Hex(canonicalJson(payload))
+        }).kind).toBe('accepted')
+      }
+      try {
+        submit('run-head', 'immediate')
+        expect(dispatchOf('run-head')).toEqual({ ok: true })
+        submit('run-queued', 'queued')
+        expect(sink.getRun('run-queued')?.lifecycle).toBe('queued')
+
+        engine.recordTerminal({ runId: 'run-head', step: 'settled', evidence: ['provider:codex'] })
+        expect(dispatchOf('run-queued')).toEqual({ ok: true })
+        expect(sink.getRun('run-queued')?.lifecycle).toBe('dispatched')
+      } finally {
+        sink.close()
+      }
+    })
+  })
+
   it('rejects dispatch when cwd symlink target changed, grant revoked, or trust gate failed', async () => {
     await withTempDir(async (userData) => {
       const ws1 = join(userData, 'ws1')

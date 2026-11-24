@@ -165,7 +165,11 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         // them with a lease. Shadow writes and historical backfill replay a record instead of
         // starting a Provider run, so they are never claimable.
         state: p.shadowOnly || p.historicalBackfill ? 'done' : 'pending',
-        expiresAt: p.shadowOnly || p.historicalBackfill || isImmediate ? null : cmd.at + boundedPendingTtlMs,
+        // D1: a queued turn is the user's queue, not a pending dispatch. The TTL exists to void a
+        // dispatch nobody will claim; the queue may legitimately wait minutes, so it has no deadline.
+        expiresAt: p.shadowOnly || p.historicalBackfill || isImmediate || queueDecision === 'queued'
+          ? null
+          : cmd.at + boundedPendingTtlMs,
         leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : p.historicalBackfill ? 'historical:no-dispatch' : null,
         claimedAt: p.shadowOnly || p.historicalBackfill ? cmd.at : null
       })

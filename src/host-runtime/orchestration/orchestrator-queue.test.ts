@@ -138,3 +138,12 @@ it('D1: a held entry can be released, and releasing it twice is refused', () => 
   expect(decide({ ...release, commandId: 'cmd-release-3' } as OrchestrationCommand, notQueued))
     .toMatchObject({ kind: 'rejected', reason: 'illegal_transition' })
 })
+
+// D1: "用户排的队在重启后保留（不受 pending 的 60 秒 TTL 约束）". The queue entry must carry no expiry,
+// because the TTL exists to void a dispatch nobody claimed — a queue may legitimately wait minutes.
+it('D1: a queued submit carries no pending TTL', () => {
+  const decision = decide(submit('queued-run', 'queued'), view())
+  expect(decision.kind).toBe('accepted')
+  if (decision.kind !== 'accepted') return
+  expect(decision.effects[0]).toMatchObject({ kind: 'provider.run.start', state: 'pending', expiresAt: null })
+})

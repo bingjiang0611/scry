@@ -239,7 +239,12 @@ export class AuthorityEngine {
       return { ok: false, action: 'fail', reason: 'stop_requested' }
     }
     if (preDispatched && run.lifecycle === 'dispatched') return { ok: true }
-    if (run.lifecycle !== 'recorded') return { ok: false, action: 'fail', reason: 'illegal_transition' }
+    // D1: a queued run is accepted and not yet dispatched — exactly what this gate admits. Without
+    // `queued` here, the first time the session head cleared the queue entry failed the gate and the
+    // row stayed `queued` forever, which then blocked every later send in that session.
+    if (run.lifecycle !== 'recorded' && run.lifecycle !== 'queued') {
+      return { ok: false, action: 'fail', reason: 'illegal_transition' }
+    }
 
     const now = this.#clock()
     const { intentAt, expiresAt } = getRunStartExpiryInfo(this.sink, input.runId, run.intentSeq)

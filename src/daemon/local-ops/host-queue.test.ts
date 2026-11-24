@@ -118,3 +118,32 @@ describe('agent:releaseQueuedRun', () => {
     expect(seen[0]).toMatchObject({ type: 'run.release_queue', payload: { runId: 'run-1', reason: 'user' } })
   })
 })
+
+// B3 follow-up (review): the release must work against the real authority, not just a fake execute.
+// The first version submitted the command as actor 'user', which the P4 authority refuses as
+// `device_not_authorized`, so every release failed while the hold kept the queue stopped.
+describe('agent:releaseQueuedRun against the real authority', () => {
+  function releaseOp() {
+    const userData = mkdtempSync(join(tmpdir(), 'scry-release-'))
+    dirs.push(userData)
+    const sink = EventSink.open({ userDataDir: userData })
+    const ops = queueReleaseLocalOps({ orchestrationReader: () => sink } as never) as Record<
+      string,
+      (input: unknown) => Promise<{ ok: boolean; reason?: string }>
+    >
+    return { sink, release: ops['agent:releaseQueuedRun'] }
+  }
+
+  it('releases a held queued run and refuses a second release', async () => {
+    const { sink, release } = releaseOp()
+    insertSession(sink, { sessionKey: 's-1' })
+    insertRun(sink, { runId: 'run-head', sessionKey: 's-1', lifecycle: 'dispatched', position: null, seq: 1 })
+    insertRun(sink, { runId: 'run-held', sessionKey: 's-1', lifecycle: 'queued', position: 1, held: 1, seq: 2 })
+
+    expect(await release({ runId: 'run-held' })).toEqual({ ok: true })
+    expect(sink.getRun('run-held')?.queueHeld ?? false).toBe(false)
+    // Nothing left to release: the authority refuses instead of clearing flags again.
+    expect(await release({ runId: 'run-held' })).toEqual({ ok: false, reason: 'invalid_target' })
+    sink.close()
+  })
+})
