@@ -101,8 +101,14 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 同一 socket 的直接 `serve` 也串行认领，避免两个进程互相 unlink；不自动清理此前已启动的旧版孤儿进程。检查存量进程时须核对 PID、工作区、版本和 owner，不按进程名批量杀进程。
 - `scripts/recorder-daemon-cpu-bench.mjs` 提供 600 秒真实等待的隔离 L2 socket 基准。它计 daemon 与小型测试客户端所在进程的 user+system CPU，不含 Git 子进程、真实宿主或上传。历史目录只用合成数据，不改生产账本。
 
-不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
+### 0.2.85：单个会话不可读不再中断整轮
 
+- 恢复轮、健康统计、`staleOpenTurns` 列表和“是否还有 open turn”的判断都逐会话隔离。一个会话目录里出现非目录项（Finder 写的 `.DS_Store`、被文件占位的 `turns/`）或权限不足，只跳过这一个会话，其余会话照常处理，整轮不再是全有或全无。
+- 只有“这个条目不是可读会话”的错误（`ENOTDIR`/`ENOENT`/`EACCES`/`EPERM`/`ELOOP`/`ENAMETOOLONG`）按可跳过处理。轮次内部的读错误（例如事件 `stat` 的 `EIO`）仍然直接失败：它可能改变结论，不能变成一次安静的跳过。
+- 同一个会话连续 3 次失败后进入 suspended：不再每轮重试，改为每小时重探一次。转入时 `recorder.log` 留一行 `WARN session suspended after N failed passes`，`health.json` 的 `suspendedSessions` 和 `scry status` 都会报出来。暂停只影响重试，不删标记、不改 `open.json`、不丢弃证据。
+- 一次成功收尾会清掉该会话的失败记录，瞬时故障不会累积成 suspended。记录写在 `.scry/session-failures.json`（和 `health.json` 同级），是报告，不是事实源；删掉它只会让下一轮重新计数。
+
+不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
 存量 workspace 升级 CLI 后需要重新生成 hook 脚本才能拿到快路径:`scry integrations repair --yes`(不做也不会错,只是慢)。
 
 ## 容量与归档

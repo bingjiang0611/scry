@@ -12,6 +12,7 @@ import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, updateHealth, safeKey } from './store.js'
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, recorderQuarantinedOpenTurns, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { attentionIndexPresent, markedSessions } from './attention.js'
+import { clearSessionFailure, isUnusableSessionError, noteSessionFailure, readSessionFailures, sessionFailureKey, suspendedSessionKeys, type SessionFailureLedger } from './session-failures.js'
 import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
 import { queueHook } from './recorder-hook-queue.js'
@@ -149,16 +150,23 @@ async function recoverySessions(
   dataRoot: string,
   scope?: RecorderRecoveryScope,
   incremental = false
-): Promise<Array<{ provider: ProviderId; sessionDir: string }>> {
+): Promise<{ sessions: Array<{ provider: ProviderId; sessionDir: string }>; failures: SessionFailureLedger }> {
+  const failures = await readSessionFailures(dataRoot)
+  const suspended = suspendedSessionKeys(failures)
+  // A suspended session is retried hourly, not every pass: repeating a failure it has no new
+  // evidence for is what kept the whole pass from finishing.
+  const visitable = (sessions: Array<{ provider: ProviderId; sessionDir: string }>) =>
+    sessions.filter(session => !suspended.has(sessionFailureKey(session.provider, basename(session.sessionDir))))
   if (scope) {
     const sessionDir = recorderSessionRoot(dataRoot, scope.provider, scope.sessionId)
     if (!incremental) await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
-    return [{ provider: scope.provider, sessionDir }]
+    // An explicit scope is the operator asking for that session by name: suspension never hides it.
+    return { sessions: [{ provider: scope.provider, sessionDir }], failures }
   }
   const initialized = await attentionIndexPresent(dataRoot)
   if (!initialized || !incremental) {
     try {
-      return await reconcileAttentionIndex(dataRoot)
+      return { sessions: visitable(await reconcileAttentionIndex(dataRoot)), failures }
     } catch (error) {
       // A partial initial index is never usable. A failed repair must not starve known work.
       if (!initialized || !await attentionIndexPresent(dataRoot)) throw error
@@ -167,12 +175,12 @@ async function recoverySessions(
       ).catch(() => undefined)
     }
   }
-  return markedSessions(dataRoot)
+  return { sessions: visitable(await markedSessions(dataRoot)), failures }
 }
 
 async function pendingHealth(
   dataRoot: string
-): Promise<{ pendingCount: number; oldestPendingAgeMs: number; openTurns: number; staleOpenTurns: number }> {
+): Promise<{ pendingCount: number; oldestPendingAgeMs: number; openTurns: number; staleOpenTurns: number; suspendedSessions: number }> {
   return recorderPendingHealth(dataRoot)
 }
 
@@ -223,7 +231,8 @@ export async function recoverRecorder(
   let expired = 0
   let managedPresent = false
   try {
-    for (const item of await recoverySessions(enablement.dataRoot, scope, options.incremental)) {
+    const { sessions, failures } = await recoverySessions(enablement.dataRoot, scope, options.incremental)
+    for (const item of sessions) {
       try {
         // Hooks queued behind a busy lock must land before this pass judges the open turn.
         if ((await recorderInboxEntries(item.sessionDir)).length) {
@@ -343,6 +352,10 @@ export async function recoverRecorder(
         else if (result.status === 'committed' || result.status === 'duplicate') {
           recovered++
           if (forcedExpiry) expired++
+          // The session finished its work, so earlier failures were transient after all.
+          await clearSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), {
+            present: sessionFailureKey(item.provider, basename(item.sessionDir)) in failures
+          }).catch(() => undefined)
         }
       } catch (error) {
         pending++
@@ -350,6 +363,11 @@ export async function recoverRecorder(
         // Evidence remains pending, not dropped. Failure of diagnostics must not block peers.
         if (!isLockTimeout(error)) {
           await updateHealth(enablement.dataRoot, { lastError: { at: new Date().toISOString(), message } }).catch(() => undefined)
+          // A busy peer is not a broken session: it clears itself as soon as the lock is released.
+          // Neither is a read error inside the turn: only an unusable entry is skipped for good.
+          if (isUnusableSessionError(error)) {
+            await noteSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), error).catch(() => undefined)
+          }
         }
         await appendRotatingLog(
           join(enablement.dataRoot, 'logs', 'recorder.log'),
