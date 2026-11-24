@@ -236,6 +236,7 @@ function buildAuthorityRuntime<
         grantScope: input.grantScope,
         commandId: input.scopedIntentId,
         detail: input.detail,
+        ...(input.claimMode ? { claimMode: input.claimMode } : {}),
         ...(immediateDispatch ? { immediateDispatch } : {})
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
