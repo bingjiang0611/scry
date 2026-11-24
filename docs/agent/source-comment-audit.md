@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `752b8a44`, corrected the two Git turn-diff benchmark headers. The probes do not enforce a performance threshold, but can still fail; interleaving reduces order bias without guaranteeing equal load. Both scripts preserved comment-free output, tool directives and shebangs; `node --check` and the ratchet passed. No benchmark was run.
+
 At `e6106075`, moved the completed-run versus durable input-receipt decision from the unified conversation smoke into [ADR 014](../adr/014-conversation-ownership-and-side-chat.md). The script's comment-free emit and directives matched. Ten receipt/refusal tests and the ratchet passed; the live smoke was not run.
 
 At `04e007e3`, moved the cross-consumer packaged layout decision into [ADR 020](../adr/020-build-identity-and-provider-compatibility.md). Kept the local pointer to the ADR and the Linux executable-name constraint. The script emitted identical code with comments disabled; 20 wrapper and layout tests and the ratchet passed. No product artifact was built or launched.

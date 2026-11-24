@@ -3,9 +3,8 @@
  * Measure `beginGitTurnDiff`, which runs inside the Provider's turn-start hook and is therefore
  * the one capture cost the user waits for directly.
  *
- * This is an informational probe, not a gate: it always exits 0 once the CLI bundle exists, and
- * nothing here asserts a threshold. Absolute numbers move with machine, disk and load, so compare
- * runs on the same machine rather than against the reference below.
+ * This informational probe does not enforce a performance threshold. Compare runs on the same
+ * machine; the reference below depends on the hardware, disk and load.
  *
  * Reference (macOS, Apple silicon, CLI 0.2.31, git spawn ~75ms):
  *   clean worktree              311ms   (554ms before the layout calls were merged into one rev-parse)

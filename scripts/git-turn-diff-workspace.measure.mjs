@@ -3,9 +3,8 @@
  * Measure one whole recorder turn over a real workspace layout: every discovered repository is
  * baselined at the turn start and diffed at the turn end, exactly as the hook does.
  *
- * This is an informational probe, not a gate: it always exits 0 once the bundles exist. Numbers move
- * with machine, disk cache and other load, so pass two builds and let the script interleave them:
- * both see the same load, and the printed delta is the part worth reading.
+ * This informational probe does not enforce a performance threshold. Pass two builds to interleave
+ * them and reduce order bias. Machine load and disk cache can still differ between runs.
  *
  * The layout is read-only: copy it first, never measure the live workspace.
  *
@@ -17,8 +16,8 @@
  * Modes:
  *   (default)     every repository of a turn is captured in parallel; reports the wall time
  *   --sequential  one repository at a time, which is the cost of a turn that does not overlap them
- *   --paired      implies --sequential and alternates the builds per repository, so a load spike
- *                 cannot land on one build only; reports the sum of per-repository medians
+ *   --paired      implies --sequential, alternates build order per repository, and reports the sum
+ *                 of per-repository medians
  *
  * Options: --layout <dir> (required), --rounds <n> (default 5), --bundle <dir|git.js> (repeatable),
  *          --per-repository, --json <file>
