@@ -55,15 +55,12 @@ try {
   if (!projectPath) { console.log('[syn] ✗ no authorized project'); process.exit(2) }
 } catch (e) { console.log(`[syn] ✗ projects failed: ${e.message}`); process.exit(2) }
 
-// Provider picker op: the device learns which Providers the host offers.
 console.log('[syn] relay-run providers...')
 try {
   const { stdout } = await exec(probe, ['relay-run', 'providers', p.relayHost, String(p.relayPort), p.hostId, anchor, grantedCertPem, key, ''], { timeout: 30_000, maxBuffer: 1 << 20 })
   console.log(`[syn]   providers -> ${stdout.trim().replace(/\n/g, ' | ')}`)
 } catch (e) { console.log(`[syn]   (providers op error: ${e.message})`) }
 
-// Session catalog op: the device learns the SAME conversations the Mac lists
-// (fixes the always-empty phone session list).
 console.log('[syn] relay-run sessions...')
 try {
   const { stdout } = await exec(probe, ['relay-run', 'sessions', p.relayHost, String(p.relayPort), p.hostId, anchor, grantedCertPem, key, ''], { timeout: 30_000, maxBuffer: 1 << 20 })

@@ -101,7 +101,7 @@ test('rate limit: bounded attempts per window, then refused', () => {
   a.register(newSession())
   for (let i = 0; i < 3; i++) rejects(() => a.admit({ token: token(), role: 'device' }), 'unknown_or_expired_ticket')
   rejects(() => a.admit({ token: token(), role: 'device' }), 'admission_rate_limited')
-  c.advance(10_001) // window slides; budget restored
+  c.advance(10_001)
   rejects(() => a.admit({ token: token(), role: 'device' }), 'unknown_or_expired_ticket')
 })
 

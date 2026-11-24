@@ -19,7 +19,7 @@ export async function resolve(specifier, context, next) {
       try {
         const candidate = new URL(rel, context.parentURL)
         if (existsSync(fileURLToPath(candidate))) return { url: candidate.href, shortCircuit: true }
-      } catch { /* fall through */ }
+      } catch {}
     }
   }
   return next(specifier, context)
