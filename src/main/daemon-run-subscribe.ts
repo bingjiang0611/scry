@@ -1,5 +1,5 @@
 import type { AgentQuestionRequest, AgentStopState } from '../shared/runtime'
-import { TERMINAL_RUN_LIFECYCLE_NAMES } from '../shared/run-lifecycle'
+import { TERMINAL_RUN_LIFECYCLE_NAMES } from '../shared/orchestration-subscribe'
 import type { DesktopRemoteContext, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type {
   SubscribeActiveRunRow,

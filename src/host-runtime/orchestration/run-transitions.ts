@@ -2,7 +2,7 @@ import { RUN_LIFECYCLE_NEXT } from '../../main/remote/session-ledger'
 import {
   TERMINAL_RUN_LIFECYCLE_NAMES,
   TERMINAL_RUN_LIFECYCLE_SQL as TERMINAL_RUN_LIFECYCLE_SQL_SHARED
-} from '../../shared/run-lifecycle'
+} from '../../shared/orchestration-subscribe'
 import type { H1RunLifecycle, RunLifecycleState } from './types'
 
 /**

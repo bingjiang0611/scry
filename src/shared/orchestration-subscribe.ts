@@ -129,6 +129,22 @@ export interface SubscribeActiveRunRow {
   hasCheckpoint?: boolean
 }
 
+/**
+ * The terminal run lifecycles, as plain strings. They live beside the run-row contract because both the
+ * host and the App read them: main may not import `host-runtime/orchestration`, and splitting the list
+ * per layer is how one run kept blocking its session after a rollback.
+ */
+export const TERMINAL_RUN_LIFECYCLE_NAMES: readonly string[] = [
+  'settled',
+  'failed',
+  'cancelled',
+  'interrupted',
+  // D5: a rolled-back run is finished.
+  'rolled_back'
+]
+
+export const TERMINAL_RUN_LIFECYCLE_SQL = `(${TERMINAL_RUN_LIFECYCLE_NAMES.map((state) => `'${state}'`).join(', ')})`
+
 export interface SubscribeEventItem {
   seq: number
   type: string
