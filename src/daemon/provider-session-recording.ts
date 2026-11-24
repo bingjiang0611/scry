@@ -68,3 +68,8 @@ export function createDaemonProviderSessions(
     }
   })
 }
+
+/** C1: both Provider session observers read the same authority, so the host builds them together. */
+export function createProviderSessionObservers(getSink: () => EventSink | undefined) {
+  return { providerSessions: createDaemonProviderSessions(getSink), piSessions: createPiSessionObserver(getSink) }
+}

@@ -284,7 +284,8 @@ export async function startRun(
         firstTracePerf, firstTextPerf,
         stopSignal: options.stopSignal,
         requestRemoteStop,
-        remoteRunIds, remoteRunLedgerIds
+        remoteRunIds, remoteRunLedgerIds,
+        ...(host.captureCheckpoint ? { captureCheckpoint: host.captureCheckpoint } : {})
       }
       attachRunSettlement(
         runtimePromise,

@@ -8,12 +8,13 @@ import { createSessionCatalog } from '../main/bootstrap/session-catalog'
 import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
 import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
-import { createDaemonProviderSessions, createPiSessionObserver } from './provider-session-recording'
+import { createProviderSessionObservers } from './provider-session-recording'
 import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
 import { configureRecorderCliRuntime, warmShellEnv } from '../main/claude-locate'
 import { configureRunStageTiming } from '../main/run-stage-timing'
 import { daemonPrivateCliPath } from './daemon-config'
 import { startRun } from '../main/bootstrap/run-execution'
+import { createHostCheckpointService } from './checkpoint-service'
 import { startWorkspaceRun } from '../main/bootstrap/workspace-start'
 import { SourceControlService } from '../main/source-control/service'
 import { createRemoteHistoryHandlers } from '../main/bootstrap/remote-history'
@@ -99,8 +100,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const pi = createPiProfileRuntime({ userDataDir: options.userDataDir })
   // C1: Provider session lifetime is daemon-owned so the release reason can be stored.
   let userDataAuthority: EventSink | undefined
-  const providerSessions = createDaemonProviderSessions(() => userDataAuthority)
-  const piSessions = createPiSessionObserver(() => userDataAuthority)
+  const { providerSessions, piSessions } = createProviderSessionObservers(() => userDataAuthority)
   const providers = createProviderRuntime({
     providerSessions,
     piSessions,
@@ -153,13 +153,15 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     registeredWorkspaceRun: (runId, cwd) => pipeline.runs.get(runId)?.state.cwd === cwd
   })
 
+  const checkpoints = createHostCheckpointService({ sink: () => userDataAuthority, log })
+
   const remoteRunIds = new Set<string>()
   const remoteRunLedgerIds = new Map<string, string>()
   const requestRunStop = (runId: string): boolean => pipeline.requestRunStop(runId)
   pipeline = createRunPipeline({
     observeNativeTranscript: (run) => orchestrationAuthority?.observeNativeTranscript(workspace.homeDir, run),
-    // The pipeline's volatile notices travel on the App subscription. The trace and questions
-    // reach the App through its own run reads, so they are not sent twice (W1).
+    // Volatile notices travel on the App subscription; traces and questions reach it through its
+    // own run reads, so they are not sent twice (W1).
     renderer: {
       send: (channel, payload) => {
         if (channel === 'agent:dataUpdated') publishData(payload as AgentDataUpdated)
@@ -177,6 +179,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     isShuttingDown: () => isShuttingDown,
     nextRunSequence: () => runSequence++,
     sourceControl,
+    captureCheckpoint: (input) => checkpoints.capture(input),
     providerRegistry: providers.providerRegistry,
     resolveKnownProjectDirectory: workspace.resolveKnownProjectDirectory,
     resolveRemoteProjectDirectory: workspace.resolveRemoteProjectDirectory,

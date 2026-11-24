@@ -51,6 +51,8 @@ export interface RunPipelineInputs {
   remoteRunLedgerIds: Map<string, string>
   mirrorSessionTranscript: Parameters<typeof startRun>[2]['mirrorSessionTranscript']
   observeNativeTranscript?: Parameters<typeof startRun>[2]['observeNativeTranscript']
+  /** D5: checkpoint capture for a settled run; absent means this host keeps no checkpoints. */
+  captureCheckpoint?: Parameters<typeof startRun>[2]['captureCheckpoint']
   /**
    * Who executes runs. `'daemon'` means another process owns every run: this assembly
    * still serves the registry and trace views those channels read, but it must never
