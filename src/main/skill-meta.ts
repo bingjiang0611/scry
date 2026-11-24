@@ -1,4 +1,3 @@
-// SKILL.md frontmatter 解析（纯函数，有单测）。
 // 从 index.ts 抽出：description 可能是 YAML 多行块（> / >- / | / |-），
 // 这块解析有过 bug（只读首行 → 展示出 ">" / ">-" / "|"），故独立成可测模块。
 

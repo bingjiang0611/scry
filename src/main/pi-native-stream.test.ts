@@ -237,7 +237,6 @@ describe('Pi native session streaming', () => {
       minimum = Math.min(minimum, available)
     }
     expect(seen).toBe(60)
-    // Every body is released, so the allowance is whole again.
     expect(budget.available).toBe(2 * 1024 * 1024)
     // Peak residency: one turn is being consumed and at most one is open, so the whole
     // history never becomes resident. Holding every body instead fills the allowance.

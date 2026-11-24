@@ -1,4 +1,3 @@
-// 跨会话聚合查询与 30/60/90 天窗口统计（纯函数 + SQL 常量）。
 import type { DbStats } from '../shared/trace'
 import { providerDangerCoverage, type ProviderId } from '../shared/provider'
 

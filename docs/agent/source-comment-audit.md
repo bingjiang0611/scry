@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `4b20e999`, reconciled 548 lexical comment tokens across 163 direct `src/main/` TypeScript files. The A–L slice excluded `agent-`, `background-`, `context-`, `conversation-`, `daemon-`, `db-`, `dock-`, and `git-`; the M–Z slice excluded `managed-`, `normalize-`, `process-`, `project-`, `provider-`, `run-`, `session-`, `terminal-`, `trace-`, and `workspace-`. Removed 16 redundant comments in 13 files. Comment-free emit and tool directives matched; eight targeted suites passed 192 tests and the ratchet passed. ADR and wording candidates remain in place. Also reviewed the four comments in `scripts/fixtures/enable-macos-accessibility.swift`; retained its fixture and evidence contracts. `swiftc -frontend -parse` passed without running the helper.
+
 At `db02f0ec`, reconciled 843 lexical comment tokens across all 68 direct JS/TS/TSX files in `scripts/fixtures/`, including the 15 `.mjs` paths initially omitted from the scout reports. Removed six redundant or historical comments, preserving embedded fixture programs, tool directives and evidence limits. Comment-free emit matched, seven deterministic suites passed 48 tests, and the ratchet passed. The live UI/Provider scenarios and benchmark were not run. The fixture Swift source and wording follow-ups remain separate.
 
 At `9d6bc939`, reviewed 103 lexical comments across `experiments/remote-g0/cf-relay/src/worker.js` and `experiments/remote-g0/cf-relay-pages/public/_worker.js`. Removed nine redundant catch and forwarding labels, preserving transport, admission, and liveness rationale. Comment-free emit and tooling directives matched, four local Worker tests passed, and the ratchet passed. No deployment was performed.

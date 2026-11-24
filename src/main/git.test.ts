@@ -1228,7 +1228,6 @@ describe('snapshotSessionNetDiff（会话净 diff：基线 → 当前，非消�
       const baseline = await beginGitTurnDiff(root)
       expect(baseline.status).toBe('ready')
 
-      // 第一轮：base → v1，整行替换（逐轮 diff = +1/−1）
       await writeFile(join(root, 'f.ts'), 'v1\n')
       const afterTurn1 = await snapshotSessionNetDiff(baseline)
       expect(afterTurn1.status).toBe('captured')
@@ -1269,7 +1268,6 @@ describe('snapshotSessionNetDiff（会话净 diff：基线 → 当前，非消�
       expect(baseline.status).toBe('ready')
       expect(baseline.baselineClean).toBe(false)
 
-      // 会话中只动另一个新文件。
       await writeFile(join(root, 'session.txt'), 'hello\n')
       const net = await snapshotSessionNetDiff(baseline)
       expect(net.status).toBe('captured')

@@ -15,7 +15,6 @@ type NodeSqlite = { DatabaseSync: new (p: string) => SqliteDb }
 const nodeSqlite = (await import('node:sqlite').catch(() => null)) as NodeSqlite | null
 const sqliteIt = nodeSqlite ? it : it.skip
 
-// 把位置行映射回字段名，断言更可读
 const asSpan = (row: unknown[]): Record<string, unknown> =>
   Object.fromEntries(SPAN_COLS.map((c, i) => [c, row[i]]))
 const asMu = (row: unknown[]): Record<string, unknown> =>

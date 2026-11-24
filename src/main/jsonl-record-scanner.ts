@@ -39,7 +39,6 @@ export interface TranscriptReadEvidence {
   digest?: Hash
 }
 
-/** Provider specific projection of one token stream. */
 export interface RecordProjector<T> {
   accept(token: Token): T[]
 }

@@ -295,7 +295,6 @@ describe('app-store', () => {
 
       const projects = store.listProjects()
       expect(projects.map((p) => p.cwd)).toEqual(['/repo/a', ''])
-      // 不绑定分组确实更新，依然被排到末尾
       expect(projects.at(-1)!.mtime).toBeGreaterThanOrEqual(projects[0].mtime)
     } finally {
       rmSync(dir, { recursive: true, force: true })
