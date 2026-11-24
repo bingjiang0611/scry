@@ -34,7 +34,6 @@ export async function exerciseChatPreviewDom() {
     check(visible(close) && visible(query('放大图片')), 'Preview controls escaped viewport')
     check(rect(image).width <= stage.clientWidth + 1 && rect(image).height <= stage.clientHeight + 1, 'Initial image does not fit')
     check(document.activeElement === close, 'Close did not receive initial focus')
-    // Focus must stay in the dialog; image clicks must not dismiss it.
     thumbs[1].focus()
     // Hidden BrowserWindows do not emit native focusin; exercise the document guard.
     thumbs[1].dispatchEvent(new FocusEvent('focusin', { bubbles: true }))

@@ -72,7 +72,7 @@ ${proxyEntries}
 </dict></plist>\n`
 
   try {
-    try { execFileSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }) } catch { /* ignore */ }
+    try { execFileSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }) } catch {}
     writeFileSync(plistPath, plist, { mode: 0o600 })
     execFileSync('launchctl', ['bootstrap', `gui/${uid}`, plistPath])
 
@@ -206,7 +206,7 @@ ${proxyEntries}
       }
     }
   } finally {
-    try { execFileSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }) } catch { /* ignore */ }
+    try { execFileSync('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }) } catch {}
     rmSync(plistPath, { force: true })
     rmSync(root, { recursive: true, force: true })
   }

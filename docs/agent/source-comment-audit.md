@@ -37,6 +37,10 @@
 
 ## Contextual reviews with follow-ups
 
+At `88b75ca7`, reconciled all 171 lexical comment tokens in 27 direct A–D JS/TS scripts, excluding `b4v-*`, `check-*`, `ci-*`, `concurren*`, `daemon-*`, and `desktop-*`. Removed three comments that repeated an empty catch or the adjacent assertions. Kept executable examples, fixture notes and the eight wording follow-ups pending verification. The two edited files emitted identical comment-free JS and preserved tool directives; no live launchd or UI smoke was run. The local ratchet CLI timed out; replaying the same predicate and inputs over 279 paths found no added prose.
+
+The `88b75ca7` merge preserved all 45 newly added or edited lexical comments across the seven TypeScript files touched by upstream #190. Only already-audited deletions were replayed. The recorder and CI contract suites passed 51 tests; the ratchet passed against the new main baseline `33b6bd36` before the script cleanup.
+
 At `37a4fd11`, reconciled 663 lexical tokens across 117 direct scripts and Provider files in four slices. The scripts covered E–Z with already-prioritized prefixes excluded; the Provider slice excluded the named adapter families. Removed 19 redundant or stale tokens in 11 files. Comment-free emit and tool directives matched; four focused suites passed all 23 tests and the ratchet passed against the branch's merge base. Live UI, login-service and performance scenarios were not run.
 
 At `b30fe80d`, verified four slices of direct `.ts`/`.tsx` files in `src/renderer/`: 141 files and 441 lexical tokens, excluding the literal `app-`, `format-`, `machines-`, and `side-chat-` prefixes. These overlap earlier reviews and exclude nested files. Removed 26 redundant comments from 12 files; preserved tool directives, trust and evidence rationale. Comment-free emit matched, eight focused suites passed all 155 tests, and the source-comment ratchet passed.
