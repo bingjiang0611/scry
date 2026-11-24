@@ -24,6 +24,8 @@ import { useAppSessionRuntime } from './app-session-runtime'
 import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
+import { useSessionHostQueue } from './hooks/useHostQueue'
+import { retryHistoryFor } from './retry-history'
 const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 type AppInteractionContext = { state: ReturnType<typeof import('./app-state').useAppState> }
 export function useAppInteraction(context: AppInteractionContext) {
@@ -190,15 +192,13 @@ export function useAppInteraction(context: AppInteractionContext) {
   })
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
-  const retryHistory = activeEvidenceGap?.status === 'error' && activeSessionId
-    ? projects.flatMap(project => project.sessions.map(row => ({ cwd: row.cwd ?? project.cwd, row })))
-        .find(entry => entry.row.sessionId === activeSessionId && entry.cwd === cwd)
-    : undefined
+  const retryHistory = activeEvidenceGap?.status === 'error' ? retryHistoryFor(projects, activeSessionId, cwd) : undefined
+  const hostQueue = useSessionHostQueue({ sessionId: activeSessionId, providerId: integrations.selectedId, cwd })
   const chatProps = createAppChatProps({
     workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
     sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
-    sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
+    sessionCacheVisible, hostQueue, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
     retryHistory: retryHistory ? () => {
       const { row } = retryHistory
       void pickSession(retryHistory.cwd, row.sessionId, row.providerId, row.externalSessionId, row.runId, row.agentProfileId)

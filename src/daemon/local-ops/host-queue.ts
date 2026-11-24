@@ -1,5 +1,5 @@
 import { findNativeSession } from '../../host-runtime/orchestration/native-session-lookup'
-import { hostQueueEntries, type HostQueueEntry, type HostQueueRow } from '../../shared/host-queue'
+import { hostQueueEntries, type HostQueueAnswer, type HostQueueRow } from '../../shared/host-queue'
 import type { DaemonLocalOpGroup } from './deps'
 
 interface HostQueueRequest {
@@ -20,7 +20,7 @@ interface HostQueueRequest {
  * for a session that has not run yet.
  */
 export const hostQueueLocalOps: DaemonLocalOpGroup = (deps) => ({
-  'agent:hostQueue': async (input: unknown): Promise<HostQueueEntry[]> => {
+  'agent:hostQueue': async (input: unknown): Promise<HostQueueAnswer> => {
     const request = readRequest(input)
     const reader = deps.orchestrationReader?.()
     if (!reader) throw new Error('orchestration_unavailable')
@@ -30,7 +30,11 @@ export const hostQueueLocalOps: DaemonLocalOpGroup = (deps) => ({
       profile: request.agentProfileId ?? null,
       cwd: request.cwd
     })
-    const sessionKey = bound?.sessionKey ?? request.sessionId
+    // No binding and no row of its own means the projection has never seen this session: the queue
+    // is unknown. Saying "empty" there would be a guess, and a queue is a promise about dispatch.
+    const own = bound ? undefined : reader.getSession(request.sessionId)
+    const sessionKey = bound?.sessionKey ?? own?.sessionKey ?? null
+    if (!sessionKey) return { resolved: false, entries: [] }
     const rows = reader.handle.db.prepare(
       `SELECT run_id AS runId, session_key AS sessionKey, lifecycle, queue_position AS queuePosition,
               queue_held AS queueHeld, origin, intent_seq AS intentSeq, prompt_preview AS promptPreview
@@ -38,7 +42,7 @@ export const hostQueueLocalOps: DaemonLocalOpGroup = (deps) => ({
         WHERE session_key = ? AND lifecycle = 'queued'`
     ).all(sessionKey) as (Omit<HostQueueRow, 'queueHeld'> & { queueHeld: number | null })[]
     // The shared ordering decides the order, so the App and a device cannot disagree.
-    return hostQueueEntries(rows.map((row) => ({ ...row, queueHeld: row.queueHeld === 1 })), sessionKey)
+    return { resolved: true, entries: hostQueueEntries(rows.map((row) => ({ ...row, queueHeld: row.queueHeld === 1 })), sessionKey) }
   }
 })
 

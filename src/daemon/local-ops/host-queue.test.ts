@@ -44,7 +44,9 @@ describe('agent:hostQueue', () => {
       insertRun(sink, { runId: 'second', sessionKey: 'native:abc', lifecycle: 'queued', position: 2, seq: 2, prompt: '第二条' })
       insertRun(sink, { runId: 'first', sessionKey: 'native:abc', lifecycle: 'queued', position: 1, seq: 1, prompt: '第一条', held: 1 })
       insertRun(sink, { runId: 'running', sessionKey: 'native:abc', lifecycle: 'dispatched', position: null, seq: 3 })
-      const entries = await channel({ sessionId: 'sess-1', providerId: 'codex', cwd: '/w' }) as { runId: string; position: number; held: boolean; promptPreview: string | null }[]
+      const answer = await channel({ sessionId: 'sess-1', providerId: 'codex', cwd: '/w' }) as { resolved: boolean; entries: { runId: string; position: number; held: boolean; promptPreview: string | null }[] }
+      expect(answer.resolved).toBe(true)
+      const entries = answer.entries
       expect(entries.map((entry) => entry.runId)).toEqual(['first', 'second'])
       expect(entries[0]).toMatchObject({ position: 1, held: true, promptPreview: '第一条' })
       expect(entries[1].held).toBe(false)
@@ -53,10 +55,20 @@ describe('agent:hostQueue', () => {
     }
   })
 
-  it('answers an empty queue when the projection has never seen the session', async () => {
+  it('says unresolved when the projection has never seen the session', async () => {
     const { sink, channel } = op()
     try {
-      expect(await channel({ sessionId: 'unseen', providerId: 'codex', cwd: '/w' })).toEqual([])
+      expect(await channel({ sessionId: 'unseen', providerId: 'codex', cwd: '/w' })).toEqual({ resolved: false, entries: [] })
+    } finally {
+      sink.close()
+    }
+  })
+
+  it('answers a resolved empty queue for a known session with nothing waiting', async () => {
+    const { sink, channel } = op()
+    try {
+      insertSession(sink, { sessionKey: 'native:abc', nativeSessionId: 'sess-1', cwd: '/w' })
+      expect(await channel({ sessionId: 'sess-1', providerId: 'codex', cwd: '/w' })).toEqual({ resolved: true, entries: [] })
     } finally {
       sink.close()
     }

@@ -53,6 +53,15 @@ export function isAgentQueueEntry(entry: HostQueueEntry): boolean {
 }
 
 /**
+ * The host's answer. `resolved` is false when the projection has never recorded this session: then
+ * the queue is unknown, not empty, and the UI has to say so.
+ */
+export interface HostQueueAnswer {
+  resolved: boolean
+  entries: HostQueueEntry[]
+}
+
+/**
  * What the App knows about a session when it asks the host for the queue. The daemon resolves it to
  * the projection key; the App never has to know that key.
  */

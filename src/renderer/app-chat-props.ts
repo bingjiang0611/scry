@@ -11,6 +11,8 @@ import type { SlashCmd } from '@shared/trace'
 import { LOCAL_MACHINE } from './components/LocationPicker'
 import { SessionChatView } from './components/ChatView'
 
+import type { HostQueueState } from './hooks/useHostQueue'
+
 export interface AppChatPropsContext {
   draftStore: ComposerDraftStore
   workspaceContext?: ReactNode
@@ -35,6 +37,8 @@ export interface AppChatPropsContext {
   providerSendBlockedReason: string | null
   providerCompatibilityIssue: string | null | undefined
   sessionCacheVisible: boolean
+  /** D1: what the host is holding for this session; undefined never mounts the panel. */
+  hostQueue?: HostQueueState
   activeEvidenceGap: SessionEvidenceGap | null
   retryHistory?: () => void
   draftAttachments: DraftAttachment[]
@@ -83,7 +87,7 @@ export interface AppChatPropsContext {
 export function createAppChatProps(context: AppChatPropsContext): ComponentProps<typeof SessionChatView> {
   const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, workspaceSetup, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
     composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason,
-    providerCompatibilityIssue, sessionCacheVisible, activeEvidenceGap, retryHistory, draftAttachments, queuedPrompts, steerCapability,
+    providerCompatibilityIssue, sessionCacheVisible, hostQueue, activeEvidenceGap, retryHistory, draftAttachments, queuedPrompts, steerCapability,
     steerEvidenceByMessageId, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
     stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,
@@ -119,6 +123,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     submitting: composerSubmitting || switchingAgent,
     sessionLoading,
     sessionCacheVisible,
+    ...(hostQueue === undefined ? {} : { hostQueue }),
     sessionEvidenceGap: activeEvidenceGap ? { ...activeEvidenceGap, retry: retryHistory,
       retrying: activeEvidenceGap.status === 'error' && sessionLoading } : null,
     busy: session.busy,

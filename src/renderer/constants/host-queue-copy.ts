@@ -10,6 +10,8 @@ export const HOST_QUEUE_COPY = {
   empty: '宿主队列为空',
   loading: '正在读取宿主队列',
   unavailable: (reason: string) => `读不到宿主队列：${reason}`,
+  unknownSession: '宿主没有这个会话的记录，队列未知',
+  unknownHint: '这不代表没有排队；宿主确认后会显示真实顺序',
   noPrompt: '（这条没有提示词预览）',
   rowLabel: (position: number, held: boolean) =>
     held ? `宿主队列第 ${position} 位，已挂起` : `宿主队列第 ${position} 位`

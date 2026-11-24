@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from 'react'
+import type { HostQueueState } from '../../hooks/useHostQueue'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type {
   AgentModelRef,
@@ -58,6 +59,8 @@ export interface ChatViewProps {
   // Live trace is pending; this is not a composer or session-owner lock.
   transcriptPending?: boolean
   sessionCacheVisible?: boolean
+  /** D1: the host's queue for this session; the composer shows it above its own queue. */
+  hostQueue?: HostQueueState
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string; title?: string; retry?: () => void; retrying?: boolean } | null
   /**
    * What an empty but selected conversation is. A side chat is a new conversation with a
