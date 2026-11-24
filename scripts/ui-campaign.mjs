@@ -29,7 +29,6 @@ export function runUiCampaign({ electron, script, argv = [], env }) {
       try {
         resolve(JSON.parse(result))
       } catch (error) {
-        // An unparseable result is a failed campaign, never a silent success.
         reject(error)
       }
     })

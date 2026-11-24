@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `f140e5ea`, removed two redundant comments in `scripts/ui-campaign.mjs` and `src/renderer/machines-view-model.test.ts`; comment-free output and directives matched, 18 focused tests and the ratchet passed. A separate recorder measurement invocation hit its outer timeout. Left `scripts/recorder-engine-bench.mjs` unchanged; no conclusion about its performance follows.
+
 At `752b8a44`, corrected the two Git turn-diff benchmark headers. The probes do not enforce a performance threshold, but can still fail; interleaving reduces order bias without guaranteeing equal load. Both scripts preserved comment-free output, tool directives and shebangs; `node --check` and the ratchet passed. No benchmark was run.
 
 At `e6106075`, moved the completed-run versus durable input-receipt decision from the unified conversation smoke into [ADR 014](../adr/014-conversation-ownership-and-side-chat.md). The script's comment-free emit and directives matched. Ten receipt/refusal tests and the ratchet passed; the live smoke was not run.

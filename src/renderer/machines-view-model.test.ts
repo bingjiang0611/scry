@@ -73,7 +73,6 @@ describe('resource bars', () => {
     expect(meters.map((meter) => meter.label)).toEqual(['CPU', '内存', '交换区', '磁盘'])
     expect(meters[0]).toMatchObject({ percent: 34, valueText: '34%', tone: 'normal' })
     expect(meters[1]).toMatchObject({ percent: 57, valueText: '已用 9.1 GB / 16 GB' })
-    // 85% and above is the danger threshold, 70% warns.
     expect(meters[2]).toMatchObject({ percent: 50, valueText: '已用 2 GB / 4 GB', tone: 'normal' })
     expect(meters[3]).toMatchObject({ percent: 79, valueText: '剩余 212 GB', tone: 'warn' })
   })
