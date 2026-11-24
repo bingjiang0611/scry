@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { it, expect } from 'vitest'
+import { USAGE_BASELINE_MISSING_REASON } from '../../../shared/turn-record'
 import { handleRecorderHook } from '../recorder'
 import { listRecords } from '../store'
 import { workspace, payload } from './fixture.test'
@@ -105,8 +106,10 @@ export function registerCodexUsageBaselineSuite(): void {
     expect(records[0].usage.status).toBe('unavailable')
     expect(records[0].usage.quality).toBe('unavailable')
     expect(records[0].usage.value).toBeUndefined()
-    expect(records[0].usage.omissionCodes).toEqual(['usage_baseline_missing'])
-    expect(records[0].usage.omissionReason).toEqual(expect.stringContaining('cumulative usage'))
+    // No code is written yet: servers and older readers only accept the diff codes, and one unknown
+    // code would reject the whole record. The sentence is the contract until they catch up.
+    expect(records[0].usage.omissionCodes).toBeUndefined()
+    expect(records[0].usage.omissionReason).toBe(USAGE_BASELINE_MISSING_REASON)
     // 后一轮的基线是第一帧的累计值，是真实的帧，不需要再推导。
     expect(records[1].usage.status).toBe('available')
     expect(records[1].usage.value).toEqual(expect.objectContaining({ inputTokens: 100, outputTokens: 100 }))
@@ -190,6 +193,7 @@ export function registerCodexUsageBaselineSuite(): void {
     expect(records[1].usage.status).toBe('unavailable')
     expect(records[1].usage.quality).toBe('unavailable')
     expect(records[1].usage.value).toBeUndefined()
-    expect(records[1].usage.omissionCodes).toEqual(['usage_baseline_missing'])
+    expect(records[1].usage.omissionCodes).toBeUndefined()
+    expect(records[1].usage.omissionReason).toBe(USAGE_BASELINE_MISSING_REASON)
   })
 }

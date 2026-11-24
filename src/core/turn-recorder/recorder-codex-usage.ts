@@ -43,6 +43,10 @@ export function codexUsageCounters(record: Record<string, unknown>): CodexUsageC
  * Returns undefined when the proof does not hold: no `last_token_usage`, a counter the frame does not
  * carry, or a `last` count above its own total. A caller must then report the turn as unknown rather
  * than subtract from zero, which would claim the whole session as one turn.
+ *
+ * Known limit: if the turn's first request left no usage frame, the derived value stands for the
+ * counters *before the first frame's request*, so that earlier request lands outside the turn. The
+ * error is at most one request short of the truth, never above it.
  */
 export function codexBaselineFromLastFrame(
   total: Record<string, unknown> | undefined,

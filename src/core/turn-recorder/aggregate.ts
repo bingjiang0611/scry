@@ -12,6 +12,7 @@ import { aggregateHooks, isRecorderHook } from './aggregate-hooks.js'
 import { captureOmissionReasons, joinOmissionReasons } from './aggregate-capture.js'
 import { usageFrom } from './aggregate-usage.js'
 import {
+  USAGE_BASELINE_MISSING_REASON,
   available,
   partial,
   unavailable,
@@ -393,13 +394,10 @@ export function aggregateTurnEvidence(args: {
           : available(hooks, [source]),
     // Checked before `observable.usage`: the provider did report cumulative usage, it just cannot be
     // attributed to this turn, so the generic "not observable" sentence would be wrong here. A
-    // separately reported result event stays authoritative when one exists.
+    // separately reported result event stays authoritative when one exists. Only the fixed sentence
+    // is written: no `omissionCode`, because servers and older readers only accept the diff codes.
     usage: usageBaselineMissing && !usage
-      ? unavailable(
-          "the provider reported cumulative usage but nothing proves the session counters before this turn, so this turn's usage is unknown",
-          [source],
-          ['usage_baseline_missing']
-        )
+      ? unavailable(USAGE_BASELINE_MISSING_REASON, [source])
       : !observable.usage
         ? unavailable('provider usage was not observable', [source])
         : usage

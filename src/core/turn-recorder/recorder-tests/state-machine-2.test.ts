@@ -54,6 +54,31 @@ export function registerSuite2(): void {
     }
   })
 
+  it('读得懂别的版本写的未知 omissionCodes，但提交时不许自己造一个', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'code-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const path = join(dataRoot, 'records', name)
+    const stored = JSON.parse(await readFile(path, 'utf8'))
+    // A newer recorder may explain a usage gap with a code this build does not know. The whole
+    // record must stay readable; one unknown code may not invalidate every other section.
+    stored.usage = {
+      status: 'unavailable',
+      quality: 'unavailable',
+      source: ['provider_transcript+lifecycle_hooks'],
+      omissionReason: 'a newer recorder explained this gap with a code this build does not know',
+      omissionCodes: ['some_future_code']
+    }
+    await writeFile(path, JSON.stringify(stored))
+    const records = await listRecords(dataRoot)
+    expect(records).toHaveLength(1)
+    expect(records[0].usage.omissionCodes).toEqual(['some_future_code'])
+    // Writing stays strict: the same record cannot be committed again from this build.
+    await expect(commitRecord(dataRoot, { ...stored, recordId: 'a'.repeat(32) }))
+      .rejects.toThrow('refusing to commit a record with unknown omissionCodes: some_future_code')
+  })
+
   it('大 assistant 与 reasoning 保留有界预览和可分页完整正文引用', async () => {
     const root = await workspace()
     const rollout = join(root, 'large-model-bodies.jsonl')

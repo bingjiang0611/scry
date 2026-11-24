@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { type ToolContentRef } from '../../shared/tool-content.js'
 import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn-record.js'
+import { unknownOmissionCodes } from '../../shared/turn-evidence-validation.js'
 import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
@@ -86,6 +87,12 @@ export async function commitRecord(
     if (!validation.ok) {
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
       throw new Error(`refusing to commit invalid turn record: ${detail}`)
+    }
+    // Readers tolerate codes this build does not know so a newer record stays readable; the writer
+    // must not introduce one, because servers and older readers reject the whole record for it.
+    const unknownCodes = unknownOmissionCodes(record)
+    if (unknownCodes.length > 0) {
+      throw new Error(`refusing to commit a record with unknown omissionCodes: ${unknownCodes.join(', ')}`)
     }
     // Reserve the number durably before the record exists: a crash may skip a sequence, never reuse one.
     await reserveSequence(dataRoot, sequence)

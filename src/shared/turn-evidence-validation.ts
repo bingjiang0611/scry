@@ -1,6 +1,43 @@
-import { OMISSION_CODES, type TurnRepositoryDiscovery, type Evidence, type TurnModelTimingLane, type TurnModelCallTiming, type TurnModelTiming, type TurnModelSegment, type TurnTranscriptSource, type TurnCompaction } from './turn-record-contracts.js'
+import { type TurnRepositoryDiscovery, type Evidence, type TurnModelTimingLane, type TurnModelCallTiming, type TurnModelTiming, type TurnModelSegment, type TurnTranscriptSource, type TurnCompaction } from './turn-record-contracts.js'
 import { isToolContentRef } from './tool-content.js'
+import { OMISSION_CODES } from './turn-record-contracts.js'
 
+/**
+ * Readers accept a bounded list of codes without checking it against this build's enum: a record
+ * written by a newer recorder is evidence, not a parse error, and rejecting the whole record throws
+ * away every other section with it.
+ */
+const OMISSION_CODE_LIMIT = 16
+
+/**
+ * Write-side guard. Section builders are typed with the closed `OmissionCode` union, but a record can
+ * still reach `commitRecord` as parsed JSON (managed handoff) or through a cast, so the commit funnel
+ * checks the codes it is about to persist instead of trusting the caller's type.
+ */
+export function unknownOmissionCodes(value: unknown): string[] {
+  const found = new Set<string>()
+  const queue: Array<{ node: unknown; depth: number }> = [{ node: value, depth: 0 }]
+  let visited = 0
+  while (queue.length > 0 && visited < 5_000) {
+    const { node, depth } = queue.shift()!
+    visited++
+    if (node === null || typeof node !== 'object' || depth > 6) continue
+    if (Array.isArray(node)) {
+      for (const item of node) queue.push({ node: item, depth: depth + 1 })
+      continue
+    }
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      if (key === 'omissionCodes' && Array.isArray(child)) {
+        for (const code of child) {
+          if (typeof code !== 'string' || !(OMISSION_CODES as readonly string[]).includes(code)) found.add(String(code))
+        }
+        continue
+      }
+      queue.push({ node: child, depth: depth + 1 })
+    }
+  }
+  return [...found]
+}
 
 export function isEvidence(value: unknown): value is Evidence<unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -10,9 +47,9 @@ export function isEvidence(value: unknown): value is Evidence<unknown> {
   if (!Array.isArray(raw.source) || !raw.source.every((source) => typeof source === 'string' && source.length > 0)) return false
   if (raw.omissionReason !== undefined && (typeof raw.omissionReason !== 'string' || raw.omissionReason.length === 0)) return false
   if (raw.omissionCodes !== undefined && (!Array.isArray(raw.omissionCodes) ||
-      raw.omissionCodes.length === 0 || raw.omissionCodes.length > OMISSION_CODES.length ||
+      raw.omissionCodes.length === 0 || raw.omissionCodes.length > OMISSION_CODE_LIMIT ||
       new Set(raw.omissionCodes).size !== raw.omissionCodes.length ||
-      !raw.omissionCodes.every((code) => (OMISSION_CODES as readonly unknown[]).includes(code)))) return false
+      !raw.omissionCodes.every((code) => typeof code === 'string' && code.length > 0))) return false
   if (raw.status === 'available') return raw.value !== undefined && raw.quality !== 'unavailable' && raw.source.length > 0
   if (raw.status === 'partial') return raw.value !== undefined && raw.quality !== 'unavailable' && typeof raw.omissionReason === 'string' && raw.source.length > 0
   // Early schema-v1 writers omitted omissionReason, so readers retain that historical compatibility.
