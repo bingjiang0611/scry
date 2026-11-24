@@ -13,6 +13,10 @@ import {
 } from './attention.js'
 import { safeKey } from './store.js'
 import { recorderHasRetryableInbox, recorderInboxEntries } from './inbox.js'
+import {
+  clearSessionFailure, isUnusableSessionError, noteSessionFailure, readSessionFailures, sessionFailureKey,
+  suspendedSessionKeys
+} from './session-failures.js'
 
 export interface RecorderSealedSegment {
   recordId: string
@@ -209,6 +213,10 @@ export async function recorderQuarantinedOpenTurns(
 
 export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedSession[]> {
   const indexed = new Set((await markedSessions(dataRoot)).map(marker => `${marker.provider}__${marker.sessionKey}`))
+  const failures = await readSessionFailures(dataRoot)
+  const suspended = suspendedSessionKeys(failures)
+  // A session this scan could not read leaves the index unproven, so it may not publish readiness.
+  let incomplete = false
   const live = new Set<string>()
   for (const provider of ATTENTION_PROVIDERS) {
     const providerRoot = join(dataRoot, 'runtime', provider)
@@ -220,16 +228,32 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
       if (!entry.isDirectory()) continue
       const sessionKey = entry.name
       const sessionDir = join(providerRoot, sessionKey)
+      const key = sessionFailureKey(provider, sessionKey)
       live.add(`${provider}__${sessionKey}`)
-      await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
-      if (!indexed.has(`${provider}__${sessionKey}`) && !await sessionHasPendingEvidence(sessionDir)) continue
-      await withSessionAttentionLock(dataRoot, provider, sessionKey, async () => {
-        if (await sessionHasPendingEvidence(sessionDir)) {
-          await markSessionAttention(dataRoot, provider, sessionKey)
-        } else {
-          await clearSessionAttention(dataRoot, provider, sessionKey)
+      // A suspended session keeps its marker untouched: its failure is already reported, and this
+      // scan has nothing new to decide about it.
+      if (suspended.has(key)) continue
+      try {
+        await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
+        if (indexed.has(`${provider}__${sessionKey}`) || await sessionHasPendingEvidence(sessionDir)) {
+          await withSessionAttentionLock(dataRoot, provider, sessionKey, async () => {
+            if (await sessionHasPendingEvidence(sessionDir)) {
+              await markSessionAttention(dataRoot, provider, sessionKey)
+            } else {
+              await clearSessionAttention(dataRoot, provider, sessionKey)
+            }
+          })
         }
-      })
+        // Readable again: whatever it failed on before was transient after all.
+        await clearSessionFailure(dataRoot, provider, sessionKey, { present: key in failures })
+      } catch (error) {
+        // One unreadable session must not starve the rebuild for every other one; readiness waits.
+        // A read error inside a turn is not an unreadable entry, and still stops the scan here.
+        if (!isUnusableSessionError(error)) throw error
+        incomplete = true
+        // Diagnostics never block the rebuild, and readiness stays withheld either way.
+        await noteSessionFailure(dataRoot, provider, sessionKey, error).catch(() => undefined)
+      }
     }
   }
   for (const marker of await markedSessions(dataRoot)) {
@@ -237,7 +261,7 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
       await releaseStaleAttention(dataRoot, marker.provider, marker.sessionDir)
     }
   }
-  await publishAttentionIndexReady(dataRoot)
+  if (!incomplete) await publishAttentionIndexReady(dataRoot)
   return markedSessions(dataRoot)
 }
 
@@ -278,6 +302,17 @@ async function attentionSessions(dataRoot: string): Promise<MarkedSession[]> {
   return await attentionIndexPresent(dataRoot)
     ? await markedSessions(dataRoot)
     : await reconcileAttentionIndex(dataRoot)
+}
+
+/**
+ * Sessions a reader may describe right now: the index, minus the ones suspended for repeating the
+ * same failure. Suspension is a report about retries, not evidence about the turn.
+ */
+async function sessionsToVisit(dataRoot: string): Promise<{ sessions: MarkedSession[]; suspendedSessions: number }> {
+  const suspended = suspendedSessionKeys(await readSessionFailures(dataRoot))
+  const all = await attentionSessions(dataRoot)
+  const sessions = all.filter(session => !suspended.has(sessionFailureKey(session.provider, session.sessionKey)))
+  return { sessions, suspendedSessions: all.length - sessions.length }
 }
 
 export const STALE_OPEN_TURN_QUIET_MS = 30 * 60 * 1_000
@@ -380,13 +415,18 @@ async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState):
 
 export async function recorderPendingHealth(
   dataRoot: string
-): Promise<{ pendingCount: number; oldestPendingAgeMs: number; openTurns: number; staleOpenTurns: number }> {
+): Promise<{ pendingCount: number; oldestPendingAgeMs: number; openTurns: number; staleOpenTurns: number; suspendedSessions: number }> {
   let pendingCount = 0
   let oldestPendingAgeMs = 0
   let openTurns = 0
   let staleOpenTurns = 0
   const now = Date.now()
-  for (const { sessionDir: root } of await attentionSessions(dataRoot)) {
+  const { sessions, suspendedSessions } = await sessionsToVisit(dataRoot)
+  for (const session of sessions) {
+    const root = session.sessionDir
+    // One unusable session must not hide the health of every other one. Health runs once per pass,
+    // so this is the one place that can count a repeated failure without double counting it.
+    try {
       for (const entry of await recorderInboxEntries(root)) {
         pendingCount++
         const arrival = /^(\d{15})-/.exec(entry.name)
@@ -412,8 +452,14 @@ export async function recorderPendingHealth(
         const silence = Number.isFinite(quietMs) ? quietMs : now - (Date.parse(open.startedAt) || now)
         if (open.status === 'open' && !open.managedByScry && silence >= STALE_OPEN_TURN_QUIET_MS) staleOpenTurns++
       }
+    } catch (error) {
+      // A read error inside a turn is evidence we could not inspect, not an entry we can skip.
+      if (!isUnusableSessionError(error)) throw error
+      await noteSessionFailure(dataRoot, session.provider, session.sessionKey, error).catch(() => undefined)
     }
-  return { pendingCount, oldestPendingAgeMs, openTurns, staleOpenTurns }
+  }
+  // A session suspended during this pass is not in this snapshot. It shows up next pass.
+  return { pendingCount, oldestPendingAgeMs, openTurns, staleOpenTurns, suspendedSessions }
 }
 
 export async function recorderStaleOpenTurns(
@@ -437,27 +483,35 @@ export async function recorderStaleOpenTurns(
     if (!tableRead) { tableRead = true; table = await processTable() }
     return table
   }
-  for (const { provider, sessionDir } of await attentionSessions(dataRoot)) {
-    const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
-    if (!open || open.status !== 'open' || open.managedByScry) continue
-    const startedAt = Date.parse(open.startedAt)
-    if (!Number.isFinite(startedAt) || now - startedAt <= expiryMs) continue
-    if (open.transcriptPath) {
-      const touchedAt = await transcriptTouchedAt(open.transcriptPath)
-      if (touchedAt != null && now - touchedAt <= expiryMs) continue
+  for (const { provider, sessionDir } of (await sessionsToVisit(dataRoot)).sessions) {
+    // A diagnostic listing reports the sessions it can read; one broken session is not the answer.
+    try {
+      const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
+      if (!open || open.status !== 'open' || open.managedByScry) continue
+      const startedAt = Date.parse(open.startedAt)
+      if (!Number.isFinite(startedAt) || now - startedAt <= expiryMs) continue
+      if (open.transcriptPath) {
+        const touchedAt = await transcriptTouchedAt(open.transcriptPath)
+        if (touchedAt != null && now - touchedAt <= expiryMs) continue
+      }
+      const { lastAt, quietMs } = await openTurnQuiet(sessionDir, open, now)
+      result.push({
+        provider,
+        sessionId: open.sessionId,
+        startedAt: open.startedAt,
+        ageMs: now - startedAt,
+        ...(lastAt ? { lastEventAt: new Date(lastAt).toISOString() } : {}),
+        quietMs: Number.isFinite(quietMs) ? quietMs : now - startedAt,
+        growing: quietMs < STALE_OPEN_TURN_QUIET_MS,
+        host: await hostProcessState(open.host, await hostTable())
+      })
+    } catch (error) {
+      // Skipped here only when the entry itself is unusable; the pass records the failure that
+      // suspends it. A turn that failed to read may still change a verdict, so it stays loud.
+      if (!isUnusableSessionError(error)) throw error
     }
-    const { lastAt, quietMs } = await openTurnQuiet(sessionDir, open, now)
-    result.push({
-      provider,
-      sessionId: open.sessionId,
-      startedAt: open.startedAt,
-      ageMs: now - startedAt,
-      ...(lastAt ? { lastEventAt: new Date(lastAt).toISOString() } : {}),
-      quietMs: Number.isFinite(quietMs) ? quietMs : now - startedAt,
-      growing: quietMs < STALE_OPEN_TURN_QUIET_MS,
-      host: await hostProcessState(open.host, await hostTable())
-    })
   }
+
   return result
 }
 
@@ -470,9 +524,16 @@ async function transcriptTouchedAt(path: string): Promise<number | null> {
 }
 
 export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
-  const sessions = await attentionSessions(dataRoot)
+  const { sessions } = await sessionsToVisit(dataRoot)
   for (const session of sessions) {
-    if (await sessionNeedsPass(session.sessionDir)) return true
+    try {
+      if (await sessionNeedsPass(session.sessionDir)) return true
+    } catch (error) {
+      // Unreadable means unknown, not done: the pass that follows records the failure and, after the
+      // threshold, suspends the session so this answer can finally be `false`.
+      if (!isUnusableSessionError(error)) throw error
+      return true
+    }
   }
   return false
 }

@@ -45,6 +45,11 @@ export interface WorkspaceStatusReport {
         dataRoot: string
         openTurnsPending: number
         staleOpenTurns: number
+        /**
+         * Sessions every pass fails the same way, so they are retried hourly instead. Their evidence
+         * is untouched; this is here because a skipped session would otherwise look like quiet work.
+         */
+        suspendedSessions: number
       }
   providers: ProviderStatusRow[]
   trustEvidence: string
@@ -128,7 +133,8 @@ export async function workspaceStatus(
       enabled: true,
       dataRoot: enablement.dataRoot,
       openTurnsPending: health.pendingCount + health.openTurns,
-      staleOpenTurns: health.staleOpenTurns
+      staleOpenTurns: health.staleOpenTurns,
+      suspendedSessions: health.suspendedSessions ?? 0
     },
     providers,
     trustEvidence: TRUST_UNOBSERVABLE,

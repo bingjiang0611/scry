@@ -74,7 +74,9 @@ export async function markedSessions(dataRoot: string): Promise<MarkedSession[]>
     if (!SESSION_KEY_PATTERN.test(sessionKey)) {
       const entry = await lstat(sessionDir).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return null
-        throw error
+        // Unreadable proves nothing about this entry. Keep it so the pass can record the failure,
+        // instead of letting one marker hide every other session behind it.
+        return undefined
       })
       if (entry && !entry.isDirectory()) continue
     }
