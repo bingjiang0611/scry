@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `b30fe80d`, verified four slices of direct `.ts`/`.tsx` files in `src/renderer/`: 141 files and 441 lexical tokens, excluding the literal `app-`, `format-`, `machines-`, and `side-chat-` prefixes. These overlap earlier reviews and exclude nested files. Removed 26 redundant comments from 12 files; preserved tool directives, trust and evidence rationale. Comment-free emit matched, eight focused suites passed all 155 tests, and the source-comment ratchet passed.
+
 At `79f5df21`, reviewed 84 tokens in all eight `scripts/b4v/scenarios/*.mjs` files. Removed two stale claims about the switch-off control: the CLI always sets `noControls`, and the scenarios record the comparison as not run. Preserved the fixture, process-scope, and evidence-limit notes. Comment-free emit and tool directives matched; 13 CLI and outcome unit tests and the source-comment ratchet passed. The B4V scenarios themselves were not run.
 
 At `1ca13a36`, reviewed the 21 tracked TypeScript files under `src/renderer/constants/` and the five under `src/main/managed-turn-tests/` (53 and nine tokens respectively). Removed one repeated file heading. Kept the copy notes that distinguish missing evidence, runtime outcomes and user actions, and the managed-turn fixture notes on replay, archive reads and asynchronous receipt cleanup. Comment-free emit matched and 17 targeted tests passed. The ratchet CLI timed out under host load; a batch replay of its production predicate and identical inputs found no new prose in 279 files. This does not count B4V scenarios as reviewed.

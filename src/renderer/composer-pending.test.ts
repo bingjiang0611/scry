@@ -193,7 +193,6 @@ describe('pending submission receipts', () => {
       input: { prompt: 'original question', attachments: [image('shot.png')] }
     })
     persistence.dispose()
-    // Reopen: a fresh store reads the same bounded entry back.
     const reopened = store(readComposerDrafts(storage))
     const pending = reopened.getSnapshot().get('draft')!.pending!
     expect(pending.prompt).toBe('original question')
@@ -204,7 +203,6 @@ describe('pending submission receipts', () => {
       commandId: pending.commandId, delivery: { status: 'not_sent', reason: '在调用 Provider 前已停止' } }])).toEqual({ kind: 'not_sent' })
     const cleared = clearPendingSubmission(reopened.getSnapshot().get('draft')!, pending.commandId)
     expect(cleared.pending).toBeUndefined()
-    // A newer edit is untouched by an older response.
     const edited = { ...reopened.getSnapshot().get('draft')!, input: 'next question' }
     expect(clearPendingSubmission(edited, pending.commandId).input).toBe('next question')
   })
@@ -222,7 +220,6 @@ describe('pending submission receipts', () => {
     expect(send).not.toHaveBeenCalled()
     vi.useFakeTimers()
     vi.advanceTimersByTime(COMPOSER_DRAFT_SAVE_INTERVAL_MS)
-    // Live content is intact and no pending receipt was published.
     expect(drafts.getSnapshot().get('draft')).toMatchObject({ input: 'keep me' })
     expect(drafts.getSnapshot().get('draft')?.pending).toBeUndefined()
     persistence.dispose()
@@ -238,11 +235,9 @@ describe('pending submission receipts', () => {
     for (let index = 0; index < 40; index++) {
       drafts = updateComposerDraft(drafts, `k${index}`, () => ({ input: `v${index}`, attachments: [] })).drafts
     }
-    // The bound holds at 32 entries and the unresolved receipt is one of them.
     expect(drafts.get('holding')?.pending?.commandId).toBe('command-0001')
     expect(drafts.size).toBe(32)
     expect(drafts.has('k0')).toBe(false)
-    // And a pending-only entry is not dropped by storage.
     const storage = new MemoryStorage()
     expect(writeComposerDrafts(storage, drafts)).toBe(true)
     expect(readComposerDrafts(storage).get('holding')?.pending?.prompt).toBe('question')
@@ -266,7 +261,6 @@ describe('bounded pending capacity', () => {
     expect(result).toEqual({ status: 'refused', error: PENDING_CAPACITY_FULL })
     expect(send).not.toHaveBeenCalled()
     expect(drafts.getSnapshot().get('draft')).toMatchObject({ input: 'question', attachments: [image('shot.png')] })
-    // Every existing receipt survives the refusal.
     for (let index = 0; index < MAX_PENDING_DRAFTS; index++) {
       expect(drafts.getSnapshot().get(`child-${index}`)?.pending?.commandId).toBe(`command-000${index}`)
     }

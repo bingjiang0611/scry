@@ -77,7 +77,6 @@ describe('same-composer Agent handoff', () => {
     expect(registeredPiProfileIdOf('pi:rotom', [agent])).toBe('pi:0123456789abcdef')
     expect(conversationTarget('pi:rotom', { permissionMode: 'full_access' }, [agent]))
       .toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef', permissionMode: 'full_access' })
-    // 已登记的稳定 id 仍然用它自己，不依赖发现结果。
     expect(conversationTarget('pi:0123456789abcdef')).toEqual({ providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' })
     // 另一个 Pi 启动器不是这个 Agent 的身份。
     expect(registeredPiProfileIdOf('pi:rotom', [

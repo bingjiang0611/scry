@@ -72,7 +72,6 @@ describe('ViewedSessions', () => {
     expect(view).not.toHaveBeenCalled()
     viewed.notice({ runId: 'run-1', sessionId: 'n-1' })
     expect(view).toHaveBeenLastCalledWith({ viewId: 'side:c1', main: false, sessionKeys: [key] })
-    // The page read afterwards names the same session: nothing new to say.
     viewed.setPage({ ...(page as object), bindings: [binding('b1', { nativeSessionId: 'n-1' })] } as never)
     viewed.notice({ runId: 'run-1', sessionId: 'n-1' })
     expect(view).toHaveBeenCalledTimes(1)

@@ -67,7 +67,6 @@ export interface RightSurfaceState {
   activeId: RightSurfaceKind | null
   visible: boolean
   maximized: boolean
-  /** Open side-chat instances of this scope, ordered after the tool tabs. */
   sideChats: string[]
   /** The active child tab, or null when a tool (or the chooser) is active. */
   activeSideChatId: string | null
@@ -122,12 +121,10 @@ export function createRightSurfaceState(options: CreateRightSurfaceStateOptions 
   }
 }
 
-/** Active tool tab; a child tab being active means no tool is. */
 export function activeToolId(state: RightSurfaceState): RightSurfaceKind | null {
   return state.activeSideChatId ? null : state.activeId
 }
 
-/** Flat tab order: tool tabs first, then side-chat instances in their open order. */
 export function rightSurfaceTabs(state: RightSurfaceState): RightSurfaceTab[] {
   return [
     ...state.openIds.map((kind): RightSurfaceTab => ({ type: 'tool', kind })),

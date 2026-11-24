@@ -55,7 +55,6 @@ describe('deferred preparation ownership', () => {
     release()
     expect(await run).toEqual({ status: 'aborted' })
     expect(send).not.toHaveBeenCalled()
-    // The unconsumed draft is still exactly what the user typed.
     expect(drafts.getSnapshot().get('draft')).toMatchObject({ input: 'question', attachments: [image('shot.png')] })
     expect(drafts.getSnapshot().get('draft')?.pending).toBeUndefined()
     persistence.dispose()
@@ -160,7 +159,6 @@ describe('deferred preparation ownership', () => {
     expect(after.input).toBe('next thought')
     expect(after.attachments).toEqual([later])
     expect(after.pending?.attachments).toEqual([submitted])
-    // The helper itself is explicit about what it keeps.
     expect(dispatchedDraft({ input: 'question', attachments: [] }, pendingReceipt('command-1'), new Set(['id-shot.png']))
       .input).toBe('')
     persistence.dispose()
@@ -196,7 +194,6 @@ describe('preview URL lifetime', () => {
     const live = createComposerDraftStore(new Map([['keep', { input: 'x', attachments: [image('keep.png')] }]]))
     live.update(current => updateComposerDraft(current, 'keep', draft => ({ ...draft, input: 'y' })).drafts)
     expect(revoke).not.toHaveBeenCalled()
-    // Removing the attachment releases only that URL.
     live.update(current => updateComposerDraft(current, 'keep',
       draft => ({ ...draft, attachments: draft.attachments.filter(attachment => attachment.name !== 'keep.png') })).drafts)
     expect(revoke).toHaveBeenCalledWith('blob:keep.png')
