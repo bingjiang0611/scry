@@ -1,0 +1,286 @@
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { historyReaderEnvironment, type HistoryReaderConnection } from '../conversation-history-reader'
+import { resolveRuntimeCliBin, runtimeCliEnv } from '../claude-locate'
+import type { CodexHookTrustGrant } from '../codex-hook-trust'
+import { CodexAppServerClient } from './codex-app-server'
+import { createCodexIsolatedHome } from './codex-isolated-home'
+import { sanitizeMcpAuthError } from './mcp-auth-security'
+import { codexMcpConfig } from './codex-mcp-config'
+import type { AuthorizedMcpExecution } from './types'
+import { ContinuationIdentityUnavailable, codexContinuationKey } from './continuation-identity'
+
+/**
+ * Codex app-server clients are expensive: one process owns threads, MCP servers and hook state.
+ * The pool keeps one client per (cwd, hook trust, MCP, continuation identity, history reader) key,
+ * releases it after the C1 idle window, and stays under a hard LRU cap.
+ */
+export interface CodexClientPool {
+  getClient: (
+    cwd?: string,
+    hookTrust?: CodexHookTrustGrant[],
+    mcpExecution?: AuthorizedMcpExecution,
+    expectedContinuationKey?: string,
+    historyReader?: HistoryReaderConnection
+  ) => CodexAppServerClient
+  shutdownClient: (client: CodexAppServerClient) => Promise<void>
+  scheduleClientShutdown: (client: CodexAppServerClient) => void
+  request: <T>(
+    method: string,
+    params?: unknown,
+    cwd?: string,
+    hookTrust?: CodexHookTrustGrant[],
+    mcpExecution?: AuthorizedMcpExecution,
+    expectedContinuationKey?: string,
+    historyReader?: HistoryReaderConnection
+  ) => Promise<T>
+  readonly clientActivity: Map<CodexAppServerClient, number>
+  readonly clientActiveRuns: Map<CodexAppServerClient, number>
+  /** Health is read, not inferred: the pool is the only writer of these fields. */
+  health: () => {
+    pid: number | undefined
+    lastOkAt: number | undefined
+    lastErrorAt: number | undefined
+    lastError: string | undefined
+    restarts: number
+  }
+  executable: () => string | undefined
+  runtimeEnvironment: () => Record<string, string>
+  sourceHomeFor: (env: Readonly<Record<string, string>>) => string
+  ensureIsolatedHome: (sourceHome: string) => ReturnType<typeof createCodexIsolatedHome>
+  /** The isolated home the pool materialised, if any; identity checks read the same value. */
+  isolatedState: () => { home: ReturnType<typeof createCodexIsolatedHome> | undefined; sourceHome: string | undefined }
+  closeAll: () => Promise<void>
+}
+
+export function createCodexClientPool(options: {
+  isolatedHomePath?: string
+  homeDir: string
+}): CodexClientPool {
+  const { isolatedHomePath, homeDir } = options
+  const clients = new Map<string, CodexAppServerClient>()
+const clientActivity = new Map<CodexAppServerClient, number>()
+/** A5：每个共享 client 上正在进行的 run 数；硬杀只回收计数为 1 的 client。 */
+const clientActiveRuns = new Map<CodexAppServerClient, number>()
+const clientLastUsed = new Map<CodexAppServerClient, number>()
+const clientIdleTimers = new Map<CodexAppServerClient, ReturnType<typeof setTimeout>>()
+// Stdio MCP env files live as long as the pooled client that may (re)start the servers.
+const clientFiles = new Map<CodexAppServerClient, () => void>()
+const releaseClientFiles = (client: CodexAppServerClient): void => {
+  const dispose = clientFiles.get(client)
+  clientFiles.delete(client)
+  dispose?.()
+}
+const CLIENT_IDLE_MS = 60_000
+let lastClient: CodexAppServerClient | null = null
+let lastOkAt: number | undefined
+let lastErrorAt: number | undefined
+let lastError: string | undefined
+let restarts = 0
+let isolatedHome: ReturnType<typeof createCodexIsolatedHome> | undefined
+let isolatedSourceHome: string | undefined
+
+const executable = (): string | undefined => process.env.SCRY_CODEX_PATH?.trim() || resolveRuntimeCliBin('codex')
+const runtimeEnvironment = (): Record<string, string> => {
+  const env = runtimeCliEnv(undefined, { managedRecorder: true, providerId: 'codex' })
+  // runtimeCliEnv may be a deliberately minimal test/launcher environment; keep the
+  // adapter's configured home explicit so source-home derivation uses the same env key.
+  return { ...env, HOME: env.HOME ?? homeDir }
+}
+const sourceHomeFor = (env: Readonly<Record<string, string>>): string => {
+  const configured = process.env.SCRY_CODEX_SOURCE_HOME?.trim() || env.CODEX_HOME?.trim()
+  if (configured) return configured
+  if (env.HOME?.trim()) return join(env.HOME, '.codex')
+  throw new ContinuationIdentityUnavailable('Codex runtime HOME 不可用')
+}
+const ensureIsolatedHome = (sourceHome: string): ReturnType<typeof createCodexIsolatedHome> => {
+  if (isolatedHome) {
+    if (isolatedSourceHome !== sourceHome) {
+      throw new ContinuationIdentityUnavailable('Codex source home 已变化；请重启 Provider 后再继续')
+    }
+    return isolatedHome
+  }
+  isolatedHome = createCodexIsolatedHome(sourceHome, isolatedHomePath)
+  isolatedSourceHome = sourceHome
+  return isolatedHome
+}
+const evictIdleClients = (protectedClient?: CodexAppServerClient): void => {
+  const unique = [...new Set(clients.values())]
+  if (unique.length <= 3) return
+  const idle = unique
+    .filter((client) => client !== protectedClient && (clientActivity.get(client) ?? 0) === 0)
+    .sort((left, right) => (clientLastUsed.get(left) ?? 0) - (clientLastUsed.get(right) ?? 0))
+  for (const client of idle.slice(0, Math.max(0, unique.length - 3))) void shutdownClient(client)
+}
+const scheduleClientShutdown = (client: CodexAppServerClient): void => {
+  const previous = clientIdleTimers.get(client)
+  if (previous) clearTimeout(previous)
+  const timer = setTimeout(() => {
+    clientIdleTimers.delete(client)
+    if ((clientActivity.get(client) ?? 0) > 0) {
+      scheduleClientShutdown(client)
+      return
+    }
+    void shutdownClient(client)
+  }, CLIENT_IDLE_MS)
+  timer.unref()
+  clientIdleTimers.set(client, timer)
+}
+const getClient = (
+  cwd?: string,
+  hookTrust: CodexHookTrustGrant[] = [],
+  mcpExecution?: AuthorizedMcpExecution,
+  expectedContinuationKey?: string,
+  historyReader?: HistoryReaderConnection
+): CodexAppServerClient => {
+  const trustedHooks = [...hookTrust].sort((left, right) => left.key.localeCompare(right.key))
+  const trustKey = trustedHooks.map((hook) => `${hook.key}\0${hook.currentHash}`).join('\n')
+  const env = runtimeEnvironment()
+  const sourceHome = sourceHomeFor(env)
+  const privateHome = ensureIsolatedHome(sourceHome)
+  let identity = ''
+  if (expectedContinuationKey) {
+    identity = codexContinuationKey(
+      { providerId: 'codex', ...(cwd ? { cwd } : {}) },
+      sourceHome,
+      privateHome.path,
+      executable(),
+      env,
+      'materialized'
+    )
+    if (identity !== expectedContinuationKey) {
+      throw new ContinuationIdentityUnavailable('Codex 接续身份已变化，请重新预览')
+    }
+  }
+  const readerKey = historyReader ? createHash('sha256').update(JSON.stringify(historyReader)).digest('hex') : 'none'
+  const key = `${cwd ?? ''}\0${trustKey}\0${mcpExecution?.fingerprint ?? 'none'}\0${identity}\0${readerKey}`
+  const existing = clients.get(key)
+  if (existing) {
+    const timer = clientIdleTimers.get(existing)
+    if (timer) clearTimeout(timer)
+    clientIdleTimers.delete(existing)
+    clientLastUsed.set(existing, Date.now())
+    lastClient = existing
+    return existing
+  }
+  const path = executable()
+  if (!path) throw new Error('Codex CLI 未找到')
+  if (lastErrorAt) restarts++
+  delete env.SCRY_CODEX_SOURCE_HOME
+  const appServerArgs = [
+    'app-server',
+    '--strict-config',
+    '--disable', 'apps',
+    '--disable', 'plugins',
+    '--disable', 'remote_plugin',
+    '--disable', 'external_migration',
+    '--disable', 'skill_mcp_dependency_install'
+  ]
+  // Trusted project configs may define optional profiles without a default; app-server strict mode still requires one.
+  const projectTrustArgs = cwd
+    ? [
+        '-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`,
+        '-c', 'default_permissions=":workspace"'
+      ]
+    : []
+  const hookTrustArgs = trustedHooks.length > 0
+    ? ['-c', `hooks={state={${trustedHooks.map((hook) =>
+        `${JSON.stringify(hook.key)}={trusted_hash=${JSON.stringify(hook.currentHash)}}`
+      ).join(',')}}}`]
+    : []
+  const mcp = codexMcpConfig(mcpExecution, historyReader)
+  const args = [
+    ...projectTrustArgs,
+    ...hookTrustArgs,
+    ...mcp.args,
+    ...appServerArgs
+  ]
+  let client: CodexAppServerClient
+  try {
+    client = new CodexAppServerClient({
+      command: path,
+      args,
+      cwd,
+      env: { ...(historyReader ? historyReaderEnvironment(env) : env), CODEX_HOME: privateHome.path, ...(historyReader ? { SCRY_HISTORY_READER_TOKEN: historyReader.token } : {}), ...mcp.env }
+    })
+  } catch (error) {
+    mcp.dispose?.()
+    throw error
+  }
+  if (mcp.dispose) clientFiles.set(client, mcp.dispose)
+  clients.set(key, client)
+  clientLastUsed.set(client, Date.now())
+  lastClient = client
+  evictIdleClients(client)
+  return client
+}
+
+const shutdownClient = async (client: CodexAppServerClient): Promise<void> => {
+  const timer = clientIdleTimers.get(client)
+  if (timer) clearTimeout(timer)
+  clientIdleTimers.delete(client)
+  clientActivity.delete(client)
+  clientActiveRuns.delete(client)
+  clientLastUsed.delete(client)
+  let registered = false
+  for (const [key, cached] of clients) {
+    if (cached !== client) continue
+    registered = true
+    clients.delete(key)
+  }
+  if (lastClient === client) lastClient = null
+  try {
+    if (registered) await client.shutdown()
+  } finally {
+    releaseClientFiles(client)
+  }
+}
+
+const request = async <T>(
+  method: string,
+  params?: unknown,
+  cwd?: string,
+  hookTrust: CodexHookTrustGrant[] = [],
+  mcpExecution?: AuthorizedMcpExecution,
+  expectedContinuationKey?: string,
+  historyReader?: HistoryReaderConnection
+): Promise<T> => {
+  const client = getClient(cwd, hookTrust, mcpExecution, expectedContinuationKey, historyReader)
+  clientActivity.set(client, (clientActivity.get(client) ?? 0) + 1)
+  try {
+    const result = await client.request<T>(method, params)
+    lastOkAt = Date.now()
+    lastError = undefined
+    return result
+  } catch (error) {
+    lastErrorAt = Date.now()
+    lastError = sanitizeMcpAuthError(error)
+    throw error
+  } finally {
+    const active = Math.max(0, (clientActivity.get(client) ?? 1) - 1)
+    if (active > 0) clientActivity.set(client, active)
+    else clientActivity.delete(client)
+    clientLastUsed.set(client, Date.now())
+    scheduleClientShutdown(client)
+    evictIdleClients()
+  }
+}
+
+  return {
+    getClient,
+    shutdownClient,
+    scheduleClientShutdown,
+    request,
+    clientActivity,
+    clientActiveRuns,
+    health: () => ({ pid: lastClient?.pid, lastOkAt, lastErrorAt, lastError, restarts }),
+    executable,
+    runtimeEnvironment,
+    sourceHomeFor,
+    ensureIsolatedHome,
+    isolatedState: () => ({ home: isolatedHome, sourceHome: isolatedSourceHome }),
+    closeAll: async () => {
+      for (const client of [...new Set(clients.values())]) await shutdownClient(client)
+    }
+  }
+}
