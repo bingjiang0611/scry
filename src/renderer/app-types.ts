@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 import type { DesktopRemoteHistory, RemoteSessionRef } from '@shared/desktop-remote'
 
-export type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
+export type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote' | 'machines'
 
 export type PreparedRemoteHistory =
   | { status: 'loading' }

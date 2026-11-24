@@ -17,7 +17,7 @@ export function fixtureState(options) {
   directoryReads: [], directorySelectCalls: [], directoryGrants: [], oldDirectoryHost: false, selectDirectoryFailure: false, holdDirectorySelection: false,
   phoneEnabled: true, relayConfigured: true, phoneStatusFailure: false, phonePairingCalls: 0,
   clipboardImageCalls: 0, forks: [], deletions: [], deleteFailure: false,
-  commandFailure: false, holdCommands: false,
+  commandFailure: false, holdCommands: false, targetMetricsCalls: [], targetMetricsUnsupported: false, targetMetricsFailure: false, localMetricsFailure: false,
   providerMetadataObservedAt: 1700000000000, providerControlsObservedAt: 1700000000000, providerMetadataRevision: 1
 }
 const connection = {

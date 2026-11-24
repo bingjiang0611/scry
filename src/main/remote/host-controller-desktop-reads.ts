@@ -22,6 +22,8 @@ export interface DesktopReadDeps {
   canSessionFork: boolean
   canSessionDelete: boolean
   hasHostAdminNotices?: boolean
+  // P8 §5: declared only when this host can actually answer the machine summary.
+  canHostMetrics?: boolean
 }
 
 export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string, input: unknown): Promise<DesktopHostReadResult> {
@@ -50,6 +52,7 @@ export async function readDesktop(deps: DesktopReadDeps, peerCertSHA256: string,
     ...(deps.canSessionFork ? { sessionFork: true as const } : {}),
     ...(deps.canSessionDelete ? { sessionDelete: true as const } : {}),
     ...(deps.hasHostAdminNotices ? { hostAdminNotices: 1 as const } : {}),
+    ...(deps.canHostMetrics ? { hostMetrics: 1 as const } : {}),
     ...(deps.attachmentStore ? { attachments: attachmentCapability() } : {})
   }
 }

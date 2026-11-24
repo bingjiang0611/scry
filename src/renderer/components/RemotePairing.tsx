@@ -4,7 +4,6 @@ import type { RemotePairingCode } from '../../shared/remote'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { projectRemote, confirmArguments, type PendingRow, type RemotePairingViewModel } from '../remote-pairing'
 import { RemoteHostPanel } from './DesktopRemote'
-import { RemoteConnectionsSettings } from './HostsView'
 import { Icon } from './primitives/Icon'
 import { EmptyState } from './primitives/EmptyState'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
@@ -34,9 +33,10 @@ function DeviceCodeQR({ code }: { code: string }): JSX.Element {
   )
 }
 
-// Trusted-local remote access settings. Outbound hosts and inbound grants share
-// one tab but remain separate sections because they have different authority.
-export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }): JSX.Element {
+// 连到本机的设备（P8 §2 第三块「已配对的设备」）：配对二维码、待确认的配对、
+// 设备列表与撤销。出站执行目标在 MachinesView 的「执行目标」块，两个方向
+// 有不同授权，所以仍是两块界面。
+export function InboundDevices(): JSX.Element {
   const titleId = useId()
   const [vm, setVm] = useState<RemotePairingViewModel | null>(null)
   const [code, setCode] = useState<RemotePairingCode | null>(null)
@@ -94,7 +94,6 @@ export function RemotePairing({ onNewSession }: { onNewSession: (connectionId: s
 
   return (
     <section className="remote-pairing">
-      <RemoteConnectionsSettings onNewSession={onNewSession} />
       <section className="remote-access-section remote-access-inbound" aria-label={copy.inboundTitle}>
         <h3>{copy.inboundTitle}</h3>
         <div className="remote-access-grid">

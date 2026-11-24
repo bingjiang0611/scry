@@ -173,7 +173,7 @@ describe('formatUptime', () => {
 
 describe('Settings «后台服务» tab', () => {
   it('is a settings section of its own', () => {
-    const html = renderToStaticMarkup(<SettingsModal initialTab="service" theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />)
+    const html = renderToStaticMarkup(<SettingsModal initialTab="service" theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onOpenMachines={() => {}} onClose={() => {}} />)
     expect(html).toContain('后台服务')
     expect(html).toContain('读取中…')
   })

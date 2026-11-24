@@ -12,6 +12,7 @@ import type { BackgroundWork } from '@shared/background-work'
 import type { ConversationSummary } from '@shared/conversation-api'
 import { conversationAttentionKey, sessionAttentionKey } from '@shared/session-attention'
 import { Icon } from './primitives/Icon'
+import { SidebarNav } from './SidebarNav'
 import { EmptyState } from './primitives/EmptyState'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import type { ProjectMeta, SessionMeta } from '../env'
@@ -69,6 +70,8 @@ export const Sidebar = memo(function Sidebar({
   onUndoArchive,
   onAnalytics,
   analyticsActive = false,
+  onMachines,
+  machinesActive = false,
   onLlmPerformance,
   onSkills,
   onMcp,
@@ -120,6 +123,8 @@ export const Sidebar = memo(function Sidebar({
   onUndoArchive?: () => void
   onAnalytics?: () => void
   analyticsActive?: boolean
+  onMachines?: () => void
+  machinesActive?: boolean
   onLlmPerformance?: () => void
   onSkills?: () => void
   onMcp?: () => void
@@ -231,52 +236,12 @@ export const Sidebar = memo(function Sidebar({
         <input ref={searchInput} placeholder={projectCopy.searchPlaceholder} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      {(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts) && (
-        <nav className="sb-nav" aria-label="主要视图">
-          {onAnalytics && (
-            <button
-              type="button"
-              className={`sb-navitem ${analyticsActive ? 'active' : ''}`}
-              aria-current={analyticsActive ? 'page' : undefined}
-              onClick={onAnalytics}
-            >
-              <Icon name="overview" /> 分析
-            </button>
-          )}
-          {onLlmPerformance && (
-            <button type="button" className="sb-navitem" onClick={onLlmPerformance} title="LLM 性能" aria-haspopup="dialog">
-              <Icon name="chart" /> LLM 性能
-            </button>
-          )}
-          {onSkills && (
-            <button type="button" className="sb-navitem" onClick={onSkills} title="Skills" aria-haspopup="dialog">
-              <Icon name="box" /> 技能
-            </button>
-          )}
-          {onMcp && (
-            <button
-              type="button"
-              className="sb-navitem"
-              onClick={onMcp}
-              title="MCP"
-              aria-haspopup="dialog"
-              aria-label="MCP"
-            >
-              <Icon name="cube" /> MCP
-            </button>
-          )}
-          {onMetaPrompts && (
-            <button
-              type="button"
-              className={`sb-navitem ${metaPromptsActive ? 'active' : ''}`}
-              aria-current={metaPromptsActive ? 'page' : undefined}
-              onClick={onMetaPrompts}
-            >
-              <Icon name="terminal" /> Meta Prompts
-            </button>
-          )}
-        </nav>
-      )}
+      <SidebarNav
+        onAnalytics={onAnalytics} analyticsActive={analyticsActive}
+        onMachines={onMachines} machinesActive={machinesActive}
+        onLlmPerformance={onLlmPerformance} onSkills={onSkills} onMcp={onMcp}
+        onMetaPrompts={onMetaPrompts} metaPromptsActive={metaPromptsActive}
+      />
 
       <Tabs
         className="sb-view-tabs"

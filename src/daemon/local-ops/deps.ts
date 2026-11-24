@@ -44,6 +44,8 @@ export interface DaemonLocalEndpointDeps {
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   hostAdmin?: import('../host-admin-store').HostAdminStore
+  // P8 host metrics: the daemon's own sampler, local scope (may carry the PID).
+  hostMetrics?: () => Promise<import('../../shared/host-metrics').HostMetricsSnapshot>
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>

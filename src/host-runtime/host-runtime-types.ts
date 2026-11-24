@@ -90,6 +90,8 @@ export interface HostRuntimeInputs {
   onLedgerEvent?: HostControllerFactoryDependencies['onLedgerEvent']
   orchestration: NonNullable<HostControllerFactoryDependencies['orchestration']>
   listHostAdminNotices?: HostControllerFactoryDependencies['listHostAdminNotices']
+  // P8 §5: daemon-side sampler, already scoped to what a remote reader may see.
+  readHostMetrics?: HostControllerFactoryDependencies['readHostMetrics']
   managedLaunches?: Pick<import('../main/remote/managed-launches').ManagedLaunches<import('../main/conversation-service-deps').ManagedConversationStart>, 'take' | 'abandon'>
 }
 

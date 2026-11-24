@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>机器卡片状态</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#141416}
+a{color:#8ab4ff}a:hover{color:#b3ceff}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1440px; height: 560px; box-sizing: border-box; padding: 40px; background: #141416; color: #e8e8ea; font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700">卡片的四种异常状态</h1>
+<p style="margin: 0; color: #a1a1aa; font-size: 13px">读不到的数值一律写明原因或「不可用」，不显示 0，也不显示空条。</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; flex: 1 1 auto">
+
+<article style="background: #1d1d21; border: 1px solid #2c2c31; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #6b6b73"></span><span style="font-weight: 600">linux-build</span><span style="font-size: 12px; font-weight: 600; color: #a1a1aa">离线</span></div>
+<p style="margin: 0; font-size: 13px; color: #c9c9cf; line-height: 1.6">最后在线 12 分钟前。检查 SSH 是否可达，或对方的 Scry 后台服务是否在运行。</p>
+<div style="margin-top: auto; display: flex; gap: 8px"><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: none; background: #e8e8ea; color: #141416; font-size: 13px; font-weight: 600; cursor: pointer">连接</button><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2e2e33; background: transparent; color: #e8e8ea; font-size: 13px; cursor: pointer">编辑 SSH</button></div>
+</article>
+
+<article style="background: #1d1d21; border: 1px solid #2c2c31; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #3ecf8e"></span><span style="font-weight: 600">mac4</span><span style="font-size: 12px; font-weight: 600; color: #3ecf8e">在线</span></div>
+<p style="margin: 0; font-size: 13px; color: #f0c27a; background: #2a2418; border-radius: 8px; padding: 10px 12px; line-height: 1.6">这台主机的 Scry 版本较旧，不提供资源信息。升级到最新版后即可显示。</p>
+<p style="margin: 0; font-size: 12px; color: #a1a1aa">会话和运行功能不受影响。</p>
+<div style="margin-top: auto; display: flex; gap: 8px"><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: none; background: #e8e8ea; color: #141416; font-size: 13px; font-weight: 600; cursor: pointer">新建会话</button><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2e2e33; background: transparent; color: #e8e8ea; font-size: 13px; cursor: pointer">断开</button></div>
+</article>
+
+<article style="background: #1d1d21; border: 1px solid #2c2c31; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #3ecf8e"></span><span style="font-weight: 600">mac2</span><span style="font-size: 12px; font-weight: 600; color: #3ecf8e">在线</span></div>
+<p style="margin: 0; font-size: 13px; color: #ffb3a8; background: #2c1d1b; border-radius: 8px; padding: 10px 12px; line-height: 1.6">读取资源失败：请求超时（2 秒）。上次成功读取是 5 分钟前。</p>
+<div style="display: flex; gap: 8px; align-items: center; font-size: 12px; color: #a1a1aa">显示的是 5 分钟前的数据</div>
+<div style="margin-top: auto; display: flex; gap: 8px"><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2e2e33; background: transparent; color: #e8e8ea; font-size: 13px; cursor: pointer">重试</button></div>
+</article>
+
+<article style="background: #1d1d21; border: 1px solid #2c2c31; border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 9px; height: 9px; border-radius: 50%; background: #3ecf8e"></span><span style="font-weight: 600">mac3</span><span style="font-size: 12px; font-weight: 600; color: #3ecf8e">在线</span></div>
+<div style="display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+<div style="display: flex"><span style="color: #a1a1aa">CPU</span><span style="margin-left: auto; font-weight: 600">73%</span></div>
+<div style="display: flex"><span style="color: #a1a1aa">内存</span><span style="margin-left: auto; font-weight: 600">64%</span></div>
+<div style="display: flex"><span style="color: #a1a1aa">内存压力</span><span style="margin-left: auto; color: #a1a1aa">不可用</span></div>
+<div style="display: flex"><span style="color: #a1a1aa">交换区</span><span style="margin-left: auto; color: #a1a1aa">不可用</span></div>
+</div>
+<p style="margin: 0; font-size: 12px; color: #a1a1aa">部分指标读不到时只标「不可用」，其余照常显示。</p>
+</article>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

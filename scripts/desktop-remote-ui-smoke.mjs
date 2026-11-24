@@ -93,10 +93,11 @@ try {
         if (!source.includes(heading)) throw new Error('slash source control not found')
         return source.replace(heading, 'SLASH_COMMAND_COPY.heading(undefined, slashLoading)')
       }
-      if (negativeSettingsControl && id.endsWith('/app-view.tsx')) {
-        const target = "setSettingsTab('remote')"
-        if (!source.includes(target)) throw new Error('remote settings control not found')
-        return source.replace(target, "setSettingsTab('appearance')")
+      if (negativeSettingsControl && id.endsWith('/SettingsModal.tsx')) {
+        // 设置里的跳转按钮必须真的到「机器」页；改成就地不动，冒烟必须失败。
+        const target = 'onClick={onOpenMachines}'
+        if (!source.includes(target)) throw new Error('remote settings jump control not found')
+        return source.replace(target, 'onClick={() => {}}')
       }
       if (negativePromptControl && id.endsWith('/app-view.tsx')) {
         const target = 'const target = metaPromptTarget.current'

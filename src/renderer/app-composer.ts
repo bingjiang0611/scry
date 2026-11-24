@@ -1,3 +1,4 @@
+import type { AppView } from './app-types'
 import { useCallback, useEffect, useLayoutEffect, type MutableRefObject, type RefObject, type Dispatch, type SetStateAction } from 'react'
 import type { SlashCmd, TraceEvent } from '@shared/trace'
 import type { RendererSteerEvidence } from './steer'
@@ -19,14 +20,14 @@ import { ipcErrorMessage } from './constants/ipc-error-copy'
 import { isWorkspaceStartCancelledError } from '@shared/workspace-selection'
 
 export interface AppComposerContext {
-  view: 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
+  view: AppView
   cwd: string | null
   setCwd: (cwd: string | null) => void
   loadProjects: () => void
   openWorkspaceRun: (cwd: string, sessionId: string, runId: string) => Promise<void>
   sessionSelectionSeqRef: MutableRefObject<number>
-  viewRef: MutableRefObject<'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'>
-  setView: Dispatch<SetStateAction<'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'>>
+  viewRef: MutableRefObject<AppView>
+  setView: Dispatch<SetStateAction<AppView>>
   switchingAgentRef: MutableRefObject<string | undefined>
   movedQueuedPromptId: string | null
   EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[]

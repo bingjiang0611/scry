@@ -270,6 +270,16 @@
       "scopes": [
         "local"
       ]
+    },
+    "localHostMetrics": {
+      "path": "resources-shell",
+      "request": "{ op:'hostMetrics', method:'read', args: [] }（这个 op 没有参数；scope 由调用方的 grant 决定，不由参数决定）",
+      "response": "HostMetricsSnapshot（P8 §5）：sampledAt、uptimeSec、cpu{percent,cores,load1}、memory{totalBytes,usedBytes,pressure,swapUsedBytes}、disks[{role,totalBytes,freeBytes}]、scry{daemon{cpuPercent,rssBytes,pid?},providers[]|null}、runs{active,queued}。采不到的字段为 null；remote scope 不含 PID",
+      "authorize": "本机 grant（scope: local），每次请求重验；每 2 秒最多真正采样一次，其余返回 5 秒缓存。设备与 Desktop 走只读设备 op `hostMetrics`，不是这个 local op",
+      "why": "ps 只能在 daemon 里跑（App 主进程禁止 child_process），而机器页需要后台服务及其 Provider 子进程的真实占用",
+      "scopes": [
+        "local"
+      ]
     }
   }
 }

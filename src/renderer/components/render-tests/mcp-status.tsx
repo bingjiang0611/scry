@@ -5,7 +5,7 @@ const { describe, it, expect, renderToStaticMarkup, ArchivedChatsPanel, McpModal
 describe('McpModal 渲染：pending 不伪装 connected', () => {
   it('设置弹窗把当前主题呈现为可访问的单选项', () => {
     const html = renderToStaticMarkup(
-      <SettingsModal theme="light" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />
+      <SettingsModal theme="light" onThemeChange={() => {}} onSessionsChanged={() => {}} onOpenMachines={() => {}} onClose={() => {}} />
     )
     expect(html).toContain('class="modal settings-modal"')
     expect(html).toContain('role="group" aria-label="界面主题"')
@@ -16,7 +16,7 @@ describe('McpModal 渲染：pending 不伪装 connected', () => {
 
   it('设置弹窗用左侧 tab 分区，默认停在外观', () => {
     const html = renderToStaticMarkup(
-      <SettingsModal theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />
+      <SettingsModal theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onOpenMachines={() => {}} onClose={() => {}} />
     )
     expect(html).toContain('role="tablist" aria-label="设置分区" aria-orientation="vertical"')
     expect(html).toContain('-appearance-tab" type="button" role="tab" aria-selected="true"')

@@ -1,5 +1,5 @@
-// Settings surface for saved outbound desktop connections. Inbound access stays
-// in RemotePairing so the two directions remain separate while sharing one tab.
+// 已保存的出站连接（P8 §2 第二块「执行目标」）。入站设备在 RemotePairing 的
+// InboundDevices 里，两个方向授权不同，所以仍是两块界面。
 import { useId, useRef, useState, type FormEvent } from 'react'
 import type { DesktopRemoteConnection, DesktopSshTarget } from '@shared/desktop-remote'
 import { formatHostAdminNoticeText } from '../../shared/host-admin'
@@ -15,6 +15,7 @@ import { Icon } from './primitives/Icon'
 import { EmptyState } from './primitives/EmptyState'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ModalCloseButton } from './primitives/ModalCloseButton'
+import { TargetMetrics } from './TargetMetrics'
 import './hosts-view.css'
 import { Button } from './primitives/Button'
 import { Notice } from './primitives/Notice'
@@ -27,22 +28,27 @@ function errorText(error: unknown): string {
   return message
 }
 
-export function RemoteConnectionsSettings({ onNewSession }: { onNewSession: (connectionId: string, cwd: string) => void }) {
+export function RemoteConnectionsSettings({ onNewSession, heading = copy.title, showSectionTitle = true }: {
+  onNewSession: (connectionId: string, cwd: string) => void
+  /** 机器页把这一块当页面小节，标题由它自己给。 */
+  heading?: string
+  showSectionTitle?: boolean
+}): JSX.Element {
   const { connections, loaded, refreshing, error: readError } = useDesktopConnections()
   const [adding, setAdding] = useState(false)
   const refreshHosts = useAsyncAction<'read'>()
   const [expanded, setExpanded] = useState<string | null>(null)
   const titleId = useId()
   return (
-    <section className="remote-connections-settings" aria-label={copy.outboundTitle}>
+    <section className="remote-connections-settings" aria-label={showSectionTitle ? copy.outboundTitle : heading}>
       <header className="remote-access-header">
-        <h2>{copy.title}</h2>
+        <h2>{heading}</h2>
         <Button variant="primary" onClick={() => setAdding(true)}>
           <Icon name="plus" /> {copy.addHost}
         </Button>
       </header>
-      <section className="remote-access-section" aria-label={copy.outboundTitle}>
-        <h3>{copy.outboundTitle}</h3>
+      <section className="remote-access-section" aria-label={showSectionTitle ? copy.outboundTitle : heading}>
+        {showSectionTitle && <h3>{copy.outboundTitle}</h3>}
         {readError && <EmptyState size="card" picture="alert" title={copy.hostsReadFailed} announcement="alert"
           actions={[{ label: copy.retry, icon: 'refresh', onClick: () => refreshHosts.run('read', refreshDesktopConnections), busy: refreshHosts.pending !== null }]} />}
         {(!loaded || refreshing) && !readError && connections.length === 0 && <DelayedSkeletonRows loading rows={3} label={copy.loadingHosts} />}
@@ -139,6 +145,7 @@ function HostRow({
           </button>
         </span>
       </div>
+      <TargetMetrics connection={connection} />
       {action.error && (
         <Notice tone="bad" className="hosts-error" role="alert" action={<Button size="sm" onClick={action.retry}>{copy.retry}</Button>}>
           {action.error.text}

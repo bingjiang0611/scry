@@ -44,9 +44,21 @@ export async function pairDevice({ evaluate, transport, temp, userDataDir, works
   assert.deepEqual(info.desktop, {
     kind: 'info', protocol: RUN_PROTOCOL_VERSION, hostId: invitation.hostId, execution: 'canonical',
     directorySelection: true, workbench: 1, sessionActions: true, sessionFork: true, sessionDelete: true, providerDiscovery: 2, managedWorktrees: 1, traceDelta: 1,
-    hostAdminNotices: 1, subscribe: 1,
+    hostAdminNotices: 1, subscribe: 1, hostMetrics: 1,
     attachments: { transport: 'chunked', chunkBytes: 262144, maxBytes: 16777216, maxCount: 16, maxTotalBytes: 33554432 }
   })
+  // P8 §5: a paired device reads the machine summary over the wire, and what it
+  // gets is the remote scope — no PID, no process names, disks carry only a role.
+  const metrics = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, { op: 'hostMetrics' })
+  assert.equal(metrics.error, undefined, `hostMetrics over the wire failed: ${JSON.stringify(metrics.error)}`)
+  const machine = metrics.hostMetrics
+  assert.ok(machine && typeof machine.sampledAt === 'number', 'hostMetrics is missing the snapshot')
+  assert.equal(typeof machine.cpu.percent, 'number')
+  assert.equal(typeof machine.memory.totalBytes, 'number')
+  assert.ok(['low', 'medium', 'high'].includes(machine.memory.pressure))
+  assert.deepEqual(Object.keys(machine.disks[0]).sort(), ['freeBytes', 'role', 'totalBytes'], 'remote disks carry a role and sizes only')
+  assert.equal(JSON.stringify(machine).includes('"pid"'), false, 'remote scope leaked a PID')
+  assert.equal(JSON.stringify(machine).includes(canonicalWorkspace), false, 'remote scope leaked a path')
   const { subscribe: snapshot } = await tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {
     op: 'subscribe', views: ['sessions', 'activeRuns'], waitMs: 0
   })

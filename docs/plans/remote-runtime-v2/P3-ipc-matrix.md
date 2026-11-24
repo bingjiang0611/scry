@@ -2,11 +2,11 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：183 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：66，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：86
+- 生产特权 IPC channel：185 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：67，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：87
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 18 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
-- 桌面远程客户端（`desktopRemote:*`，共 32 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)
+- 桌面远程客户端（`desktopRemote:*`，共 33 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)
 - 工作台行（`desktopWorkbench` 转发的 workspace / sourceControl，与 App 终端 op `terminal`，共 31 行）见 [P3-ipc-matrix-workbench](P3-ipc-matrix-workbench.md)
 
 ## 判定规则
@@ -97,6 +97,7 @@
 | `app:rendererRestart` | main | `—` | — | — | 窗口行为 |
 | `app:reportRendererPerformance` | main | `—` | — | — | renderer 自报指标 |
 | `app:setTheme` | main | `—` | — | — | 窗口主题 |
+| `hostMetrics:read` | new-op | `localHostMetrics:read` | resources-shell | — | 机器页「本机」资源（P8 §5）：只有 daemon 能跑 ps，main 不允许引入 child_process；返回值含 PID，只在本机 grant 下发 |
 | `remote:backgroundService:quit` | main | `—` | — | — | 原生二次确认框、向 daemon.lock 登记且身份复核一致的进程发 SIGTERM、app.quit；撤销或停止中 App 无法调用 daemon op |
 | `remote:backgroundService:reconnect` | main | `—` | — | — | §13.2 链路：本机 grant 已被撤销，App 不能再调用 daemon 的任何 op；确认框、按身份停止、删除被拒的本机凭据、重新入网都在 App |
 | `remote:backgroundService:restart` | main | `—` | — | — | 版本不一致时 App 不与 daemon 通话；确认框、按身份停止与启动对应版本的后台服务都在 App |

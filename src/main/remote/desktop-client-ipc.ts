@@ -5,7 +5,7 @@ import type { DesktopRemoteAPI } from '../../shared/desktop-remote'
 export const DESKTOP_REMOTE_CLIENT_METHODS = [
   'list', 'pair', 'finishPairing', 'updateSsh', 'connect', 'disconnect', 'forget',
   'catalog', 'setViewedSession', 'providerControls', 'commands', 'workspaceChoices', 'validateWorkspaceBranch', 'sessionAction', 'forkSession', 'deleteSession', 'directories', 'selectDirectory', 'history', 'trace', 'traceDelta', 'intents', 'submit', 'intentStatus', 'resolveIntent',
-  'runStatus', 'liveRun', 'stop', 'answer', 'files', 'file', 'workbench'
+  'runStatus', 'liveRun', 'stop', 'answer', 'files', 'file', 'workbench', 'hostMetrics'
 ] as const satisfies readonly (keyof DesktopRemoteAPI)[]
 
 export function registerDesktopClientIpc<Event>(
