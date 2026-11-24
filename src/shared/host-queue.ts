@@ -51,3 +51,14 @@ export function hostQueueEntries(rows: readonly HostQueueRow[], sessionKey?: str
 export function isAgentQueueEntry(entry: HostQueueEntry): boolean {
   return entry.origin === 'agent'
 }
+
+/**
+ * What the App knows about a session when it asks the host for the queue. The daemon resolves it to
+ * the projection key; the App never has to know that key.
+ */
+export interface HostQueueRequest {
+  sessionId: string
+  providerId?: string
+  agentProfileId?: string | null
+  cwd?: string
+}

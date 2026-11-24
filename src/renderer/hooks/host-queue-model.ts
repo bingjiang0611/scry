@@ -1,4 +1,4 @@
-import type { HostQueueEntry } from '../../shared/host-queue'
+import type { HostQueueEntry, HostQueueRequest } from '../../shared/host-queue'
 import { isAgentQueueEntry } from '../../shared/host-queue'
 import { HOST_QUEUE_COPY } from '../constants/host-queue-copy'
 
@@ -29,4 +29,15 @@ export function hostQueueItems(entries: readonly HostQueueEntry[]): HostQueueIte
       note: notes.length > 0 ? notes.join(' · ') : null
     }
   })
+}
+
+/** The request the panel sends: only the fields the session actually has, so a blank never travels. */
+export function hostQueueRequestFor(session: { sessionId: string | null; providerId?: string | null; cwd?: string | null; agentProfileId?: string | null }): HostQueueRequest | null {
+  if (!session.sessionId) return null
+  return {
+    sessionId: session.sessionId,
+    ...(session.providerId ? { providerId: session.providerId } : {}),
+    ...(session.cwd ? { cwd: session.cwd } : {}),
+    ...(session.agentProfileId ? { agentProfileId: session.agentProfileId } : {})
+  }
 }

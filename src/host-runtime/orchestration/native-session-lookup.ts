@@ -19,7 +19,7 @@ export interface NativeSessionIdentity {
   cwd: string | undefined
 }
 
-type SessionReader = Pick<EventSink, 'getSession' | 'handle'>
+export type SessionReader = Pick<EventSink, 'getSession' | 'handle'>
 
 export function scopedNativeSessionKey(identity: NativeSessionIdentity): string {
   return `native:${sha256Hex(JSON.stringify([identity.provider, identity.profile, identity.cwd, identity.sessionId]))}`

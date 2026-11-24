@@ -44,12 +44,9 @@ export function registerAgentRuntimeHandlers({
   // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
   handleTrusted('agent:activeRun', async (): Promise<ActiveRun | null> => await daemon.activeRun())
   // D1: the queue is the host's, so the App asks for it instead of reconstructing one from what it
-  // sent. A missing or empty key is refused here, before the daemon sees it.
-  handleTrusted('agent:hostQueue', async (_e, sessionKey: unknown) => {
-    if (typeof sessionKey !== 'string' || sessionKey.length === 0 || sessionKey.length > 4096 || sessionKey.includes('\0')) {
-      throw new Error('invalid_session_key')
-    }
-    return await daemon.localOp({ op: 'hostQueue', method: 'hostQueue', args: [sessionKey], read: true })
+  // sent. The App knows a session by its own id, provider and cwd; the daemon resolves the key.
+  handleTrusted('agent:hostQueue', async (_e, request: unknown) => {
+    return await daemon.localOp({ op: 'hostQueue', method: 'hostQueue', args: [hostQueueRequest(request)], read: true })
   })
   let detailOwner: IpcMainInvokeEvent['sender'] | undefined
   const clearDetailOwner = () => { detailOwner = undefined; daemon.watchDetail?.(null) }
@@ -119,4 +116,28 @@ export function registerAgentRuntimeHandlers({
   // The registry that owns the run is in the daemon: consulting the App's own registry
   // would answer "identity changed" about a run it never held.
   handleTrusted('agent:steer', async (_event, payload: unknown) => await daemon.steer(payload))
+}
+
+/**
+ * D1: the shape main is willing to forward. Anything the daemon would have to guess about is
+ * refused here, so a bad request never reaches the projection.
+ */
+function hostQueueRequest(input: unknown): { sessionId: string; providerId?: string; agentProfileId?: string | null; cwd?: string } {
+  const value = (input ?? {}) as Record<string, unknown>
+  const text = (raw: unknown, max: number): string | undefined => {
+    if (raw === undefined) return undefined
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > max || raw.includes('\0')) throw new Error('invalid_session_id')
+    return raw
+  }
+  const sessionId = text(value.sessionId, 512)
+  if (sessionId === undefined) throw new Error('invalid_session_id')
+  const providerId = text(value.providerId, 128)
+  const cwd = text(value.cwd, 4096)
+  const agentProfileId = value.agentProfileId === null ? null : text(value.agentProfileId, 128)
+  return {
+    sessionId,
+    ...(providerId === undefined ? {} : { providerId }),
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(agentProfileId === undefined ? {} : { agentProfileId })
+  }
 }

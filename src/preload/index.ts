@@ -11,7 +11,7 @@ import type { WorkspaceSelectionApi } from '../shared/workspace-selection'
 import type { ConversationSummary } from '../shared/conversation-api'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
-import type { HostQueueEntry } from '../shared/host-queue'
+import type { HostQueueEntry, HostQueueRequest } from '../shared/host-queue'
 import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/tool-content'
 import type {
   ActiveRun,
@@ -204,7 +204,7 @@ const api = {
   setCwd: (dir: string | null, clearIfMissing?: boolean): Promise<string | null> =>
     ipcRenderer.invoke('agent:setCwd', ...(clearIfMissing ? [dir, true] : [dir])),
   // D1: the host's queue for one session, in the order it will dispatch them.
-  hostQueue: (sessionKey: string): Promise<HostQueueEntry[]> => ipcRenderer.invoke('agent:hostQueue', sessionKey),
+  hostQueue: (request: HostQueueRequest): Promise<HostQueueEntry[]> => ipcRenderer.invoke('agent:hostQueue', request),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   forkSession: (request: AgentForkSessionRequest): Promise<AgentForkSessionResult> => ipcRenderer.invoke('agent:forkSession', request),
   invalidateProviderContext: (context: ProviderContext): Promise<true> => ipcRenderer.invoke('agent:invalidateProviderContext', context),

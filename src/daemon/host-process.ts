@@ -287,7 +287,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       appVersion: options.appVersion,
       isPackaged: options.isPackaged,
       sourceControl, checkpoints, providerDiscovery,
-      orchestrationDb: () => userDataAuthority?.handle.db,
+      orchestrationReader: () => userDataAuthority,
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
       links: sessionLinks,

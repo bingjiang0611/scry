@@ -11,33 +11,40 @@ afterEach(() => {
   dirs = []
 })
 
-function ops() {
+function op() {
   const userData = mkdtempSync(join(tmpdir(), 'scry-host-queue-'))
   dirs.push(userData)
   const sink = EventSink.open({ userDataDir: userData })
-  const channel = hostQueueLocalOps({ orchestrationDb: () => sink.handle.db } as never)['agent:hostQueue']
-  return { sink, channel }
+  return { sink, channel: hostQueueLocalOps({ orchestrationReader: () => sink } as never)['agent:hostQueue'] }
 }
 
-/** A row as the projection keeps it: the op must translate the stored shape, not echo it. */
-function insert(sink: EventSink, input: { runId: string; lifecycle: string; position: number | null; held?: number; seq: number; prompt?: string; origin?: string }) {
+function insertSession(sink: EventSink, input: { sessionKey: string; nativeSessionId?: string; provider?: string; cwd?: string }) {
+  sink.handle.db.prepare(
+    `INSERT INTO orch_p_session (session_key, conversation_id, provider, profile, cwd, title, ts, catalog, rev_seq)
+     VALUES (?, NULL, ?, NULL, ?, '', 0, ?, 0)`
+  ).run(input.sessionKey, input.provider ?? 'codex', input.cwd ?? '/w',
+    input.nativeSessionId === undefined ? null : JSON.stringify({ nativeSessionId: input.nativeSessionId }))
+}
+
+function insertRun(sink: EventSink, input: { runId: string; sessionKey: string; lifecycle: string; position: number | null; held?: number; seq: number; prompt?: string; origin?: string }) {
   sink.handle.db.prepare(
     `INSERT INTO orch_p_run (run_id, session_key, owner_actor, scope, provider, profile, cwd, origin,
        prompt_preview, lifecycle, stop_state, output_seq, intent_seq, body, rev_seq, queue_position, queue_held)
-     VALUES (?, 's-1', 'system', 'system', 'codex', NULL, '/w', ?, ?, ?, NULL, NULL, ?, '{}', ?, ?, ?)`
-  ).run(input.runId, input.origin ?? 'user', input.prompt ?? null, input.lifecycle, input.seq, input.seq, input.position, input.held ?? 0)
+     VALUES (?, ?, 'system', 'system', 'codex', NULL, '/w', ?, ?, ?, NULL, NULL, ?, '{}', ?, ?, ?)`
+  ).run(input.runId, input.sessionKey, input.origin ?? 'user', input.prompt ?? null, input.lifecycle, input.seq, input.seq, input.position, input.held ?? 0)
 }
 
-// D1: the App asks the host what it is holding. The op answers in dispatch order, translates the
-// stored 0/1 into a boolean, and treats an unused session as an empty queue rather than an error.
+// D1: the App knows a session by its native id, provider and cwd; the projection keys rows by
+// `native:<digest>`. The op resolves one to the other and answers in dispatch order.
 describe('agent:hostQueue', () => {
-  it('answers queued rows in dispatch order with held translated', async () => {
-    const { sink, channel } = ops()
+  it('resolves a native identity to the projection key and answers in dispatch order', async () => {
+    const { sink, channel } = op()
     try {
-      insert(sink, { runId: 'second', lifecycle: 'queued', position: 2, seq: 2, prompt: '第二条' })
-      insert(sink, { runId: 'first', lifecycle: 'queued', position: 1, seq: 1, prompt: '第一条', held: 1 })
-      insert(sink, { runId: 'running', lifecycle: 'dispatched', position: null, seq: 3 })
-      const entries = await channel({ sessionKey: 's-1' }) as { runId: string; position: number; held: boolean; promptPreview: string | null }[]
+      insertSession(sink, { sessionKey: 'native:abc', nativeSessionId: 'sess-1', cwd: '/w' })
+      insertRun(sink, { runId: 'second', sessionKey: 'native:abc', lifecycle: 'queued', position: 2, seq: 2, prompt: '第二条' })
+      insertRun(sink, { runId: 'first', sessionKey: 'native:abc', lifecycle: 'queued', position: 1, seq: 1, prompt: '第一条', held: 1 })
+      insertRun(sink, { runId: 'running', sessionKey: 'native:abc', lifecycle: 'dispatched', position: null, seq: 3 })
+      const entries = await channel({ sessionId: 'sess-1', providerId: 'codex', cwd: '/w' }) as { runId: string; position: number; held: boolean; promptPreview: string | null }[]
       expect(entries.map((entry) => entry.runId)).toEqual(['first', 'second'])
       expect(entries[0]).toMatchObject({ position: 1, held: true, promptPreview: '第一条' })
       expect(entries[1].held).toBe(false)
@@ -46,23 +53,25 @@ describe('agent:hostQueue', () => {
     }
   })
 
-  it('answers an empty queue for a session with nothing waiting', async () => {
-    const { sink, channel } = ops()
+  it('answers an empty queue when the projection has never seen the session', async () => {
+    const { sink, channel } = op()
     try {
-      expect(await channel({ sessionKey: 's-unused' })).toEqual([])
+      expect(await channel({ sessionId: 'unseen', providerId: 'codex', cwd: '/w' })).toEqual([])
     } finally {
       sink.close()
     }
   })
 
-  it('refuses a request without a session key and one without a database', async () => {
-    const { sink, channel } = ops()
+  it('refuses a request without a session id, a bad cwd, or no projection', async () => {
+    const { sink, channel } = op()
     try {
-      await expect(channel({})).rejects.toThrow('invalid_session_key')
+      await expect(channel({})).rejects.toThrow('invalid_session_id')
+      await expect(channel({ sessionId: 's', cwd: '/w\0/x' })).rejects.toThrow('invalid_cwd')
+      await expect(channel({ sessionId: 's', providerId: 7 })).rejects.toThrow('invalid_provider_id')
     } finally {
       sink.close()
     }
-    const withoutDb = hostQueueLocalOps({} as never)['agent:hostQueue']
-    await expect(withoutDb({ sessionKey: 's-1' })).rejects.toThrow('orchestration_unavailable')
+    const withoutReader = hostQueueLocalOps({} as never)['agent:hostQueue']
+    await expect(withoutReader({ sessionId: 's' })).rejects.toThrow('orchestration_unavailable')
   })
 })
