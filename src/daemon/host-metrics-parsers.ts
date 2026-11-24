@@ -106,10 +106,7 @@ export function parseProcMeminfo(text: string): {
   }
 }
 
-/**
- * Linux PSI `/proc/pressure/memory` avg10 onto the same three levels the macOS
- * kernel reports: under 10% low, under 40% medium, from 40% high.
- */
+/** Maps Linux PSI avg10 to the shared UI bands (P8 §3). */
 export function parsePsiMemory(text: string): HostMemoryPressure | null {
   const avg10 = text.match(/avg10=([\d.]+)/)
   if (!avg10) return null
