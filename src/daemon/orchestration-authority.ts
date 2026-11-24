@@ -30,6 +30,8 @@ import {
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
 import { createAuthorityRunTerminalHandler } from './orchestration-run-terminal'
+import { quotaFailureIdentity, recordQuotaFailure } from './usage-limit-capture'
+import type { UsageLimitScheduler } from './usage-limit-scheduler'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
@@ -83,6 +85,11 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   attentionSnapshot?: () => SessionAttentionSnapshot
   /** Retention timer; `null` disables it. */
   maintenanceIntervalMs?: number | null
+  /**
+   * C4: supplied by the daemon when usage-limit resume exists. The authority reports quota failures
+   * and never resumes on its own, so a limit cannot spend the user's quota without their opt-in.
+   */
+  usageLimits?: UsageLimitScheduler
 }
 
 /**
@@ -377,6 +384,21 @@ function buildAuthorityRuntime<
 
     onRunTerminal: createAuthorityRunTerminalHandler({
       engine,
+      // C4: a quota failure becomes a stored pending resume; classification lives with the provider.
+      onProviderFailure: (failure) => {
+        const usageLimits = options.usageLimits
+        if (!usageLimits) return
+        const identity = quotaFailureIdentity(sink.handle.db, failure.runId)
+        if (!identity) return
+        recordQuotaFailure(usageLimits, {
+          sessionKey: identity.sessionKey,
+          cwd: identity.cwd,
+          provider: identity.provider,
+          profile: identity.profile,
+          detail: failure.detail,
+          now: Date.now()
+        })
+      },
       liveRunMeta: (runId) => subscribeHub.liveRunMeta(runId),
       resolveCanonical,
       findRecorderEvidence,

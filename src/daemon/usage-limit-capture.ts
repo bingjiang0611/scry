@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3'
 import { parseUsageLimit } from '../main/providers/usage-limit'
 import type { UsageLimitScheduler } from './usage-limit-scheduler'
 
@@ -8,6 +9,28 @@ import type { UsageLimitScheduler } from './usage-limit-scheduler'
  */
 export const USAGE_LIMIT_RESUME_PROMPT =
   '上一次请求因为用量限额中断。请接着把未完成的工作做完，并说明已经完成的部分。'
+
+export interface QuotaFailureIdentity {
+  sessionKey: string
+  cwd: string
+  provider: string
+  profile: string | null
+}
+
+/**
+ * The session a failed run belonged to, read from the projection. A run that never reached the
+ * projection has no identity, and its failure cannot be resumed.
+ */
+export function quotaFailureIdentity(db: Database.Database, runId: string): QuotaFailureIdentity | undefined {
+  const row = db.prepare(
+    `SELECT r.session_key AS sessionKey, r.cwd AS cwd, s.provider AS provider, s.profile AS profile
+       FROM orch_p_run r
+       LEFT JOIN orch_p_session s ON s.session_key = r.session_key
+      WHERE r.run_id = ?`
+  ).get(runId) as { sessionKey?: string | null; cwd?: string | null; provider?: string | null; profile?: string | null } | undefined
+  if (!row?.sessionKey || !row.cwd) return undefined
+  return { sessionKey: row.sessionKey, cwd: row.cwd, provider: row.provider ?? 'unknown', profile: row.profile ?? null }
+}
 
 export interface QuotaFailureInput {
   sessionKey: string | undefined

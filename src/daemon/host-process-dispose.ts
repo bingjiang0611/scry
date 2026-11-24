@@ -2,6 +2,7 @@ import type { ConversationStore } from '../main/conversation-store'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/run-registry'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
+import { createUsageLimitScheduler } from './usage-limit-scheduler'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
 /** Attaches the daemon’s authoritative event log and subscription hub. */
@@ -17,7 +18,18 @@ export async function attachHostProcessOrchestration<
   log: (line: string) => void
 }): Promise<DaemonOrchestrationAuthority> {
   const { options, conversationStore, runs, requestRunStop, attentionSnapshot, log } = input
-  return attachDaemonOrchestrationAuthority({
+  // C4: the scheduler is created before the authority and reads it lazily, because the authority
+  // owns the database the pending items live in. Off unless the user turned it on.
+  let attached: DaemonOrchestrationAuthority | undefined
+  const usageLimits = createUsageLimitScheduler({
+    db: () => {
+      const db = attached?.sink.handle.db
+      return db?.open ? db : undefined
+    },
+    sink: () => attached?.sink,
+    settings: () => ({ autoResume: process.env.SCRY_USAGE_LIMIT_AUTO_RESUME === '1' })
+  })
+  const authority = await attachDaemonOrchestrationAuthority({
     userDataDir: options.userDataDir,
     env: process.env,
     conversationStore,
@@ -26,8 +38,14 @@ export async function attachHostProcessOrchestration<
     attentionSnapshot,
     log,
     ...(options.orchestrationPauseBackfill ? { pauseDeferredImport: options.orchestrationPauseBackfill } : {}),
-    ...(options.orchestrationBeforeCommitHook ? { beforeCommitHook: options.orchestrationBeforeCommitHook } : {})
+    ...(options.orchestrationBeforeCommitHook ? { beforeCommitHook: options.orchestrationBeforeCommitHook } : {}),
+    usageLimits
   })
+  attached = authority
+  // A restart re-arms exactly the items that are still pending; a stored item that already resumed
+  // is not resumed again.
+  usageLimits.pump()
+  return authority
 }
 
 /** Bounded provider registry shutdown helper extracted from host-process.ts to stay within the 20 KB file budget. */

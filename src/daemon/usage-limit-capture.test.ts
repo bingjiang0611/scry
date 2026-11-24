@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { listPendingUsageLimits } from '../host-runtime/orchestration/usage-limit-store'
 import { createUsageLimitScheduler } from './usage-limit-scheduler'
-import { recordQuotaFailure, USAGE_LIMIT_RESUME_PROMPT } from './usage-limit-capture'
+import { quotaFailureIdentity, recordQuotaFailure, USAGE_LIMIT_RESUME_PROMPT } from './usage-limit-capture'
+import { submitAgentWake } from './agent-wake'
 
 let dirs: string[] = []
 afterEach(() => {
@@ -58,6 +59,23 @@ describe('usage-limit capture from a failed run', () => {
       expect(recordQuotaFailure(scheduler, { ...base, detail: 'Qoder CLI 已退出（code=1）' })).toBe(false)
       expect(listPendingUsageLimits(deps.db)).toEqual([])
       scheduler.stop()
+    } finally {
+      deps.sink.close()
+    }
+  })
+
+  it('resolves the failed run\'s session from the projection', () => {
+    const deps = store()
+    try {
+      // A real run row, written by the same submit path a dispatch uses.
+      const wake = submitAgentWake(deps.sink, {
+        taskId: 'task-1', sessionKey: 'native-1', provider: 'codex', profile: null, cwd: '/w', prompt: '继续'
+      }, 10)
+      expect(wake.runId).toBeDefined()
+      expect(quotaFailureIdentity(deps.db, wake.runId!)).toEqual({
+        sessionKey: 'native-1', cwd: '/w', provider: 'codex', profile: null
+      })
+      expect(quotaFailureIdentity(deps.db, 'missing-run')).toBeUndefined()
     } finally {
       deps.sink.close()
     }

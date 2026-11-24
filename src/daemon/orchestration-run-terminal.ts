@@ -88,6 +88,11 @@ export interface AuthorityTerminalHandlerDeps {
   schedule: (fn: () => void, ms: number) => void
   evidenceFor: (step: TerminalStep) => string[]
   releaseRun: (canonicalRunId: string, dispatchRunId: string) => void
+  /**
+   * C4: a failed run may have failed on a Provider quota. The handler reports the failure text and
+   * lets the caller decide what it means; it never interprets Provider wording itself.
+   */
+  onProviderFailure?: (input: { runId: string; detail: string | undefined }) => void
 }
 
 /** Wires the live-run terminal sequence for the daemon authority hooks. */
@@ -99,6 +104,8 @@ export function createAuthorityRunTerminalHandler(
     const binding = deps.liveRunMeta(runId)
     const appRunId = binding?.admitted && binding.scryRunId ? binding.scryRunId : undefined
     const baseEvidence = deps.evidenceFor(step)
+    // Before release: the caller resolves the session from what the run left in the projection.
+    if (step === 'failed') deps.onProviderFailure?.({ runId, detail })
     deps.releaseRun(runId, dispatchRunId)
     settleRunTerminal({
       findEvidence: () => deps.findRecorderEvidence?.(runId),
