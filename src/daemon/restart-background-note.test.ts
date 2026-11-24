@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import {
   findRestartBackgroundNotes,
+  prependRestartNoteToDetail,
   renderRestartNote,
   storeRestartBackgroundNotes,
   takeRestartBackgroundNote
@@ -71,6 +72,16 @@ describe('restart background note', () => {
     } finally {
       sink.close()
     }
+  })
+
+  it('prepends the note to the turn prompt inside the routing detail only', () => {
+    const detail = JSON.stringify({ providerId: 'codex', prompt: '继续修测试', cwd: '/w' })
+    const rewritten = prependRestartNoteToDetail(detail, '（宿主重启提示）任务已取消')
+    expect(JSON.parse(rewritten!).prompt).toBe('（宿主重启提示）任务已取消\n\n继续修测试')
+    // Everything else in the routing is preserved, so dispatch validation sees the same target.
+    expect(JSON.parse(rewritten!).cwd).toBe('/w')
+    expect(prependRestartNoteToDetail(detail, undefined)).toBe(detail)
+    expect(prependRestartNoteToDetail('not json', 'note')).toBe('not json')
   })
 
   it('says the results are unknown rather than claiming the tasks failed or finished', () => {

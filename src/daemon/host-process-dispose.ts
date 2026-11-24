@@ -3,6 +3,7 @@ import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
 import { createUsageLimitScheduler } from './usage-limit-scheduler'
+import { findRestartBackgroundNotes, storeRestartBackgroundNotes } from './restart-background-note'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
 /** Attaches the daemon’s authoritative event log and subscription hub. */
@@ -45,6 +46,13 @@ export async function attachHostProcessOrchestration<
   // A restart re-arms exactly the items that are still pending; a stored item that already resumed
   // is not resumed again.
   usageLimits.pump()
+  // C4: the background work the previous process was waiting on is gone; the next turn of that
+  // session is told so once.
+  try {
+    storeRestartBackgroundNotes(authority.sink.handle.db, findRestartBackgroundNotes(authority.sink.handle.db))
+  } catch (error) {
+    log(`[scry] restart background note failed: ${(error as Error).message}`)
+  }
   return authority
 }
 

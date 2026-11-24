@@ -82,3 +82,19 @@ export function takeRestartBackgroundNote(db: SqliteDb, sessionKey: string): str
   db.prepare('DELETE FROM orch_meta WHERE key = ?').run(NOTE_KEY(sessionKey))
   return row.value
 }
+
+/**
+ * Prepends the note to the prompt inside the routing detail. The stored body is untouched: the note is
+ * a one-off instruction for this turn, not part of what the user wrote.
+ *
+ * A detail that does not parse is returned unchanged — the dispatcher's own validation reports it.
+ */
+export function prependRestartNoteToDetail(detail: string | undefined, note: string | undefined): string | undefined {
+  if (!note || detail === undefined) return detail
+  let parsed: unknown
+  try { parsed = JSON.parse(detail) } catch { return detail }
+  if (!parsed || typeof parsed !== 'object') return detail
+  const routing = parsed as Record<string, unknown>
+  if (typeof routing.prompt !== 'string' || routing.prompt.length === 0) return detail
+  return JSON.stringify({ ...routing, prompt: `${note}\n\n${routing.prompt}` })
+}
