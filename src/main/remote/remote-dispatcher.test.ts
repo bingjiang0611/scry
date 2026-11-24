@@ -296,4 +296,19 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
     dispatcher.pump()
     expect(outbox.settled).toEqual(['claim:eff-stop', 'retry:eff-stop'])
   })
+
+  it('never scans the in-memory intent list once a durable outbox is wired', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor } = deferredExecutor()
+    const outbox = memoryOutbox([{ effectId: 'eff-1', runId: null }])
+    const runId = randomUUID()
+    outbox.rows[0]!.runId = runId
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    // B1: the dispatch path must not depend on an in-memory scan of recorded intents.
+    ;(ledger as unknown as { recordedIntents: () => unknown }).recordedIntents = () => {
+      throw new Error('dispatch must not read the in-memory intent list')
+    }
+    const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
+    expect(dispatcher.pump()).toEqual([runId])
+  })
 })
