@@ -28,7 +28,6 @@ type RuntimeEnv = Readonly<Record<string, string | undefined>>
 
 const MAX_AUTH_BYTES = 1024 * 1024
 const EXECUTABLE_CHUNK_BYTES = 1024 * 1024
-/** Enough for a Provider CLI plus its bundled re-launch path, never unbounded. */
 const MAX_CACHED_EXECUTABLES = 4
 
 interface FileStamp {

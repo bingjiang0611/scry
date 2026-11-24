@@ -267,7 +267,6 @@ export function createHostMetricsSources(options: HostMetricsSourceOptions): Hos
       const limits = { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: PROCESS_TABLE_MAX_BYTES, env: COMMAND_LOCALE }
       const runs = options.activeRuns()
       // 有运行在跑（或排队；排队数未知时按有算）时降优先级，采样不和它抢 CPU。
-      // 没有运行时直接调用 ps，省掉一次 nice 进程：实测单次采样省约 8 ms。
       if (runs.active === 0 && runs.queued === 0) return run('ps', PROCESS_TABLE_ARGS, limits)
       const output = await run('nice', ['-n', '10', 'ps', ...PROCESS_TABLE_ARGS], limits)
       // `nice` is present on both targets; a missing one must not lose the table.
