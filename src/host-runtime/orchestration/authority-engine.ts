@@ -20,7 +20,7 @@ import {
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import { findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
-import { parseLedgerIntentRouting, type ShadowCommitSample } from './shadow-routing'
+import { parseLedgerIntentRouting, type OrchestrationCommitSample } from './ledger-intent-routing'
 import {
   DEFAULT_PENDING_TTL_MS,
   INLINE_BODY_MAX_BYTES,
@@ -38,7 +38,7 @@ export interface AuthorityEngineOptions {
   pendingTtlMs?: number
   clock?: () => number
   resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
-  onCommitTiming?: (sample: ShadowCommitSample) => void
+  onCommitTiming?: (sample: OrchestrationCommitSample) => void
 }
 
 export type AuthoritySubmitResult =
@@ -60,7 +60,7 @@ export class AuthorityEngine {
   readonly #pendingTtlMs: number
   readonly #clock: () => number
   readonly #resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
-  readonly #onCommitTiming?: (sample: ShadowCommitSample) => void
+  readonly #onCommitTiming?: (sample: OrchestrationCommitSample) => void
   readonly #preparedRealCwdByRun = new Map<string, string>()
   readonly #preDispatchedRuns = new Set<string>()
 

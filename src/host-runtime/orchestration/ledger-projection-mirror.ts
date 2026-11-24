@@ -7,51 +7,51 @@ import {
   buildProgressMarkerCommand,
   parseLedgerIntentRouting,
   type ConversationTurnSettledInfo,
-  type ShadowCommitSample,
-  type ShadowMirrorStats
-} from './shadow-routing'
+  type LedgerProjectionStats,
+  type OrchestrationCommitSample
+} from './ledger-intent-routing'
 import { INLINE_BODY_MAX_BYTES } from './types'
 
 export {
   parseLedgerIntentRouting,
   type ConversationTurnSettledInfo,
-  type ParsedIntentRouting,
-  type ShadowCommitSample,
-  type ShadowMirrorStats
-} from './shadow-routing'
+  type LedgerProjectionStats,
+  type OrchestrationCommitSample,
+  type ParsedIntentRouting
+} from './ledger-intent-routing'
 
-export interface ShadowLedgerEventMeta {
+export interface LedgerEventMeta {
   peerCertSHA256?: string
   grantScope?: 'local' | 'remote'
   answeredByPeer?: string
 }
 
-export interface ShadowMirrorOptions extends EventSinkOptions {
+export interface LedgerProjectionMirrorOptions extends EventSinkOptions {
   leaseOwner?: string
   clock?: () => number
   /** Optional resolver returning the submitting peer cert SHA-256 and grant scope for a ledger run. */
   resolveRunMeta?: (ledgerRunId: string) => { peerCertSHA256?: string; grantScope?: 'local' | 'remote' } | undefined
   /** Optional fallback resolver returning authoritative H3 ordinal if a legacy routing detail omitted it. */
   resolveTurnOrdinal?: (sessionKey: string, runId: string) => number | undefined
-  onCommitTiming?: (sample: ShadowCommitSample) => void
+  onCommitTiming?: (sample: OrchestrationCommitSample) => void
   onError?: (error: unknown) => void
 }
 
 const PEER_SHA_RE = /^[0-9a-f]{64}$/
-const MAX_PENDING_SHADOW_BODIES = 16
+const MAX_PENDING_BODIES = 16
 
 /**
- * P4-1 fail-open shadow mirror (plan §9 P4-1).
- * Mirrors H1 `SessionLedger.#emit` and H3 `ConversationStore.settle` into `orchestration.db`
- * strictly through `EventSink.execute(...)` without altering any user-visible run behavior.
+ * Projects `SessionLedger` lifecycle events and `ConversationStore.settle` transitions
+ * into `orchestration.db` strictly through `EventSink.execute(...)` without altering
+ * any user-visible run behavior (used to rebuild and verify the dispatch ledger projection).
  */
-export class ShadowMirror {
+export class LedgerProjectionMirror {
   readonly sink: EventSink | null
   readonly #leaseOwner: string
   readonly #clock: () => number
-  readonly #resolveRunMeta?: ShadowMirrorOptions['resolveRunMeta']
+  readonly #resolveRunMeta?: LedgerProjectionMirrorOptions['resolveRunMeta']
   readonly #resolveTurnOrdinal: (sessionKey: string, runId: string) => number | undefined
-  readonly #onCommitTiming?: (sample: ShadowCommitSample) => void
+  readonly #onCommitTiming?: (sample: OrchestrationCommitSample) => void
   readonly #onError?: (error: unknown) => void
   readonly #ledgerToCanonical = new Map<string, string>()
   readonly #preFirstTokenCommits = new Map<string, number>()
@@ -69,7 +69,7 @@ export class ShadowMirror {
   #deferringLegacyWatermark = false
   #maxDeferredSeq = 0
 
-  private constructor(sink: EventSink | null, options: ShadowMirrorOptions) {
+  private constructor(sink: EventSink | null, options: LedgerProjectionMirrorOptions) {
     this.sink = sink
     this.#leaseOwner = options.leaseOwner ?? `daemon:${process.pid}`
     this.#clock = options.clock ?? (() => Date.now())
@@ -84,20 +84,20 @@ export class ShadowMirror {
     }
   }
 
-  static open(options: ShadowMirrorOptions): ShadowMirror {
+  static open(options: LedgerProjectionMirrorOptions): LedgerProjectionMirror {
     try {
       const sink = EventSink.open({
         ...options,
         maxActiveRuns: options.maxActiveRuns ?? 1024
       })
-      return new ShadowMirror(sink, options)
+      return new LedgerProjectionMirror(sink, options)
     } catch (error) {
       options.onError?.(error)
-      return new ShadowMirror(null, options)
+      return new LedgerProjectionMirror(null, options)
     }
   }
 
-  stats(): ShadowMirrorStats {
+  stats(): LedgerProjectionStats {
     return {
       acceptedCommits: this.#acceptedCommits,
       commits: this.#acceptedCommits,
@@ -121,7 +121,7 @@ export class ShadowMirror {
     }
   }
 
-  /** Marks shadow as failed-open (e.g. when startup import trips the sink fence). */
+  /** Marks the mirror as failed-open (e.g. when startup import trips the sink fence). */
   markFailedOpen(error: unknown): void {
     this.failOpen(error)
   }
@@ -224,8 +224,8 @@ export class ShadowMirror {
       return false
     }
 
-    // Only accepted commits enter commit counts and timing samples (B2).
-    // durationMs covers the entire shadow hook (parse, ordinal, hash, EventSink).
+    // Only accepted commits enter commit counts and timing samples.
+    // durationMs covers the entire projection hook (parse, ordinal, hash, EventSink).
     this.#acceptedCommits += 1
     if (meta.preFirstToken) {
       this.#preFirstTokenCommits.set(meta.runId, (this.#preFirstTokenCommits.get(meta.runId) ?? 0) + 1)
@@ -246,7 +246,7 @@ export class ShadowMirror {
     return true
   }
 
-  /** Flushes deferred >16 KiB shadow bodies to `BodyStore` off the pre-first-token hot path. */
+  /** Flushes deferred >16 KiB bodies to `BodyStore` off the pre-first-token hot path. */
   flushPendingBodies(runId?: string): void {
     if (!this.sink || this.#failedOpen || this.sink.isWriteIndeterminate()) {
       if (runId) this.#pendingBodies.delete(runId)
@@ -269,8 +269,8 @@ export class ShadowMirror {
     }
   }
 
-  /** H1 `#emit` shadow hook: mirrors ledger lifecycle transitions into `orchestration.db`. */
-  onLedgerEvent(event: LedgerEvent, meta?: ShadowLedgerEventMeta): void {
+  /** Projects ledger lifecycle transitions into `orchestration.db`. */
+  onLedgerEvent(event: LedgerEvent, meta?: LedgerEventMeta): void {
     if (!this.sink || this.#failedOpen) return
     const hookStarted = performance.now()
     try {
@@ -340,7 +340,7 @@ export class ShadowMirror {
         if (accepted && body && event.detail) {
           this.#pendingBodies.delete(routing.canonicalRunId)
           this.#pendingBodies.set(routing.canonicalRunId, { sha256: body.sha256, content: event.detail })
-          if (this.#pendingBodies.size > MAX_PENDING_SHADOW_BODIES) {
+          if (this.#pendingBodies.size > MAX_PENDING_BODIES) {
             const oldestKey = this.#pendingBodies.keys().next().value
             if (oldestKey && oldestKey !== routing.canonicalRunId) {
               setImmediate(() => this.flushPendingBodies(oldestKey))
@@ -423,7 +423,7 @@ export class ShadowMirror {
     event: LedgerEvent,
     runId: string,
     hookStarted: number,
-    meta?: ShadowLedgerEventMeta
+    meta?: LedgerEventMeta
   ): void {
     const built = buildProgressMarkerCommand(event, runId, meta)
     if (!built) return
@@ -439,9 +439,9 @@ export class ShadowMirror {
   }
 
   /**
-   * H3 `ConversationStore.settle` shadow hook (B1 + B3): compares H3's authoritative ordinal
-   * against the shadow turn's ordinal (counting any mismatch as a deviation without fencing),
-   * and commits `turn.record_delivery` through `EventSink.execute(...)`.
+   * Projects `ConversationStore.settle` into `orchestration.db`: compares the authoritative
+   * ordinal against the projected turn's ordinal (counting any mismatch as a deviation
+   * without fencing), and commits `turn.record_delivery` through `EventSink.execute(...)`.
    */
   onConversationTurnSettled(info: ConversationTurnSettledInfo): void {
     if (!this.sink || this.#failedOpen) return

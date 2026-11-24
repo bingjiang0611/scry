@@ -32,7 +32,7 @@ import {
   parsePendingTtlMs
 } from '../host-runtime/orchestration/mode'
 import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
-import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
+import { parseLedgerIntentRouting } from '../host-runtime/orchestration/ledger-intent-routing'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
 const MAX_LEDGER_CANONICAL_MAP = 4_096

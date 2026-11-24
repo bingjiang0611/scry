@@ -9,20 +9,20 @@ import { PerformanceTrace, performanceRecordingEnabled } from '../performance-ti
 // The operation label comes from a fixed allowlist. A request body is untrusted
 // before dispatch validates it, so an unknown or malformed `op` collapses to
 // `other` instead of becoming a free-text telemetry channel.
-const measuredOperations = new Set([
+export const MEASURED_REMOTE_OPERATIONS: ReadonlySet<string> = new Set([
   'answerQuestion', 'attachmentChunk', 'attachmentCommit', 'attachmentStart',
   'catalogSnapshot', 'commands', 'desktop', 'desktopDirectory', 'desktopWorkbench',
   'directories', 'directoriesPage', 'executionTargets', 'fileDownload', 'history',
-  'historyPage', 'historyPreview', 'historyTurnsPage', 'historyVersion', 'intentStatus', 'intentStatusAtLog',
-  'liveRuns', 'output', 'poll', 'projects', 'providers', 'questions', 'resolveIntent',
-  'runState', 'sessionAction', 'sessionDelete', 'sessionFork', 'sessions', 'sessionsPage',
-  'stop', 'submit', 'submitAtLog', 'subscribe', 'target', 'toolPanel', 'watch', 'watchStream', 'workspace'
+  'historyPage', 'historyPreview', 'historyTurnsPage', 'historyVersion', 'intentStatusAtLog',
+  'output', 'projects', 'providers', 'resolveIntent',
+  'sessionAction', 'sessionDelete', 'sessionFork', 'sessions', 'sessionsPage',
+  'stop', 'submit', 'submitAtLog', 'subscribe', 'target', 'toolPanel', 'workspace'
 ])
 
 export function remoteOperationLabel(request: unknown): string {
   if (!request || typeof request !== 'object' || Array.isArray(request)) return 'other'
   const op = (request as { op?: unknown }).op
-  return typeof op === 'string' && measuredOperations.has(op) ? op : 'other'
+  return typeof op === 'string' && MEASURED_REMOTE_OPERATIONS.has(op) ? op : 'other'
 }
 
 /** Counters for one measured remote request; keys stay inside the label allowlist. */

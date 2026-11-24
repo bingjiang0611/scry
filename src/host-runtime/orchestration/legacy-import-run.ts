@@ -4,7 +4,7 @@ import type { TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
 import type { LegacyRunState } from './legacy-ledger-reader'
 import { deletedNativeSessionKey, findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
-import { parseLedgerIntentRouting, type ParsedIntentRouting } from './shadow-routing'
+import { parseLedgerIntentRouting, type ParsedIntentRouting } from './ledger-intent-routing'
 
 /** Resolve a legacy run against the current catalog and honor deletions within its import transaction. */
 function legacyImportSessionKey(sink: EventSink, routing: ParsedIntentRouting): string | null | undefined {

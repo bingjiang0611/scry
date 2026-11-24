@@ -7,7 +7,7 @@ import { HostController, type HostControllerDependencies, type RemoteIntentRouti
 import type { IssuedPairingCertificate, PairingDependencies, PairingPersistence, PairingState } from './pairing'
 import type { LedgerEvent, LedgerStore } from './session-ledger'
 import type { WorkspaceAuthorizer } from './remote-run-policy'
-import { ShadowMirror } from '../../host-runtime/orchestration/shadow-mirror'
+import { LedgerProjectionMirror } from '../../host-runtime/orchestration/ledger-projection-mirror'
 
 export const KEY = 'a'.repeat(64)
 export const CSR = 'b'.repeat(64)
@@ -47,7 +47,7 @@ export function pairingDeps(): PairingDependencies {
 
 export type RunProvider = (input: { runId: string; routing: RemoteIntentRouting; progress(detail?: string): void }) => Promise<void>
 
-const projections: Array<{ mirror: ShadowMirror; directory: string }> = []
+const projections: Array<{ mirror: LedgerProjectionMirror; directory: string }> = []
 afterEach(() => {
   for (const { mirror, directory } of projections.splice(0)) {
     try { mirror.close() } finally { rmSync(directory, { recursive: true, force: true }) }
@@ -57,7 +57,7 @@ afterEach(() => {
 /** Project component fixtures' transient dispatch events to real SQLite without exposing old readers. */
 export function createHostProjectionFixture() {
   const directory = mkdtempSync(join(tmpdir(), 'scry-host-projection-'))
-  const mirror = ShadowMirror.open({ userDataDir: directory, fullfsync: false })
+  const mirror = LedgerProjectionMirror.open({ userDataDir: directory, fullfsync: false })
   projections.push({ mirror, directory })
   const projection = mirror.sink
   if (!projection) throw new Error('test_projection_unavailable')

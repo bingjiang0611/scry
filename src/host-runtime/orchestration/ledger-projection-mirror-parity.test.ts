@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { ConversationStore } from '../../main/conversation-store'
 import { SessionLedger, type LedgerEvent, type LedgerStore } from '../../main/remote/session-ledger'
 import type { Conversation } from '../../shared/conversation'
-import { ShadowMirror } from './shadow-mirror'
+import { LedgerProjectionMirror } from './ledger-projection-mirror'
 
 function withTempDir(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'scry-shadow-parity-test-'))
@@ -27,10 +27,10 @@ function memoryLedgerStore(): LedgerStore {
   }
 }
 
-describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verification', () => {
+describe('P4-1 LedgerProjectionMirror B1/B2/B3 parity, ordinal fallback, and settle verification', () => {
   it('B1: mirrors multi-turn conversations and resumed native sessions without ordinal PK collision', () => {
     withTempDir((userData) => {
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),
@@ -88,7 +88,7 @@ describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verifi
   it('B2: classifies rejected/duplicate decisions, excludes rejections from timing samples, and trips failedOpen on fence', () => {
     withTempDir((userData) => {
       const timingSamples: Array<{ commitKind: string; durationMs: number }> = []
-      const mirror = ShadowMirror.open({
+      const mirror = LedgerProjectionMirror.open({
         userDataDir: userData,
         onCommitTiming: (sample) => timingSamples.push({ commitKind: sample.commitKind, durationMs: sample.durationMs })
       })
@@ -117,7 +117,7 @@ describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verifi
   it('B3: routes H3 onConversationTurnSettled through EventSink and preserves replay consistency', () => {
     withTempDir((userData) => {
       const fixedAt = 1_700_000_123_456
-      const mirror = ShadowMirror.open({
+      const mirror = LedgerProjectionMirror.open({
         userDataDir: userData,
         clock: () => fixedAt
       })
@@ -184,7 +184,7 @@ describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verifi
   it('B1 settle check: counts deviation when H3 settle ordinal disagrees with shadow turn ordinal without fencing', () => {
     withTempDir((userData) => {
       const fixedAt = 1_700_000_200_000
-      const mirror = ShadowMirror.open({ userDataDir: userData, clock: () => fixedAt })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData, clock: () => fixedAt })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),
@@ -270,7 +270,7 @@ describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verifi
       })
       expect(begun.turn.ordinal).toBe(3)
 
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),
@@ -304,7 +304,7 @@ describe('P4-1 ShadowMirror B1/B2/B3 parity, ordinal fallback, and settle verifi
 
   it('R3: records answered_by as unavailable (never system) when answering peer is unknown, and skips orphan body writes on rejected submit', () => {
     withTempDir((userData) => {
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         const ledger = new SessionLedger({
           store: memoryLedgerStore(),

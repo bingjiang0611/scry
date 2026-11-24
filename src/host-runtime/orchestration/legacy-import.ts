@@ -9,7 +9,7 @@ import {
   type LegacyRunState
 } from './legacy-ledger-reader'
 import { importSingleRun } from './legacy-import-run'
-import { parseLedgerIntentRouting } from './shadow-routing'
+import { parseLedgerIntentRouting } from './ledger-intent-routing'
 import { DEFAULT_PENDING_TTL_MS } from './types'
 import { WalCheckpointWorker } from './wal-checkpoint-worker'
 

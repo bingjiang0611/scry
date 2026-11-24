@@ -9,7 +9,7 @@ import { scopedIntentId } from '../../main/remote/remote-gateway'
 import { AuthorityEngine } from './authority-engine'
 import { EventSink } from './event-sink'
 import { importLegacyStateIncrementally, startDeferredLegacyImport } from './legacy-import'
-import { ShadowMirror } from './shadow-mirror'
+import { LedgerProjectionMirror } from './ledger-projection-mirror'
 
 function withTempDir(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'scry-legacy-import-test-'))
@@ -417,7 +417,7 @@ describe('P4-1 off <-> shadow/on incremental import (plan §9 rule 1)', () => {
       }
       writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`)
 
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         mirror.setDeferringLegacyWatermark(true)
 

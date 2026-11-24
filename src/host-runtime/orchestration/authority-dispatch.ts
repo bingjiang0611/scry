@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import { evaluatePreDispatchRecheck, type OrchestrationCommand } from './orchestrator-commands'
-import { parseLedgerIntentRouting } from './shadow-routing'
+import { parseLedgerIntentRouting } from './ledger-intent-routing'
 import { INLINE_BODY_MAX_BYTES, type OutboxState, type PreparedBody } from './types'
 
 export function h1DetailDigest(detail: string | undefined): string {

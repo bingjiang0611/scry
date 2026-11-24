@@ -11,7 +11,7 @@ import {
   repairMissingShadowBodies,
   startDeferredLegacyImport
 } from './legacy-import'
-import { ShadowMirror } from './shadow-mirror'
+import { LedgerProjectionMirror } from './ledger-projection-mirror'
 
 function withTempDir(run: (dir: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'scry-legacy-edge-test-'))
@@ -42,7 +42,7 @@ describe('P4-1 S2 missing-body startup repair and ordinal-miss safety', () => {
       // Simulate shadow committing intent_recorded (deferred body in memory) and then process crashing
       // WITHOUT calling flushPendingBodies() / close() (we close underlying sink directly to simulate SIGKILL)
       let expectedSha = ''
-      const mirror1 = ShadowMirror.open({ userDataDir: userData })
+      const mirror1 = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         mirror1.onLedgerEvent({ seq: 1, at: t0, runId: ledgerRunId, kind: 'intent_recorded', intentId, detail })
         const run = mirror1.sink!.getRun(ledgerRunId)
@@ -70,7 +70,7 @@ describe('P4-1 S2 missing-body startup repair and ordinal-miss safety', () => {
       // Restart 2: Delete both external body file and H1 ledger -> unrecoverable ref must be counted as deviation
       rmSync(join(userData, 'orchestration', 'bodies'), { recursive: true, force: true })
       rmSync(ledgerDir, { recursive: true, force: true })
-      const mirror3 = ShadowMirror.open({ userDataDir: userData })
+      const mirror3 = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         const plan = loadLegacyLedgerPlan(mirror3.sink!, userData)
         const result = repairMissingShadowBodies(mirror3.sink!, plan)
@@ -192,7 +192,7 @@ describe('P4-1 S2 missing-body startup repair and ordinal-miss safety', () => {
       }
       writeFileSync(join(ledgerDir, 'session-ledger.log'), `${lines.join('\n')}\n`)
 
-      const mirror = ShadowMirror.open({ userDataDir: userData })
+      const mirror = LedgerProjectionMirror.open({ userDataDir: userData })
       try {
         mirror.setDeferringLegacyWatermark(true)
 
