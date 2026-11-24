@@ -27,10 +27,12 @@ import {
   readNextTurnOrdinalRaw,
   readReceiptRaw,
   readRunRaw,
+  readSessionByConversation,
   readSessionRaw,
   readTurnByRunIdRaw,
   readTurnRaw
 } from './event-sink-queries'
+import { WalCheckpointController } from './wal-checkpoint-controller'
 import { prepareEventSinkStatements, type EventSinkStatements } from './event-sink-statements'
 import { createOrchestratorReadView } from './read-view'
 import { buildRollbackRejection, isFatalOrchestrationStoreError } from './store-fault'
@@ -79,11 +81,7 @@ export class EventSink {
   #writeIndeterminate = false
   #walModeEnforced = false
   #inBatchTransaction = false
-  #checkpointIntervalMs: number
-  #checkpointTimer: ReturnType<typeof setTimeout> | null = null
-  #checkpointCount = 0
-  #workerCheckpointActive = false
-  #onCheckpoint?: (sample: WalCheckpointSample) => void
+  #wal: WalCheckpointController
   #onCommit?: (seq: number) => void
   #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
@@ -94,14 +92,17 @@ export class EventSink {
     this.#authorizedActors = new Set(['system', ...(options.authorizedActors ?? [])])
     this.#maxActiveRuns = options.maxActiveRuns ?? 8
     this.#isProviderAuthenticating = options.isProviderAuthenticating ?? (() => false)
-    this.#checkpointIntervalMs = options.checkpointIntervalMs ?? 500
+    this.#wal = new WalCheckpointController(
+      { handle, isFenced: () => this.#writeIndeterminate },
+      options.checkpointIntervalMs ?? 500
+    )
     this.#beforeCommitHook = options.beforeCommitHook
     this.#stmts = prepareEventSinkStatements(handle.db)
     this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
   }
 
   setCheckpointObserver(observer: ((sample: WalCheckpointSample) => void) | undefined): void {
-    this.#onCheckpoint = observer
+    this.#wal.setObserver(observer)
   }
 
   setCommitObserver(observer: ((seq: number) => void) | undefined): void {
@@ -121,65 +122,19 @@ export class EventSink {
     }
   }
 
-  checkpointCount(): number { return this.#checkpointCount }
+  checkpointCount(): number { return this.#wal.count() }
 
   walFileBytes(): number { return this.handle.db.open ? this.handle.walFileBytes() : 0 }
 
-  setLockingMode(mode: 'normal' | 'exclusive'): void {
-    this.#workerCheckpointActive = mode === 'normal'
-    if (mode === 'normal' && this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
-    this.handle.setLockingMode(mode)
-  }
+  setLockingMode(mode: 'normal' | 'exclusive'): void { this.#wal.setLockingMode(mode) }
 
-  recordExternalCheckpoint(sample: WalCheckpointSample): void {
-    this.#checkpointCount += 1
-    this.#onCheckpoint?.(sample)
-  }
+  recordExternalCheckpoint(sample: WalCheckpointSample): void { this.#wal.recordExternal(sample) }
 
-  private scheduleIdleCheckpoint(): void {
-    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#workerCheckpointActive || this.#checkpointTimer) return
-    const timer = setTimeout(() => {
-      this.#checkpointTimer = null
-      this.checkpointPassive()
-    }, this.#checkpointIntervalMs)
-    timer.unref?.()
-    this.#checkpointTimer = timer
-  }
+  private scheduleIdleCheckpoint(): void { this.#wal.scheduleIdle() }
 
-  checkpointPassive(): WalCheckpointResult { return this.runCheckpoint('passive') }
-  checkpointTruncate(): WalCheckpointResult { return this.runCheckpoint('truncate') }
+  checkpointPassive(): WalCheckpointResult { return this.#wal.passive() }
 
-  private runCheckpoint(mode: 'passive' | 'truncate'): WalCheckpointResult {
-    if (this.#writeIndeterminate || !this.handle.db.open) {
-      return { busy: 0, log: 0, checkpointed: 0 }
-    }
-    if (this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
-    const walBytesBefore = this.handle.walFileBytes()
-    const started = performance.now()
-    try {
-      const result = mode === 'truncate' ? this.handle.checkpointTruncate() : this.handle.checkpointPassive()
-      const durationMs = Number((performance.now() - started).toFixed(2))
-      this.#checkpointCount += 1
-      this.#onCheckpoint?.({
-        mode,
-        durationMs,
-        walBytesBefore,
-        walBytesAfter: this.handle.walFileBytes(),
-        result,
-        executor: 'main',
-        threadId: 0
-      })
-      return result
-    } catch {
-      return { busy: 1, log: 0, checkpointed: 0 }
-    }
-  }
+  checkpointTruncate(): WalCheckpointResult { return this.#wal.truncate() }
 
   getSessionDeleteEpoch(sessionKey: string): number {
     return this.#sessionDeleteEpoch.get(sessionKey) ?? 0
@@ -557,6 +512,11 @@ export class EventSink {
     return readSessionRaw(this.#stmts, sessionKey)
   }
 
+  getSessionByConversation(conversationId: string): SessionProjectionRow | undefined {
+    this.assertDeterminate()
+    return readSessionByConversation(this.#stmts, conversationId)
+  }
+
   getTurn(sessionKey: string, ordinal: number): TurnProjectionRow | undefined {
     this.assertDeterminate()
     return readTurnRaw(this.handle.db, sessionKey, ordinal)
@@ -588,10 +548,7 @@ export class EventSink {
   }
 
   close(): void {
-    if (this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
+    this.#wal.dispose()
     this.handle.close({ skipCheckpoint: this.#writeIndeterminate })
   }
 }

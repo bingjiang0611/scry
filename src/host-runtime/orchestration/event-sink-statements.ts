@@ -10,6 +10,7 @@ export interface EventSinkStatements {
   readReceipt: Database.Statement
   readRun: Database.Statement
   readSession: Database.Statement
+  readSessionByConversation: Database.Statement
   readTurnByRunId: Database.Statement
   readTurnByOrdinal: Database.Statement
   nextOrdinal: Database.Statement
@@ -55,6 +56,10 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
     readReceipt: db.prepare('SELECT * FROM orch_command WHERE command_id = ? AND actor = ?'),
     readRun: db.prepare('SELECT * FROM orch_p_run WHERE run_id = ?'),
     readSession: db.prepare('SELECT * FROM orch_p_session WHERE session_key = ?'),
+    // D3: a side chat names its parent conversation, and the parent's session is the lineage edge.
+    readSessionByConversation: db.prepare(
+      'SELECT * FROM orch_p_session WHERE conversation_id = ? ORDER BY ts DESC, rev_seq DESC LIMIT 1'
+    ),
     readTurnByRunId: db.prepare('SELECT * FROM orch_p_turn WHERE run_id = ?'),
     readTurnByOrdinal: db.prepare('SELECT * FROM orch_p_turn WHERE session_key = ? AND ordinal = ?'),
     nextOrdinal: db.prepare(

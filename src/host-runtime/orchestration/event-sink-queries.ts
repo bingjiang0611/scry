@@ -26,6 +26,12 @@ export function readSessionRaw(stmts: EventSinkStatements, sessionKey: string): 
   return row ? mapSessionRow(row) : undefined
 }
 
+/** The newest session of a conversation; a conversation may open more than one native session. */
+export function readSessionByConversation(stmts: EventSinkStatements, conversationId: string): SessionProjectionRow | undefined {
+  const row = stmts.readSessionByConversation.get(conversationId) as Record<string, unknown> | undefined
+  return row ? mapSessionRow(row) : undefined
+}
+
 export function readTurnRaw(db: Database.Database, sessionKey: string, ordinal: number): TurnProjectionRow | undefined {
   const row = db
     .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? AND ordinal = ?')
