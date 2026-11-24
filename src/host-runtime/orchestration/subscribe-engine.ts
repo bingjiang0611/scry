@@ -341,7 +341,10 @@ export class SubscribeEngine {
       settledAt: run.settledAt,
       recoveredAt: run.recoveredAt,
       outcome: access.scope === 'remote' ? deviceOutcome(run.outcome) : run.outcome,
-      revSeq: run.revSeq
+      revSeq: run.revSeq,
+      // D1: the queue lives on the host, so every client reads the same positions and holds.
+      ...(run.queuePosition === null || run.queuePosition === undefined ? {} : { queuePosition: run.queuePosition }),
+      ...(run.queueHeld ? { queueHeld: true } : {})
     }
   }
 

@@ -119,6 +119,10 @@ export interface SubscribeActiveRunRow {
   recoveredAt: number | null
   outcome: unknown | null
   revSeq: number
+  /** D1: 1-based slot while this run waits in its session's queue on the host. */
+  queuePosition?: number | null
+  /** D1: the queue entry is held (a stop or an explicit hold) and will not dispatch on its own. */
+  queueHeld?: boolean
 }
 
 export interface SubscribeEventItem {

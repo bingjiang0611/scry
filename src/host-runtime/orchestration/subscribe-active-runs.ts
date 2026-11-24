@@ -17,14 +17,14 @@ export function readSubscribedRuns(sink: EventSink, now: number, tracked?: strin
   const live = db
     .prepare(
       `SELECT * FROM orch_p_run
-       WHERE lifecycle IN ('recorded', 'admitted', 'dispatched')
+       WHERE lifecycle IN ('recorded', 'admitted', 'dispatched', 'queued')
        ORDER BY intent_seq DESC`
     )
     .all() as Array<Record<string, unknown>>
   const recentTerminal = db
     .prepare(
       `SELECT * FROM orch_p_run
-       WHERE lifecycle NOT IN ('recorded', 'admitted', 'dispatched')
+       WHERE lifecycle NOT IN ('recorded', 'admitted', 'dispatched', 'queued')
          AND COALESCE(settled_at, recovered_at, 0) >= ?
        ORDER BY intent_seq DESC
        LIMIT ?`
