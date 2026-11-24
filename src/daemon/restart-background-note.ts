@@ -98,3 +98,11 @@ export function prependRestartNoteToDetail(detail: string | undefined, note: str
   if (typeof routing.prompt !== 'string' || routing.prompt.length === 0) return detail
   return JSON.stringify({ ...routing, prompt: `${note}\n\n${routing.prompt}` })
 }
+
+/** The daemon's port: resolve the run's session, then take its one-turn note. */
+export function takeRestartNoteForRun(db: SqliteDb, runId: string): string | undefined {
+  const row = db.prepare('SELECT session_key AS sessionKey FROM orch_p_run WHERE run_id = ?').get(runId) as
+    | { sessionKey?: string | null }
+    | undefined
+  return row?.sessionKey ? takeRestartBackgroundNote(db, row.sessionKey) : undefined
+}

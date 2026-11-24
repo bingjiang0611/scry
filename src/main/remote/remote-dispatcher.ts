@@ -92,6 +92,11 @@ export interface RemoteDispatcherDependencies {
     | { ok: false; action: 'requeue'; reason: string; retryAfterMs?: number }
   /** P4-2 authoritative terminal settlement hook after executor finishes. */
   onSettled?(runId: string, lifecycle: TerminalRunLifecycle, detail?: string): void
+  /**
+   * C4: a turn that continues a session after a daemon restart is told which background work the
+   * previous process cancelled. The hook returns the detail to execute, or the original one.
+   */
+  rewriteDetail?(runId: string, detail: string | undefined): string | undefined
 }
 
 export class RemoteDispatcher {
@@ -103,6 +108,7 @@ export class RemoteDispatcher {
   #leaseOwner = `dispatcher:${process.pid}`
   #beforeDispatch?: RemoteDispatcherDependencies['beforeDispatch']
   #onSettled?: RemoteDispatcherDependencies['onSettled']
+  #rewriteDetail?: RemoteDispatcherDependencies['rewriteDetail']
   #inflight = new Set<string>()
   #retryTimer: ReturnType<typeof setTimeout> | null = null
   #disposed = false
@@ -115,6 +121,7 @@ export class RemoteDispatcher {
     this.#effectExecutor = deps.effectExecutor
     this.#beforeDispatch = deps.beforeDispatch
     this.#onSettled = deps.onSettled
+    this.#rewriteDetail = deps.rewriteDetail
   }
 
   dispose(): void {
@@ -298,8 +305,14 @@ export class RemoteDispatcher {
     // returns; a synchronous throw is mapped to failure like a rejection.
     let pending: Promise<RemoteExecutionOutcome>
     recordRunStage(runId, 'dispatch')
+    // The note is consumed once, before execution, so a retry of the same turn still carries it and a
+    // later turn does not.
+    let effectiveDetail = detail
+    if (this.#rewriteDetail) {
+      try { effectiveDetail = this.#rewriteDetail(runId, detail) } catch { /* a note never blocks dispatch */ }
+    }
     try {
-      pending = this.#executor.execute({ runId, detail, progress, output })
+      pending = this.#executor.execute({ runId, detail: effectiveDetail, progress, output })
     } catch (error) {
       void flushOutput().finally(() => {
         this.#settle(runId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096))

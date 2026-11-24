@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import { maybeStartOrchestrationMaintenance } from './orchestration-maintenance'
 import { createOutboxGate } from './orchestration-outbox-gate'
@@ -31,6 +30,8 @@ import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
 import { createAuthorityRunTerminalHandler } from './orchestration-run-terminal'
 import { createQuotaFailureHook } from './usage-limit-capture'
+import { takeRestartNoteForRun } from './restart-background-note'
+import { createLedgerIdForSubmit } from './orchestration-canonical-run-ids'
 import type { UsageLimitScheduler } from './usage-limit-scheduler'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
@@ -47,7 +48,6 @@ import { sessionQueueBlocksDispatch } from './orchestration-dispatch-queue'
 import { createCanonicalRunIds } from './orchestration-canonical-run-ids'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
-const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
   readonly fullfsync: boolean
@@ -83,10 +83,8 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   deferredImportThreshold?: number
   pauseDeferredImport?: Promise<void>
   attentionSnapshot?: () => SessionAttentionSnapshot
-  /** Retention timer; `null` disables it. */
-  maintenanceIntervalMs?: number | null
-  /** C4: when set, a failed run reported as a quota becomes a stored pending resume. */
-  usageLimits?: UsageLimitScheduler
+  /** Retention timer; `null` disables it. */ maintenanceIntervalMs?: number | null
+  /** C4: quotas and restart notes are recorded only when set. */ usageLimits?: UsageLimitScheduler
 }
 
 /**
@@ -101,7 +99,7 @@ export async function attachDaemonOrchestrationAuthority<
   options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
 ): Promise<DaemonOrchestrationAuthority> {
 
-  // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
+  // Maintainer decision (2026-11-20): macOS defaults both fullfsync flags ON.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
   const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
@@ -174,8 +172,9 @@ function buildAuthorityRuntime<
   const { options, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
   let deferredPlan = ctx.deferredPlan
   const { importComplete, resolveImportComplete } = ctx
-  // A3: live-run terminal outcomes read the same committed recorder evidence as startup recovery.
+  // A3: live-run outcomes read the same committed recorder evidence as startup recovery.
   const findRecorderEvidence = createRecorderEvidenceFinder(options.userDataDir, sink)
+  const db = sink.handle.db
 
   const engine = new AuthorityEngine({
     sink,
@@ -200,19 +199,7 @@ function buildAuthorityRuntime<
 
   const canonicalIds = createCanonicalRunIds(sink, ledgerToCanonical)
   const { resolveCanonical, resolvePersistedCanonical, trackCanonical } = canonicalIds
-  const aliasForCanonical = sink.handle.db.prepare(
-    'SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?'
-  )
-  const ledgerIdForSubmit = (runId: string, duplicate: boolean): string => {
-    if (duplicate) {
-      const alias = aliasForCanonical.get(runId) as { ledger_run_id: string } | undefined
-      return alias?.ledger_run_id ?? runId
-    }
-    if (UUID_V4_RE.test(runId)) return runId
-    const ledgerRunId = randomUUID()
-    trackCanonical(ledgerRunId, runId)
-    return ledgerRunId
-  }
+    const ledgerIdForSubmit = createLedgerIdForSubmit(db, trackCanonical)
 
   const readSubmitReceipt = (peer: string, commandId: string) => {
     if (sink.isWriteIndeterminate()) throw new Error('orchestration_write_indeterminate')
@@ -221,8 +208,9 @@ function buildAuthorityRuntime<
   }
 
   const hooks: OrchestrationAuthorityHooks = {
-    outbox: () => createOutboxGate(() => sink.handle.db),
+    outbox: () => createOutboxGate(() => db),
     recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
+    takeRestartBackgroundNote: (runId) => takeRestartNoteForRun(db, runId),
     recordSessionMetadata: (input) => recordSessionMetadata(sink, input, Date.now()),
     currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: () => createAuthorityLedgerStore(sink),
@@ -381,9 +369,7 @@ function buildAuthorityRuntime<
 
     onRunTerminal: createAuthorityRunTerminalHandler({
       engine,
-      ...(options.usageLimits
-        ? { onProviderFailure: createQuotaFailureHook(() => sink, () => options.usageLimits) }
-        : {}),
+      onProviderFailure: createQuotaFailureHook(() => sink, () => options.usageLimits),
       liveRunMeta: (runId) => subscribeHub.liveRunMeta(runId),
       resolveCanonical,
       findRecorderEvidence,

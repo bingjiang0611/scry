@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { prependRestartNoteToDetail } from '../../daemon/restart-background-note'
 import { RemoteGateway } from './remote-gateway'
 import type { RemoteCommandSource, RemoteHistoryPreviewSource, RemoteHistorySource, RemoteHistoryTurnsPageSource, RemoteHistoryVersionSource } from './remote-gateway'
 import { RemoteDispatcher } from './remote-dispatcher'
@@ -203,6 +204,9 @@ export function createExecution(input: ExecutionDeps): {
         }
         return check
       },
+      // C4: the one turn that continues a session after a restart is told what the previous process
+      // cancelled. Reading the note removes it, so later turns do not repeat it.
+      rewriteDetail: (runId, detail) => prependRestartNoteToDetail(detail, deps.orchestration?.takeRestartBackgroundNote?.(runId)),
       onSettled: (runId, lifecycle, detail) => {
         deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
       },

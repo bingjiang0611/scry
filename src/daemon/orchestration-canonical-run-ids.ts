@@ -1,4 +1,8 @@
+import { randomUUID } from 'node:crypto'
+import type Database from 'better-sqlite3'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
+
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const MAX_LEDGER_CANONICAL_MAP = 4_096
 
@@ -36,4 +40,25 @@ export function createCanonicalRunIds(sink: EventSink, ledgerToCanonical: Map<st
   }
 
   return { resolveCanonical, resolvePersistedCanonical, trackCanonical }
+}
+
+/**
+ * A submit's run id may be a caller-chosen id. The ledger needs a v4 id, and a duplicate submit must
+ * resolve to the ledger row it already created — read from the alias table, never guessed.
+ */
+export function createLedgerIdForSubmit(
+  db: Database.Database,
+  trackCanonical: (ledgerRunId: string, runId: string) => void
+): (runId: string, duplicate: boolean) => string {
+  const alias = db.prepare('SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?')
+  return (runId, duplicate) => {
+    if (duplicate) {
+      const row = alias.get(runId) as { ledger_run_id: string } | undefined
+      return row?.ledger_run_id ?? runId
+    }
+    if (UUID_V4_RE.test(runId)) return runId
+    const ledgerRunId = randomUUID()
+    trackCanonical(ledgerRunId, runId)
+    return ledgerRunId
+  }
 }

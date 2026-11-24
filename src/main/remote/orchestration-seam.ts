@@ -49,6 +49,11 @@ export interface OrchestrationAuthorityHooks {
    */
   recordSessionLineage?(input: SessionLineageRecord): { status: 'recorded' | 'unavailable'; reason?: string }
   /**
+   * C4: the note a restart owes this session's next turn. Reading it removes it, so one turn gets
+   * told and later turns do not.
+   */
+  takeRestartBackgroundNote?(runId: string): string | undefined
+  /**
    * D4: rename, pin and archive are decided by the authority so the projection and every device
    * see the change, and the event names the caller that asked for it.
    */
