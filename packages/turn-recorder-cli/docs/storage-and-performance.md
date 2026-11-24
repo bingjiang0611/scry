@@ -108,6 +108,14 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 同一个会话连续 3 次失败后进入 suspended：不再每轮重试，改为每小时重探一次。转入时 `recorder.log` 留一行 `WARN session suspended after N failed passes`，`health.json` 的 `suspendedSessions` 和 `scry status` 都会报出来。暂停只影响重试，不删标记、不改 `open.json`、不丢弃证据。
 - 一次成功收尾会清掉该会话的失败记录，瞬时故障不会累积成 suspended。记录写在 `.scry/session-failures.json`（和 `health.json` 同级），是报告，不是事实源；删掉它只会让下一轮重新计数。
 
+### 0.2.86：记录摘要缓存（派生，可重建）
+
+- 身份路径（给新会话分配 `generation`/`turnIndex`、判断某个 `providerTurnId` 是否已提交）只需要每份记录的五个字段：`provider`、`sessionId`、`generation`、`turnIndex`、`providerTurnId`。以前为这五个字段要解析整份记录，现在读 `.scry/records-summary.json`。
+- 缓存按记录文件名（序号 + recordId）对齐：文件名列表与缓存不一致、文件缺失、JSON 损坏、字段不合规，一律丢弃重建成一次全量解析。全量解析遇到读不出来的记录仍按原样报错，不静默跳过。
+- 写入方在 `commitRecord` 里追加一行；写缓存失败只丢缓存，不影响提交结果。缺缓存时的冷重建由第一个读者完成（守护进程启动时就会预热），之后不再全量解析。
+- 记录仍是唯一事实源。原地改写已有记录不会被文件名对齐发现，所以未来任何改写记录字段的路径必须删掉该缓存；目前没有这样的路径：提交只追加、归档只把文件移出、`content-repair` 不改记录。
+- 实测（3,000 条 × ~88 KB）：`listRecords()` 1,011 ms / 峰值 352 MiB；冷重建 925 ms / 79 MiB；热读 9 ms / 55 MiB。`npm run bench:record-summary` 复现，每个模式独立进程计峰值。
+
 不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
 存量 workspace 升级 CLI 后需要重新生成 hook 脚本才能拿到快路径:`scry integrations repair --yes`(不做也不会错,只是慢)。
 

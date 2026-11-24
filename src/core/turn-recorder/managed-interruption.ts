@@ -1,5 +1,5 @@
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
-import { listRecords, stableHash } from './store.js'
+import { listRecordSummaries, stableHash } from './store.js'
 import { recorderStatePath, type RecorderOpenTurnState, type RecorderSessionState } from './runtime-state.js'
 import type { PrepareManagedTurnInput } from './managed.js'
 import { join } from 'node:path'
@@ -34,8 +34,8 @@ export async function reserveObservedInterruption(
   // The session lock is held by prepare. Rebuild the high-water marks too: a lost
   // cache must never reuse a committed or crash-reserved generation.
   const state = await readJson<RecorderSessionState>(recorderStatePath(root))
-  const records = (await listRecords(dataRoot)).filter((record) =>
-    record.provider.id === input.provider && record.sessionId === input.sessionId)
+  const records = (await listRecordSummaries(dataRoot)).filter((record) =>
+    record.provider === input.provider && record.sessionId === input.sessionId)
   const reserved = (await listFiles(join(root, 'turns')))
     .filter((name) => /^\d+$/.test(name)).map(Number)
   const generation = Math.max(state?.lastGeneration ?? 0, ...records.map((record) => record.generation), ...reserved) + 1
