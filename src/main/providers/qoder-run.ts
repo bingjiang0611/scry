@@ -357,7 +357,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           isTranscriptUserPrompt(message) && !forkBaseline.has(message.uuid)
         )
         if (candidates.length === 1) forkTurnId = candidates[0].uuid
-        // One transcript read serves the optional fork identity and the input receipt.
         // Acceptance follows the native evidence; the failed/interrupted outcome is
         // reported separately by this run and is never upgraded by this call.
         if (history.snapshot()?.status === 'unknown') {
