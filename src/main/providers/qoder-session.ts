@@ -87,6 +87,11 @@ export function createQoderSession(query: Query): QoderSession {
           turn.ended = true
           turn.queue.length = 0
           if (active === turn) active = undefined
+          // A reader parked on this turn must observe the end, or it waits for a message that can
+          // never come and the turn's iterator leaks on every settlement.
+          const wake = turn.wake
+          turn.wake = undefined
+          wake?.()
         },
         async *[Symbol.asyncIterator](): AsyncGenerator<Record<string, unknown>, void> {
           if (turn.reading) throw new QoderSessionBusyError()
