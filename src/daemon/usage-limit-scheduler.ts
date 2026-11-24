@@ -3,6 +3,7 @@ import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import {
   claimUsageLimitResume,
   listPendingUsageLimits,
+  releaseUsageLimitResume,
   recordUsageLimit,
   type UsageLimitRow
 } from '../host-runtime/orchestration/usage-limit-store'
@@ -23,6 +24,7 @@ export interface UsageLimitSchedulerDeps {
   settings: () => UsageLimitResumeSettings
   now?: () => number
   schedule?: (fn: () => void, ms: number) => { unref?: () => void }
+  log?: (line: string) => void
 }
 
 export interface UsageLimitScheduler {
@@ -88,8 +90,15 @@ export function createUsageLimitScheduler(deps: UsageLimitSchedulerDeps): UsageL
       }
       if (decision.status !== 'submit') continue
       // The claim is the fence: without it a second pump would submit the same resume again.
-      if (!claimUsageLimitResume(db, row.sessionKey, row.recordedAt, now())) continue
-      submitUsageLimitResume(deps.sink(), pending, now())
+      const claimedAt = now()
+      if (!claimUsageLimitResume(db, row.sessionKey, row.recordedAt, claimedAt)) continue
+      const submitted = submitUsageLimitResume(deps.sink(), pending, claimedAt)
+      if (submitted.status === 'unavailable') {
+        // The resume never entered the queue, so the claim is released and the reason is kept: the row
+        // stays pending instead of claiming a resume that did not happen.
+        releaseUsageLimitResume(db, row.sessionKey, row.recordedAt, claimedAt)
+        deps.log?.(`usage-limit resume not submitted for ${row.sessionKey}: ${submitted.reason}`)
+      }
     }
     if (nextAt === undefined) return
     const wait = Math.min(MAX_ARM_MS, Math.max(0, nextAt - now()))

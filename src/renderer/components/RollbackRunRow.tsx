@@ -18,6 +18,7 @@ export function RollbackRunRow({ runId, actions }: { runId: string | null; actio
       <div className="rollback-confirm" role="alertdialog" aria-label={ROLLBACK_COPY.confirmTitle}>
         <strong>{ROLLBACK_COPY.confirmTitle}</strong>
         <span>{ROLLBACK_COPY.confirmBody}</span>
+        <code className="rollback-run-id">{ROLLBACK_COPY.confirmRun(state.runId)}</code>
         <Button variant="danger" size="sm" onClick={actions.confirm}>{ROLLBACK_COPY.confirmAction}</Button>
         <Button variant="quiet" size="sm" onClick={actions.cancel}>{ROLLBACK_COPY.cancelAction}</Button>
       </div>

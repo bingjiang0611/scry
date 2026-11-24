@@ -90,3 +90,31 @@ describe('usage-limit scheduler', () => {
     scheduler.stop()
   })
 })
+
+// B5 (review): the claim is the fence, but a claim without a submit claims something that never
+// happened — and the row is excluded from the pending list forever, so the resume is silently lost.
+describe('usage-limit scheduler: a resume that was not submitted keeps its row pending', () => {
+  it('releases the claim, logs the reason, and retries on the next pump', () => {
+    const { sink, db } = store()
+    let clock = 1_000
+    const logged: string[] = []
+    let sinkAvailable = false
+    const scheduler = createUsageLimitScheduler({
+      db: () => db,
+      // The authority is not ready yet, so the submit is refused before anything is written.
+      sink: () => (sinkAvailable ? sink : undefined),
+      settings: () => ({ autoResume: true }),
+      now: () => clock, schedule: () => ({}),
+      log: (line) => logged.push(line)
+    })
+    scheduler.record(input(2_000))
+    clock = 2_000
+    scheduler.pump()
+    expect(listPendingUsageLimits(db)).toHaveLength(1)
+    expect(logged[0]).toContain('usage-limit resume not submitted')
+    sinkAvailable = true
+    scheduler.pump()
+    expect(listPendingUsageLimits(db)).toEqual([])
+    scheduler.stop()
+  })
+})

@@ -48,6 +48,18 @@ export function listPendingUsageLimits(db: SqliteDb): UsageLimitRow[] {
  * Claims one resume. Returns false when another caller (or an earlier daemon) already claimed it, so
  * the caller must not submit in that case.
  */
+/**
+ * Gives a claim back when the resume it fenced did not reach the queue. `resumed_at` is the evidence
+ * that a resume was written, so leaving it set after a rejected submit would claim something that
+ * never happened — and the row would never be retried either.
+ */
+export function releaseUsageLimitResume(db: SqliteDb, sessionKey: string, recordedAt: number, claimedAt: number): boolean {
+  const result = db.prepare(
+    'UPDATE orch_usage_limit SET resumed_at = NULL WHERE session_key = ? AND recorded_at = ? AND resumed_at = ?'
+  ).run(sessionKey, recordedAt, claimedAt)
+  return result.changes === 1
+}
+
 export function claimUsageLimitResume(db: SqliteDb, sessionKey: string, recordedAt: number, at: number): boolean {
   const result = db.prepare(
     'UPDATE orch_usage_limit SET resumed_at = ? WHERE session_key = ? AND recorded_at = ? AND resumed_at IS NULL'

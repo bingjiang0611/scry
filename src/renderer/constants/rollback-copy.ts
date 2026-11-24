@@ -5,6 +5,7 @@ export const ROLLBACK_COPY = {
   label: (runId: string) => `把这次运行的工作树倒回到检查点（run ${runId}）`,
   confirmTitle: '倒回会重写工作树',
   confirmBody: '从宿主记下这次运行的检查点恢复；之后在同一工作树里的改动会被覆盖。',
+  confirmRun: (runId: string) => `要倒回的运行：${runId}`,
   confirmAction: '确认倒回',
   cancelAction: '取消',
   working: '正在倒回',
