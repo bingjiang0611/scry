@@ -151,9 +151,6 @@ describe('the cache is thrown away whenever it cannot be trusted', () => {
     await listRecordSummaries(root)
     const [first] = await readdir(join(root, 'records'))
     await writeFile(join(root, 'records', first!), '{"schemaVersion":1}')
-    // Same file names, different bytes: no writer does this (commits only append, archive only moves
-    // files out, content-repair never touches stored records). If one ever does, it must delete the
-    // cache; this assertion is here so that requirement cannot be forgotten silently.
     await expect(listRecordSummaries(root)).resolves.toHaveLength(2)
     await expect(listRecords(root)).rejects.toThrow()
   })

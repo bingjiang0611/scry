@@ -4,25 +4,6 @@ import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import { readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 import { readRecordFile, recordFiles } from './store-index.js'
 
-/**
- * A derived, disposable projection of what a record *is*: its provider, session, sequence numbers
- * and provider turn id. No other part of a record is read.
- *
- * Learning those five fields by reading the record costs a full parse of the file. A workspace with
- * a few thousand turns makes that seconds and hundreds of megabytes per call, and the hook path
- * needs it once for every session that has no `session.json` and again for a terminal event whose
- * id is not cached yet. So the projection is cached on disk, keyed by the record file names that
- * produced it.
- *
- * The cache is never authority. Records remain the only source of truth: a missing, unreadable or
- * name-mismatched projection is discarded and rebuilt from the records themselves, and callers get
- * exactly what `listRecords()` would have returned for these fields.
- *
- * In-place rewrites of an existing record would not change the file list, so they cannot be told
- * apart from the cache's point of view. Today nothing rewrites a record (commits only append, the
- * archive only moves files out, `content-repair` never touches stored records); a future writer must
- * delete `records-summary.json` after changing one.
- */
 export interface RecordSummary {
   name: string
   sequence: number
@@ -80,7 +61,6 @@ function summaryOf(row: SummaryRow, sequence: number, recordId: string): RecordS
   }
 }
 
-/** Anything that is not exactly a row this module wrote counts as "no cache", never as partial data. */
 function rowOfRaw(raw: unknown): SummaryRow | null {
   if (!Array.isArray(raw) || raw.length !== 6) return null
   const [name, provider, sessionId, generation, turnIndex, providerTurnId] = raw as unknown[]
@@ -110,7 +90,6 @@ async function writeSummaryRows(dataRoot: string, rows: SummaryRow[]): Promise<v
   })
 }
 
-/** True only when the cache describes exactly the record files that exist right now. */
 function rowsMatchFiles(rows: SummaryRow[], names: string[]): boolean {
   return rows.length === names.length && rows.every((row, index) => row[0] === names[index])
 }
