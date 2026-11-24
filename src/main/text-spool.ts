@@ -149,7 +149,6 @@ export class TextSpool {
     await rm(file.directory, { recursive: true, force: true })
   }
 
-  /** Writes at the tracked offset; a short write resumes where it stopped. */
   private async write(file: { handle: FileHandle }, chunk: string, bytes: number): Promise<void> {
     let written = 0
     while (written < bytes) {

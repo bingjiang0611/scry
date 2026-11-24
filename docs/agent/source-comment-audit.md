@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `419d782f`, confirmed that `src/main/text-spool.ts` advances the file offset after a short write but passes the original string again. [#192](https://github.com/bingjiang0611/scry/issues/192) tracks the fix and regression coverage; no real short write or corruption was observed. Removed the unsupported comment without changing the write loop. Comment-free emit matched; all six existing spool tests and the ratchet passed.
+
 At `d2b91e62`, reviewed 58 retained comment tokens introduced by the machines feature outside the dedicated host-metrics and machines files. Matched current lexical comments against the upstream trees before and after the feature, then read the surrounding source. Removed five redundant or overstated notes, preserving privacy and missing-data contracts. Comment-free emit and tool directives matched, 44 focused tests passed, and the ratchet passed. No live UI was run.
 
 At `3da3b861`, reviewed all 21 lexical comments in the three direct `scripts/structure-*.mjs` files. Removed four repeated or overstated labels in the App and side-chat checks. Preserved the catalog-preview contract and the structure fixture function serialized as executable source. Comment-free emit and tool directives matched, 17 fixture-wiring tests and the ratchet passed. The native App smoke was not run.
