@@ -3,8 +3,11 @@ import { ROLLBACK_COPY } from './constants/rollback-copy'
 export interface RollbackContext {
   /** The run to roll back, or null when nothing is focused. */
   runId: string | null
-  /** Whether the host has a checkpoint for it. */
-  hasCheckpoint: boolean
+  /**
+   * Whether the host has a checkpoint. `unknown` is allowed on purpose: the App does not always have
+   * the projection row, and the host refuses with `checkpoint_missing` — a reason beats a dead button.
+   */
+  hasCheckpoint: boolean | 'unknown'
   /** The host can serve the op at all (the App is talking to a daemon that knows it). */
   available: boolean
   busy: boolean
@@ -21,7 +24,7 @@ export type RollbackDecision =
 export function rollbackDecision(context: RollbackContext): RollbackDecision {
   if (!context.available) return { allowed: false, reason: ROLLBACK_COPY.unavailable }
   if (!context.runId) return { allowed: false, reason: ROLLBACK_COPY.noRun }
-  if (!context.hasCheckpoint) return { allowed: false, reason: ROLLBACK_COPY.noCheckpoint }
+  if (context.hasCheckpoint === false) return { allowed: false, reason: ROLLBACK_COPY.noCheckpoint }
   if (context.busy) return { allowed: false, reason: ROLLBACK_COPY.working }
   return { allowed: true }
 }
