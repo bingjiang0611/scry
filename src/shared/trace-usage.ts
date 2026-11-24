@@ -100,7 +100,7 @@ export interface DbStats {
   }
 }
 
-export type UsageAnalyticsRangeDays = 7 | 30 | 90
+export type UsageAnalyticsRangeDays = 1 | 7 | 30 | 90
 
 export interface QoderCreditEvidence {
   credits: number | null

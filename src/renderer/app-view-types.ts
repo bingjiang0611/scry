@@ -16,7 +16,6 @@ export interface AppViewContext {
   setTheme: Dispatch<SetStateAction<AppTheme>>
   setShowSkills: Dispatch<SetStateAction<boolean>>
   setShowMcp: Dispatch<SetStateAction<boolean>>
-  setShowLlmPerformance: Dispatch<SetStateAction<boolean>>
   refreshProviderCatalogs: () => Promise<void>
   view: AppView
   setView: Dispatch<SetStateAction<AppView>>

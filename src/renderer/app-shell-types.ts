@@ -78,8 +78,6 @@ export interface AppShellProps {
   workspaceOpenRequests: ReadonlyMap<string, WorkspaceOpenRequest>
   setScopeDirty: (id: string, dirty: boolean) => void
   addWorkspaceReference: (entry: WorkspaceEntry) => void
-  showLlmPerformance: boolean
-  setShowLlmPerformance: (show: boolean) => void
   showSkills: boolean
   showMcp: boolean
   openSkills: () => void
