@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `e6106075`, moved the completed-run versus durable input-receipt decision from the unified conversation smoke into [ADR 014](../adr/014-conversation-ownership-and-side-chat.md). The script's comment-free emit and directives matched. Ten receipt/refusal tests and the ratchet passed; the live smoke was not run.
+
 At `04e007e3`, moved the cross-consumer packaged layout decision into [ADR 020](../adr/020-build-identity-and-provider-compatibility.md). Kept the local pointer to the ADR and the Linux executable-name constraint. The script emitted identical code with comments disabled; 20 wrapper and layout tests and the ratchet passed. No product artifact was built or launched.
 
 At `b96af32f`, matched all 976 lexical tokens in [146 JS/TS paths without a verified historical blob match](source-comment-audit-b96af32f.md) to contextual review recommendations. Removed six assertion restatements from `src/main/session-diff.test.ts`; the test's 40 cases passed. Other removal, ADR, and issue candidates remain in place. This closes the intake for that JS/TS slice, not the remaining dispositions or non-JS/TS reconciliation.
