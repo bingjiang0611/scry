@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `2c1c78ef`, reconciled all 176 lexical comment tokens in 25 direct `scripts/concurrent-diff*`, `scripts/concurrent-performance*` and `scripts/daemon-*` JS/TS files (excluding `daemon-mode-*`). Removed two redundant labels and kept the operator, fixture, and evidence contracts. Comment-free emit and tool directives matched; both focused suites passed all 22 tests and the ratchet passed. No live App or performance benchmark was run.
+
 At `1366d1e0`, reviewed 54 lexical comments across seven files: the four tracked JS skill tools, the bundled Pi history reader, and the two performance-evidence experiment files. Removed three redundant section labels in the UI contract checker. Its three report sections ran successfully; shebang, tool directives and comment-free emit matched, and the source-comment ratchet passed. The report is a review aid, not a UI smoke result.
 
 At `8f5f8a46`, reviewed 36 lexical tokens in `scripts/b4v-scenarios.mjs` and the three direct `scripts/agy-a0-probe/*.mjs` helpers. Corrected the B4V header to stop promising the retired switch-off control. The shebang, comment-free emit and tool directives matched; 13 CLI and report tests and the source-comment ratchet passed. Live acceptance and Provider probes were not run.

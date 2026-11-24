@@ -35,7 +35,6 @@ function sourceFiles(directory) {
   })
 }
 
-/** Every privileged channel in production source, with the file that registers it. */
 // Registrations whose channel is built from a handler table, e.g. `sourceControl:${method}`.
 // Each prefix names how to read its method list from source; an unknown templated
 // registration fails the scan instead of silently dropping channels.
