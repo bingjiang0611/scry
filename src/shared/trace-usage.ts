@@ -1,5 +1,6 @@
 import type { BillingProvider } from './billing.js'
 import type { ProviderId } from './provider.js'
+import type { UsageAgentId } from './usage-identity.js'
 
 export type CostSource =
   | 'sdk_estimate'
@@ -148,6 +149,18 @@ export interface UsageAnalyticsDailyProviderRow extends UsageAnalyticsDayRow {
 export interface UsageAnalyticsBreakdownRow extends UsageAnalyticsAggregate {
   provider: BillingProvider
   model: string | null
+  /** Identity used by the page: the agent owns the row, the provider does not. */
+  agent: UsageAgentId
+  /** Upstream name (openai-codex, cc-switch…); absent when none was recorded. */
+  gateway?: string
+}
+
+export interface UsageAnalyticsAgentRow extends UsageAnalyticsAggregate {
+  agent: UsageAgentId
+}
+
+export interface UsageAnalyticsDailyAgentRow extends UsageAnalyticsDayRow {
+  agent: UsageAgentId
 }
 
 export interface UsageAnalytics {
@@ -160,7 +173,9 @@ export interface UsageAnalytics {
   totals: UsageAnalyticsAggregate
   byDay: UsageAnalyticsDayRow[]
   dailyByProvider: UsageAnalyticsDailyProviderRow[]
+  dailyByAgent: UsageAnalyticsDailyAgentRow[]
   byProvider: UsageAnalyticsBreakdownRow[]
+  byAgent: UsageAnalyticsAgentRow[]
   byModel: UsageAnalyticsBreakdownRow[]
 }
 

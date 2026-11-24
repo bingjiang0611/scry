@@ -43,9 +43,20 @@ const VENDOR_AGENTS: Record<string, UsageAgentId> = {
   antigravity: 'antigravity'
 }
 
-const gatewayOf = (value?: string | null): string | undefined => {
+// A vendor name is not a gateway: "Claude · anthropic" would repeat Q2's mistake.
+const VENDOR_GATEWAYS: Record<UsageAgentId, ReadonlySet<string>> = {
+  pi: new Set(),
+  claude: new Set(['anthropic', 'claude-code']),
+  codex: new Set(['openai', 'codex']),
+  qoder: new Set(['qoder']),
+  opencode: new Set(['opencode']),
+  antigravity: new Set(['antigravity'])
+}
+
+const gatewayOf = (value: string | null | undefined, agent?: UsageAgentId): string | undefined => {
   const trimmed = value?.trim()
   if (!trimmed || trimmed === 'unknown') return undefined
+  if (agent && VENDOR_GATEWAYS[agent].has(trimmed)) return undefined
   return trimmed
 }
 
@@ -70,16 +81,16 @@ export function usageIdentity(args: {
     // Without a recorded upstream, a vendor-shaped billing provider would name
     // the wrong thing; only a gateway-shaped one is the real upstream.
     const fallback = runtimeAgent === 'pi' && provider && !VENDOR_AGENTS[provider] ? provider : undefined
-    const gateway = gatewayOf(args.upstreamProvider) ?? gatewayOf(fallback)
+    const gateway = gatewayOf(args.upstreamProvider, runtimeAgent) ?? gatewayOf(fallback, runtimeAgent)
     return gateway ? { agent: runtimeAgent, gateway } : { agent: runtimeAgent }
   }
   const agent = (provider && VENDOR_AGENTS[provider]) || 'pi'
-  const gateway = agent === 'pi' ? gatewayOf(args.upstreamProvider) ?? gatewayOf(provider) : undefined
+  const gateway = agent === 'pi' ? gatewayOf(args.upstreamProvider, agent) ?? gatewayOf(provider, agent) : undefined
   return gateway ? { agent, gateway } : { agent }
 }
 
 /** Performance rows already know the agent; only the gateway needs a rule. */
 export function usageIdentityForProviderId(agent: UsageAgentId, gateway?: string | null): UsageIdentity {
-  const value = gatewayOf(gateway)
+  const value = gatewayOf(gateway, agent)
   return value ? { agent, gateway: value } : { agent }
 }

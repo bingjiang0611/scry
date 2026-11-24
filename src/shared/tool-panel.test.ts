@@ -18,7 +18,7 @@ const analytics = (over: Partial<UsageAnalytics> = {}): UsageAnalytics => ({
   status: 'ready', rangeDays: 7, fromDay: '2026-10-15', toDay: '2026-10-21', observedAt: 1,
   days: ['2026-10-15'], totals: aggregate({ costUsd: 1.25 }),
   byDay: [{ day: '2026-10-15', ...aggregate() }],
-  dailyByProvider: [], byProvider: [], byModel: [], ...over
+  dailyByProvider: [], dailyByAgent: [], byProvider: [], byAgent: [], byModel: [], ...over
 })
 
 describe('tool panel shaping', () => {
