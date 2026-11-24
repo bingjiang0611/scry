@@ -1,4 +1,4 @@
-import type { AgentTurnRecord, DiffOmissionCode, Evidence, EvidenceQuality } from './turn-record-contracts.js'
+import type { AgentTurnRecord, Evidence, EvidenceQuality, OmissionCode } from './turn-record-contracts.js'
 
 export { validateAgentTurnRecord, isAgentTurnRecord } from './turn-record-validate.js'
 export { canonicalCostUsd } from './turn-record-contracts.js'
@@ -59,8 +59,14 @@ export function available<T>(value: T, source: string[], quality: EvidenceQualit
   return { status: 'available', quality, source, value }
 }
 
-export function unavailable<T>(reason: string, source: string[] = []): Evidence<T> {
-  return { status: 'unavailable', quality: 'unavailable', source, omissionReason: reason }
+export function unavailable<T>(reason: string, source: string[] = [], codes: OmissionCode[] = []): Evidence<T> {
+  return {
+    status: 'unavailable',
+    quality: 'unavailable',
+    source,
+    omissionReason: reason,
+    ...(codes.length > 0 ? { omissionCodes: [...new Set(codes)] } : {})
+  }
 }
 
 export function disabled<T>(reason: string): Evidence<T> {
@@ -72,7 +78,7 @@ export function partial<T>(
   source: string[],
   reason: string,
   quality: EvidenceQuality = 'inferred',
-  codes: DiffOmissionCode[] = []
+  codes: OmissionCode[] = []
 ): Evidence<T> {
   return {
     status: 'partial',

@@ -166,8 +166,9 @@ async function codexTurnWithChildren(
       observable.files = observable.files || nested.observable.files
       observable.errors = observable.errors || nested.observable.errors
       events.push(...nested.events.flatMap((event): TraceEvent[] => {
-        // Child text retains its scope in modelSegments; only root usage is authoritative.
-        if (event.kind === 'harness' && event.stage === 'result') return []
+        // Child text retains its scope in modelSegments; only root usage is authoritative, and a child
+        // usage gap says nothing about the parent turn's own counters.
+        if (event.kind === 'harness' && (event.stage === 'result' || event.stage === 'usage_baseline_missing')) return []
         return [{
           ...event,
           agentId: event.agentId ?? child.sessionId,

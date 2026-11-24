@@ -108,6 +108,16 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 同一个会话连续 3 次失败后进入 suspended：不再每轮重试，改为每小时重探一次。转入时 `recorder.log` 留一行 `WARN session suspended after N failed passes`，`health.json` 的 `suspendedSessions` 和 `scry status` 都会报出来。暂停只影响重试，不删标记、不改 `open.json`、不丢弃证据。
 - 一次成功收尾会清掉该会话的失败记录，瞬时故障不会累积成 suspended。记录写在 `.scry/session-failures.json`（和 `health.json` 同级），是报告，不是事实源；删掉它只会让下一轮重新计数。
 
+### 0.2.87：Codex 首轮用量不再把会话累计当成本轮
+
+- Codex 的 `token_count` 帧是会话累计值，一轮的用量是相邻帧的差。差需要“这一轮开始前的累计”做基线，而按轮解析的窗口从本轮 `task_started` 开始，看不到上一帧。
+- 以前找不到基线就把基线当 0：`没有基线` 和 `会话从 0 开始` 在代码里是同一个值。续写 rollout（`resume`/`fork`、同一会话的第二段文件）的首帧累计本来就已经很大，于是那一轮把整个会话累计写成了本轮用量。
+- 现在按顺序取基线：① 同文件内前序累计帧（原逻辑，`CODEX_USAGE_BASELINE_BYTES` 窗口内最后一帧）；② 窗口首帧自带的 `last_token_usage`：`首帧累计 − 最近一次` 就是首帧之前的累计，前提是该帧同时带两组值且 `最近一次 ≤ 累计`；③ 两者都拿不到时，这一轮用量标 `unavailable`，`omissionCodes: ["usage_baseline_missing"]`，不写任何数字。
+- 真正从 0 开始的新会话（首帧累计等于最近一次）算出的基线就是 0，仍然按本轮算，不会被标未知。
+- 实测（本机 2,223 个 rollout、803 个带累计帧的轮次）：input 合计 20.07b → 3.79b（5.3×），单轮最大 2.51b → 426.2M，值发生变化的只有 14 轮；每个文件都满足“逐轮差值 + 推导基线 = 文件末累计”。三个具体文件：2,514,734,962 → 465,004、550,229,534 → 2,843,638、2,450,973,309 → 23,925,566。
+- 本机 14,801 个 `token_count` 帧全部同时带 `total_token_usage` 与 `last_token_usage`，五个计数齐全，也没有 `最近一次 > 累计` 的情况，所以第 ② 步在真实数据上总能成立；第 ③ 步只兜住残缺或手写的帧。
+- 历史记录不回填、不重传。已经写进 store 和已经上传的偏大值仍然存在，要单独处理。
+
 ### 0.2.86：记录摘要缓存（派生，可重建）
 
 - 身份路径（给新会话分配 `generation`/`turnIndex`、判断某个 `providerTurnId` 是否已提交）只需要每份记录的五个字段：`provider`、`sessionId`、`generation`、`turnIndex`、`providerTurnId`。以前为这五个字段要解析整份记录，现在读 `.scry/records-summary.json`。

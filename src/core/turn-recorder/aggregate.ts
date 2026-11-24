@@ -278,6 +278,9 @@ export function aggregateTurnEvidence(args: {
       ? [{ message: outputSummary(event.output ?? event.text) ?? `${event.tool ?? event.stage} failed`, source: event.stage, toolUseId: event.toolUseId }]
       : []
   )
+  const usageBaselineMissing = args.events.some((event) =>
+    event.kind === 'harness' && event.stage === 'usage_baseline_missing'
+  )
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
   const errorCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['error']))
@@ -388,13 +391,22 @@ export function aggregateTurnEvidence(args: {
               'inferred'
             )
           : available(hooks, [source]),
-    usage: !observable.usage
-      ? unavailable('provider usage was not observable', [source])
-      : usage
-        ? usage.credits || providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
-          ? partial(usage, [source], 'one or more usage counters have partial coverage; inspect credits and context provenance', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
-          : available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
-        : unavailable('no authoritative usage event was captured', [source]),
+    // Checked before `observable.usage`: the provider did report cumulative usage, it just cannot be
+    // attributed to this turn, so the generic "not observable" sentence would be wrong here. A
+    // separately reported result event stays authoritative when one exists.
+    usage: usageBaselineMissing && !usage
+      ? unavailable(
+          "the provider reported cumulative usage but nothing proves the session counters before this turn, so this turn's usage is unknown",
+          [source],
+          ['usage_baseline_missing']
+        )
+      : !observable.usage
+        ? unavailable('provider usage was not observable', [source])
+        : usage
+          ? usage.credits || providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
+            ? partial(usage, [source], 'one or more usage counters have partial coverage; inspect credits and context provenance', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+            : available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+          : unavailable('no authoritative usage event was captured', [source]),
     compactions: available(compactions, [source]),
     ...(modelTiming
       ? {
