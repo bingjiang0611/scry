@@ -15,8 +15,9 @@ export class DesktopRemoteClientRun extends DesktopRemoteClientSession {
     const state: DesktopRemoteRunStatus['state'] = lifecycle === 'recorded' ? 'recorded'
       : lifecycle === 'queued' ? 'queued'
       : lifecycle === 'admitted' || lifecycle === 'dispatched' ? 'dispatched'
-      : lifecycle === 'settled' ? 'settled' : lifecycle === 'failed' || lifecycle === 'cancelled' || lifecycle === 'interrupted'
-        ? 'failed' : 'unknown'
+      : lifecycle === 'settled' ? 'settled'
+        : lifecycle === 'failed' || lifecycle === 'cancelled' || lifecycle === 'interrupted' || lifecycle === 'rolled_back'
+          ? 'failed' : 'unknown'
     const outputSeq = row?.outputSeq ?? undefined
     // The host projects live worktree preparation onto the run row before admission.
     const workspaceProgress = parseWorkspacePrepareProgress(row?.workspaceProgress)

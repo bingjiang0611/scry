@@ -30,6 +30,8 @@ export type RunLifecycleState =
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+  /** D5: the worktree was restored to a checkpoint of an earlier state of this run. */
+  | 'rolled_back'
 
 export type H1RunLifecycle = 'recorded' | 'dispatched' | 'settled' | 'failed' | 'cancelled'
 
@@ -64,6 +66,9 @@ export type OrchestrationEventType =
   | 'run.cancelled'
   | 'run.interrupted'
   | 'run.content_gap'
+  | 'run.rolled_back'
+  | 'checkpoint.captured'
+  | 'checkpoint.rollback_requested'
   | 'session.created'
   | 'session.renamed'
   | 'session.pinned'
@@ -100,6 +105,9 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'run.cancelled',
   'run.interrupted',
   'run.content_gap',
+  'run.rolled_back',
+  'checkpoint.captured',
+  'checkpoint.rollback_requested',
   'session.created',
   'session.renamed',
   'session.pinned',
@@ -275,6 +283,10 @@ export interface RunProjectionRow {
   queuePosition?: number | null
   /** D1: a stop holds the queue entry until something explicitly releases it. */
   queueHeld?: boolean
+  /** D5: the checkpoint ref captured at settlement, when one was captured. */
+  checkpointRef?: string | null
+  /** D5: set once the run's worktree content was rolled back. */
+  rolledBackAt?: number | null
 }
 
 export interface InteractionProjectionRow {

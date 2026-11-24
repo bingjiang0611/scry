@@ -90,7 +90,9 @@ export function mapRunRow(row: Record<string, unknown>): RunProjectionRow {
     ...(row.queue_position === null || row.queue_position === undefined
       ? {}
       : { queuePosition: Number(row.queue_position) }),
-    ...(row.queue_held ? { queueHeld: true } : {})
+    ...(row.queue_held ? { queueHeld: true } : {}),
+    checkpointRef: (row.checkpoint_ref as string | null) ?? null,
+    rolledBackAt: row.rolled_back_at === null || row.rolled_back_at === undefined ? null : Number(row.rolled_back_at)
   }
 }
 

@@ -209,6 +209,8 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
         DROP INDEX IF EXISTS idx_orch_p_run_queue;
         ALTER TABLE orch_p_run DROP COLUMN queue_position;
         ALTER TABLE orch_p_run DROP COLUMN queue_held;
+        ALTER TABLE orch_p_run DROP COLUMN checkpoint_ref;
+        ALTER TABLE orch_p_run DROP COLUMN rolled_back_at;
         DROP INDEX IF EXISTS idx_orch_outbox_fifo;
         ALTER TABLE orch_p_run DROP COLUMN intent_command_id;
         ALTER TABLE orch_p_run DROP COLUMN intent_at;

@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 11
+export const ORCHESTRATION_SCHEMA_VERSION = 12
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -363,7 +363,16 @@ const ORCH_DDL_V11: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS idx_orch_p_run_queue ON orch_p_run(session_key, queue_held, queue_position)'
 ]
 
+/**
+ * D5: checkpoints are git refs, so the host stores the ref name and the tree it points at, plus
+ * when a run was rolled back. The columns are projections of recorded events, never the evidence.
+ */
+const ORCH_DDL_V12: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN checkpoint_ref TEXT',
+  'ALTER TABLE orch_p_run ADD COLUMN rolled_back_at INTEGER'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
   ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
-  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11
+  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11, ORCH_DDL_V12
 ]

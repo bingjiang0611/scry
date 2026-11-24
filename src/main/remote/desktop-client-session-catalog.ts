@@ -40,7 +40,7 @@ function isRunRow(raw: unknown): raw is SubscribeActiveRunRow {
   return record(raw) && validRunId(raw.runId) && text(raw.cwd, 16_384) && Number.isSafeInteger(raw.revSeq) &&
     (raw.traceRunId === undefined || validRunId(raw.traceRunId)) &&
     // D1: a queued run is a real row the host publishes, so the device validator must accept it.
-    ['queued', 'recorded', 'admitted', 'dispatched', 'settled', 'failed', 'cancelled', 'interrupted'].includes(String(raw.lifecycle)) &&
+    ['queued', 'recorded', 'admitted', 'dispatched', 'settled', 'failed', 'cancelled', 'interrupted', 'rolled_back'].includes(String(raw.lifecycle)) &&
     (raw.queuePosition === undefined || raw.queuePosition === null || Number.isSafeInteger(raw.queuePosition)) &&
     (raw.queueHeld === undefined || typeof raw.queueHeld === 'boolean')
 }

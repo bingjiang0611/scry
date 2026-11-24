@@ -23,17 +23,20 @@ export const ORCH_RUN_NEXT: Readonly<Record<RunLifecycleState, readonly RunLifec
   queued: ['admitted', 'dispatched', 'cancelled', 'failed'],
   admitted: ['dispatched', 'cancelled', 'failed'],
   dispatched: ['settled', 'failed', 'cancelled', 'interrupted'],
-  settled: [],
+  // D5: a settled run may be rolled back; nothing leaves `rolled_back`.
+  settled: ['rolled_back'],
   failed: [],
   cancelled: [],
-  interrupted: []
+  interrupted: [],
+  rolled_back: []
 }
 
 export const TERMINAL_RUN_LIFECYCLES: ReadonlySet<RunLifecycleState> = new Set([
   'settled',
   'failed',
   'cancelled',
-  'interrupted'
+  'interrupted',
+  'rolled_back'
 ])
 
 export function canTransitionRun(from: RunLifecycleState, to: RunLifecycleState): boolean {

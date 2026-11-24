@@ -18,6 +18,7 @@ import {
   type OrchestratorReadView
 } from './orchestrator-handlers'
 import { isTerminalRunLifecycle } from './run-transitions'
+import { decideRunCheckpoint, decideRunRollback } from './orchestrator-checkpoint'
 import { decideSubmitQueue, heldQueueEvents, queuedRunEvent } from './orchestrator-queue'
 import {
   DEFAULT_PENDING_TTL_MS,
@@ -190,6 +191,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         result: tombstoneResult
       })
     }
+
+    case 'run.checkpoint':
+      return decideRunCheckpoint(cmd, view)
+
+    case 'run.rollback':
+      return decideRunRollback(cmd, view)
 
     case 'run.stop': {
       const target = view.getRun(cmd.payload.runId)

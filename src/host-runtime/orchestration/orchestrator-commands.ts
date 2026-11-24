@@ -69,6 +69,22 @@ export interface SessionStopSubtasksPayload {
   shadowOnly?: boolean
 }
 
+/** D5: the host records a captured checkpoint; the git ref is the evidence, this is the row. */
+export interface RunCheckpointPayload {
+  runId: string
+  ref: string
+  tree: string
+  sessionKey?: string | null
+  cwd?: string | null
+}
+
+/** D5: a user asked to put the worktree back to a captured checkpoint. */
+export interface RunRollbackPayload {
+  runId: string
+  ref: string
+  reason?: string
+}
+
 export type EffectResultStep =
   | 'admitted'
   | 'dispatched'
@@ -225,6 +241,8 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'run.submit'; payload: RunSubmitPayload })
   | (BaseCommand & { type: 'run.resolve_intent'; payload: RunResolveIntentPayload })
   | (BaseCommand & { type: 'run.stop'; payload: RunStopPayload })
+  | (BaseCommand & { type: 'run.checkpoint'; payload: RunCheckpointPayload })
+  | (BaseCommand & { type: 'run.rollback'; payload: RunRollbackPayload })
   | (BaseCommand & { type: 'session.stop_subtasks'; payload: SessionStopSubtasksPayload })
   | (BaseCommand & { type: 'run.effect_result'; payload: RunEffectResultPayload })
   | (BaseCommand & { type: 'turn.record_delivery'; payload: TurnRecordDeliveryPayload })
