@@ -8,7 +8,7 @@ import { createSessionCatalog } from '../main/bootstrap/session-catalog'
 import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
 import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
-import { createDaemonProviderSessions } from './provider-session-recording'
+import { createDaemonProviderSessions, createPiSessionObserver } from './provider-session-recording'
 import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
 import { configureRecorderCliRuntime, warmShellEnv } from '../main/claude-locate'
 import { configureRunStageTiming } from '../main/run-stage-timing'
@@ -100,8 +100,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // C1: Provider session lifetime is daemon-owned so the release reason can be stored.
   let userDataAuthority: EventSink | undefined
   const providerSessions = createDaemonProviderSessions(() => userDataAuthority)
+  const piSessions = createPiSessionObserver(() => userDataAuthority)
   const providers = createProviderRuntime({
     providerSessions,
+    piSessions,
     homeDir: workspace.homeDir,
     userDataDir: options.userDataDir,
     appPath: options.appPath,

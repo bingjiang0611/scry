@@ -22,6 +22,12 @@ export function createBuiltInProviderAdapters(
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
     historyExtensionPath?: string
     diagnostics?: PiRunDiagnostics
+    /** C1: Pi's pool reports open/release so the host can store the reason. */
+    sessions?: {
+      onOpened?: (key: string, provider: 'pi', at: number) => void
+      onNativeSessionId?: (key: string, nativeSessionId: string) => void
+      onReleased?: (key: string, reason: string, at: number) => void
+    }
   },
   userDataDir?: string,
   /** Scry C1: daemon-owned Provider session host shared by adapters that can keep a process. */

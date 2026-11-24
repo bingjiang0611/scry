@@ -234,18 +234,38 @@ interface IdleRotomRpc {
   timer: ReturnType<typeof setTimeout>
 }
 
+/**
+ * C1: the pool already releases by idle time, cap and replacement. Reporting those moments lets the
+ * host store a release reason instead of leaving the App to infer why a process went away.
+ */
+export type RotomReleaseReason = 'idle' | 'evicted' | 'replaced' | 'shutdown'
+
+export interface RotomRpcPoolOptions {
+  idleMs?: number
+  maxIdle?: number
+  /** The first time a session becomes reusable, so the host can record the open session. */
+  onOpened?: (sessionId: string, at: number) => void
+  onReleased?: (sessionId: string, reason: RotomReleaseReason) => void
+}
+
 export class RotomRpcPool {
   private readonly idle = new Map<string, IdleRotomRpc>()
   private readonly idleMs: number
   private readonly maxIdle: number
+  private readonly onReleased?: (sessionId: string, reason: RotomReleaseReason) => void
+  private readonly onOpened?: (sessionId: string, at: number) => void
+  /** Session ids already reported as opened; a re-keep of the same session is not a new open. */
+  private readonly opened = new Set<string>()
 
   get size(): number {
     return this.idle.size
   }
 
-  constructor(options: { idleMs?: number; maxIdle?: number } = {}) {
+  constructor(options: RotomRpcPoolOptions = {}) {
     this.idleMs = Math.min(ROTOM_RPC_IDLE_MAX_MS, Math.max(ROTOM_RPC_IDLE_MIN_MS, options.idleMs ?? ROTOM_RPC_IDLE_MS))
     this.maxIdle = Math.max(1, options.maxIdle ?? ROTOM_RPC_MAX_IDLE)
+    this.onReleased = options.onReleased
+    this.onOpened = options.onOpened
   }
 
   private key(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, continuationKey?: string): string {
@@ -276,6 +296,7 @@ export class RotomRpcPool {
     const previous = this.idle.get(key)
     if (previous) {
       clearTimeout(previous.timer)
+      this.onReleased?.(previous.sessionId, 'replaced')
       void previous.rpc.close().catch(() => undefined)
     }
     const entry: IdleRotomRpc = {
@@ -288,11 +309,16 @@ export class RotomRpcPool {
       timer: setTimeout(() => {
         if (this.idle.get(key) !== entry) return
         this.idle.delete(key)
+        this.onReleased?.(entry.sessionId, 'idle')
         void rpc.close().catch(() => undefined)
       }, this.idleMs)
     }
     entry.timer.unref()
     this.idle.set(key, entry)
+    if (!this.opened.has(sessionId)) {
+      this.opened.add(sessionId)
+      this.onOpened?.(sessionId, Date.now())
+    }
     while (this.idle.size > this.maxIdle) {
       const oldest = this.idle.keys().next()
       if (oldest.done) break
@@ -300,6 +326,7 @@ export class RotomRpcPool {
       this.idle.delete(oldest.value)
       if (evicted) {
         clearTimeout(evicted.timer)
+        this.onReleased?.(evicted.sessionId, 'evicted')
         void evicted.rpc.close().catch(() => undefined)
       }
     }
@@ -323,6 +350,7 @@ export class RotomRpcPool {
     this.idle.clear()
     await Promise.all(entries.map(async (entry) => {
       clearTimeout(entry.timer)
+      this.onReleased?.(entry.sessionId, 'shutdown')
       await entry.rpc.close()
     }))
   }

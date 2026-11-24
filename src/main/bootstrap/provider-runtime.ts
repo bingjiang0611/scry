@@ -9,9 +9,18 @@ import type { AntigravityProcessSession } from '../providers/antigravity-session
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
+/** C1: what the Pi pool reports; the daemon records it next to the Antigravity sessions. */
+export interface PiSessionObserver {
+  onOpened?: (key: string, provider: 'pi', at: number) => void
+  onNativeSessionId?: (key: string, nativeSessionId: string) => void
+  onReleased?: (key: string, reason: string, at: number) => void
+}
+
 export function createProviderRuntime(deps: {
   /** C1: the daemon owns Provider session lifetime because only it can record the release reason. */
   providerSessions?: ProviderSessionHost<AntigravityProcessSession>
+  /** C1: Pi reports its pool lifecycle here so open/release reasons are stored, not logged. */
+  piSessions?: PiSessionObserver
   homeDir: string
   userDataDir: string
   appPath: string
@@ -57,7 +66,8 @@ export function createProviderRuntime(deps: {
     join(userDataDir, 'provider-state', 'opencode-v1'),
     {
       listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
-      historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs')
+      historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs'),
+      ...(deps.piSessions ? { sessions: deps.piSessions } : {})
     },
     userDataDir,
     providerSessions
