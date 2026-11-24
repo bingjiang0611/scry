@@ -69,6 +69,8 @@ export interface DaemonLocalEndpointDeps {
   // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
+  /** D1: the projection read, so the App can show the host's queue instead of its own guess. */
+  orchestrationDb?: () => import('better-sqlite3').Database | undefined
   /** D5: checkpoint capture and rollback; the host owns the git side. */
   checkpoints?: import('../checkpoint-service').CheckpointService
   log?: (line: string) => void
