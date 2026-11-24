@@ -1,20 +1,28 @@
 import { homedir } from 'node:os'
-import type { AgentQuestionResponse, AgentInputAttachment } from '../../shared/runtime'
+import type { AgentQuestionResponse } from '../../shared/runtime'
 import { maskSecrets } from '../../shared/trace'
-import {
-  detectStrippedAntigravityEnvNames,
-  explicitlyAllowedProviderEnvKeys
-} from '../provider-environment'
+import { explicitlyAllowedProviderEnvKeys } from '../provider-environment'
 import { shellEnv } from '../claude-locate'
-import { AcpClient, AcpRpcError, type AcpInitializeResult, type AcpJsonRpcId } from './acp-client'
+import { sha256Hex } from '../../host-runtime/orchestration/canonical-json'
+import {
+  ProviderSessionHost
+} from '../../host-runtime/provider-sessions/session-host'
+import { environmentFingerprint, providerSessionKey } from '../../host-runtime/provider-sessions/session-key'
+import { AcpClient, AcpRpcError, type AcpJsonRpcId } from './acp-client'
+import { formatAntigravityUnauthenticatedError } from './antigravity-auth-error'
 import { AntigravityEventTranslator } from './antigravity-events'
+import { buildPromptBlocks } from './antigravity-prompt-blocks'
 import {
   AntigravityStderrTail,
   buildAntigravityLaunchEnv,
   forceKillAntigravityProcess,
-  signalAntigravityProcess,
-  spawnAntigravityAcp
+  signalAntigravityProcess
 } from './antigravity-launch'
+import {
+  openAntigravityNativeSession,
+  openAntigravityProcessSession,
+  type AntigravityProcessSession
+} from './antigravity-session'
 import { collectAllowCapablePreToolUseMatchers } from './antigravity-mcp-paths'
 import {
   antigravityNativeModeFor,
@@ -37,6 +45,8 @@ export interface AntigravityRunDeps {
   acquireRunSlot?: (signal?: AbortSignal) => Promise<() => void>
   /** Optional A6 workspace config trust gate executed after slot acquisition (fail closed). */
   checkWorkspaceTrust?: (cwd: string) => void | Promise<void>
+  /** C1: daemon-owned Provider session host; absent means one process per run. */
+  sessions?: ProviderSessionHost<AntigravityProcessSession>
   /** Optional extra ACP `mcpServers` entries (e.g. A6 run-scoped history reader) + extra env & cleanup. */
   prepareMcp?: (request: ProviderRunRequest, baseEnv?: Record<string, string>) => Promise<{
     mcpServers: Array<Record<string, unknown>>
@@ -52,37 +62,6 @@ function isAuthFailure(error: unknown, loginPromptDetected: boolean): boolean {
     if (error.code === -32603 && /no browser|auth|login|sign in/i.test(error.message)) return true
   }
   return false
-}
-
-export function formatAntigravityUnauthenticatedError(rawEnv: Record<string, string | undefined>): string {
-  const base = 'Antigravity 未登录：在终端运行 agy 完成登录（或 agy acp --login），再回到 Scry 刷新'
-  const stripped = detectStrippedAntigravityEnvNames(rawEnv)
-  if (stripped.length === 0) return base
-  return `${base}（检测到已清洗的环境变量：${stripped.join(', ')}；如需使用请配置 SCRY_PROVIDER_ENV_ALLOW=antigravity:<NAME>）`
-}
-
-function buildPromptBlocks(
-  prompt: string,
-  attachments: readonly AgentInputAttachment[],
-  init: AcpInitializeResult
-): Array<Record<string, unknown>> {
-  const blocks: Array<Record<string, unknown>> = []
-  if (prompt) blocks.push({ type: 'text', text: prompt })
-  const supportsImage = init.agentCapabilities?.promptCapabilities?.image !== false
-  for (const att of attachments) {
-    const kind = (att as { kind?: string }).kind
-    if (kind === 'audio') {
-      throw new Error('Antigravity ACP 不支持音频附件（promptCapabilities.audio=false）')
-    }
-    if (att.kind === 'image') {
-      if (!supportsImage) throw new Error('Antigravity ACP 当前不支持图片附件')
-      blocks.push({ type: 'image', data: att.dataBase64, mimeType: att.mimeType })
-    } else if (att.path) {
-      blocks.push({ type: 'text', text: `[Attachment path: ${att.path}]` })
-    }
-  }
-  if (blocks.length === 0) blocks.push({ type: 'text', text: '' })
-  return blocks
 }
 
 interface PendingPermission {
@@ -103,8 +82,12 @@ export function runAntigravity(
   let cancelRequested = false
   let forceKillRequested = false
   let activeClient: AcpClient | undefined
-  let activeIdentityPromise: ReturnType<typeof spawnAntigravityAcp>['identityPromise'] | undefined
+  let activeIdentityPromise: AntigravityProcessSession['identityPromise'] | undefined
   let forceKillPromise: Promise<void> | undefined
+  let sessionKey: string | undefined
+  let session: AntigravityProcessSession | undefined
+  let idleTimedOut = false
+  let sessionKeyParts: Parameters<typeof providerSessionKey>[0] | undefined
   const pendingPermissions = new Map<string, PendingPermission>()
   const queueAbort = new AbortController()
 
@@ -186,7 +169,6 @@ export function runAntigravity(
     } = { mcpServers: [] }
 
     const stderrTail = new AntigravityStderrTail()
-    let spawned: ReturnType<typeof spawnAntigravityAcp> | undefined
     let client: AcpClient | undefined
     let exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | undefined
     let idleTimer: ReturnType<typeof setTimeout> | undefined
@@ -212,16 +194,48 @@ export function runAntigravity(
 
       const allowCapablePreToolUseMatchers = collectAllowCapablePreToolUseMatchers(cwd, homeDir, sanitizedEnv)
 
-      spawned = spawnAntigravityAcp({
+      const spawnSession = (): Promise<AntigravityProcessSession> => openAntigravityProcessSession({
         cwd,
         permissionMode,
         baseEnv,
         extraEnv: mcpPrepared.extraEnv,
-        stderrTail
+        clientVersion: deps.clientVersion ?? '0.2.250',
+        stderrTail,
+        onSpawn: (spawned) => {
+          activeIdentityPromise = spawned.identityPromise
+          exitPromise = new Promise((resolve) => {
+            spawned.child.once('exit', (code, signal) => resolve({ code, signal }))
+          })
+        }
       })
-      activeIdentityPromise = spawned.identityPromise
-      const child = spawned.child
-      exitPromise = new Promise((resolve) => {
+      // C1: a matching Provider session keeps one ACP process across turns; without a host this
+      // stays a per-run process, exactly as before.
+
+      if (deps.sessions) {
+        sessionKeyParts = {
+          sessionBinding: cwd,
+          continuationKey: request.resume ?? 'fresh',
+          mcpFingerprint: sha256Hex(JSON.stringify(mcpPrepared.mcpServers)),
+          permissionMode,
+          environmentFingerprint: environmentFingerprint(baseEnv)
+        }
+        const key = providerSessionKey(sessionKeyParts)
+        sessionKey = key
+        const acquired = await deps.sessions.acquire(
+          key,
+          async () => {
+            const opened = await spawnSession()
+            return { value: opened, sessionId: opened.sessionId ?? '', close: () => opened.close() }
+          },
+          (entry) => entry.value.isClosed()
+        )
+        session = acquired.value
+      } else {
+        session = await spawnSession()
+      }
+      activeIdentityPromise = session.identityPromise
+      const child = session.child
+      exitPromise ??= new Promise((resolve) => {
         child.once('exit', (code, signal) => resolve({ code, signal }))
       })
 
@@ -233,7 +247,6 @@ export function runAntigravity(
         hasUserAllowRules: userPermCheck.allowRules.length > 0
       })
       let inPrompt = false
-      let idleTimedOut = false
 
       const resetIdle = (): void => {
         clearIdle()
@@ -245,7 +258,8 @@ export function runAntigravity(
       }
 
       let permSeq = 0
-      client = new AcpClient(child, {
+      client = session.client
+      session.attach({
         onRawMessage: (direction, rawLine) => {
           // Record ONLY incoming raw agent JSON-RPC lines verbatim (NEVER maskSecrets!).
           if (direction === 'in') request.recordNative?.('antigravity_acp_message', rawLine)
@@ -302,39 +316,20 @@ export function runAntigravity(
       })
       activeClient = client
 
-      const init = await client.initialize(deps.clientVersion ?? '0.2.250')
+      const init = session.init
       const allowedEnv = explicitlyAllowedProviderEnvKeys(rawEnv.SCRY_PROVIDER_ENV_ALLOW, 'antigravity')
 
-      const openSession = async (): Promise<string> => {
-        const mcpServers = mcpPrepared.mcpServers
-        if (request.resume) {
-          try {
-            const resumed = await client!.request<{ sessionId?: string }>('session/resume', {
-              sessionId: request.resume,
-              cwd,
-              mcpServers
-            })
-            return resumed?.sessionId || request.resume
-          } catch (resumeErr) {
-            if (isAuthFailure(resumeErr, client!.loginPromptDetected)) throw resumeErr
-            // Fallback to `session/load`, suppressing replayed history notifications (P7 §3).
-            translator.suppressReplay = true
-            try {
-              const loaded = await client!.request<{ sessionId?: string }>('session/load', {
-                sessionId: request.resume,
-                cwd,
-                mcpServers
-              })
-              return loaded?.sessionId || request.resume
-            } finally {
-              translator.suppressReplay = false
-            }
-          }
-        }
-        const created = await client!.request<{ sessionId: string }>('session/new', { cwd, mcpServers })
-        if (!created?.sessionId) throw new Error('Antigravity ACP session/new 未返回 sessionId')
-        return created.sessionId
-      }
+      const active = session
+      const openSession = (): Promise<string> => openAntigravityNativeSession({
+        session: active,
+        cwd,
+        resume: request.resume,
+        mcpServers: mcpPrepared.mcpServers,
+        allowedEnv,
+        rawEnv,
+        translator,
+        isAuthFailure: (error) => isAuthFailure(error, client?.loginPromptDetected === true)
+      })
 
       let sid: string
       try {
@@ -358,6 +353,10 @@ export function runAntigravity(
 
       externalSessionId = sid
       sessionEstablished = true
+      session.sessionId = sid
+      if (deps.sessions && sessionKey && sessionKeyParts && request.resume === undefined) {
+        deps.sessions.alias(sessionKey, providerSessionKey({ ...sessionKeyParts, continuationKey: sid }))
+      }
       request.onExternalSessionId?.(sid)
 
       if (request.model?.id) {
@@ -474,7 +473,13 @@ export function runAntigravity(
     } finally {
       clearIdle()
       cancelAllPendingPermissions()
-      if (exitPromise && activeIdentityPromise) {
+      if (deps.sessions) {
+        session?.detach()
+        if (sessionKey) {
+          await deps.sessions.settle(sessionKey, { reusable: !forceKillRequested && !idleTimedOut })
+        }
+        if (forceKillRequested || idleTimedOut) session?.close()
+      } else if (exitPromise && activeIdentityPromise) {
         if (forceKillRequested) {
           await runForceKillOnce()
           if (client) client.closeStdin()

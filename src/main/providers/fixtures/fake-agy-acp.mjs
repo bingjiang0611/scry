@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -33,6 +33,10 @@ const recorded = {
   permissionReplies: [],
   clientErrorReplies: [],
   spawnedChildPids: []
+}
+
+if (scenario.recordSpawns) {
+  try { appendFileSync(join(scriptDir, 'spawns.log'), `${process.pid}\n`) } catch { /* ignore */ }
 }
 
 function saveRecord() {

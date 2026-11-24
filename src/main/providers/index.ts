@@ -1,4 +1,6 @@
 import type { ProviderAdapter } from './types'
+import type { ProviderSessionHost } from '../../host-runtime/provider-sessions/session-host'
+import type { AntigravityProcessSession } from './antigravity-session'
 import { isExperimentalProviderEnabled } from '../../shared/experimental-providers'
 import { createAntigravityAdapter } from './antigravity'
 import { createClaudeAdapter } from './claude'
@@ -20,7 +22,9 @@ export function createBuiltInProviderAdapters(
     historyExtensionPath?: string
     diagnostics?: PiRunDiagnostics
   },
-  userDataDir?: string
+  userDataDir?: string,
+  /** Scry C1: daemon-owned Provider session host shared by adapters that can keep a process. */
+  providerSessions?: ProviderSessionHost<AntigravityProcessSession>
 ): ProviderAdapter[] {
   return [
     createClaudeAdapter(homeDir),
@@ -28,6 +32,8 @@ export function createBuiltInProviderAdapters(
     createQoderAdapter(homeDir),
     createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : []),
-    ...(isExperimentalProviderEnabled('antigravity') ? [createAntigravityAdapter(homeDir, { userDataDir })] : [])
+    ...(isExperimentalProviderEnabled('antigravity')
+      ? [createAntigravityAdapter(homeDir, { userDataDir, sessions: providerSessions })]
+      : [])
   ]
 }

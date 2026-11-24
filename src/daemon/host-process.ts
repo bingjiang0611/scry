@@ -364,6 +364,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       // Close shadow first so pending bodies flush and the EXCLUSIVE SQLite lock releases
       // immediately even if a pooled provider process is slow to exit; bound provider dispose.
       await authority.close()
+      await providers.providerSessions.closeAll()
       await disposeProviderRegistryBounded(providers.providerRegistry, options.providerDisposeTimeoutMs ?? 5_000, log)
     }
   }

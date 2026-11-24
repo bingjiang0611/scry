@@ -4,6 +4,8 @@ import { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
 import { createBuiltInProviderAdapters } from '../providers'
 import { createSmokeProviderAdapter, type SmokeFixtureProviderId } from '../providers/smoke'
 import { sweepStalePrivateMcpConfigs } from '../providers/private-mcp-config'
+import { ProviderSessionHost } from '../../host-runtime/provider-sessions/session-host'
+import type { AntigravityProcessSession } from '../providers/antigravity-session'
 import type { PiAgentProfile } from '../pi-agent-profiles'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
@@ -45,6 +47,7 @@ export function createProviderRuntime(deps: {
     id: id === 'pi' ? 'pi:0123456789abcdef' : id,
     name: id === 'pi' ? 'Pi · Rotom Smoke Fixture' : `${id} Smoke Fixture`, bin: id, path: process.execPath
   }))
+  const providerSessions = new ProviderSessionHost<AntigravityProcessSession>()
   const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id) => createSmokeProviderAdapter(id)) : createBuiltInProviderAdapters(
     homeDir,
     join(userDataDir, 'codex-home-v1'),
@@ -54,7 +57,8 @@ export function createProviderRuntime(deps: {
       listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
       historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs')
     },
-    userDataDir
+    userDataDir,
+    providerSessions
   )
   /**
    * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；
@@ -76,5 +80,13 @@ export function createProviderRuntime(deps: {
     }
   )
 
-  return { builtInProviderAdapters, providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents }
+  return {
+    builtInProviderAdapters,
+    providerCompatibility,
+    providerRegistry,
+    providerSessions,
+    piRunDiagnostics,
+    smokeProviderEnabled,
+    smokeDetectedAgents
+  }
 }
