@@ -43,6 +43,14 @@ export function registerAgentRuntimeHandlers({
 
   // Renderer 重挂时拉回当前焦点或全部在途 run；焦点只影响显示，不影响后台生命周期。
   handleTrusted('agent:activeRun', async (): Promise<ActiveRun | null> => await daemon.activeRun())
+  // D1: the queue is the host's, so the App asks for it instead of reconstructing one from what it
+  // sent. A missing or empty key is refused here, before the daemon sees it.
+  handleTrusted('agent:hostQueue', async (_e, sessionKey: unknown) => {
+    if (typeof sessionKey !== 'string' || sessionKey.length === 0 || sessionKey.length > 4096 || sessionKey.includes('\0')) {
+      throw new Error('invalid_session_key')
+    }
+    return await daemon.localOp({ op: 'hostQueue', method: 'hostQueue', args: [sessionKey], read: true })
+  })
   let detailOwner: IpcMainInvokeEvent['sender'] | undefined
   const clearDetailOwner = () => { detailOwner = undefined; daemon.watchDetail?.(null) }
   handleTrusted('agent:watchSessionDetail', (event, key: unknown): boolean => {

@@ -721,6 +721,14 @@
       "channel": "conversation:setViewed",
       "route": "main",
       "why": "badge 由 main 渲染；只读统一对话以校验其项目，不写对话"
+    },
+    {
+      "channel": "agent:hostQueue",
+      "route": "new-op",
+      "op": "hostQueue",
+      "method": "hostQueue",
+      "why": "D1 队列在宿主：App 读宿主持有的队列，而不是自己重建",
+      "path": "navigation"
     }
   ]
 }

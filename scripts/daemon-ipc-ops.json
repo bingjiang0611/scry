@@ -270,6 +270,16 @@
       "scopes": [
         "local"
       ]
+    },
+    "hostQueue": {
+      "path": "hostQueue",
+      "request": "{ op:'hostQueue', method:'hostQueue', args: [sessionKey] }",
+      "response": "该会话在宿主队列里的条目（按派发顺序，含位置与是否挂起）",
+      "authorize": "本机 grant；只读投影，不写任何状态",
+      "why": "D1 队列的权威在宿主，App 与设备读同一份",
+      "scopes": [
+        "local"
+      ]
     }
   }
 }
