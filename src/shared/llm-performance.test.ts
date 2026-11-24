@@ -98,6 +98,16 @@ describe('LLM comparison rounds', () => {
     ])
   })
 
+  it('drops the placeholder model prefixes and unmodelled failed rounds (Q7)', () => {
+    const selected = row(1000, { model: '所选：model-a' })
+    const unknown = row(2000, { model: '未知模型' })
+    const failedUnknown = row(3000, { model: '未知模型', failed: true })
+    const rounds = llmComparisonRounds([selected, unknown, failedUnknown])
+    expect(rounds).toEqual([expect.objectContaining({ model: 'model-a', state: 'completed' })])
+    expect(JSON.stringify(rounds)).not.toContain('所选：')
+    expect(JSON.stringify(rounds)).not.toContain('未知模型')
+  })
+
   it('keeps provisional local waiting with unknown model, but persisted failure wins', () => {
     const sessions = summarizeRunningLlmSessions([
       { ...run('1000', { firstOutputWaitMs: 900 }), providerId: 'antigravity' },

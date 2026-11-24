@@ -169,6 +169,17 @@ function comparisonMetrics(speed?: number, firstTokenMs?: number, firstOutputWai
   return metrics
 }
 
+/**
+ * 旧记录用占位字符串代替模型：`所选：<id>` 里其实是选中的模型，`未知模型` 不是模型。
+ * 读取时迁移，不改写 usage.jsonl。
+ */
+export function observedModelName(model: string | undefined | null): string | undefined {
+  const trimmed = model?.trim()
+  if (!trimmed || trimmed === '未知模型') return undefined
+  const selected = trimmed.startsWith('所选：') ? trimmed.slice('所选：'.length).trim() : trimmed
+  return selected && selected !== '未知模型' ? selected : undefined
+}
+
 /** Keep coverage even without timing. Stopped/failed rounds never contribute to metric distributions. */
 export function llmComparisonRounds(rows: readonly LlmPerformanceHistoryRow[], sessions: readonly LlmRunningSession[] = []): LlmComparisonRound[] {
   const rounds: LlmComparisonRound[] = []
@@ -176,9 +187,12 @@ export function llmComparisonRounds(rows: readonly LlmPerformanceHistoryRow[], s
   for (const row of rows) {
     const ts = Date.parse(row.ts)
     if (!Number.isFinite(ts)) continue
+    // 没有模型的一轮没有行可归，也不计入统计（Q7）。
+    const model = observedModelName(row.model)
+    if (!model) continue
     const performance = row.performance
     rounds.push({
-      ts, providerId: row.providerId, model: row.model, state: row.failed ? 'failed' : 'completed',
+      ts, providerId: row.providerId, model, state: row.failed ? 'failed' : 'completed',
       metrics: row.failed ? {} : comparisonMetrics(performance.apiTokensPerSecond, performance.firstTokenMs, performance.firstOutputWaitMs)
     })
   }
@@ -187,7 +201,10 @@ export function llmComparisonRounds(rows: readonly LlmPerformanceHistoryRow[], s
     const ts = Date.parse(session.observedAt)
     if (!Number.isFinite(ts)) continue
     const metrics = comparisonMetrics(session.tokensPerSecond, session.firstTokenMs, session.firstOutputWaitMs)
-    if (Object.keys(metrics).length) rounds.push({ ts, providerId: session.providerId, model: session.model, state: 'running', metrics })
+    // 进行中的一轮还没有模型时保持原样：它没有被持久化，也没有可归的行。
+    if (Object.keys(metrics).length) {
+      rounds.push({ ts, providerId: session.providerId, model: observedModelName(session.model), state: 'running', metrics })
+    }
   }
   return rounds
 }
