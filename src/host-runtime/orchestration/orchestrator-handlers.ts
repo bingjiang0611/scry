@@ -452,3 +452,31 @@ export function isWithdrawableSession(session: SessionProjectionRow): boolean {
   return !session.catalog.preview && session.lastRunId === null && session.title === null &&
     session.pinnedAt === null && session.archivedAt === null && session.conversationId === null
 }
+/** D4: rename, pin and archive are decisions over an existing session, not new rows. */
+export function decideSessionMetadata(
+  cmd: Extract<OrchestrationCommand, {
+    type: 'session.rename' | 'session.pin' | 'session.unpin' | 'session.archive' | 'session.restore'
+  }>,
+  view: OrchestratorReadView
+): DecisionResult {
+  const existing = view.getSession(cmd.payload.sessionKey)
+  if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+  const type = cmd.type === 'session.rename' ? 'session.renamed' : SESSION_TOGGLE_EVENT[cmd.type]
+  const event = makeEvent(cmd, 0, {
+    type,
+    stream: `session:${existing.sessionKey}`,
+    sessionKey: existing.sessionKey,
+    cwd: existing.cwd,
+    payload: cmd.type === 'session.rename'
+      ? { sessionKey: existing.sessionKey, title: cmd.payload.title }
+      : { sessionKey: existing.sessionKey }
+  })
+  return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
+}
+
+const SESSION_TOGGLE_EVENT = {
+  'session.pin': 'session.pinned',
+  'session.unpin': 'session.unpinned',
+  'session.archive': 'session.archived',
+  'session.restore': 'session.restored'
+} as const

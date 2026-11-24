@@ -37,7 +37,8 @@ export interface RunSubmitPayload {
   claimMode: 'immediate' | 'queued'
   leaseOwner?: string
   pendingTtlMs?: number
-  origin?: 'local' | 'remote' | 'system'
+  /** C3: `agent` marks a run the host started to wake the session after background work. */
+  origin?: 'local' | 'remote' | 'system' | 'agent'
   isConversationRun?: boolean
   /** P4-1 shadow writes mark outbox rows done + shadowOnly so P4-2 recovery never dispatches them. */
   shadowOnly?: boolean

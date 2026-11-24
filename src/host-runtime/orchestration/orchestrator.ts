@@ -8,6 +8,7 @@ import {
 import {
   acceptDecision,
   decideCatalogChange,
+  decideSessionMetadata,
   decideRunEffectResult,
   makeEffect,
   makeEvent,
@@ -140,7 +141,8 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
               ordinal,
               ordinalOrigin,
               userTextPreview: truncatePreview(p.userTextPreview ?? p.promptPreview, USER_TEXT_PREVIEW_MAX_CHARS),
-              author: 'user'
+              // C3: an agent wake is not the user's turn.
+              author: p.origin === 'agent' ? 'agent' : 'user'
             }
           })
         )
@@ -413,40 +415,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
     }
 
-    case 'session.rename': {
-      const existing = view.getSession(cmd.payload.sessionKey)
-      if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      const event = makeEvent(cmd, 0, {
-        type: 'session.renamed',
-        stream: `session:${existing.sessionKey}`,
-        sessionKey: existing.sessionKey,
-        cwd: existing.cwd,
-        payload: { sessionKey: existing.sessionKey, title: cmd.payload.title }
-      })
-      return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
-    }
-
+    case 'session.rename':
     case 'session.pin':
     case 'session.unpin':
     case 'session.archive':
-    case 'session.restore': {
-      const existing = view.getSession(cmd.payload.sessionKey)
-      if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      const typeMap = {
-        'session.pin': 'session.pinned',
-        'session.unpin': 'session.unpinned',
-        'session.archive': 'session.archived',
-        'session.restore': 'session.restored'
-      } as const
-      const event = makeEvent(cmd, 0, {
-        type: typeMap[cmd.type],
-        stream: `session:${existing.sessionKey}`,
-        sessionKey: existing.sessionKey,
-        cwd: existing.cwd,
-        payload: { sessionKey: existing.sessionKey }
-      })
-      return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
-    }
+    case 'session.restore':
+      return decideSessionMetadata(cmd, view)
 
     case 'session.discover':
     case 'session.withdraw':
