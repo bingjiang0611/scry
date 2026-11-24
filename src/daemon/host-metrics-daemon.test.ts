@@ -20,7 +20,6 @@ describe('host metrics on a real daemon', () => {
       expect(snapshot.cpu.cores).toBeGreaterThan(0)
       expect(snapshot.cpu.percent === null || (snapshot.cpu.percent >= 0 && snapshot.cpu.percent <= 100)).toBe(true)
       expect(snapshot.memory.totalBytes).toBeGreaterThan(0)
-      // Either the platform read worked, or the field is honestly null.
       expect(snapshot.memory.usedBytes === null || snapshot.memory.usedBytes > 0).toBe(true)
       expect(snapshot.memory.usedBytes === null || snapshot.memory.usedBytes < snapshot.memory.totalBytes).toBe(true)
       expect(snapshot.uptimeSec === null || snapshot.uptimeSec > 0).toBe(true)

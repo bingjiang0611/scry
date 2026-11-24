@@ -15,7 +15,6 @@ export interface ProcessRow {
   comm: string
 }
 
-/** Sums the per-core CPU times `os.cpus()` reports. */
 export function cpuTimesFromCpus(cpus: ReadonlyArray<{ times: Record<string, number> }>): CpuTimes {
   let idle = 0
   let total = 0

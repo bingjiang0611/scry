@@ -73,7 +73,6 @@ export function redactHostMetricsForRemote(snapshot: HostMetricsSnapshot): HostM
   return { ...snapshot, scry: { ...snapshot.scry, daemon } }
 }
 
-/** True when the serialized snapshot stays inside the protocol's 8 KiB bound. */
 export function hostMetricsWithinBound(snapshot: HostMetricsSnapshot): boolean {
   return Buffer.byteLength(JSON.stringify(snapshot), 'utf8') <= HOST_METRICS_MAX_BYTES
 }

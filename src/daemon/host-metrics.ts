@@ -51,7 +51,6 @@ export interface HostMetricsSources {
   swapText(): Promise<string | null>
   /** `ps` table text; null when it failed or timed out. */
   processTable(): Promise<string | null>
-  /** The volumes to report, with the role each one is shown under. */
   diskRoots(): Array<{ role: HostDiskRole; path: string }>
   statfs(path: string): { totalBytes: number; freeBytes: number } | null
   volumeId(path: string): string | null
@@ -125,7 +124,6 @@ export class HostMetricsSampler {
   async #assemble(sampledAt: number, cpuPercent: number | null): Promise<HostMetricsSnapshot> {
     const sources = this.#sources
     // 四个外部读取互不依赖：并行跑，一次采样的耗时才是最慢那一个，而不是四个相加。
-    // ps 已经降优先级（nice），并行不会抢运行启动的 CPU。
     const [memoryText, pressureText, swapText, processTable] = await Promise.all([
       attempt(() => sources.memoryText()),
       attempt(() => sources.pressureText()),

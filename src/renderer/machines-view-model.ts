@@ -85,7 +85,6 @@ export function runsText(runs: HostMetricsSnapshot['runs']): string {
   return `进行中 ${runs.active} · 排队 ${queued}`
 }
 
-/** 「10 核 · 开机 3 天 · 运行中 2」 */
 export function hostSummary(snapshot: HostMetricsSnapshot): string {
   const running = snapshot.runs.active === 0 ? '没有运行' : `运行中 ${snapshot.runs.active}`
   return `${snapshot.cpu.cores} 核 · ${formatUptime(snapshot.uptimeSec)} · ${running}`
