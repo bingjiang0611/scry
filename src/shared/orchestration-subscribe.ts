@@ -125,6 +125,8 @@ export interface SubscribeActiveRunRow {
   queuePosition?: number | null
   /** D1: the queue entry is held (a stop or an explicit hold) and will not dispatch on its own. */
   queueHeld?: boolean
+  /** D5: the host has a checkpoint for this run, so rolling it back is possible. */
+  hasCheckpoint?: boolean
 }
 
 export interface SubscribeEventItem {

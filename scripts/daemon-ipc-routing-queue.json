@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "channels": [
+    {
+      "channel": "agent:hostQueue",
+      "route": "new-op",
+      "op": "hostQueue",
+      "method": "hostQueue",
+      "why": "D1 队列在宿主：App 读宿主持有的队列，而不是自己重建",
+      "path": "navigation"
+    },
+    {
+      "channel": "agent:rollbackRun",
+      "route": "new-op",
+      "op": "checkpoints",
+      "method": "rollbackRun",
+      "path": "controls",
+      "why": "D5 倒回会改工作树，只能由持有 git 与检查点的宿主执行"
+    }
+  ]
+}

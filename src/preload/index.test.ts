@@ -116,6 +116,7 @@ const invokeChannels = {
   watchSessionDetail: 'agent:watchSessionDetail',
   activeRuns: 'agent:activeRuns',
   hostQueue: 'agent:hostQueue',
+  rollbackRun: 'agent:rollbackRun',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',
   focusRun: 'agent:focusRun',
   setLegacyDiffPreviewDemand: 'runTraces:setLegacyDemand',

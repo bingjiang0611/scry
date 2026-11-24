@@ -280,6 +280,16 @@
       "scopes": [
         "local"
       ]
+    },
+    "checkpoints": {
+      "path": "controls",
+      "request": "{ op:'checkpoints', method:'rollbackRun', args:[{ runId, reason? }] }",
+      "response": "倒回结果：恢复到的检查点、重置了哪些工作树，或拒绝原因",
+      "authorize": "本机 grant；只接受纯 run id，工作树是否可重置由检查点服务判定",
+      "why": "D5 检查点与 git ref 在宿主，工作树也在宿主",
+      "scopes": [
+        "local"
+      ]
     }
   }
 }

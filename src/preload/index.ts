@@ -205,6 +205,8 @@ const api = {
     ipcRenderer.invoke('agent:setCwd', ...(clearIfMissing ? [dir, true] : [dir])),
   // D1: the host's queue for one session, in the order it will dispatch them.
   hostQueue: (request: HostQueueRequest): Promise<HostQueueAnswer> => ipcRenderer.invoke('agent:hostQueue', request),
+  // D5: rewrite a run's worktree back to its checkpoint. The host decides what may be reset.
+  rollbackRun: (runId: string): Promise<unknown> => ipcRenderer.invoke('agent:rollbackRun', { runId }),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   forkSession: (request: AgentForkSessionRequest): Promise<AgentForkSessionResult> => ipcRenderer.invoke('agent:forkSession', request),
   invalidateProviderContext: (context: ProviderContext): Promise<true> => ipcRenderer.invoke('agent:invalidateProviderContext', context),

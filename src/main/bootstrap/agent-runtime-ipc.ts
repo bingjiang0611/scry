@@ -48,6 +48,15 @@ export function registerAgentRuntimeHandlers({
   handleTrusted('agent:hostQueue', async (_e, request: unknown) => {
     return await daemon.localOp({ op: 'hostQueue', method: 'hostQueue', args: [hostQueueRequest(request)], read: true })
   })
+  // D5: rolling back rewrites the run's worktree, so the run id is validated here and the decision
+  // about which worktrees may be reset stays with the host's checkpoint service.
+  handleTrusted('agent:rollbackRun', async (_e, request: unknown) => {
+    const value = (request ?? {}) as { runId?: unknown; reason?: unknown }
+    if (typeof value.runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.runId)) throw new Error('invalid_run_id')
+    if (value.reason !== undefined && (typeof value.reason !== 'string' || value.reason.length > 512)) throw new Error('invalid_reason')
+    const args = [{ runId: value.runId, ...(typeof value.reason === 'string' && value.reason ? { reason: value.reason } : {}) }]
+    return await daemon.localOp({ op: 'checkpoints', method: 'rollbackRun', args, read: false })
+  })
   let detailOwner: IpcMainInvokeEvent['sender'] | undefined
   const clearDetailOwner = () => { detailOwner = undefined; daemon.watchDetail?.(null) }
   handleTrusted('agent:watchSessionDetail', (event, key: unknown): boolean => {

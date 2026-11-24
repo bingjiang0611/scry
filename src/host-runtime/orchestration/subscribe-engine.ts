@@ -345,7 +345,10 @@ export class SubscribeEngine {
       revSeq: run.revSeq,
       // D1: the queue lives on the host, so every client reads the same positions and holds.
       ...(run.queuePosition === null || run.queuePosition === undefined ? {} : { queuePosition: run.queuePosition }),
-      ...(run.queueHeld ? { queueHeld: true } : {})
+      ...(run.queueHeld ? { queueHeld: true } : {}),
+      // D5: whether the host can roll this run back. The renderer must not offer an op it cannot
+      // complete, and it has no other way to know a checkpoint exists.
+      ...(run.checkpointRef ? { hasCheckpoint: true } : {})
     }
   }
 
