@@ -87,7 +87,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
   const initializedControlsContext = useRef<string | undefined>(undefined)
   const [turns, setTurns] = useState<Turn[]>(() => preparedHistory?.status === 'ready' ? historyTurns(preparedHistory.history) : [])
   const [selected, setSelected] = useState<TraceEvent | null>(null)
-  const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot'> | null>(preparedHistory?.status === 'ready' ? preparedHistory.history : null)
+  const [historyEvidence, setHistoryEvidence] = useState<Pick<DesktopRemoteHistory, 'status' | 'reason' | 'hasOlder' | 'before' | 'snapshot' | 'detailCursor'> | null>(preparedHistory?.status === 'ready' ? preparedHistory.history : null)
   const [historyLoading, setHistoryLoading] = useState(preparedHistory?.status === 'loading')
   const [historyRevision, setHistoryRevision] = useState(0)
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)
@@ -162,6 +162,7 @@ export function useRemoteChatFoundation({ connectionId, cwd, session, preparedHi
     setHistoryEvidence({
       status: preparedHistory.history.status, reason: preparedHistory.history.reason,
       hasOlder: preparedHistory.history.hasOlder, before: preparedHistory.history.before,
+      detailCursor: preparedHistory.history.detailCursor,
       snapshot: preparedHistory.history.snapshot
     })
     presentedHistoryContext.current = context
