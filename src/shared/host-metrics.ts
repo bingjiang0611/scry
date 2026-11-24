@@ -1,7 +1,7 @@
 // Host metrics (P8 机器管理): what one machine reports about its own resources.
 // Sampled on demand by the daemon, cached briefly, and redacted before a paired
 // device or another Desktop may read it.
-//
+
 // Every unreadable number is `null`, never 0: "we could not read the swap" and
 // "the machine has no swap in use" are different facts and must not look alike.
 
@@ -10,7 +10,6 @@ export type HostMemoryPressure = 'low' | 'medium' | 'high'
 export type HostDiskRole = 'data' | 'workspace'
 
 // Provider id, or 'other' for a descendant whose provider cannot be named
-// (P8 §3: an unattributable child counts as 「其他」, never as a Provider).
 export interface HostProviderUsage {
   providerId: string
   processes: number
@@ -55,11 +54,9 @@ export interface HostMetricsSnapshot {
 export const HOST_METRICS_CACHE_MS = 5_000
 /** Two real samples are never closer than this, however often the page refreshes. */
 export const HOST_METRICS_MIN_INTERVAL_MS = 2_000
-/** The daemon reads the CPU twice on a cold start, 500 ms apart (P8 §4). */
 export const HOST_METRICS_COLD_CPU_GAP_MS = 500
 /** A single answer never exceeds this; the sampler caps its own provider rows. */
 export const HOST_METRICS_MAX_BYTES = 8 * 1024
-/** Resource-bar thresholds shared by every machine card (P8: 70% / 85%). */
 export const HOST_METRICS_WARN_PERCENT = 70
 export const HOST_METRICS_DANGER_PERCENT = 85
 

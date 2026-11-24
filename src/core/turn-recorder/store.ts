@@ -28,10 +28,6 @@ export interface RecorderHealth {
   oldestPendingAgeMs: number
   openTurns: number
   staleOpenTurns: number
-  /**
-   * Sessions every pass fails the same way, so a reader does not mistake them for quiet work. Their
-   * evidence is untouched and they are retried hourly; see `session-failures.ts`.
-   */
   suspendedSessions?: number
   recoveredRecords: number
 }

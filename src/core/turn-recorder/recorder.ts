@@ -135,8 +135,6 @@ async function recoverySessions(
 ): Promise<{ sessions: Array<{ provider: ProviderId; sessionDir: string }>; failures: SessionFailureLedger }> {
   const failures = await readSessionFailures(dataRoot)
   const suspended = suspendedSessionKeys(failures)
-  // A suspended session is retried hourly, not every pass: repeating a failure it has no new
-  // evidence for is what kept the whole pass from finishing.
   const visitable = (sessions: Array<{ provider: ProviderId; sessionDir: string }>) =>
     sessions.filter(session => !suspended.has(sessionFailureKey(session.provider, basename(session.sessionDir))))
   if (scope) {
@@ -302,7 +300,6 @@ export async function recoverRecorder(
         else if (result.status === 'committed' || result.status === 'duplicate') {
           recovered++
           if (forcedExpiry) expired++
-          // The session finished its work, so earlier failures were transient after all.
           await clearSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), {
             present: sessionFailureKey(item.provider, basename(item.sessionDir)) in failures
           }).catch(() => undefined)
@@ -313,7 +310,6 @@ export async function recoverRecorder(
         if (!isLockTimeout(error)) {
           await updateHealth(enablement.dataRoot, { lastError: { at: new Date().toISOString(), message } }).catch(() => undefined)
           // A busy peer is not a broken session: it clears itself as soon as the lock is released.
-          // Neither is a read error inside the turn: only an unusable entry is skipped for good.
           if (isUnusableSessionError(error)) {
             await noteSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), error).catch(() => undefined)
           }

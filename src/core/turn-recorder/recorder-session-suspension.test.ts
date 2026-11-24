@@ -63,7 +63,6 @@ describe('one unreadable session does not take the recovery pass with it', () =>
   it('finishes the sessions behind the broken one and reports a nonzero recovery count', async () => {
     const f = await fixture()
     await f.seedClosableTurn('codex', 's-healthy')
-    // Entry order is whatever the filesystem returns; the healthy session must not depend on it.
     await f.unreadableSession(BROKEN)
 
     await expect(recoverRecorder(f.root, f.env, undefined, undefined, INCREMENTAL))
@@ -83,7 +82,6 @@ describe('one unreadable session does not take the recovery pass with it', () =>
 
     await expect(recorderPendingHealth(f.dataRoot)).resolves.toMatchObject({ openTurns: 1, pendingCount: 1 })
     await expect(recoverRecorder(f.root, f.env, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ recovered: 1 })
-    // The healthy turn is finished; the unreadable session does not stop the report from being read.
     await expect(recorderPendingHealth(f.dataRoot)).resolves.toMatchObject({ openTurns: 0 })
   })
 })
@@ -103,7 +101,6 @@ describe('a session that repeats the same failure stops being retried', () => {
     expect(suspended.failures).toBe(3)
     expect(suspended.suspendedAt).toEqual(expect.any(String))
 
-    // The fourth pass skips it: no new failure and no new attempt.
     await recoverRecorder(f.root, f.env, undefined, undefined, INCREMENTAL)
     expect((await ledger(f.dataRoot))[`codex__${BROKEN}`]).toEqual(suspended)
     expect(await readHealth(f.dataRoot)).toMatchObject({ suspendedSessions: 1 })
@@ -152,8 +149,6 @@ describe('a session that repeats the same failure stops being retried', () => {
     await recoverRecorder(f.root, f.env, undefined, undefined, INCREMENTAL)
     expect((await ledger(f.dataRoot))[`codex__${safeKey('s-heal')}`].failures).toBeGreaterThanOrEqual(1)
 
-    // The directory becomes readable again and the session commits a turn, so the earlier failures
-    // were a transient condition and must not keep counting toward a suspension.
     await rm(join(dir, 'turns'))
     await f.seedClosableTurn('codex', 's-heal')
     await expect(recoverRecorder(f.root, f.env, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ recovered: 1 })

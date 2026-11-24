@@ -244,7 +244,6 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
             }
           })
         }
-        // Readable again: whatever it failed on before was transient after all.
         await clearSessionFailure(dataRoot, provider, sessionKey, { present: key in failures })
       } catch (error) {
         // One unreadable session must not starve the rebuild for every other one; readiness waits.
@@ -424,8 +423,6 @@ export async function recorderPendingHealth(
   const { sessions, suspendedSessions } = await sessionsToVisit(dataRoot)
   for (const session of sessions) {
     const root = session.sessionDir
-    // One unusable session must not hide the health of every other one. Health runs once per pass,
-    // so this is the one place that can count a repeated failure without double counting it.
     try {
       for (const entry of await recorderInboxEntries(root)) {
         pendingCount++
@@ -453,7 +450,6 @@ export async function recorderPendingHealth(
         if (open.status === 'open' && !open.managedByScry && silence >= STALE_OPEN_TURN_QUIET_MS) staleOpenTurns++
       }
     } catch (error) {
-      // A read error inside a turn is evidence we could not inspect, not an entry we can skip.
       if (!isUnusableSessionError(error)) throw error
       await noteSessionFailure(dataRoot, session.provider, session.sessionKey, error).catch(() => undefined)
     }
@@ -484,7 +480,6 @@ export async function recorderStaleOpenTurns(
     return table
   }
   for (const { provider, sessionDir } of (await sessionsToVisit(dataRoot)).sessions) {
-    // A diagnostic listing reports the sessions it can read; one broken session is not the answer.
     try {
       const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
       if (!open || open.status !== 'open' || open.managedByScry) continue
@@ -506,8 +501,6 @@ export async function recorderStaleOpenTurns(
         host: await hostProcessState(open.host, await hostTable())
       })
     } catch (error) {
-      // Skipped here only when the entry itself is unusable; the pass records the failure that
-      // suspends it. A turn that failed to read may still change a verdict, so it stays loud.
       if (!isUnusableSessionError(error)) throw error
     }
   }
