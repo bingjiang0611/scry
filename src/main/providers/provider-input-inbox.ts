@@ -1,29 +1,27 @@
-import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-
 /**
- * One durable input channel per kept-alive Claude session.
+ * One durable input channel per kept-alive Provider session.
  *
- * The SDK only keeps a session alive when `prompt` is an async iterable: with a string it starts a
- * session, answers, and exits. Two turns therefore share one iterator, which means exactly one
- * consumer per turn and a strict handoff — a second `next()` in flight would interleave two turns'
- * messages, so the queue refuses it instead of guessing.
+ * The Claude and Qoder SDKs only keep a session alive when `prompt` is an async iterable: with a
+ * string they start a session, answer, and exit. Two turns therefore share one iterator, which means
+ * exactly one consumer per turn and a strict handoff — a second `next()` in flight would interleave
+ * two turns' messages, so the queue refuses it instead of guessing.
  */
-export interface ClaudeInputInbox extends AsyncIterable<SDKUserMessage> {
-  push(message: SDKUserMessage): void
+export interface ProviderInputInbox<TMessage> extends AsyncIterable<TMessage> {
+  push(message: TMessage): void
   /** Ends the stream and releases a pending read; used on release and on interrupt-before-input. */
   close(): void
   readonly closed: boolean
 }
 
-export class ClaudeInputInboxBusyError extends Error {
+export class ProviderInputInboxBusyError extends Error {
   constructor() {
-    super('claude_session_input_busy')
-    this.name = 'ClaudeInputInboxBusyError'
+    super('provider_session_input_busy')
+    this.name = 'ProviderInputInboxBusyError'
   }
 }
 
-export function createClaudeInputInbox(): ClaudeInputInbox {
-  const queue: SDKUserMessage[] = []
+export function createProviderInputInbox<TMessage>(): ProviderInputInbox<TMessage> {
+  const queue: TMessage[] = []
   let readPending: (() => void) | undefined
   let closed = false
   let reading = false
@@ -48,7 +46,7 @@ export function createClaudeInputInbox(): ClaudeInputInbox {
       wake()
     },
     async *[Symbol.asyncIterator]() {
-      if (reading) throw new ClaudeInputInboxBusyError()
+      if (reading) throw new ProviderInputInboxBusyError()
       reading = true
       try {
         while (!closed) {
