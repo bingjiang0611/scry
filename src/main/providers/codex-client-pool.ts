@@ -10,6 +10,25 @@ import { codexMcpConfig } from './codex-mcp-config'
 import type { AuthorizedMcpExecution } from './types'
 import { ContinuationIdentityUnavailable, codexContinuationKey } from './continuation-identity'
 
+/** C1: a Codex app-server stays for the idle window, then the pool releases it with a reason. */
+export const CODEX_IDLE_MIN_MS = 15 * 60_000
+export const CODEX_IDLE_MAX_MS = 30 * 60_000
+export const CODEX_IDLE_DEFAULT_MS = 20 * 60_000
+export const CODEX_CLIENT_CAP = 8
+
+export function codexIdleWindowMs(env: Readonly<Record<string, string | undefined>>): number {
+  const raw = Number(env.SCRY_CODEX_IDLE_MS)
+  if (!Number.isFinite(raw) || raw <= 0) return CODEX_IDLE_DEFAULT_MS
+  return Math.min(CODEX_IDLE_MAX_MS, Math.max(CODEX_IDLE_MIN_MS, raw))
+}
+
+/** Released facts, not log lines: the host stores these as the session's lifecycle. */
+export interface CodexSessionObserver {
+  onOpened?: (key: string, provider: 'codex', at: number) => void
+  onNativeSessionId?: (key: string, nativeSessionId: string) => void
+  onReleased?: (key: string, reason: 'idle' | 'lru' | 'dispose', at: number) => void
+}
+
 /**
  * Codex app-server clients are expensive: one process owns threads, MCP servers and hook state.
  * The pool keeps one client per (cwd, hook trust, MCP, continuation identity, history reader) key,
@@ -50,14 +69,22 @@ export interface CodexClientPool {
   ensureIsolatedHome: (sourceHome: string) => ReturnType<typeof createCodexIsolatedHome>
   /** The isolated home the pool materialised, if any; identity checks read the same value. */
   isolatedState: () => { home: ReturnType<typeof createCodexIsolatedHome> | undefined; sourceHome: string | undefined }
+  /** C1: the thread this client carries, reported once the app-server names it. */
+  recordNativeSession: (client: CodexAppServerClient, threadId: string) => void
   closeAll: () => Promise<void>
 }
 
 export function createCodexClientPool(options: {
   isolatedHomePath?: string
   homeDir: string
+  sessions?: CodexSessionObserver
+  /** Tests pin the window; production reads the C1 clamp from the environment. */
+  idleWindowMs?: number
+  maxClients?: number
 }): CodexClientPool {
-  const { isolatedHomePath, homeDir } = options
+  const { isolatedHomePath, homeDir, sessions } = options
+  const CLIENT_IDLE_MS = options.idleWindowMs ?? codexIdleWindowMs(process.env)
+  const CLIENT_CAP = options.maxClients ?? CODEX_CLIENT_CAP
   const clients = new Map<string, CodexAppServerClient>()
 const clientActivity = new Map<CodexAppServerClient, number>()
 /** A5：每个共享 client 上正在进行的 run 数；硬杀只回收计数为 1 的 client。 */
@@ -71,7 +98,6 @@ const releaseClientFiles = (client: CodexAppServerClient): void => {
   clientFiles.delete(client)
   dispose?.()
 }
-const CLIENT_IDLE_MS = 60_000
 let lastClient: CodexAppServerClient | null = null
 let lastOkAt: number | undefined
 let lastErrorAt: number | undefined
@@ -104,13 +130,21 @@ const ensureIsolatedHome = (sourceHome: string): ReturnType<typeof createCodexIs
   isolatedSourceHome = sourceHome
   return isolatedHome
 }
+const keyOf = (client: CodexAppServerClient): string | undefined => {
+  for (const [key, cached] of clients) if (cached === client) return key
+  return undefined
+}
+const releaseReason = new WeakMap<CodexAppServerClient, 'idle' | 'lru' | 'dispose'>()
 const evictIdleClients = (protectedClient?: CodexAppServerClient): void => {
   const unique = [...new Set(clients.values())]
-  if (unique.length <= 3) return
+  if (unique.length <= CLIENT_CAP) return
   const idle = unique
     .filter((client) => client !== protectedClient && (clientActivity.get(client) ?? 0) === 0)
     .sort((left, right) => (clientLastUsed.get(left) ?? 0) - (clientLastUsed.get(right) ?? 0))
-  for (const client of idle.slice(0, Math.max(0, unique.length - 3))) void shutdownClient(client)
+  for (const client of idle.slice(0, Math.max(0, unique.length - CLIENT_CAP))) {
+    releaseReason.set(client, 'lru')
+    void shutdownClient(client)
+  }
 }
 const scheduleClientShutdown = (client: CodexAppServerClient): void => {
   const previous = clientIdleTimers.get(client)
@@ -121,6 +155,7 @@ const scheduleClientShutdown = (client: CodexAppServerClient): void => {
       scheduleClientShutdown(client)
       return
     }
+    releaseReason.set(client, 'idle')
     void shutdownClient(client)
   }, CLIENT_IDLE_MS)
   timer.unref()
@@ -209,6 +244,7 @@ const getClient = (
   }
   if (mcp.dispose) clientFiles.set(client, mcp.dispose)
   clients.set(key, client)
+  sessions?.onOpened?.(key, 'codex', Date.now())
   clientLastUsed.set(client, Date.now())
   lastClient = client
   evictIdleClients(client)
@@ -223,9 +259,11 @@ const shutdownClient = async (client: CodexAppServerClient): Promise<void> => {
   clientActiveRuns.delete(client)
   clientLastUsed.delete(client)
   let registered = false
+  let keyOfReleasedClient: string | undefined
   for (const [key, cached] of clients) {
     if (cached !== client) continue
     registered = true
+    keyOfReleasedClient = key
     clients.delete(key)
   }
   if (lastClient === client) lastClient = null
@@ -233,6 +271,10 @@ const shutdownClient = async (client: CodexAppServerClient): Promise<void> => {
     if (registered) await client.shutdown()
   } finally {
     releaseClientFiles(client)
+    if (registered) {
+      sessions?.onReleased?.(keyOfReleasedClient ?? '', releaseReason.get(client) ?? 'dispose', Date.now())
+      releaseReason.delete(client)
+    }
   }
 }
 
@@ -279,6 +321,10 @@ const request = async <T>(
     sourceHomeFor,
     ensureIsolatedHome,
     isolatedState: () => ({ home: isolatedHome, sourceHome: isolatedSourceHome }),
+    recordNativeSession: (client, threadId) => {
+      const key = keyOf(client)
+      if (key) sessions?.onNativeSessionId?.(key, threadId)
+    },
     closeAll: async () => {
       for (const client of [...new Set(clients.values())]) await shutdownClient(client)
     }

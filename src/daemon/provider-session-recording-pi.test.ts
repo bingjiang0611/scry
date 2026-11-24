@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { readProviderSessions } from '../host-runtime/orchestration/provider-session-records'
-import { createPiSessionObserver } from './provider-session-recording'
+import { createProcessSessionObserver } from './provider-session-recording'
 
 let dirs: string[] = []
 afterEach(() => {
@@ -21,7 +21,7 @@ describe('Pi session recording', () => {
     dirs.push(userData)
     const sink = EventSink.open({ userDataDir: userData })
     try {
-      const observer = createPiSessionObserver(() => sink)
+      const observer = createProcessSessionObserver(() => sink)
       observer.onOpened('pi:native-1', 'pi', 1_700_000_000_000)
       observer.onNativeSessionId('pi:native-1', 'native-1')
       observer.onReleased('pi:native-1', 'idle', 1_700_000_600_000)
@@ -37,7 +37,7 @@ describe('Pi session recording', () => {
   })
 
   it('records nothing while the authority is unavailable', () => {
-    const observer = createPiSessionObserver(() => undefined)
+    const observer = createProcessSessionObserver(() => undefined)
     expect(() => observer.onOpened('pi:native-2', 'pi', 1)).not.toThrow()
     expect(() => observer.onReleased('pi:native-2', 'evicted', 2)).not.toThrow()
   })

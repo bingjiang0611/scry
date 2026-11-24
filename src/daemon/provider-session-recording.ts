@@ -17,10 +17,14 @@ import type { AntigravityProcessSession } from '../main/providers/antigravity-se
  * the Antigravity host. The rows land in the same table, so both providers' release reasons read
  * the same way.
  */
-export function createPiSessionObserver(
+/**
+ * C1: any Provider that keeps a process reports its pool lifecycle here, so "reused" and
+ * "released because idle" are stored facts instead of log lines.
+ */
+export function createProcessSessionObserver(
   getSink: () => Pick<EventSink, 'handle' | 'isWriteIndeterminate'> | undefined
 ): {
-  onOpened: (key: string, provider: 'pi', at: number) => void
+  onOpened: (key: string, provider: 'pi' | 'codex', at: number) => void
   onNativeSessionId: (key: string, nativeSessionId: string) => void
   onReleased: (key: string, reason: string, at: number) => void
 } {
@@ -69,7 +73,11 @@ export function createDaemonProviderSessions(
   })
 }
 
-/** C1: both Provider session observers read the same authority, so the host builds them together. */
+/** C1: every Provider session observer reads the same authority, so the host builds them together. */
 export function createProviderSessionObservers(getSink: () => EventSink | undefined) {
-  return { providerSessions: createDaemonProviderSessions(getSink), piSessions: createPiSessionObserver(getSink) }
+  return {
+    providerSessions: createDaemonProviderSessions(getSink),
+    piSessions: createProcessSessionObserver(getSink),
+    codexSessions: createProcessSessionObserver(getSink)
+  }
 }

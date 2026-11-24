@@ -37,9 +37,10 @@ import {
 // Root items that run a tool the model called. Their completion is tool activity, not model output.
 export function createCodexAdapter(
   isolatedHomePath?: string,
-  homeDir = homedir()
+  homeDir = homedir(),
+  sessions?: import('./codex-client-pool').CodexSessionObserver
 ): ProviderAdapter {
-  const pool = createCodexClientPool({ isolatedHomePath, homeDir })
+  const pool = createCodexClientPool({ isolatedHomePath, homeDir, sessions })
   const { getClient, shutdownClient, request, clientActivity, clientActiveRuns, executable, runtimeEnvironment, sourceHomeFor } = pool
   const modelCache = new Map<string, { data: AgentRunControlCatalog; observedAt: number }>()
   const forcedSkillReloads = new Map<string, number>()
@@ -197,7 +198,8 @@ export function createCodexAdapter(
       clientActivity,
       clientActiveRuns,
       modelCache,
-      skills
+      skills,
+      onNativeThread: pool.recordNativeSession
     }),
     invalidateContext(context) {
       const key = context.cwd ?? ''

@@ -6,9 +6,8 @@ import { createSessionState, createMirrorSessionTranscript } from '../main/boots
 import { createWorkspaceRuntime } from '../main/bootstrap/workspace-runtime'
 import { createSessionCatalog } from '../main/bootstrap/session-catalog'
 import { createPiProfileRuntime } from '../main/bootstrap/pi-profiles'
-import { createProviderRuntime } from '../main/bootstrap/provider-runtime'
+import { createDaemonProviderRuntime } from './host-provider-runtime'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
-import { createProviderSessionObservers } from './provider-session-recording'
 import { runStartupRecovery } from '../main/bootstrap/startup-recovery'
 import { configureRecorderCliRuntime, warmShellEnv } from '../main/claude-locate'
 import { configureRunStageTiming } from '../main/run-stage-timing'
@@ -100,10 +99,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   const pi = createPiProfileRuntime({ userDataDir: options.userDataDir })
   // C1: session lifetime is daemon-owned so the release reason can be stored.
   let userDataAuthority: EventSink | undefined
-  const { providerSessions, piSessions } = createProviderSessionObservers(() => userDataAuthority)
-  const providers = createProviderRuntime({
-    providerSessions,
-    piSessions,
+  const providers = createDaemonProviderRuntime({
     homeDir: workspace.homeDir,
     userDataDir: options.userDataDir,
     appPath: options.appPath,
@@ -111,7 +107,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appVersion: options.appVersion,
     isPackaged: options.isPackaged,
     listPiProfiles: pi.listPiProfiles,
-    resolvePiProfile: pi.resolvePiProfile
+    resolvePiProfile: pi.resolvePiProfile,
+    authority: () => userDataAuthority
   })
 
   // The conversation service records its sends as ledger intents (P3-conversation-send.md);

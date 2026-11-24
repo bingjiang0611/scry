@@ -48,6 +48,7 @@ vi.mock('../claude-locate', () => ({
 }))
 
 import { codexMcpConfig, createCodexAdapter } from './codex'
+import { CODEX_IDLE_DEFAULT_MS } from './codex-client-pool'
 import { sweepStalePrivateMcpConfigs } from './private-mcp-config'
 import { authorizedMcpExecution, ensureMcpExecutionAuthorized } from '../bootstrap/trust'
 
@@ -139,8 +140,9 @@ describe('Codex MCP configuration on the app-server argv', () => {
     const file = envFileOf(generatedServers(appServer.options.at(-1)!.args).local)
     expect(file).toBeDefined()
 
+    // C1: the pooled client lives for the 20-minute idle window, so the file must survive until then.
     // The pooled client may restart the server until it is shut down.
-    await vi.advanceTimersByTimeAsync(59_000)
+    await vi.advanceTimersByTimeAsync(CODEX_IDLE_DEFAULT_MS - 1_000)
     expect(existsSync(file!)).toBe(true)
     await vi.advanceTimersByTimeAsync(1_000)
     await new Promise((resolve) => setImmediate(resolve))

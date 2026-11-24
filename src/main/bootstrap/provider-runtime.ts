@@ -21,6 +21,12 @@ export function createProviderRuntime(deps: {
   providerSessions?: ProviderSessionHost<AntigravityProcessSession>
   /** C1: Pi reports its pool lifecycle here so open/release reasons are stored, not logged. */
   piSessions?: PiSessionObserver
+  /** C1: Codex reports its app-server pool lifecycle for the same reason. */
+  codexSessions?: {
+    onOpened?: (key: string, provider: 'codex', at: number) => void
+    onNativeSessionId?: (key: string, nativeSessionId: string) => void
+    onReleased?: (key: string, reason: string, at: number) => void
+  }
   homeDir: string
   userDataDir: string
   appPath: string
@@ -70,7 +76,8 @@ export function createProviderRuntime(deps: {
       ...(deps.piSessions ? { sessions: deps.piSessions } : {})
     },
     userDataDir,
-    providerSessions
+    providerSessions,
+    deps.codexSessions
   )
   /**
    * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；

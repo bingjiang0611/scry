@@ -31,11 +31,17 @@ export function createBuiltInProviderAdapters(
   },
   userDataDir?: string,
   /** Scry C1: daemon-owned Provider session host shared by adapters that can keep a process. */
-  providerSessions?: ProviderSessionHost<AntigravityProcessSession>
+  providerSessions?: ProviderSessionHost<AntigravityProcessSession>,
+  /** C1: Codex keeps one app-server per session key and reports open/release here. */
+  codexSessions?: {
+    onOpened?: (key: string, provider: 'codex', at: number) => void
+    onNativeSessionId?: (key: string, nativeSessionId: string) => void
+    onReleased?: (key: string, reason: string, at: number) => void
+  }
 ): ProviderAdapter[] {
   return withDeclaredCapabilities([
     createClaudeAdapter(homeDir),
-    createCodexAdapter(codexHomeDir, homeDir),
+    createCodexAdapter(codexHomeDir, homeDir, codexSessions),
     createQoderAdapter(homeDir),
     createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : []),

@@ -59,6 +59,7 @@ export interface CodexRunDeps {
   clientActivity: Map<CodexAppServerClient, number>
   clientActiveRuns: Map<CodexAppServerClient, number>
   modelCache: Map<string, { data: unknown; observedAt: number }>
+  onNativeThread?: (client: CodexAppServerClient, threadId: string) => void
   skills: {
     list: (
       context: ProviderContext,
@@ -69,7 +70,7 @@ export interface CodexRunDeps {
 }
 
 export function createCodexRun(deps: CodexRunDeps) {
-  const { request, getClient, shutdownClient, scheduleClientShutdown, clientActivity, clientActiveRuns, skills } = deps
+  const { request, getClient, shutdownClient, scheduleClientShutdown, clientActivity, clientActiveRuns, skills, onNativeThread } = deps
   return (runRequest: ProviderRunRequest): ProviderRunHandle => {
     const history = new HistoricalInput(runRequest)
     const state: CodexTurnState = {
@@ -261,6 +262,8 @@ export function createCodexRun(deps: CodexRunDeps) {
               runRequest.historyReader
             )
         state.externalSessionId = thread.thread.id
+        // C1: this client now carries a named thread; the pool reports it as the session's native id.
+        onNativeThread?.(appServer, thread.thread.id)
         history.verifySession(state.externalSessionId)
         if (runRequest.historyReader) {
           const statuses = codexMcpStatus(await appServer.request('mcpServerStatus/list', { threadId: state.externalSessionId, detail: 'full' }))
