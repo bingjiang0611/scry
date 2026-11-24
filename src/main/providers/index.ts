@@ -11,6 +11,7 @@ import { createOpenCodeAdapter } from './opencode'
 import { createPiAdapter } from './pi'
 import type { PiRunDiagnostics } from './pi-run-diagnostics'
 import type { PiAgentProfile } from '../pi-agent-profiles'
+import type { SessionLifecycleObserver } from './session-pool-policy'
 
 export function createBuiltInProviderAdapters(
   homeDir: string,
@@ -33,17 +34,15 @@ export function createBuiltInProviderAdapters(
   /** Scry C1: daemon-owned Provider session host shared by adapters that can keep a process. */
   providerSessions?: ProviderSessionHost<AntigravityProcessSession>,
   /** C1: Codex keeps one app-server per session key and reports open/release here. */
-  codexSessions?: {
-    onOpened?: (key: string, provider: 'codex', at: number) => void
-    onNativeSessionId?: (key: string, nativeSessionId: string) => void
-    onReleased?: (key: string, reason: string, at: number) => void
-  }
+  codexSessions?: SessionLifecycleObserver,
+  /** C1: OpenCode keeps one server per workspace and reports the same lifecycle. */
+  openCodeSessions?: SessionLifecycleObserver
 ): ProviderAdapter[] {
   return withDeclaredCapabilities([
     createClaudeAdapter(homeDir),
     createCodexAdapter(codexHomeDir, homeDir, codexSessions),
     createQoderAdapter(homeDir),
-    createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
+    createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory, openCodeSessions),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : []),
     ...(isExperimentalProviderEnabled('antigravity')
       ? [createAntigravityAdapter(homeDir, { userDataDir, sessions: providerSessions })]

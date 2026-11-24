@@ -19,11 +19,13 @@ export function createDaemonProviderRuntime(options: {
   listPiProfiles: () => Promise<PiAgentProfile[]>
   resolvePiProfile: (id: string) => Promise<PiAgentProfile | undefined>
 }) {
-  const { providerSessions, piSessions, codexSessions } = createProviderSessionObservers(options.authority)
+  const { providerSessions, piSessions, codexSessions, openCodeSessions } =
+    createProviderSessionObservers(options.authority)
   return createProviderRuntime({
     providerSessions,
     piSessions,
     codexSessions,
+    openCodeSessions,
     homeDir: options.homeDir,
     userDataDir: options.userDataDir,
     appPath: options.appPath,

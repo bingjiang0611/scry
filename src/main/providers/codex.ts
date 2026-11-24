@@ -38,7 +38,7 @@ import {
 export function createCodexAdapter(
   isolatedHomePath?: string,
   homeDir = homedir(),
-  sessions?: import('./codex-client-pool').CodexSessionObserver
+  sessions?: import('./session-pool-policy').SessionLifecycleObserver
 ): ProviderAdapter {
   const pool = createCodexClientPool({ isolatedHomePath, homeDir, sessions })
   const { getClient, shutdownClient, request, clientActivity, clientActiveRuns, executable, runtimeEnvironment, sourceHomeFor } = pool

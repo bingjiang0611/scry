@@ -10,6 +10,12 @@ import {
   type OpenCodeServerState
 } from './opencode-server'
 import type { AuthorizedMcpExecution } from './types'
+import {
+  SESSION_POOL_CAP,
+  sessionIdleWindowMs,
+  type SessionLifecycleObserver,
+  type SessionReleaseReason
+} from './session-pool-policy'
 
 /**
  * One OpenCode server per canonical cwd, shared by every conversation in that
@@ -60,8 +66,15 @@ export interface OpenCodeServerPool {
 export function createOpenCodeServerPool(
   executable: () => string | undefined,
   privateMcpAuthDirectory?: string,
-  sessionStateRoot?: string
+  sessionStateRoot?: string,
+  sessions?: SessionLifecycleObserver,
+  options: { sessionIdleMs?: number; metadataIdleMs?: number; maxServers?: number } = {}
 ): OpenCodeServerPool {
+  // A session keeps its server for the C1 window; a metadata read only leases it briefly, because a
+  // 20-minute retention for one config read would pin a server nobody is using.
+  const SESSION_IDLE_MS = options.sessionIdleMs ?? sessionIdleWindowMs(process.env, 'SCRY_OPENCODE_IDLE_MS')
+  const METADATA_IDLE_MS = options.metadataIdleMs ?? 90_000
+  const SERVER_CAP = options.maxServers ?? SESSION_POOL_CAP
   const managers = new Map<string, OpenCodeServerManager>()
   const ownedManagers = new Set<OpenCodeServerManager>()
   let disposed = false
@@ -69,45 +82,60 @@ export function createOpenCodeServerPool(
     await manager.close()
     ownedManagers.delete(manager)
   }
-  const retireManager = (manager: OpenCodeServerManager): void => {
+  const releaseReason = new WeakMap<OpenCodeServerManager, SessionReleaseReason>()
+  const keyOfManager = (manager: OpenCodeServerManager): string | undefined => {
+    for (const [key, cached] of managers) if (cached === manager) return key
+    return undefined
+  }
+  const retireManager = (manager: OpenCodeServerManager, reason: SessionReleaseReason = 'dispose'): void => {
+    const key = keyOfManager(manager)
+    releaseReason.set(manager, releaseReason.get(manager) ?? reason)
     // Failed cleanup retains ownership for shutdown/escalation; a sent signal is not exit.
-    void closeManager(manager).catch((error) => console.warn('[scry] OpenCode cleanup failed:', error))
+    void closeManager(manager)
+      .then(() => {
+        // Idle and LRU already reported their reason when they left the map; only dispose reports here.
+        if (reason === 'dispose' && key !== undefined) {
+          sessions?.onReleased?.(key, releaseReason.get(manager) ?? reason, Date.now())
+        }
+      })
+      .catch((error) => console.warn('[scry] OpenCode cleanup failed:', error))
   }
   const managerActivity = new Map<OpenCodeServerManager, number>()
   const managerLastUsed = new Map<OpenCodeServerManager, number>()
   const managerIdleTimers = new Map<OpenCodeServerManager, ReturnType<typeof setTimeout>>()
-  // A bounded renewable lease spans the existing 60s metadata refresh cadence without making
-  // an idle server resident indefinitely. Active operations still protect the shared writer.
-  const SERVER_IDLE_MS = 90_000
   const evictIdleManagers = (protectedManager?: OpenCodeServerManager): void => {
-    if (managers.size <= 3) return
+    if (managers.size <= SERVER_CAP) return
     const idle = [...managers.entries()]
       .filter(([, manager]) => manager !== protectedManager && (managerActivity.get(manager) ?? 0) === 0)
       .sort(([, left], [, right]) => (managerLastUsed.get(left) ?? 0) - (managerLastUsed.get(right) ?? 0))
-    for (const [cwd, manager] of idle.slice(0, Math.max(0, managers.size - 3))) {
+    for (const [cwd, manager] of idle.slice(0, Math.max(0, managers.size - SERVER_CAP))) {
       managers.delete(cwd)
       managerLastUsed.delete(manager)
       const timer = managerIdleTimers.get(manager)
       if (timer) clearTimeout(timer)
       managerIdleTimers.delete(manager)
-      retireManager(manager)
+      sessions?.onReleased?.(cwd, 'lru', Date.now())
+      retireManager(manager, 'lru')
     }
   }
-  const scheduleManagerClose = (cwd: string, manager: OpenCodeServerManager): void => {
+  const scheduleManagerClose = (cwd: string, manager: OpenCodeServerManager, idleMs: number): void => {
     if (disposed) return
     const previous = managerIdleTimers.get(manager)
     if (previous) clearTimeout(previous)
     const timer = setTimeout(() => {
       managerIdleTimers.delete(manager)
       if ((managerActivity.get(manager) ?? 0) > 0 || managers.get(cwd) !== manager) {
-        if (managers.get(cwd) === manager) scheduleManagerClose(cwd, manager)
+        if (managers.get(cwd) === manager) scheduleManagerClose(cwd, manager, idleMs)
         return
       }
+      const key = keyOfManager(manager) ?? cwd
       managers.delete(cwd)
       managerActivity.delete(manager)
       managerLastUsed.delete(manager)
-      retireManager(manager)
-    }, SERVER_IDLE_MS)
+      releaseReason.set(manager, 'idle')
+      sessions?.onReleased?.(key, 'idle', Date.now())
+      retireManager(manager, 'idle')
+    }, idleMs)
     timer.unref()
     managerIdleTimers.set(manager, timer)
   }
@@ -117,6 +145,7 @@ export function createOpenCodeServerPool(
     if (!manager) {
       manager = new OpenCodeServerManager(executable, privateMcpAuthDirectory, {}, sessionStateRoot)
       managers.set(cwd, manager)
+      sessions?.onOpened?.(cwd, 'opencode', Date.now())
       ownedManagers.add(manager)
     }
     const timer = managerIdleTimers.get(manager)
@@ -160,7 +189,7 @@ export function createOpenCodeServerPool(
       }
       throw error
     } finally {
-      scheduleManagerClose(context.cwd, manager)
+      scheduleManagerClose(context.cwd, manager, METADATA_IDLE_MS)
     }
   }
 
@@ -181,7 +210,7 @@ export function createOpenCodeServerPool(
         if (active > 0) managerActivity.set(manager, active)
         else managerActivity.delete(manager)
         managerLastUsed.set(manager, Date.now())
-        scheduleManagerClose(context.cwd, manager)
+        scheduleManagerClose(context.cwd, manager, METADATA_IDLE_MS)
         evictIdleManagers()
       }
     },
@@ -200,7 +229,7 @@ export function createOpenCodeServerPool(
           if (active > 0) managerActivity.set(manager, active)
           else managerActivity.delete(manager)
           managerLastUsed.set(manager, Date.now())
-          scheduleManagerClose(cwd, manager)
+          scheduleManagerClose(cwd, manager, SESSION_IDLE_MS)
         }
       }
     },
@@ -240,8 +269,14 @@ export function createOpenCodeServerPool(
       managerIdleTimers.clear()
       managerActivity.clear()
       managerLastUsed.clear()
+      // The release record needs the key, and the map is the only place that knows it.
+      const closing = [...ownedManagers].map((manager) => ({ manager, key: keyOfManager(manager) }))
       managers.clear()
-      const results = await Promise.allSettled([...ownedManagers].map(closeManager))
+      const results = await Promise.allSettled(closing.map(({ manager }) => manager.close()))
+      for (const { manager, key } of closing) {
+        ownedManagers.delete(manager)
+        if (key !== undefined) sessions?.onReleased?.(key, releaseReason.get(manager) ?? 'dispose', Date.now())
+      }
       const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       if (failures.length) throw new AggregateError(failures.map((result) => result.reason), 'OpenCode cleanup incomplete')
     },

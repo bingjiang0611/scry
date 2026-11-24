@@ -9,25 +9,23 @@ import { sanitizeMcpAuthError } from './mcp-auth-security'
 import { codexMcpConfig } from './codex-mcp-config'
 import type { AuthorizedMcpExecution } from './types'
 import { ContinuationIdentityUnavailable, codexContinuationKey } from './continuation-identity'
+import {
+  SESSION_IDLE_DEFAULT_MS,
+  SESSION_POOL_CAP,
+  sessionIdleWindowMs,
+  type SessionLifecycleObserver
+} from './session-pool-policy'
 
-/** C1: a Codex app-server stays for the idle window, then the pool releases it with a reason. */
-export const CODEX_IDLE_MIN_MS = 15 * 60_000
-export const CODEX_IDLE_MAX_MS = 30 * 60_000
-export const CODEX_IDLE_DEFAULT_MS = 20 * 60_000
-export const CODEX_CLIENT_CAP = 8
+/** C1 keeps one lifetime policy for every process-keeping Provider. */
+export const CODEX_IDLE_DEFAULT_MS = SESSION_IDLE_DEFAULT_MS
+export const CODEX_CLIENT_CAP = SESSION_POOL_CAP
 
 export function codexIdleWindowMs(env: Readonly<Record<string, string | undefined>>): number {
-  const raw = Number(env.SCRY_CODEX_IDLE_MS)
-  if (!Number.isFinite(raw) || raw <= 0) return CODEX_IDLE_DEFAULT_MS
-  return Math.min(CODEX_IDLE_MAX_MS, Math.max(CODEX_IDLE_MIN_MS, raw))
+  return sessionIdleWindowMs(env, 'SCRY_CODEX_IDLE_MS')
 }
 
 /** Released facts, not log lines: the host stores these as the session's lifecycle. */
-export interface CodexSessionObserver {
-  onOpened?: (key: string, provider: 'codex', at: number) => void
-  onNativeSessionId?: (key: string, nativeSessionId: string) => void
-  onReleased?: (key: string, reason: 'idle' | 'lru' | 'dispose', at: number) => void
-}
+export type CodexSessionObserver = SessionLifecycleObserver
 
 /**
  * Codex app-server clients are expensive: one process owns threads, MCP servers and hook state.

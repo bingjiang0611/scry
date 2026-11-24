@@ -24,7 +24,7 @@ import type { AntigravityProcessSession } from '../main/providers/antigravity-se
 export function createProcessSessionObserver(
   getSink: () => Pick<EventSink, 'handle' | 'isWriteIndeterminate'> | undefined
 ): {
-  onOpened: (key: string, provider: 'pi' | 'codex', at: number) => void
+  onOpened: (key: string, provider: string, at: number) => void
   onNativeSessionId: (key: string, nativeSessionId: string) => void
   onReleased: (key: string, reason: string, at: number) => void
 } {
@@ -78,6 +78,7 @@ export function createProviderSessionObservers(getSink: () => EventSink | undefi
   return {
     providerSessions: createDaemonProviderSessions(getSink),
     piSessions: createProcessSessionObserver(getSink),
-    codexSessions: createProcessSessionObserver(getSink)
+    codexSessions: createProcessSessionObserver(getSink),
+    openCodeSessions: createProcessSessionObserver(getSink)
   }
 }
