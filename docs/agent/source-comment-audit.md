@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `9a6eacfd`, confirmed two redundant section labels in `src/renderer/constants/side-chat-copy.ts` and removed them without changing any user-facing copy. Comment-free emit and tool directives matched; four focused tests and the source-comment ratchet passed. The broader intake of 148 tokens across renderer constants, B4V scenarios, and managed-turn tests is an inventory, not a completed review of those directories.
+
 At `17a961b6`, reviewed seven comments in `src/renderer/components/machines-view.css` and 91 in the three JS files under `experiments/remote-g0/verify/`. Removed five redundant section labels and two repeated acceptance headings. PostCSS rules and JS comment-free emit matched; the summary verifier passed seven isolated tests. Cryptographic, redaction, missing-evidence and filesystem trust rationale remains in place. No device or relay was used.
 
 After merging main at `975b917b`, reviewed 150 comment tokens in the 20 host-metrics and machines JS/TS files at `7b08371b`. Removed ten redundant or overstated comments; kept the privacy, missing-data, and measurement contracts. Comment-free emit and tool directives matched, five suites passed 56 tests, and the source-comment ratchet passed. This does not cover adjacent files changed by the feature, CSS, or UI mockups.
