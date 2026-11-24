@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, readdir, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -72,11 +73,16 @@ async function quietSession(root: string, sessionId: string, options: { backdate
       join(sessionDir, 'open.json'),
       join(sessionDir, 'session.json'),
       join(sessionDir, 'turns'),
-      ...turns.flatMap((name) => [
-        join(sessionDir, 'turns', name),
-        join(sessionDir, 'turns', name, 'events'),
-        join(sessionDir, 'turns', name, 'pending-open.json')
-      ])
+      ...(await Promise.all(turns.map(async (name) => {
+        const events = join(sessionDir, 'turns', name, 'events')
+        const files = await readdir(events).catch(() => [] as string[])
+        return [
+          join(sessionDir, 'turns', name),
+          events,
+          join(sessionDir, 'turns', name, 'pending-open.json'),
+          ...files.map((file) => join(events, file))
+        ]
+      }))).flat()
     ], 120 * MINUTE)
   }
   return { dataRoot, sessionDir, marker: join(dataRoot, 'runtime', 'attention', `qoder__${safeKey(sessionId)}`) }
@@ -190,4 +196,33 @@ it('never defers a managed session: its recovery pass only runs because the loop
   await expect(recoverRecorder(root, {}, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ pending: 1 })
   await expect(recoverRecorder(root, {}, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ pending: 1 })
   await expect(deferQuietSession(dataRoot, 'codex', sessionDir)).resolves.toBe(false)
+})
+
+/**
+ * A recorded host is the one way a turn's verdict can change while every file stays byte-identical:
+ * recovery closes it when the recorded process is gone, and a dead process moves no mtime. So these
+ * sessions keep full frequency - the fix is structural, not tuned to today's callers.
+ */
+it('never defers a session whose open turn recorded its host: a dead host closes it on the next pass', async () => {
+  const root = await workspace()
+  const { dataRoot, sessionDir } = await quietSession(root, 's-host', { backdate: true })
+  const host = spawn('sleep', ['30'], { stdio: 'ignore' })
+  await new Promise((resolve) => host.once('spawn', resolve))
+  const openPath = join(sessionDir, 'open.json')
+  const open = JSON.parse(await readFile(openPath, 'utf8')) as Record<string, unknown>
+  open.host = [{ pid: host.pid }]
+  await writeFile(openPath, JSON.stringify(open))
+  await backdate([openPath, sessionDir], 120 * MINUTE)
+  const expiry = { incremental: true, expireOpen: true } as const
+  try {
+    // The host is alive, so silence is still not an answer.
+    await expect(recoverRecorder(root, {}, undefined, undefined, expiry)).resolves.toMatchObject({ recovered: 0 })
+    await expect(deferQuietSession(dataRoot, 'qoder', sessionDir)).resolves.toBe(false)
+
+    await new Promise((resolve) => { host.once('exit', resolve); host.kill() })
+    // Nothing on disk changed between these two passes but the process table.
+    await expect(recoverRecorder(root, {}, undefined, undefined, expiry)).resolves.toMatchObject({ recovered: 1, expired: 1 })
+  } finally {
+    if (host.exitCode === null) host.kill()
+  }
 })

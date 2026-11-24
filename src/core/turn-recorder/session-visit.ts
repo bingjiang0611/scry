@@ -12,6 +12,10 @@ import { sessionFailureKey } from './session-failures.js'
  *   - any hook for that session forgets the record (`forgetSessionVisit`);
  *   - any change to a file this pass reads changes the fingerprint, so the next pass visits it.
  *
+ * A session whose `open.json` records its host process is never deferred at all: that turn can be
+ * closed when the recorded host exits, and no file changes when that happens. Silence plus a dead
+ * host is evidence; silence alone never is.
+ *
  * This is scheduling only. It never closes a turn, drops a marker, or touches evidence. It is
  * deliberately in-memory: a restart re-visits everything once, which is the safe direction. Only
  * sessions still unresolved are kept, so the map holds the quiet ones and nothing else.
@@ -48,15 +52,25 @@ async function statKey(path: string): Promise<{ key: string; mtimeMs: number }> 
 }
 
 /** The open turn's own pointers, read once so the fingerprint can reach the current generation. */
-async function openPointers(sessionDir: string): Promise<{ generation: number | null; transcriptPath: string | null }> {
+async function openPointers(sessionDir: string): Promise<{
+  generation: number | null
+  transcriptPath: string | null
+  /** Whether the turn recorded the host processes that could later be proven gone. */
+  hostRecorded: boolean
+}> {
   try {
-    const open = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8')) as { generation?: unknown; transcriptPath?: unknown }
+    const open = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8')) as {
+      generation?: unknown
+      transcriptPath?: unknown
+      host?: unknown
+    }
     return {
       generation: typeof open.generation === 'number' ? open.generation : null,
-      transcriptPath: typeof open.transcriptPath === 'string' && open.transcriptPath ? open.transcriptPath : null
+      transcriptPath: typeof open.transcriptPath === 'string' && open.transcriptPath ? open.transcriptPath : null,
+      hostRecorded: Array.isArray(open.host) && open.host.length > 0
     }
   } catch {
-    return { generation: null, transcriptPath: null }
+    return { generation: null, transcriptPath: null, hostRecorded: false }
   }
 }
 
@@ -65,8 +79,8 @@ async function openPointers(sessionDir: string): Promise<{ generation: number | 
  * rewrites a state file or queues inbox work changes one of them, a directory's own stat changes
  * when entries appear in it, and a transcript only ever grows.
  */
-async function evidence(sessionDir: string, now: number): Promise<{ fingerprint: string; quietMs: number }> {
-  const { generation, transcriptPath } = await openPointers(sessionDir)
+async function evidence(sessionDir: string, now: number): Promise<{ fingerprint: string; quietMs: number; hostRecorded: boolean }> {
+  const { generation, transcriptPath, hostRecorded } = await openPointers(sessionDir)
   const turnDir = generation === null ? null : join(sessionDir, 'turns', String(generation))
   const parts = await Promise.all([
     statKey(sessionDir),
@@ -82,7 +96,8 @@ async function evidence(sessionDir: string, now: number): Promise<{ fingerprint:
   const lastMoved = Math.max(...parts.map((part) => part?.mtimeMs ?? 0))
   return {
     fingerprint: parts.map((part) => part?.key ?? '-').join('|'),
-    quietMs: lastMoved > 0 ? Math.max(0, now - lastMoved) : 0
+    quietMs: lastMoved > 0 ? Math.max(0, now - lastMoved) : 0,
+    hostRecorded
   }
 }
 
@@ -105,7 +120,10 @@ export async function deferQuietSession(
   if (!previous) return false
   if (previous.quietMs < SESSION_QUIET_MS) return false
   if (now - previous.at >= SESSION_REVISIT_MS) return false
-  return (await evidence(sessionDir, now)).fingerprint === previous.fingerprint
+  const current = await evidence(sessionDir, now)
+  // A recorded host can be proven gone without anything on disk moving, so those wait for nothing.
+  if (current.hostRecorded) return false
+  return current.fingerprint === previous.fingerprint
 }
 
 /** Remember what this pass saw. Only a still-unresolved, already-quiet session becomes deferrable. */
@@ -117,10 +135,10 @@ export async function recordSessionVisit(
   now = Date.now()
 ): Promise<void> {
   const key = sessionFailureKey(provider, basename(sessionDir))
-  if (!options.unresolved) {
+  const { fingerprint, quietMs, hostRecorded } = await evidence(sessionDir, now)
+  if (!options.unresolved || hostRecorded) {
     visits.get(dataRoot)?.delete(key)
     return
   }
-  const { fingerprint, quietMs } = await evidence(sessionDir, now)
   visitsOf(dataRoot).set(key, { fingerprint, quietMs, at: now })
 }
