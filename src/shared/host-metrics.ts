@@ -52,10 +52,8 @@ export interface HostMetricsSnapshot {
 
 /** Cached snapshots younger than this are returned as they are (P8 §4). */
 export const HOST_METRICS_CACHE_MS = 5_000
-/** Two real samples are never closer than this, however often the page refreshes. */
 export const HOST_METRICS_MIN_INTERVAL_MS = 2_000
 export const HOST_METRICS_COLD_CPU_GAP_MS = 500
-/** A single answer never exceeds this; the sampler caps its own provider rows. */
 export const HOST_METRICS_MAX_BYTES = 8 * 1024
 export const HOST_METRICS_WARN_PERCENT = 70
 export const HOST_METRICS_DANGER_PERCENT = 85

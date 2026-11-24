@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `c03714c6`, narrowed the Machines sampling and response-size claims to completed-cache reuse and a tested byte budget. [#197](https://github.com/bingjiang0611/scry/issues/197) tracks sampling overlap separately. Six comment tokens were removed net; comment-free output and directives matched, 33 focused tests and the ratchet passed. No performance measurement was made.
+
 At `0888cf6b`, moved the Linux memory-pressure band explanation into the [Machines design note](../plans/remote-runtime-v2/P8-machine-management.md#3-指标). The parser still uses the same thresholds; the note distinguishes Scry's display labels from native OS pressure levels. Comment-free output, directives, 20 parser tests and the ratchet matched or passed.
 
 At `0da3a6d8`, corrected four side-chat comments: source parsing checks shape rather than existence or authorization; the pending create command includes source and target metadata; tab restoration can infer absence only for the bounded IDs in a successful request. No validation or storage behavior changed. Both files had identical comment-free emit and directives; 34 focused tests and the ratchet passed.

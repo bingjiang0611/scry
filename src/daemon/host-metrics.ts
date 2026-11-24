@@ -75,17 +75,14 @@ const COMMAND_TIMEOUT_MS = 2_000
 const COMMAND_LOCALE = { LC_ALL: 'C' }
 const smallOutput = { timeoutMs: COMMAND_TIMEOUT_MS, maxBytes: 64 * 1024, env: COMMAND_LOCALE }
 const PROCESS_TABLE_MAX_BYTES = 2 * 1024 * 1024
-// ucomm 只给可执行名（不含参数、不含完整路径），正是 Provider 归属需要的字段；
-// 比 comm 少一次路径解析，单次采样实测省约 10 ms。
+// ucomm 只给可执行名（不含参数、不含完整路径），正是 Provider 归属需要的字段。
 const PROCESS_TABLE_ARGS = ['-axo', 'pid=,ppid=,rss=,%cpu=,ucomm=']
-// Bounded so one answer always fits the protocol's 8 KiB; anything beyond is
-// folded into 「其他」 rather than dropped.
+// Cap provider rows for the response budget; fold excess rows into 「其他」.
 const MAX_PROVIDER_ROWS = 12
 
 /**
  * Reads the machine's resources on demand and caches the answer (P8 §4).
- * Nobody opening the page means no sampling at all; two callers inside the
- * cache window share one snapshot.
+ * Reuses the last completed snapshot within the cache window.
  */
 export class HostMetricsSampler {
   #sources: HostMetricsSources
@@ -101,8 +98,7 @@ export class HostMetricsSampler {
   async read(scope: HostMetricsScope): Promise<HostMetricsSnapshot> {
     const sources = this.#sources
     const startedAt = sources.now()
-    // 缓存 5 秒；设计的「两次采样至少隔 2 秒」在这里一并成立，取两者较大值，
-    // 免得写一个永远被缓存抢先的假分支。
+    // 取两者较大值，避免在已完成的缓存上判断一个永远不会命中的分支。
     const minAgeMs = Math.max(HOST_METRICS_CACHE_MS, HOST_METRICS_MIN_INTERVAL_MS)
     if (this.#cached && startedAt - this.#sampledAt < minAgeMs) return this.#project(scope)
     const previousCpu = this.#cpu ?? sources.cpuTimes()
@@ -208,7 +204,6 @@ async function attempt<T>(read: () => T | Promise<T>): Promise<T | null> {
   }
 }
 
-/** Folds rows past the cap into 「其他」 so a busy host cannot exceed the bound. */
 function boundProviders(providers: HostProviderUsage[]): HostProviderUsage[] {
   if (providers.length <= MAX_PROVIDER_ROWS) return providers
   const kept = providers.slice(0, MAX_PROVIDER_ROWS)
