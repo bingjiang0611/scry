@@ -232,7 +232,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       readProjectedHistory: catalogProjection.readDetail,
       getRemoteHostService: () => remoteHostService, setRemoteHostService: (value) => { remoteHostService = value },
       getCurrentCwd: () => currentCwd, getStartupManagedRecovery: () => startupManagedRecovery, isShuttingDown: () => isShuttingDown,
-      desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log
+      desktopRemoteClient: () => targetBridge.client, sessionLinks, shellOps: targetBridge.shellOps, log,
+      // The authority is attached further down, so the fork path reads it lazily.
+      getOrchestrationAuthority: () => orchestrationAuthority
     })
   forkOperations = forks
 

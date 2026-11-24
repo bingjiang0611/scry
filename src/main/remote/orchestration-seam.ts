@@ -28,8 +28,26 @@ export interface OrchestrationOutboxGate {
   retry(effectId: string, owner: string, now: number, reason: string): { status: string; delayMs?: number }
 }
 
+/** D3: the lineage of a session that already exists natively (fork, side chat or remote fork). */
+export interface SessionLineageRecord {
+  sessionKey: string
+  parentSessionKey: string
+  rootSessionKey?: string
+  conversationId?: string | null
+  provider?: string | null
+  profile?: string | null
+  cwd?: string | null
+  title?: string | null
+  lineage: { kind: 'fork' | 'side_chat' | 'delegated'; source: { sessionKey: string; runId?: string; throughOrdinal?: number }; taskId?: string }
+}
+
 export interface OrchestrationAuthorityHooks {
   currentLogId?(): string | undefined
+  /**
+   * D3: record a fork or side chat that already exists natively. Absent sinks report
+   * `unavailable` instead of claiming the row was written.
+   */
+  recordSessionLineage?(input: SessionLineageRecord): { status: 'recorded' | 'unavailable'; reason?: string }
   /** Rebuilds the transient dispatcher state from the durable log. */
   createLedgerStore(): LedgerStore
   /** B1: dispatch claims come from the durable outbox, not from in-memory bookkeeping. */

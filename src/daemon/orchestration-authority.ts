@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
 import { maybeStartOrchestrationMaintenance } from './orchestration-maintenance'
 import { createOutboxGate } from './orchestration-outbox-gate'
+import { recordSessionLineage } from './orchestration-lineage'
 import { createTransportHandlers } from './orchestration-transport-handlers'
 import { observeAuthorityNativeTranscript } from './orchestration-native-transcript'
 import type { ConversationStore } from '../main/conversation-store'
@@ -54,6 +55,8 @@ export interface DaemonOrchestrationAuthority {
   readonly importComplete: Promise<void>
   readonly subscribeHub: SubscribeHub
   createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
+  /** D3: record the lineage of a fork or side chat that already exists natively. */
+  recordSessionLineage(input: Parameters<NonNullable<OrchestrationAuthorityHooks['recordSessionLineage']>>[0]): { status: 'recorded' | 'unavailable'; reason?: string }
   publishHint(event: AppHint): void
   observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
@@ -212,6 +215,7 @@ function buildAuthorityRuntime<
 
   const hooks: OrchestrationAuthorityHooks = {
     outbox: () => createOutboxGate(() => sink.handle.db),
+    recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
     currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: () => createAuthorityLedgerStore(sink),
 
@@ -423,6 +427,7 @@ function buildAuthorityRuntime<
 
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
+    recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
     ...createTransportHandlers({ sink, subscribeHub, resolveCanonical }),
     observeNativeTranscript: (homeDir, run) =>
       observeAuthorityNativeTranscript({ sink, resolveCanonical, pendingTranscripts, log: options.log }, homeDir, run),

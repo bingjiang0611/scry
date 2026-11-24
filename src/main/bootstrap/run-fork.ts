@@ -143,7 +143,7 @@ export function createForkOperations({
   resolveKnownProjectDirectory, providerRegistry, providerOperationGate, contextAdmission,
   providerContextKey, unsettledRuns, getCurrentCwd, getStartupManagedRecovery,
   assertLegacyConversationWriteAllowed, resetSessionContext, sessionByContext,
-  invalidateSessionHistoryLoad, appSessionStore, rememberProject
+  invalidateSessionHistoryLoad, appSessionStore, rememberProject, recordSessionLineage
 }: {
   resolveKnownProjectDirectory: (cwd: string) => string
   providerRegistry: ProviderRegistry
@@ -159,6 +159,21 @@ export function createForkOperations({
   invalidateSessionHistoryLoad: (reason: string) => void
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   rememberProject: (cwd: string) => void
+  /**
+   * D3: the native fork already exists by the time this is called, so the host records its
+   * lineage rather than asking a client to describe it. Absent hook = nothing to record.
+   */
+  recordSessionLineage?: (input: {
+    sessionKey: string
+    parentSessionKey: string
+    rootSessionKey?: string
+    conversationId?: string | null
+    provider?: string | null
+    profile?: string | null
+    cwd?: string | null
+    title?: string | null
+    lineage: { kind: 'fork'; source: { sessionKey: string; runId?: string; throughOrdinal?: number } }
+  }) => unknown
 }) {
   async function forkManagedConversation(input: Parameters<NonNullable<ConversationServiceDeps['forkNative']>>[0]): Promise<string> {
     const { source, binding, turn, permissionMode, beforeFork } = input
@@ -190,6 +205,20 @@ export function createForkOperations({
           beforeFork, codexHookTrust, mcpExecution: authorizedMcpExecution(mcpSnapshot)
         })
         if (!result.externalSessionId) throw new Error('Provider 未返回原生分支身份')
+        recordSessionLineage?.({
+          sessionKey: result.externalSessionId,
+          parentSessionKey: binding.nativeSessionId!,
+          provider: providerId,
+          profile: agentProfileId ?? null,
+          cwd,
+          lineage: {
+            kind: 'fork',
+            source: {
+              sessionKey: binding.nativeSessionId!,
+              ...(turn.runId ? { runId: turn.runId } : {})
+            }
+          }
+        })
         return result.externalSessionId
       })
     } finally { lease.release() }
@@ -255,6 +284,21 @@ export function createForkOperations({
           prompt: source.userText
         })
         if (cwd) rememberProject(cwd)
+        recordSessionLineage?.({
+          sessionKey: forked.externalSessionId,
+          parentSessionKey: request.sourceSessionId,
+          conversationId: null,
+          provider: providerId,
+          profile: agentProfileId ?? null,
+          cwd: catalogCwd || null,
+          lineage: {
+            kind: 'fork',
+            source: {
+              sessionKey: request.sourceSessionId,
+              ...(request.sourceRunId ? { runId: request.sourceRunId } : {})
+            }
+          }
+        })
         return { externalSessionId: forked.externalSessionId }
       })
     } finally {
