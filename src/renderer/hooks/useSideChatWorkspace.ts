@@ -26,7 +26,6 @@ export interface SideChatHistory {
   total?: number
   /** Rows of exactly one page; the dialog never grows past `HISTORY_PAGE` rows. */
   items: readonly ConversationSummary[]
-  /** An older page exists. */
   canLoadMore: boolean
   /** Where this page's rows sit inside the whole history; absent for an empty page. */
   range?: { first: number; last: number }
@@ -147,7 +146,6 @@ export function useSideChatWorkspace({
     const pinnedScope = current.scopeKey
     const pinnedSource = sideChatSourceKey(current.source)
     const key = `${pinnedScope}\0${pinnedSource}\0${ids.join(',')}`
-    // A second read for the same tabs proves nothing new; the answer is already coming.
     if (inFlight.current === key) return
     inFlight.current = key
     const apply = (answer: SideChatRestoreAnswer): void => {

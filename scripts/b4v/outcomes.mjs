@@ -1,5 +1,3 @@
-// Pure judgements the scenarios make from what they observed. Kept apart from the
-// drivers so each rule has a unit test that fails when the rule is broken.
 
 /**
  * Reopen: what the second App shows for a run that was live across the App restart,

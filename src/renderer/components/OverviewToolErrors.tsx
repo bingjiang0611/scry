@@ -148,7 +148,6 @@ export function TurnToolErrorDetails({
 }
 
 // 正文超出内联预算时只剩归档引用。报错摘要必须来自真实正文，所以卡片出现时就按引用读一页；
-// 结果按内容哈希缓存（归档正文不可变），重复渲染/重挂载不再重复 IO。
 function ToolErrorCard({
   error,
   onOpen,

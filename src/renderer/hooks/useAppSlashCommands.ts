@@ -13,7 +13,6 @@ export function useAppSlashCommands(
   const slashCacheRef = useRef(new Map<string, { commands: SlashCmd[]; reason: string | null }>())
   const integrationContextKeyRef = useRef('')
   integrationContextKeyRef.current = providerContextCacheKey(providerContext)
-  // 斜杠命令面板：输入以 / 开头且无空白时弹出；命令清单由当前 Provider 原生能力提供。
   const [slashCmds, setSlashCmds] = useState<SlashCmd[]>([])
   const [slashReason, setSlashReason] = useState<string | null>(null)
   const [slashLoading, setSlashLoading] = useState(false)

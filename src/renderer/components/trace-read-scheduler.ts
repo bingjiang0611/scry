@@ -3,7 +3,6 @@ import { TRACE_REFRESH_FLOOR_MS } from './RemoteChatShared'
 // Content reads are coalesced on a floor, not followed report by report: an active
 // run emits a ledger batch every few hundred milliseconds and reading each one cost
 // six times the pre-long-poll rate (measured, see scripts/remote-trace-read-frequency.mjs).
-//
 // Coalescing alone loses content. The host long poll returns as soon as the run
 // changes and then waits up to 15 s, so a batch skipped inside the floor would sit
 // unread until the window expires. A run followed from another device is worse: the

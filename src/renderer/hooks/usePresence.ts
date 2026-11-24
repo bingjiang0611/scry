@@ -73,7 +73,6 @@ export function usePresence({ onClose, exitMs, onExitStart }: PresenceOptions): 
     onCloseRef.current(closeReason.current)
   }, [clearExit])
   finishRef.current = finish
-  // Commit the close before a synchronous reopen can preserve the inert instance.
   const finishCommitted = useCallback((): void => { flushSync(finish) }, [finish])
   const ref = useCallback<RefCallback<HTMLElement>>(node => { nodeRef.current = node }, [])
   const requestClose = useCallback((reason: PresenceCloseReason): void => {

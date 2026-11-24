@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { actionErrorText } from './useAsyncAction'
 
-/** How long a successful copy keeps its check mark; a failure stays until the next try. */
 export const COPIED_FEEDBACK_MS = 2_000
 
 export type CopyStatus = { state: 'idle' } | { state: 'copied' } | { state: 'failed'; reason: string }

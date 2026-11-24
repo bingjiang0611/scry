@@ -71,7 +71,6 @@ describe('flat tabs with child instances', () => {
     expect(html).toContain(`title="${longTitle}"`)
     expect(html).toContain(SIDE_CHAT_COPY.tabStatusPermission)
     expect(html).toContain('关闭 第二个')
-    // Only the active child's body is mounted.
     expect(html).toContain('data-body="child-b"')
     expect(html).not.toContain('data-body="child-a"')
   })

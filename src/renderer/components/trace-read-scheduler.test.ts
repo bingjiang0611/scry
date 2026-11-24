@@ -57,7 +57,6 @@ describe('trace read tail edge', () => {
     scheduler.setLive('run-mac')
     advance(3_000)
 
-    // First read when the run appears, then one per floor.
     expect(reads).toEqual([0, TRACE_REFRESH_FLOOR_MS, TRACE_REFRESH_FLOOR_MS * 2, TRACE_REFRESH_FLOOR_MS * 3])
     scheduler.setLive(undefined)
     advance(5_000)
@@ -128,7 +127,6 @@ describe('run identity changes read at once', () => {
   })
 })
 
-// One read at a time per run: a slow read must not overlap the next tick.
 describe('single flight', () => {
   it('does not start a second read while the first is still in flight', async () => {
     const { env, advance } = environment()

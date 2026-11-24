@@ -53,7 +53,6 @@ export function startupTraceFromLog(text) {
   return null
 }
 
-/** What must be true before a sample of this case may be taken. */
 export function precondition(name, fixture) {
   const processes = fixtureDaemonProcesses(fixture)
   if (processes.status !== 'available') return { ok: false, reason: `process_scan_unavailable:${processes.reason}` }
