@@ -27,7 +27,11 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
     // Steering and background-task stops are bound to the live run, so they answer from
     // this process's registry and cannot be replayed from another process.
     runControl: {
-      steer: (payload: unknown) => steerObservedRun(payload, (runId) => deps.runs().get(runId)),
+      // C2: a provider without a verified native steer may be interrupted instead of refusing
+      // the message; the stop is the same one the run's stop control already uses.
+      steer: (payload: unknown) => steerObservedRun(payload, (runId) => deps.runs().get(runId), {
+        restart: (runId) => deps.requestRunStop(runId)
+      }),
       stopBackgroundTask: (payload: unknown) => stopObservedBackgroundTask(payload, (runId) => deps.runs().get(runId)),
       // The run's own control refuses a unified conversation's run, as it did in process.
       adopt: (runId: string) => adoptRegisteredRun(deps.runs().get(runId))

@@ -74,11 +74,15 @@ export function useAppQueueActions(context: AppQueueContext) {
       setComposerError('当前运行仍在等待可验证的 Steer 能力证据')
       return
     }
-    if (capability.status !== 'available') {
-      setComposerError(capability.reason)
+    // C2: a provider with no verified native steer used to refuse the message. Let the host
+    // interrupt the turn instead, and keep the message queued for the turn that follows.
+    const restartWhenUnsupported = capability.status !== 'available'
+    if (restartWhenUnsupported && capability.status === 'unavailable' && !capability.reason) {
+      setComposerError('当前运行仍在等待可验证的 Steer 能力证据')
       return
     }
-    if (queued.attachments.length > 0 && !capability.attachments) {
+    // A restart path sends the message as a normal next prompt, so attachments are allowed there.
+    if (!restartWhenUnsupported && queued.attachments.length > 0 && !(capability.status === 'available' && capability.attachments)) {
       setComposerError('当前运行不支持 Steer 图片附件；原消息仍保留在队列')
       return
     }
@@ -124,7 +128,8 @@ export function useAppQueueActions(context: AppQueueContext) {
       attachments: queued.attachments.map((attachment) => ({ ...attachment })),
       expectedExternalSessionId,
       ...(queued.request.agentProfileId ? { agentProfileId: queued.request.agentProfileId } : {}),
-      ...(requestCwd ? { cwd: requestCwd } : {})
+      ...(requestCwd ? { cwd: requestCwd } : {}),
+      ...(restartWhenUnsupported ? { restartWhenUnsupported: true } : {})
     }
     void Promise.resolve()
       .then(() => window.scry.steer!(request))
@@ -132,6 +137,14 @@ export function useAppQueueActions(context: AppQueueContext) {
         steerInFlightRef.current.delete(messageId)
         if (result.status === 'accepted') {
           setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, () => null))
+          return
+        }
+        if (result.status === 'restarted') {
+          // The turn is being interrupted; the queue sends this message once it is terminal.
+          setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => ({
+            ...prompt,
+            steer: { status: 'restarted', message: result.message }
+          })))
           return
         }
         setSessionPromptQueues((current) => updateQueuedPromptByMessageId(current, messageId, (prompt) => ({

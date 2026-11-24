@@ -19,13 +19,17 @@ export function normalizeAgentSteerRequest(payload: unknown): AgentSteerRequest 
   const attachments = normalizeAgentAttachments(value.attachments).map(({ path: _path, ...attachment }) => attachment)
   if (attachments.length !== value.attachments.length) throw new Error('Steer 附件无效，消息未发送')
   if (!value.prompt.trim() && attachments.length === 0) throw new Error('Steer 消息为空')
+  if (value.restartWhenUnsupported !== undefined && typeof value.restartWhenUnsupported !== 'boolean') {
+    throw new Error('Steer 重启选项无效')
+  }
   return {
     runId, messageId, expectedExternalSessionId: sessionId,
     providerId: value.providerId!,
     ...(value.agentProfileId ? { agentProfileId: value.agentProfileId } : {}),
     ...(value.cwd ? { cwd: value.cwd } : {}),
     prompt: value.prompt,
-    attachments
+    attachments,
+    ...(value.restartWhenUnsupported ? { restartWhenUnsupported: true } : {})
   }
 }
 export function boundedControlValue(value: unknown): string | undefined {

@@ -226,11 +226,18 @@ export interface AgentSteerRequest extends AgentSteerInput {
   agentProfileId?: string
   cwd?: string
   expectedExternalSessionId: string
+  /** C2: a provider without native steer may be interrupted instead of refusing the message. */
+  restartWhenUnsupported?: boolean
 }
 
 /** Acceptance means native admission, not that the model has followed the message. */
 export type AgentSteerResult =
   | { status: 'accepted'; providerTurnId?: string }
+  /**
+   * C2: the provider has no verified native steer, so the turn was interrupted instead and the
+   * message stays queued for the next turn. Never report this as `accepted`.
+   */
+  | { status: 'restarted'; message: string }
   | { status: 'rejected' | 'unavailable' | 'unknown'; message: string }
 
 export interface AgentSteerEvidence extends AgentSteerInput {
