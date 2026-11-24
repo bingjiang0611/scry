@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { OrchestrationEventRow, OrchestrationScope, OutboxEffectRow } from './types'
+import { TERMINAL_LIFECYCLE_SQL } from './run-transitions'
 
 export interface EventSinkStatements {
   insertEvent: Database.Statement
@@ -68,7 +69,7 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
     readInteraction: db.prepare('SELECT * FROM orch_p_interaction WHERE run_id = ? AND question_id = ?'),
     hasActiveSessionRun: db.prepare(
       `SELECT 1 FROM orch_p_run
-       WHERE session_key = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')
+       WHERE session_key = ? AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}
        LIMIT 1`
     ),
     nextQueuePosition: db.prepare(
@@ -80,16 +81,16 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
        ORDER BY queue_held ASC, COALESCE(queue_position, 2147483647) ASC, rev_seq ASC`
     ),
     activeRunCount: db.prepare(
-      "SELECT COUNT(*) AS count FROM orch_p_run WHERE lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')"
+      `SELECT COUNT(*) AS count FROM orch_p_run WHERE lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}`
     ),
     listNonTerminalChildRuns: db.prepare(
       `SELECT * FROM orch_p_run
-       WHERE parent_run_id = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
+       WHERE parent_run_id = ? AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}`
     ),
     listNonTerminalChildRunsBySession: db.prepare(
       `SELECT * FROM orch_p_run
        WHERE session_key = ? AND parent_run_id IS NOT NULL
-         AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
+         AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}`
     )
   }
 }

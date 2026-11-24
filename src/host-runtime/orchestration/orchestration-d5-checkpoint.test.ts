@@ -78,3 +78,22 @@ describe('D5: checkpoint and rollback decisions', () => {
     } finally { handle.close() }
   })
 })
+
+// B1 (review): `rolled_back` is a terminal lifecycle, so every "is this run still active?" answer has
+// to agree. When one query missed it, a rolled-back run kept its session busy forever: the next
+// submit was rejected as `session_run_active` and the session's queue never drained.
+describe('D5: a rolled-back run frees its session', () => {
+  it('stops counting as an active run and lets the next submit through', () => {
+    const handle = sink()
+    try {
+      submitted(handle, 'run-1')
+      handle.execute(command('run.checkpoint', 'cp-1', { runId: 'run-1', ref: 'refs/scry/checkpoints/run-1', tree: 't1' }))
+      handle.execute(command('run.rollback', 'rb-1', { runId: 'run-1', ref: 'refs/scry/checkpoints/run-1' }, 20))
+      expect(handle.getRun('run-1')).toMatchObject({ lifecycle: 'rolled_back' })
+      const next = handle.execute(command('run.submit', 'submit-2', {
+        runId: 'run-2', sessionKey: 'native-1', provider: 'pi', profile: null, cwd: '/w', promptPreview: 'after rollback'
+      }))
+      expect(next.kind).toBe('accepted')
+    } finally { handle.close() }
+  })
+})

@@ -1,4 +1,5 @@
 import type { AgentQuestionRequest, AgentStopState } from '../shared/runtime'
+import { TERMINAL_RUN_LIFECYCLES } from '../host-runtime/orchestration/run-transitions'
 import type { DesktopRemoteContext, DesktopRemoteTraceRead } from '../shared/desktop-remote'
 import type {
   SubscribeActiveRunRow,
@@ -10,7 +11,7 @@ import type { RunCursor } from './daemon-run-cursor'
 import type { DaemonRunTransport } from './daemon-run-transport'
 import type { RunWakes } from './daemon-run-wakes'
 
-const TERMINAL_LIFECYCLES = new Set(['settled', 'failed', 'cancelled', 'interrupted'])
+const TERMINAL_LIFECYCLES: ReadonlySet<string> = TERMINAL_RUN_LIFECYCLES
 
 export interface SubscribeRuntimeContext {
   runs: Map<string, RunCursor>

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { TERMINAL_RUN_LIFECYCLES } from './run-transitions'
 import type { ConversationStore } from '../../main/conversation-store'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { findEffectPolicy } from './effect-policy'
@@ -138,7 +139,7 @@ export function recoverOrchestrationOnStartup(
         continue
       }
       const run = sink.getRun(row.runId)
-      if (!run || ['settled', 'failed', 'cancelled', 'interrupted'].includes(run.lifecycle)) {
+      if (!run || TERMINAL_RUN_LIFECYCLES.has(run.lifecycle)) {
         updateOutbox.run('done', row.leaseOwner, row.claimedAt, now, row.effectId)
         continue
       }
@@ -355,7 +356,7 @@ export async function reconcileTwoLedgersOnStartup(options: {
         continue
       }
 
-      if (!orchRun || !['settled', 'failed', 'cancelled', 'interrupted'].includes(orchRun.lifecycle)) {
+      if (!orchRun || !TERMINAL_RUN_LIFECYCLES.has(orchRun.lifecycle)) {
         continue
       }
 

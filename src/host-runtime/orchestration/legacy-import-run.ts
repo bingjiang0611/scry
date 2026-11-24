@@ -1,4 +1,5 @@
 import { canonicalJson, sha256Hex } from './canonical-json'
+import { TERMINAL_RUN_LIFECYCLES } from './run-transitions'
 import { tryRealpath } from './authority-dispatch'
 import type { TurnOrdinalResolver } from './conversation-ordinal-lookup'
 import type { EventSink } from './event-sink'
@@ -155,7 +156,7 @@ export function importSingleRun(
   }
 
   const refreshed = sink.getRun(canonicalRunId)
-  if (!refreshed || ['settled', 'failed', 'cancelled', 'interrupted'].includes(refreshed.lifecycle)) {
+  if (!refreshed || TERMINAL_RUN_LIFECYCLES.has(refreshed.lifecycle)) {
     return { imported, rejected }
   }
 

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { TERMINAL_LIFECYCLE_SQL } from './run-transitions'
 import { canonicalJson } from './canonical-json'
 
 export const OUTBOX_DONE_RETENTION_MS = 72 * 3_600_000
@@ -160,7 +161,7 @@ function queueTerminalRunBodyErasures(db: Database.Database, olderThanAt: number
   const rows = db
     .prepare(
       `SELECT run_id, body FROM orch_p_run
-       WHERE lifecycle IN ('settled', 'failed', 'cancelled', 'interrupted')
+       WHERE lifecycle IN ${TERMINAL_LIFECYCLE_SQL}
          AND body IS NOT NULL AND settled_at IS NOT NULL AND settled_at < ?`
     )
     .all(olderThanAt) as Array<{ run_id: string; body: string }>

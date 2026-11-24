@@ -1,4 +1,5 @@
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
+import { TERMINAL_LIFECYCLE_SQL } from '../host-runtime/orchestration/run-transitions'
 
 /**
  * D1: a run may not dispatch while another run of the same session is still live. The caller turns
@@ -11,7 +12,7 @@ export function sessionQueueBlocksDispatch(sink: EventSink, runId: string): bool
     .prepare(
       `SELECT 1 FROM orch_p_run
        WHERE session_key = ? AND run_id <> ?
-         AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')
+         AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}
        LIMIT 1`
     )
     .get(run.sessionKey, runId)

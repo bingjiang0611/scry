@@ -1,4 +1,5 @@
 import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
+import { canTransitionRun } from '../host-runtime/orchestration/run-transitions'
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { OrchestrationCommand } from '../host-runtime/orchestration/orchestrator-commands'
 import { captureCheckpoint, rollbackCheckpoint, type CheckpointGit } from './checkpoint-refs'
@@ -47,8 +48,9 @@ export async function recordRunCheckpoint(
 }
 
 /**
- * D5: restore the worktree first and record the rollback only when the restore actually happened.
- * A failed restore leaves the run's lifecycle untouched, so the row never claims an undone state.
+ * D5: the rewrite is destructive, so every reason to refuse is checked before it runs. Only then is
+ * the worktree restored and the rollback recorded; a failed restore leaves the run's lifecycle alone,
+ * so the row never claims an undone state.
  */
 export async function applyRunRollback(
   sink: EventSink | undefined,
@@ -60,6 +62,9 @@ export async function applyRunRollback(
   if (sink.isWriteIndeterminate()) return { status: 'unavailable', reason: 'orchestration_write_indeterminate' }
   const run = sink.getRun(input.runId)
   if (!run?.checkpointRef) return { status: 'unavailable', reason: 'checkpoint_missing' }
+  // The authority only accepts a rollback from a settled run. Checking it here keeps the refusal from
+  // arriving after the files were already rewritten — "拒绝" must mean nothing changed.
+  if (!canTransitionRun(run.lifecycle, 'rolled_back')) return { status: 'unavailable', reason: 'illegal_transition' }
   const restored = await rollbackCheckpoint(git, { cwd: input.cwd, runId: input.runId, managed: input.managed })
   if (restored.status !== 'restored') return restored
   const result = submit(sink, {

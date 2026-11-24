@@ -94,3 +94,31 @@ describe('checkpoint recorder', () => {
     } finally { handle.close() }
   })
 })
+
+// B2 (review): the restore is destructive, so a refusal must arrive before it runs. A failed run keeps
+// its checkpoint, and the authority only accepts a rollback from `settled` — without checking first,
+// the files were rewritten and the caller was told "拒绝", which is the worst of both answers.
+describe('checkpoint recorder: a refused rollback changes nothing', () => {
+  it('refuses a failed run before touching the worktree', async () => {
+    const cwd = repo()
+    const handle = sink()
+    try {
+      settledRun(handle, 'run-1', cwd)
+      await recordRunCheckpoint(handle, git, { runId: 'run-1', cwd }, 100)
+      // The run then fails; the checkpoint from the settled pass is still recorded.
+      handle.execute(command('run.submit', 'submit-2', {
+        runId: 'run-2', sessionKey: 'native-1', provider: 'pi', profile: null, cwd, promptPreview: 'p'
+      }))
+      for (const step of ['admitted', 'dispatched']) {
+        handle.execute(command('run.effect_result', `${step}-2`, { runId: 'run-2', step }))
+      }
+      handle.execute(command('run.effect_result', 'failed-2', { runId: 'run-2', step: 'failed' }))
+      handle.execute(command('run.checkpoint', 'cp-2', { runId: 'run-2', ref: 'refs/scry/checkpoints/run-2', tree: 't2' }))
+      writeFileSync(join(cwd, 'a.txt'), 'edited after failure\n')
+      const refused = await applyRunRollback(handle, git, { runId: 'run-2', cwd, managed: true }, 200)
+      expect(refused).toMatchObject({ status: 'unavailable', reason: 'illegal_transition' })
+      expect(readFileSync(join(cwd, 'a.txt'), 'utf8')).toBe('edited after failure\n')
+      expect(handle.getRun('run-2')?.lifecycle).toBe('failed')
+    } finally { handle.close() }
+  })
+})
