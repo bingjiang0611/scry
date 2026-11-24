@@ -10,12 +10,14 @@ import { applyRecordContentBudget, recordTransportBytes, RECORDER_TRANSPORT_MAX_
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
 import { pruneStaleTemps } from './temp-prune.js'
+import { appendRecordSummary } from './store-summary.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
+export { listRecordSummaries, recordSummaryPath, type RecordSummary } from './store-summary.js'
 export { type RecordCommittedNotification, type CommitNotificationStatus, type CommitNotificationScope, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.85'
+export const RECORDER_VERSION = '0.2.86'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -71,6 +73,8 @@ export async function commitRecord(
     if (uploadEnvironment !== undefined) await persistUploadEnvironment(dataRoot, record.recordId, uploadEnvironment)
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
     invalidateRecordIndex(dataRoot)
+    // Derived cache only: it may be stale, missing or unwritable, and none of that may fail a commit.
+    await appendRecordSummary(dataRoot, record).catch(() => undefined)
     await pruneStaleTemps(dataRoot).catch(() => undefined)
     return { status: 'committed' as const, record }
   })

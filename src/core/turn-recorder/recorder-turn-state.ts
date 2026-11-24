@@ -13,7 +13,7 @@ import { beginGitTurnDiff } from './git.js'
 import { hostProcessChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { readJson, writeJsonAtomic } from './io.js'
-import { listRecords, stableHash, updateHealth } from './store.js'
+import { listRecordSummaries, stableHash, updateHealth } from './store.js'
 import { publishQuarantinedOpenTurn, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import { lifecycleTraceEvents } from './recorder-lifecycle-events.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
@@ -30,7 +30,8 @@ import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf,
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
   const cached = await readJson<SessionState>(statePath(root))
   if (cached) return cached
-  const committed = (await listRecords(dataRoot)).filter((record) => record.provider.id === provider && record.sessionId === sessionId)
+  // Only identity and the two cursors are needed, so the store is not re-parsed to learn them.
+  const committed = (await listRecordSummaries(dataRoot)).filter((record) => record.provider === provider && record.sessionId === sessionId)
   const maxGeneration = Math.max(...committed.map((record) => record.generation), 0)
   const maxTurnIndex = Math.max(...committed.map((record) => record.turnIndex), 0)
   return { schemaVersion: 1, lastGeneration: maxGeneration, lastTurnIndex: maxTurnIndex }

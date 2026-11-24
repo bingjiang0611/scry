@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { readJson, listFiles, writeJsonAtomic } from './io.js'
 import { type RecorderOpenTurnState, type RecorderSessionState, recorderStatePath, recorderOpenPath, recorderTurnRoot, recorderQuarantinedOpenTurns, withRecorderSessionLock, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
-import { listRecords, stableHash, clearRuntimeTurn, safeKey, type CommitNotificationScope } from './store.js'
+import { listRecordSummaries, stableHash, clearRuntimeTurn, safeKey, type CommitNotificationScope } from './store.js'
 import { canonicalPath, type CommitNotificationDelivery, managedRecorderMode, handoffs, commitHandoff, deliverCommitNotifications } from './managed.js'
 import { isManagedRecorderProvider, type PrepareManagedTurnInput, rawTextHash, type ManagedTurnHandoff, type ManagedRecorderProviderId } from './managed-evidence.js'
 
@@ -23,8 +23,8 @@ export async function reserveCanonicalJournalRecovery(
   ) return undefined
 
   const state = await readJson<RecorderSessionState>(recorderStatePath(root))
-  const records = (await listRecords(dataRoot)).filter((record) =>
-    record.provider.id === input.provider && record.sessionId === input.sessionId)
+  const records = (await listRecordSummaries(dataRoot)).filter((record) =>
+    record.provider === input.provider && record.sessionId === input.sessionId)
   const reserved = (await listFiles(join(root, 'turns')))
     .filter((name) => /^\d+$/.test(name)).map(Number)
   const generation = Math.max(state?.lastGeneration ?? 0, ...records.map((record) => record.generation), ...reserved) + 1

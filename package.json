@@ -59,6 +59,8 @@
     "test:shell": "sh scripts/setup-scry-workspace.test.sh",
     "test": "npm run test:unit && npm run test:shell",
     "bench:git-diff": "node scripts/git-turn-diff-bench.mjs",
+    "bench:record-summary": "node scripts/recorder-record-summary-bench.mjs",
+    "bench:quiet-revisit": "node scripts/recorder-quiet-revisit-bench.mjs",
     "bench:session-history": "vitest bench src/main/session-history.bench.ts src/main/transcript-archive.bench.ts --run",
     "bench:renderer": "vitest bench src/renderer/performance.bench.tsx --run",
     "bench:host-metrics": "node scripts/host-metrics-p95.mjs",

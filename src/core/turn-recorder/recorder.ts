@@ -13,6 +13,7 @@ import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications,
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, recorderQuarantinedOpenTurns, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { attentionIndexPresent, markedSessions } from './attention.js'
 import { clearSessionFailure, isUnusableSessionError, noteSessionFailure, readSessionFailures, sessionFailureKey, suspendedSessionKeys, type SessionFailureLedger } from './session-failures.js'
+import { deferQuietSession, recordSessionVisit } from './session-visit.js'
 import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
 import { queueHook } from './recorder-hook-queue.js'
@@ -202,6 +203,13 @@ export async function recoverRecorder(
   try {
     const { sessions, failures } = await recoverySessions(enablement.dataRoot, scope, options.incremental)
     for (const item of sessions) {
+      // Judging a session again on evidence that has not moved, for a verdict it already gave, is
+      // most of what a quiet workspace spends CPU on. Only the daemon's polling pass may skip, and
+      // an operator asking for one session skips nothing: the answer they want is the current one.
+      if (options.incremental === true && !scope &&
+        await deferQuietSession(enablement.dataRoot, item.provider, item.sessionDir)) continue
+      let settled = false
+      let managedTurn = false
       try {
         if ((await recorderInboxEntries(item.sessionDir)).length) {
           const sessionKey = basename(item.sessionDir)
@@ -295,10 +303,15 @@ export async function recoverRecorder(
           },
           { waitMs: SESSION_LOCK_WAIT_MS }
         )
-        if (result.status === 'managed') managedPresent = true
-        else if (result.status === 'pending') pending++
+        if (result.status === 'managed') {
+          managedPresent = true
+          // Managed turns are recovered by their own pass, which only runs because this loop saw one.
+          // Skipping that sighting would stop managed recovery silently, so these never defer.
+          managedTurn = true
+        } else if (result.status === 'pending') pending++
         else if (result.status === 'committed' || result.status === 'duplicate') {
           recovered++
+          settled = true
           if (forcedExpiry) expired++
           await clearSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), {
             present: sessionFailureKey(item.provider, basename(item.sessionDir)) in failures
@@ -320,6 +333,14 @@ export async function recoverRecorder(
         ).catch(() => undefined)
       }
       await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
+      // Still open after this pass, and nothing here moved for longer than the stale window: the next
+      // pass may skip it until something does. Anything that does change the answer - a hook, an
+      // inbox entry, a growing transcript - also changes the evidence this record was built from.
+      if (options.incremental === true) {
+        await recordSessionVisit(enablement.dataRoot, item.provider, item.sessionDir, {
+          unresolved: !settled && !managedTurn
+        }).catch(() => undefined)
+      }
     }
     if (managedPresent) {
       const managed = await recoverManagedRecorderTurns(workspace, env, {
