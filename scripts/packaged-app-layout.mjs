@@ -1,8 +1,6 @@
 import { join } from 'node:path'
 
-// 桌面产物在 macOS 是 .app bundle，在 Linux 是 electron-builder 的解包目录。
-// 打包检查、security smoke、主机 smoke 和 App 私有 CLI 启动器必须共享这一份布局知识：
-// 任何脚本自己拼路径，都会出现“检查通过、实际启动的是另一个可执行文件”。
+// Verification and launch share this layout (ADR 020).
 export function packagedAppLayout(appPath, { platform = process.platform } = {}) {
   if (platform === 'darwin') {
     const contents = join(appPath, 'Contents')
@@ -14,7 +12,6 @@ export function packagedAppLayout(appPath, { platform = process.platform } = {})
     }
   }
   if (platform === 'linux') {
-    // electron-builder 的 linux 解包目录：<appPath>/scry + <appPath>/resources + <appPath>/locales。
     // 可执行文件名由 electron-builder.yml 的 executableName 固定，不是产品名。
     return {
       appPath,

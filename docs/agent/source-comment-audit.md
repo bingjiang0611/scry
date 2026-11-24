@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `04e007e3`, moved the cross-consumer packaged layout decision into [ADR 020](../adr/020-build-identity-and-provider-compatibility.md). Kept the local pointer to the ADR and the Linux executable-name constraint. The script emitted identical code with comments disabled; 20 wrapper and layout tests and the ratchet passed. No product artifact was built or launched.
+
 At `b96af32f`, matched all 976 lexical tokens in [146 JS/TS paths without a verified historical blob match](source-comment-audit-b96af32f.md) to contextual review recommendations. Removed six assertion restatements from `src/main/session-diff.test.ts`; the test's 40 cases passed. Other removal, ADR, and issue candidates remain in place. This closes the intake for that JS/TS slice, not the remaining dispositions or non-JS/TS reconciliation.
 
 At `488a0834`, reconciled 623 lexical tokens in 62 `src/main/remote/` paths whose current blobs lacked a verified historical match. Removed five redundant comments from `desktop-client-intent-rules.ts` and `desktop-lane.test.ts`. Kept wire, trust, and receipt evidence boundaries. Remaining ADR and wording candidates were not applied in this batch. Comment-free emit and directives matched, 31 focused tests passed, and the ratchet passed. No live remote session was run.
