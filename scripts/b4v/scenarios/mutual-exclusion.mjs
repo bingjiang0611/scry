@@ -9,8 +9,7 @@
 //                  (parallel by design), the daemon must do the same
 //
 // Authentication-versus-run exclusion (ProviderOperationGate) needs a Provider login the
-// smoke Provider does not have; it is reported as not-run. The switch-off control runs the
-// identical sequence first and the daemon scenario compares outcome classes.
+// smoke Provider does not have; it is reported as not-run.
 import { attempt } from '../app.mjs'
 import { HOLD_PROMPT, COMPLETE_PROMPT, Abort, openChecked, runScenario, startRun, waitLedger, waitRun } from '../kit.mjs'
 import { classifySecondStart, exclusionHolds } from '../outcomes.mjs'
