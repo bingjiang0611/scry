@@ -236,6 +236,17 @@ export interface SessionEvidenceFacet {
   enrich(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]>
 }
 
+export interface ProviderSessionCapabilities {
+  /** A second turn can reuse the running process instead of starting a new one. */
+  persistentProcess: boolean
+  /** Input can be injected into a running turn without interrupting it. */
+  nativeSteer: boolean
+  /** Model and effort can change on the live process without a restart. */
+  onlineModelSwitch: boolean
+  /** The permission mode is a launch flag, so a change requires a new process. */
+  permissionModeInLaunchFlags: boolean
+}
+
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
@@ -265,6 +276,12 @@ export interface ProviderAdapter {
   readonly commands?: CommandsFacet
   readonly hookTrust?: HookTrustFacet
   readonly runControls?: RunControlsFacet
+  /**
+   * C1/C2: what this Provider can do *inside* one live session. A Provider that cannot steer
+   * mid-turn must be interrupted and restarted for a follow-up, so the dispatcher reads this
+   * declaration instead of assuming every Provider behaves like Claude.
+   */
+  readonly sessionCapabilities?: ProviderSessionCapabilities
   readonly sessionEvidence?: SessionEvidenceFacet
   invalidateContext?(context: ProviderContext): Promise<void> | void
   dispose?(): Promise<void> | void

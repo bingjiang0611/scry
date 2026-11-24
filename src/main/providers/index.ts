@@ -1,3 +1,4 @@
+import { withSessionCapabilities } from './session-capabilities'
 import type { ProviderAdapter } from './types'
 import type { ProviderSessionHost } from '../../host-runtime/provider-sessions/session-host'
 import type { AntigravityProcessSession } from './antigravity-session'
@@ -26,7 +27,7 @@ export function createBuiltInProviderAdapters(
   /** Scry C1: daemon-owned Provider session host shared by adapters that can keep a process. */
   providerSessions?: ProviderSessionHost<AntigravityProcessSession>
 ): ProviderAdapter[] {
-  return [
+  return withDeclaredCapabilities([
     createClaudeAdapter(homeDir),
     createCodexAdapter(codexHomeDir, homeDir),
     createQoderAdapter(homeDir),
@@ -35,5 +36,9 @@ export function createBuiltInProviderAdapters(
     ...(isExperimentalProviderEnabled('antigravity')
       ? [createAntigravityAdapter(homeDir, { userDataDir, sessions: providerSessions })]
       : [])
-  ]
+  ])
+}
+
+function withDeclaredCapabilities(adapters: ProviderAdapter[]): ProviderAdapter[] {
+  return adapters.map(withSessionCapabilities)
 }
