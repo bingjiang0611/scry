@@ -129,3 +129,47 @@ it('uses subscribed lifecycle and the watched detail page on a capable host', as
     await rm(fixture.directory, { recursive: true, force: true })
   }
 })
+
+// D6: the detail view pages by an exclusive turn ordinal, so older turns are read with the cursor
+// the host returned instead of re-reading the whole history by offset.
+it('reads an older detail page by cursor and returns the next one', async () => {
+  const opened = { cwd: '/workspace', providerId: 'codex', externalSessionId: 'one' }
+  const calls: Record<string, unknown>[] = []
+  const fixture = await setup({ subscribe: 1, subscribeResponse: (request) => {
+    calls.push(request)
+    if (request.known) return new Promise(() => {})
+    const base = { hostId: fixture.host.hostId, logId: 'stable-log', seq: 10, mode: 'snapshot' }
+    if ((request.views as string[]).includes('detail')) {
+      const older = request.detailCursor === 'd6:4'
+      return { subscribe: { ...base, snapshot: {
+        detail: {
+          turns: [],
+          firstPage: { kind: 'remoteHistory', history: {
+            source: 'trace_archive', status: 'available', historyScope: 'session', hasOlder: true,
+            turns: [{ userText: older ? '旧一轮' : '最新一轮', items: [] }]
+          } },
+          ...(older ? { nextCursor: 'd6:2' } : { nextCursor: 'd6:4', truncated: false })
+        }
+      } } }
+    }
+    return { subscribe: { ...base, snapshot: {
+      sessions: { total: 1, rows: [row('one', 10)] },
+      activeRuns: { rows: [] }
+    } } }
+  } })
+  try {
+    const pending = await fixture.client.pair({ label: 'Mac2', ssh, invitation: fixture.invitation })
+    const id = pending.connection.id
+    await fixture.client.finishPairing(id)
+    await fixture.client.connect(id)
+    await fixture.client.catalog(id)
+    const latest = await fixture.client.history(id, opened)
+    expect(latest).toMatchObject({ turns: [{ userText: '最新一轮' }], detailCursor: 'd6:4' })
+    const older = await fixture.client.history(id, opened, undefined, undefined, latest.detailCursor)
+    expect(older).toMatchObject({ turns: [{ userText: '旧一轮' }], detailCursor: 'd6:2' })
+    expect(calls.some(call => call.detailCursor === 'd6:4')).toBe(true)
+  } finally {
+    await fixture.client.dispose()
+    await rm(fixture.directory, { recursive: true, force: true })
+  }
+})

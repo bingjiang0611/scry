@@ -276,8 +276,8 @@ describe('preload IPC boundary', () => {
     const context = { providerId: 'codex', cwd: '/remote', externalSessionId: 'native-session' }
     await api.desktopRemote.trace('host', context, 'canonical-run')
     expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:trace', 'host', context, 'canonical-run', undefined)
-    await api.desktopRemote.history('host', context, 2, 'snapshot')
-    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:history', 'host', context, 2, 'snapshot')
+    await api.desktopRemote.history('host', context, 2, 'snapshot', 'd6:3')
+    expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:history', 'host', context, 2, 'snapshot', 'd6:3')
     await api.desktopRemote.file('host', context, 'README.md', 5, 'file-snapshot')
     expect(electron.invoke).toHaveBeenLastCalledWith('desktopRemote:file', 'host', context, 'README.md', 5, 'file-snapshot')
   })

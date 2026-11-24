@@ -51,7 +51,7 @@ closeOverlays: () => void) {
     void window.scry.desktopRemote.history(connectionId, {
       cwd, providerId: session.providerId, agentProfileId: session.agentProfileId,
       externalSessionId: session.externalSessionId
-    }, undefined, undefined).then(history => finish({ status: 'ready', history }),
+    }, undefined, undefined, undefined).then(history => finish({ status: 'ready', history }),
       error => finish({ status: 'error', error: REMOTE_ACCESS_COPY.errorText(error) }))
       .finally(() => { if (pendingSelection.current === request) pendingSelection.current = null })
   }

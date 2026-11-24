@@ -183,6 +183,8 @@ export interface DesktopRemoteHistory {
   source: 'trace_archive'
   status: 'available' | 'unavailable'
   reason?: string
+  /** D6: cursor for older turns of the host's detail view; absent when nothing older remains. */
+  detailCursor?: string
 }
 // Oversized history pages and live traces are transferred losslessly in bounded byte chunks.
 // The assembled page is capped separately from the 4 MiB wire response limit.
@@ -335,7 +337,7 @@ export interface DesktopRemoteAPI {
   deleteSession(connectionId: string, request: DesktopRemoteDeleteSessionRequest): Promise<DeleteSessionResult>
   directories(connectionId: string, path?: string, cursor?: number, snapshot?: string): Promise<DesktopDirectoryPage>
   selectDirectory(connectionId: string, path: string): Promise<RemoteProjectRef>
-  history(connectionId: string, context: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory>
+  history(connectionId: string, context: DesktopRemoteContext, before?: number, snapshot?: string, detailCursor?: string): Promise<DesktopRemoteHistory>
   trace(connectionId: string, context: DesktopRemoteContext, runId: string, knownAttachmentCount?: number): Promise<ActiveRun | null>
   traceDelta(connectionId: string, context: DesktopRemoteContext, runId: string, after?: DesktopTraceCursor, knownAttachmentCount?: number): Promise<DesktopRemoteTraceRead>
   intents(connectionId: string): Promise<DesktopRemoteIntent[]>
