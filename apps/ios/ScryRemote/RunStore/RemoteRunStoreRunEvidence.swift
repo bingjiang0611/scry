@@ -72,7 +72,8 @@ extension RemoteRunStore {
   func apply(runState state: String, generation: Int, identity: SessionIdentity) {
     guard isCurrent(generation, identity: identity) else { return }
     switch state {
-    case "recorded": if lifecycle == .unknown || lifecycle == .submitting { lifecycle = .recorded }
+    case "queued": if lifecycle == .unknown { lifecycle = .queued }
+    case "recorded": if lifecycle == .unknown || lifecycle == .submitting || lifecycle == .queued { lifecycle = .recorded }
     case "dispatched": if lifecycle != .running { lifecycle = .dispatched }
     // The host projects an interrupted Provider result as `settled`; keep the
     // more specific cancelled lifecycle already read from the settled marker.

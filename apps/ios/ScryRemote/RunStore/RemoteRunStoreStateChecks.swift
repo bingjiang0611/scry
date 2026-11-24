@@ -225,8 +225,8 @@ extension RemoteRunStore {
     func status() -> SessionStatusLine? {
       SessionStatusLine.focusedRun(store, onAnswer: {}, onStop: { stopConfirmations += 1 })
     }
-    for (lifecycle, text) in [(Lifecycle.submitting, "发送中"), (.recorded, "等待开始"),
-                              (.dispatched, "等待开始"), (.running, "运行中")] {
+    for (lifecycle, text) in [(Lifecycle.submitting, "发送中"), (.queued, "排队中，等前一轮结束"),
+                              (.recorded, "等待开始"), (.dispatched, "等待开始"), (.running, "运行中")] {
       store.lifecycle = lifecycle
       checks.append(("status.\(lifecycle.rawValue)", status()?.text == text))
     }

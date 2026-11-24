@@ -422,6 +422,11 @@ struct SessionStatusLine {
     }
     if let error = run.stopError { return .init(text: error, tone: .warning, action: stopAction) }
     if let error = run.submitError { return .init(text: error, tone: .warning, action: stopAction) }
+    // D1: the host accepted this turn and is holding it behind the session's live run. It is
+    // waiting on the host, not on this phone, so the copy says so instead of "等待开始".
+    if run.lifecycle == .queued {
+      return .init(text: "排队中，等前一轮结束", tone: .running, busy: true)
+    }
     if run.canStop {
       if run.stopRequested { return .init(text: "正在停止，等待 Agent 实际结束", busy: true) }
       return .init(text: run.lifecycle == .running ? "运行中" : "等待开始", tone: .running, busy: true,
