@@ -15,8 +15,6 @@ import { QoderBackgroundMonitor } from './qoder-background-work'
 import { normalizeQoderMessage, QoderBackgroundTasks } from './qoder-messages'
 import { QoderTaskControlTransport } from './qoder-task-control'
 import { HistoricalInput } from './historical-input'
-import { isTranscriptUserPrompt } from './session-fork-boundary'
-import { settleQoderInputReceipt, type QoderTranscriptMessage } from './qoder-input-receipt'
 import {
   qoderContextTokensFromUsage,
   qoderLiveContext,
@@ -24,13 +22,7 @@ import {
   type QoderContextEvidence
 } from './qoder-evidence'
 import {
-  parseQoderBackgroundTaskFailures,
-  parseQoderHookLog,
-  parseQoderSubagentTerminals,
-  qoderHookFallbackOnly,
-  qoderHookLog,
   qoderProviderTurnId,
-  qoderProviderTurnIdFromLog,
   type QoderHookFallbackState,
   isAgentLaunchStatus,
   isAgentTerminalStatus,
@@ -40,6 +32,8 @@ import { livePrompt, QoderStderrTail, qoderExecutable, qoderMcpLaunch, qoderOpti
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
+import { applyQoderLogFallback } from './qoder-log-fallback'
+import { settleQoderTurn } from './qoder-turn-settlement'
 import { newId } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
 import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
@@ -301,87 +295,25 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
         if (!providerFailureSeen && terminalError == null) terminalError = error
       }
     }
-    const logHooksEnabled = process.env.SCRY_QODER_LOG_HOOKS?.trim() !== '0'
-    if ((request.managedRecorder === true || logHooksEnabled) && qoderPid) {
-      try {
-        const log = await qoderHookLog(qoderPid)
-        observeProviderTurnId(qoderProviderTurnIdFromLog(log, externalSessionId))
-        const backgroundFailures = parseQoderBackgroundTaskFailures(request.runId, log, externalSessionId)
-        for (const event of backgroundFailures) {
-          if (event.toolUseId) backgroundTasks.settleCall(event.toolUseId, 'Bash')
-          request.emit(event)
-        }
-        if (backgroundFailures.length > 0) providerStatus = 'failed'
-        const subagentTerminals = parseQoderSubagentTerminals(request.runId, log, externalSessionId)
-        const missingSubagentTerminals = subagentTerminals.filter(
-          (event) => event.toolUseId && !terminalAgentCalls.has(event.toolUseId)
-        )
-        for (const event of missingSubagentTerminals) emitAgentFallback(event, true)
-        if (!stopped && missingSubagentTerminals.some((event) => observedAgentStatus(event) !== 'completed')) {
-          providerStatus = 'failed'
-        }
-        if (logHooksEnabled) {
-          const fallback = parseQoderHookLog(request.runId, log, externalSessionId)
-          for (const event of qoderHookFallbackOnly(sdkHooks, fallback)) request.emit(event)
-          deps.hookFallback.observed = true
-        }
-        deps.hookFallback.error = undefined
-      } catch (error) {
-        deps.hookFallback.error = String((error as Error).message)
-        request.emit({
-          id: newId(), runId: request.runId, ts: new Date().toISOString(),
-          kind: 'harness', stage: 'runtime:telemetry_degraded', text: deps.hookFallback.error,
-          runtimeMetadata: { source: 'qoder_cli_log', capability: 'hooks' }
-        })
-      }
-    } else if ((request.managedRecorder === true || logHooksEnabled) && !qoderPid) {
-      deps.hookFallback.error = 'Qoder log fallback could not identify the current CLI process'
-    }
-    if (backgroundTasks.pending && !stopped) {
-      providerStatus = 'failed'
-      request.emit({
-        id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
-        stage: 'runtime:background_unresolved',
-        text: 'Qoder 连接已结束，但后台任务未返回终态；任务完成情况未知，请先核验文件，勿直接重试写入。',
-        runtimeMetadata: { source: 'qoder_transport_ended', pendingTaskIds: backgroundTasks.tasks.map((task) => task.taskId) }
-      })
-    }
-    if (activeAgentCalls.size > 0) {
-      if (stopped) {
-        settleUnreportedAgents('stopped', 'qoder_host_interruption')
-      } else {
-        settleUnreportedAgents('failed', 'qoder_transport_ended')
-        providerStatus = 'failed'
-      }
-    }
-    backgroundMonitor.dispose()
-    if (externalSessionId) {
-      try {
-        const messages = await getSessionMessages(externalSessionId, { dir: request.cwd, includeSystemMessages: true })
-        const candidates = messages.filter((message) =>
-          isTranscriptUserPrompt(message) && !forkBaseline.has(message.uuid)
-        )
-        if (candidates.length === 1) forkTurnId = candidates[0].uuid
-        // One transcript read serves the optional fork identity and the input receipt.
-        // Acceptance follows the native evidence; the failed/interrupted outcome is
-        // reported separately by this run and is never upgraded by this call.
-        if (history.snapshot()?.status === 'unknown') {
-          settleQoderInputReceipt({
-            history,
-            messages: messages as readonly QoderTranscriptMessage[],
-            submittedUserUuid,
-            outgoingText,
-            externalSessionId,
-            providerTurnId: currentProviderTurnId()
-          })
-        }
-      } catch (error) {
-        // The completed turn remains valid even when its optional fork identity is unavailable.
-        if (history.snapshot()?.status === 'unknown') {
-          history.unverified(`Qoder 原生 transcript 不可读取：${(error as Error).message}`)
-        }
-      }
-    }
+    if (await applyQoderLogFallback({
+      request,
+      hookFallback: deps.hookFallback,
+      pid: qoderPid,
+      externalSessionId,
+      sdkHooks,
+      terminalAgentCalls,
+      backgroundTasks,
+      stopped,
+      observeProviderTurnId,
+      emitAgentFallback
+    })) providerStatus = 'failed'
+    const settlement = await settleQoderTurn({
+      request, history, backgroundTasks, backgroundMonitor, activeAgentCalls,
+      settleUnreportedAgents, stopped, externalSessionId, forkBaseline,
+      submittedUserUuid, outgoingText, currentProviderTurnId
+    })
+    if (settlement.failed) providerStatus = 'failed'
+    if (settlement.forkTurnId) forkTurnId = settlement.forkTurnId
     if (terminalError != null) throw stderrTail.attach(terminalError)
     return {
       externalSessionId,
