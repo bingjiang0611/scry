@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `8f5f8a46`, reviewed 36 lexical tokens in `scripts/b4v-scenarios.mjs` and the three direct `scripts/agy-a0-probe/*.mjs` helpers. Corrected the B4V header to stop promising the retired switch-off control. The shebang, comment-free emit and tool directives matched; 13 CLI and report tests and the source-comment ratchet passed. Live acceptance and Provider probes were not run.
+
 At `4b20e999`, reconciled 548 lexical comment tokens across 163 direct `src/main/` TypeScript files. The A–L slice excluded `agent-`, `background-`, `context-`, `conversation-`, `daemon-`, `db-`, `dock-`, and `git-`; the M–Z slice excluded `managed-`, `normalize-`, `process-`, `project-`, `provider-`, `run-`, `session-`, `terminal-`, `trace-`, and `workspace-`. Removed 16 redundant comments in 13 files. Comment-free emit and tool directives matched; eight targeted suites passed 192 tests and the ratchet passed. ADR and wording candidates remain in place. Also reviewed the four comments in `scripts/fixtures/enable-macos-accessibility.swift`; retained its fixture and evidence contracts. `swiftc -frontend -parse` passed without running the helper.
 
 At `db02f0ec`, reconciled 843 lexical comment tokens across all 68 direct JS/TS/TSX files in `scripts/fixtures/`, including the 15 `.mjs` paths initially omitted from the scout reports. Removed six redundant or historical comments, preserving embedded fixture programs, tool directives and evidence limits. Comment-free emit matched, seven deterministic suites passed 48 tests, and the ratchet passed. The live UI/Provider scenarios and benchmark were not run. The fixture Swift source and wording follow-ups remain separate.
