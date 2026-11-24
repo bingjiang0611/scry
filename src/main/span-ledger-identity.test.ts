@@ -70,3 +70,43 @@ describe('Usage Analytics 身份与空记录', () => {
     expect(analytics.byDay.filter((entry) => entry.turns === 0)).toHaveLength(6)
   })
 })
+
+describe('Codex 定价（Q6）', () => {
+  it('按同一模型的目录单价给没有金额的轮次补上估算成本', () => {
+    const analytics = buildUsageAnalytics({
+      nowMs: now,
+      rangeDays: 7,
+      tokens: [
+        row({
+          tsStart: at(0), provider: 'codex', runtimeProvider: 'codex_cli', upstreamProvider: 'openai',
+          model: 'model-x', inputTokens: 1_000_000, outputTokens: 100_000, runId: 'run-codex', officialCostEligible: 1
+        })
+      ],
+      costs: [],
+      prices: [{ id: 'catalog:model-x', provider: 'openai-codex', model: 'model-x', currency: 'USD',
+        inputPerMillion: 4, outputPerMillion: 20, cacheReadPerMillion: 0.4, cacheWritePerMillion: 5,
+        effectiveFrom: 0, source: 'pi_model_catalog' }]
+    })
+
+    expect(analytics.totals).toMatchObject({ costKnownRows: 1, estimatedCostRows: 1 })
+    expect(analytics.totals.costUsd).toBeCloseTo(1_000_000 * 4 / 1_000_000 + 100_000 * 20 / 1_000_000, 6)
+    // 有金额的轮次不再重复叠加目录价。
+    const twice = buildUsageAnalytics({
+      nowMs: now, rangeDays: 7,
+      tokens: [row({ tsStart: at(0), provider: 'codex', runtimeProvider: 'codex_cli', model: 'model-x', inputTokens: 1_000_000, outputTokens: 0, runId: 'run-1' })],
+      costs: [{ tsStart: at(0), provider: 'codex', model: 'model-x', costUsd: 9, costSource: 'provider_reported', confidence: 'provider_reported' }],
+      prices: [{ id: 'p', provider: 'openai-codex', model: 'model-x', currency: 'USD', inputPerMillion: 4, outputPerMillion: 20, effectiveFrom: 0 }]
+    })
+    expect(twice.totals.costUsd).toBe(9)
+  })
+
+  it('查不到价格的轮次成本留空，不参与占比', () => {
+    const analytics = buildUsageAnalytics({
+      nowMs: now, rangeDays: 7,
+      tokens: [row({ tsStart: at(0), provider: 'codex', runtimeProvider: 'codex_cli', model: 'model-y', inputTokens: 10, outputTokens: 1, runId: 'run-1', officialCostEligible: 1 })],
+      costs: []
+    })
+    expect(analytics.totals.costUsd).toBeNull()
+    expect(analytics.byModel[0].costUsd).toBeNull()
+  })
+})

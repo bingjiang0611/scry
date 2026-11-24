@@ -2,6 +2,7 @@
 import type { UsageAnalytics, UsageAnalyticsAggregate, UsageAnalyticsRangeDays } from '../shared/trace'
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
 import { usageIdentity, type UsageAgentId } from '../shared/usage-identity'
+import { estimatedCostFromPrice, priceForRow, type ModelPrice } from '../shared/model-price'
 import { officialApiCost } from './official-api-cost'
 import { localDay, startOfLocalDay } from './span-ledger-analytics'
 
@@ -102,6 +103,8 @@ export interface UsageAnalyticsCostRow {
   costSource: BillingCostSource
   confidence: BillingConfidence
   officialApiEstimate?: boolean
+  /** 来自 model_price_versions（Pi 模型目录）的单价，不是官方静态价表。 */
+  catalogPriceId?: string
   inputTokens?: number | null
   outputTokens?: number | null
   cacheReadTokens?: number | null
@@ -246,6 +249,7 @@ export function buildUsageAnalytics(args: {
   rangeDays: UsageAnalyticsRangeDays
   tokens: UsageAnalyticsTokenRow[]
   costs: UsageAnalyticsCostRow[]
+  prices?: readonly ModelPrice[]
 }): UsageAnalytics {
   const bounds = usageAnalyticsBounds(args.nowMs, args.rangeDays)
   const total = emptyUsageAccumulator()
@@ -314,8 +318,17 @@ export function buildUsageAnalytics(args: {
   const costs = args.costs.filter(costRowHasUsage)
   for (const row of tokens) {
     if (!row.officialCostEligible) continue
-    const costUsd = officialApiCost(row)
-    if (costUsd != null) costs.push({ ...row, costUsd, costSource: 'price_table', confidence: 'estimated', officialApiEstimate: true })
+    const official = officialApiCost(row)
+    if (official != null) {
+      costs.push({ ...row, costUsd: official, costSource: 'price_table', confidence: 'estimated', officialApiEstimate: true })
+      continue
+    }
+    // 官方静态价表没有这个模型时，查本地价格表（Pi 模型目录写进来的单价）。
+    const price = priceForRow(row, args.prices)
+    const costUsd = price ? estimatedCostFromPrice(row, price) : null
+    if (price && costUsd != null) {
+      costs.push({ ...row, costUsd, costSource: 'price_table', confidence: 'estimated', catalogPriceId: price.id })
+    }
   }
   for (const row of costs) {
     const day = localDay(row.tsStart)
