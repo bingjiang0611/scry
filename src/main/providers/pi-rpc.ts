@@ -218,7 +218,11 @@ export class PiRpcProcess {
   }
 }
 
-const ROTOM_RPC_IDLE_MS = 60_000
+/** C1: an idle Pi process is worth keeping for minutes, not seconds; the pool cap keeps it bounded. */
+const ROTOM_RPC_IDLE_MS = 20 * 60_000
+const ROTOM_RPC_IDLE_MIN_MS = 15 * 60_000
+const ROTOM_RPC_IDLE_MAX_MS = 30 * 60_000
+const ROTOM_RPC_MAX_IDLE = 8
 
 interface IdleRotomRpc {
   rpc: PiRpcProcess
@@ -232,6 +236,17 @@ interface IdleRotomRpc {
 
 export class RotomRpcPool {
   private readonly idle = new Map<string, IdleRotomRpc>()
+  private readonly idleMs: number
+  private readonly maxIdle: number
+
+  get size(): number {
+    return this.idle.size
+  }
+
+  constructor(options: { idleMs?: number; maxIdle?: number } = {}) {
+    this.idleMs = Math.min(ROTOM_RPC_IDLE_MAX_MS, Math.max(ROTOM_RPC_IDLE_MIN_MS, options.idleMs ?? ROTOM_RPC_IDLE_MS))
+    this.maxIdle = Math.max(1, options.maxIdle ?? ROTOM_RPC_MAX_IDLE)
+  }
 
   private key(profile: PiAgentProfile, cwd: string | undefined, sessionId: string, continuationKey?: string): string {
     return `${profile.id}\0${profile.executable}\0${cwd ?? ''}\0${sessionId}\0${continuationKey ?? ''}`
@@ -274,10 +289,20 @@ export class RotomRpcPool {
         if (this.idle.get(key) !== entry) return
         this.idle.delete(key)
         void rpc.close().catch(() => undefined)
-      }, ROTOM_RPC_IDLE_MS)
+      }, this.idleMs)
     }
     entry.timer.unref()
     this.idle.set(key, entry)
+    while (this.idle.size > this.maxIdle) {
+      const oldest = this.idle.keys().next()
+      if (oldest.done) break
+      const evicted = this.idle.get(oldest.value)
+      this.idle.delete(oldest.value)
+      if (evicted) {
+        clearTimeout(evicted.timer)
+        void evicted.rpc.close().catch(() => undefined)
+      }
+    }
   }
 
   async invalidate(context: ProviderContext): Promise<void> {
