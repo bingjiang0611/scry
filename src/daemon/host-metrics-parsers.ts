@@ -157,6 +157,13 @@ function executableName(comm: string): string {
 }
 
 /**
+ * 采样自己起的命令（`ps` 就是读出这张表的那个进程，`nice` 是它的降优先级包装，
+ * `sysctl`/`vm_stat` 读内存）。它们一定挂在 daemon 底下，但不是 Scry 的工作负载，
+ * 算进去就会凭空多出一个「其他」进程和几 MB 内存。
+ */
+const SAMPLER_COMMANDS = new Set(['ps', 'nice', 'sysctl', 'vm_stat'])
+
+/**
  * Groups the daemon's own descendants by Provider (P8 §3). Only processes below
  * `rootPid` count; a remembered Provider root that now names an unrelated
  * process (PID reuse) is simply not in the tree and contributes nothing.
@@ -169,6 +176,8 @@ export function attributeProcessTree(
   const children = new Map<number, ProcessRow[]>()
   for (const row of rows) {
     if (row.pid === rootPid || row.pid <= 1) continue
+    // 只放过 daemon *直接*起的同名命令；Provider 自己起的 ps 仍在 Provider 下面。
+    if (row.ppid === rootPid && SAMPLER_COMMANDS.has(executableName(row.comm))) continue
     const list = children.get(row.ppid)
     if (list) list.push(row)
     else children.set(row.ppid, [row])

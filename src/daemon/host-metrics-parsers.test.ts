@@ -176,4 +176,18 @@ describe('process tree attribution', () => {
   it('returns nothing when the daemon has no children', () => {
     expect(attributeProcessTree(parsePsTable('  101   1  1000  0.1 node\n'), 101, [])).toEqual([])
   })
+
+  it('leaves out the sampler commands the daemon itself started', () => {
+    // 「机器」页打开时 daemon 会起 ps/sysctl/vm_stat 读数据。它们是 daemon 的直接子进程，
+    // 但属于采样本身，不能算进「Scry 占用」，否则「其他」会凭空多出进程和内存。
+    const table = parsePsTable(`  101     1  12000  0.5 node
+  110   101   1840  0.2 ps
+  111   101   1200  0.0 sysctl
+  102   101   8000  1.5 claude
+  112   102   1840  0.0 ps
+`)
+    const usage = attributeProcessTree(table, 101, [])
+    // Provider 自己起的 ps 仍在（它在 claude 下面，不是 daemon 的直接子进程）。
+    expect(usage).toEqual([{ providerId: 'claude', processes: 2, cpuPercent: 1.5, rssBytes: 9840 * 1024 }])
+  })
 })
