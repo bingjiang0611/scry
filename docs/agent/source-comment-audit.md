@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `c6a8ecb6`, rechecked 540 lexical tokens across 75 bootstrap, Provider, and remote files that lacked an exact historical blob match. This is a confirmatory slice, not necessarily new coverage. The first cleanup removed 15 repeated comments from seven test files; comment-free emit and directives matched, 54 focused tests passed, and the ratchet passed. Left all production notes, evidence boundaries, and remaining candidates in place. See [the exact path manifest](source-comment-audit-c6a8ecb6.md).
+
 At `33a0bc90`, reviewed all 76 added or rewritten #191 tokens in the two Recorder benchmark scripts and 13 Recorder source/test paths (three paths have no new tokens). Removed five redundant notes in `recorder-quiet-revisit.test.ts`, `store-summary.test.ts`, and `session-visit.ts`. Kept the cache fallback, managed-turn scheduling, and benchmark evidence boundaries. The revised blobs have identical comment-free emit and tool directives; 22 focused tests and the ratchet passed. Follow-up candidates include the visit fingerprint's sampling time, summary cache validity wording, and benchmark evidence wording. This pass did not run either benchmark or modify executable code.
 
 Synced [#191](https://github.com/bingjiang0611/scry/pull/191) from `9f0f447d`. In `store.ts`, kept the upstream derived-summary write and its failure-isolation note; the two unchanged, previously removed temp-cleanup comments stayed deleted. Compared comment-free emit, tool directives, and all 76 new or rewritten tokens in the 15 touched JS/TS paths against upstream. The ratchet and 74 focused tests passed. This verifies the merge, not contextual audit coverage of the upstream additions. The two new benchmark scripts were not run.

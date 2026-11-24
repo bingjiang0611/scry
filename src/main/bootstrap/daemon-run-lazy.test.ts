@@ -41,8 +41,6 @@ describe('lazy daemon run surface', () => {
   })
 
   it('asks again after a daemon that was not ready yet', async () => {
-    // A daemon that is still starting is not a decision for the user: the first call
-    // reports it, and the next call must be able to find the daemon it became.
     let attempts = 0
     const lazy = createLazyDaemonRunSurface(deps, async () => {
       attempts += 1

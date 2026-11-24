@@ -67,8 +67,6 @@ describe('daemon run mode', () => {
 
   it('keeps a revoked grant as its own status instead of retrying', async () => {
     vi.stubEnv('SCRY_HOST_DAEMON', '1')
-    // A stored credential that the daemon refuses surfaces from the probe; the mode
-    // must name it, not fall back to launching a daemon that would refuse again.
     const launch = vi.fn(async () => ({ status: 'failed' as const, reason: 'must_not_launch' }))
     const probe = vi.fn(async () => { throw new DaemonClientError('daemon_device_not_authorized') })
     const result = await createDaemonRunMode({ ...base, credentialCipher: cipher, launch, probe })

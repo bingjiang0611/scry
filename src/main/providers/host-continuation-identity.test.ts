@@ -129,7 +129,6 @@ describe('host continuation identity', () => {
     const anonymous = await openCodeKey({ sessionStateRoot: join(root, 'sessions') })
     expect(anonymous).toMatch(/^opencode:[a-f0-9]{64}$/)
     expect(await openCodeKey({ sessionStateRoot: join(root, 'sessions') })).toBe(anonymous)
-    // Injected auth material is part of the identity, so its presence changes the key.
     expect(await openCodeKey({ sessionStateRoot: join(root, 'sessions'), env: { OPENCODE_AUTH_CONTENT: '{"x":1}' } }))
       .not.toBe(anonymous)
     // A path that exists but cannot be verified fails closed instead of pretending absence.

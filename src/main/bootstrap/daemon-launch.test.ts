@@ -34,7 +34,6 @@ describe('daemon launch', () => {
     })
     expect(result.status).toBe('failed')
     expect(result.reason).toBe('daemon_launch_target_missing:executable')
-    // Nothing was spawned, so no log file is invented for a process that never ran.
     expect(existsSync(join(root, 'user-data', 'logs', 'daemon.log'))).toBe(false)
   })
 

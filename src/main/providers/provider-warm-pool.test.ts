@@ -102,8 +102,6 @@ describe('ProviderWarmPool', () => {
     created.park('b', otherProfile, 1, other)
     created.park('c', otherWorkspace, 1, elsewhere)
     await created.invalidate({ cwd: '/workspace' })
-    // A workspace invalidation closes both profiles in that workspace, not the
-    // warm process of an unrelated workspace.
     expect(sameWorkspace.closed).toBe(1)
     expect(otherProfile.closed).toBe(1)
     expect(otherWorkspace.closed).toBe(0)

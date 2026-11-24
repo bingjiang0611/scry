@@ -69,13 +69,13 @@ describe('SessionLedger', () => {
     const ledger = new SessionLedger({ store })
     const runId = randomUUID()
     ledger.recordIntent({ intentId: randomUUID(), runId })
-    expectCode(() => ledger.markSettled(runId), 'illegal_transition') // cannot settle before dispatch
+    expectCode(() => ledger.markSettled(runId), 'illegal_transition')
     ledger.markDispatched(runId)
     ledger.markProgress(runId, 'edited 2 files')
     expect(ledger.runState(runId)).toBe('dispatched')
     ledger.markSettled(runId)
     expect(ledger.runState(runId)).toBe('settled')
-    expectCode(() => ledger.markProgress(runId), 'illegal_transition') // terminal is terminal
+    expectCode(() => ledger.markProgress(runId), 'illegal_transition')
     expectCode(() => ledger.markDispatched(randomUUID()), 'unknown_run')
   })
 
@@ -88,10 +88,10 @@ describe('SessionLedger', () => {
     ledger.markProgress(runId, 'a')
     ledger.markSettled(runId)
     const first = ledger.since(0)
-    expect(first.events.map((e) => e.seq)).toEqual([1, 2]) // bounded page
+    expect(first.events.map((e) => e.seq)).toEqual([1, 2])
     const second = ledger.since(first.cursor)
     expect(second.events.map((e) => e.seq)).toEqual([3, 4])
-    expect(ledger.since(second.cursor).events).toEqual([]) // caught up
+    expect(ledger.since(second.cursor).events).toEqual([])
     expectCode(() => ledger.since(-1), 'invalid_cursor')
     expectCode(() => ledger.since(99), 'invalid_cursor')
     expectCode(() => ledger.since(1.5), 'invalid_cursor')
@@ -107,9 +107,8 @@ describe('SessionLedger', () => {
     ledger.markDispatched(finishedRun)
     ledger.markSettled(finishedRun)
     ledger.recordIntent({ intentId: openIntent, runId: openRun })
-    ledger.markDispatched(openRun) // recorded+dispatched but not terminal
+    ledger.markDispatched(openRun)
 
-    // Restart over the SAME persisted log.
     const revived = new SessionLedger({ store: new MemoryLedgerStore(store.log) })
     expect(revived.describe()).toEqual({ runs: 2, events: 5, lastSeq: 5 })
     expect(revived.runState(finishedRun)).toBe('settled')
