@@ -225,6 +225,16 @@ extension RemoteRunStore {
     func status() -> SessionStatusLine? {
       SessionStatusLine.focusedRun(store, onAnswer: {}, onStop: { stopConfirmations += 1 })
     }
+    // D1: a queued run repeats the host's slot, and says so when it is held.
+    store.queuePosition = 3
+    store.queueHeld = false
+    store.lifecycle = .queued
+    checks.append(("status.queuedSlot", status()?.text == "第 3 位，排队中，等前一轮结束"))
+    store.queuePosition = nil
+    checks.append(("status.queuedNoSlot", status()?.text == "排队中，等前一轮结束"))
+    store.queueHeld = true
+    checks.append(("status.queuedHeld", status()?.text == "排队中，已挂起，需在 Mac 上确认"))
+    store.queueHeld = false
     for (lifecycle, text) in [(Lifecycle.submitting, "发送中"), (.queued, "排队中，等前一轮结束"),
                               (.recorded, "等待开始"), (.dispatched, "等待开始"), (.running, "运行中")] {
       store.lifecycle = lifecycle

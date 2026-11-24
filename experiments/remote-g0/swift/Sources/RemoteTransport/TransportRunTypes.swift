@@ -23,6 +23,18 @@ extension G0Transport {
     public let detail: String?
   }
   public struct RunPollOutcome: Sendable, Equatable { public let events: [RunLedgerEvent]; public let cursor: Int }
+  /// D1: the run's lifecycle plus the host's queue slot and hold. The slot is what makes the phone
+  /// able to say "第 2 位" instead of a generic "排队中"; nil means the host did not report one.
+  public struct RunQueueSnapshot: Sendable, Equatable {
+    public let state: String?
+    public let queuePosition: Int?
+    public let queueHeld: Bool?
+    public init(state: String?, queuePosition: Int?, queueHeld: Bool?) {
+      self.state = state
+      self.queuePosition = queuePosition
+      self.queueHeld = queueHeld
+    }
+  }
   public struct RunQuestionOption: Sendable, Equatable, Codable {
     public let label: String; public let description: String; public let preview: String?
   }

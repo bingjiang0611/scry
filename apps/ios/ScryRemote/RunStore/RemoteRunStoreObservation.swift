@@ -37,8 +37,8 @@ extension RemoteRunStore {
       // Compacted ledgers may no longer retain the event that established an
       // older recovered run's current lifecycle. Reconcile the authoritative
       // run projection once, then continue from the server's resettable tail.
-      if let state = try? await client.runState(runId: runId) {
-        self.apply(runState: state, generation: generation, identity: identity)
+      if let snapshot = try? await client.runQueueState(runId: runId) {
+        self.apply(runQueue: snapshot, generation: generation, identity: identity)
       }
       while !Task.isCancelled {
         let requestConnectionRevision = self.connectionSuccessRevision

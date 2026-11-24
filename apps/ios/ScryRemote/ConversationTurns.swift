@@ -425,7 +425,10 @@ struct SessionStatusLine {
     // D1: the host accepted this turn and is holding it behind the session's live run. It is
     // waiting on the host, not on this phone, so the copy says so instead of "等待开始".
     if run.lifecycle == .queued {
-      return .init(text: "排队中，等前一轮结束", tone: .running, busy: true)
+      // D1: the host owns the order, so the phone repeats the host's slot rather than guessing one.
+      let slot = run.queuePosition.map { "第 \($0) 位，" } ?? ""
+      let held = run.queueHeld ? "已挂起，需在 Mac 上确认" : "等前一轮结束"
+      return .init(text: "\(slot)排队中，\(held)", tone: .running, busy: true)
     }
     if run.canStop {
       if run.stopRequested { return .init(text: "正在停止，等待 Agent 实际结束", busy: true) }

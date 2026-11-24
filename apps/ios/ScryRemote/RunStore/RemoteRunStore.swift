@@ -176,6 +176,10 @@ final class RemoteRunStore {
   // transport-offline (or as a successful connected state).
   var connectionObservation: ConnectionObservation = .unverified
   var lifecycle: Lifecycle = .unknown
+  // D1: the host's queue slot and hold for this run. nil when the host did not report one, which is
+  // not the same as "not queued" — the lifecycle decides that.
+  var queuePosition: Int?
+  var queueHeld = false
   var output: [OutputLine] = []
   // The user's own submitted message, echoed immediately as a chat bubble
   // (ChatGPT/Codex style) so the person sees exactly what they sent. This is the

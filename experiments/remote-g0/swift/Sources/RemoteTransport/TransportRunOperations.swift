@@ -134,8 +134,14 @@ extension G0Transport {
   // Query a single run's current lifecycle; nil means the host has no such run
   // for this device.
   public static func relayRunState(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> String? {
+    try await relayRunQueueState(endpoint: endpoint, identity: identity, runId: runId)?.state
+  }
+
+  /// D1: the same snapshot read, keeping the queue slot and hold the host reported for this run.
+  public static func relayRunQueueState(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String) async throws -> RunQueueSnapshot? {
     let (state, host) = try await subscription(endpoint: endpoint, identity: identity)
-    return try await state.observe(endpoint: endpoint, identity: identity, hostId: host).runs[runId]?.state
+    guard let row = try await state.observe(endpoint: endpoint, identity: identity, hostId: host).runs[runId] else { return nil }
+    return RunQueueSnapshot(state: row.state, queuePosition: row.queuePosition, queueHeld: row.queueHeld)
   }
 
   public static func relayRunAnswerQuestion(endpoint: RelayEndpoint, identity: G0ProbeIdentity, runId: String,

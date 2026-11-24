@@ -69,6 +69,21 @@ extension RemoteRunStore {
       (lifecycle == .settled || lifecycle == .failed || lifecycle == .cancelled)
   }
 
+  /// D1: the host also reports the queue slot and hold. They are stored apart from the lifecycle so a
+  /// stale slot can never resurrect a run the host already dispatched.
+  func apply(runQueue queue: G0Transport.RunQueueSnapshot, generation: Int, identity: SessionIdentity) {
+    guard isCurrent(generation, identity: identity) else { return }
+    if let state = queue.state { apply(runState: state, generation: generation, identity: identity) }
+    guard isCurrent(generation, identity: identity) else { return }
+    if lifecycle == .queued {
+      queuePosition = queue.queuePosition
+      queueHeld = queue.queueHeld ?? false
+    } else {
+      queuePosition = nil
+      queueHeld = false
+    }
+  }
+
   func apply(runState state: String, generation: Int, identity: SessionIdentity) {
     guard isCurrent(generation, identity: identity) else { return }
     switch state {
