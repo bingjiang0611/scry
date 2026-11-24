@@ -15,6 +15,7 @@ import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
 import { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import { paginateSubscribeReplies } from './orchestration-subscribe-chunks'
 import { parseWorkspacePrepareProgress } from '../shared/workspace-selection-input'
+import { readProviderSessions } from '../host-runtime/orchestration/provider-session-records'
 
 export interface AuthoritySubscribeRuntimeDeps {
   hostId: () => string
@@ -265,5 +266,18 @@ export function handleAuthorityRunProgress(
 }
 
 export function buildAuthorityStatus(sink: EventSink): BackgroundServiceOrchestrationStatus {
-  return { mode: 'on', writeIndeterminate: sink.isWriteIndeterminate() }
+  return {
+    mode: 'on',
+    writeIndeterminate: sink.isWriteIndeterminate(),
+    providerSessions: sink.handle.db.open
+      ? readProviderSessions(sink.handle.db, 20).map((row) => ({
+        key: row.key,
+        provider: row.provider,
+        nativeSessionId: row.nativeSessionId,
+        openedAt: row.openedAt,
+        releasedAt: row.releasedAt,
+        releaseReason: row.releaseReason
+      }))
+      : []
+  }
 }

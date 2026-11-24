@@ -80,6 +80,17 @@ export type BackgroundServiceDevices =
 export interface BackgroundServiceOrchestrationStatus {
   mode: 'on'
   writeIndeterminate?: boolean
+  /** C1: recent Provider sessions with their release reason, so the App can show why one closed. */
+  providerSessions?: BackgroundServiceProviderSession[]
+}
+
+export interface BackgroundServiceProviderSession {
+  key: string
+  provider: string
+  nativeSessionId: string | null
+  openedAt: number
+  releasedAt: number | null
+  releaseReason: string | null
 }
 
 /** What the daemon reports about itself (local op `localBackgroundService:status`). */

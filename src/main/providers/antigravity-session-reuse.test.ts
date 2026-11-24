@@ -99,13 +99,11 @@ it('C1: a reused session applies the new turn model on the same process without 
   expect(before.requests.filter((r) => r.method === 'session/new')).toHaveLength(1)
 
   // The second turn switches the model online: same process, no `session/new`, config re-sent.
-  const nativeEvents: string[] = []
   await runAntigravity(
     {
       runId: 'c1-m2', prompt: 'again', cwd, attachments: [], permissionMode: 'default',
       resume: first.externalSessionId, model: { id: 'model-b' } as never,
-      emit: () => undefined,
-      recordNative: (_t, payload) => nativeEvents.push(payload)
+      emit: () => undefined
     },
     { homeDir, sessions: host }
   ).promise

@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 9
+export const ORCHESTRATION_SCHEMA_VERSION = 10
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -334,7 +334,26 @@ const ORCH_DDL_V9: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS idx_orch_outbox_fifo ON orch_outbox(session_key, state, causation_seq, effect_id)'
 ]
 
+/**
+ * C1: which Provider sessions are open, and why they were released. The App can only claim a
+ * session was reused or released if this row exists, so the reason is a stored fact rather than a
+ * log line. Rows are never pruned: one row per opened session is the audit trail.
+ */
+const ORCH_DDL_V10: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_provider_session (
+     key TEXT PRIMARY KEY,
+     provider TEXT NOT NULL,
+     session_key TEXT,
+     native_session_id TEXT,
+     opened_at INTEGER NOT NULL,
+     last_used_at INTEGER NOT NULL,
+     released_at INTEGER,
+     release_reason TEXT
+   )`,
+  'CREATE INDEX IF NOT EXISTS idx_orch_provider_session_released ON orch_provider_session(released_at)'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
   ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
-  ORCH_DDL_V9
+  ORCH_DDL_V9, ORCH_DDL_V10
 ]

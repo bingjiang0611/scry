@@ -10,6 +10,8 @@ import type { PiAgentProfile } from '../pi-agent-profiles'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
 export function createProviderRuntime(deps: {
+  /** C1: the daemon owns Provider session lifetime because only it can record the release reason. */
+  providerSessions?: ProviderSessionHost<AntigravityProcessSession>
   homeDir: string
   userDataDir: string
   appPath: string
@@ -47,7 +49,7 @@ export function createProviderRuntime(deps: {
     id: id === 'pi' ? 'pi:0123456789abcdef' : id,
     name: id === 'pi' ? 'Pi · Rotom Smoke Fixture' : `${id} Smoke Fixture`, bin: id, path: process.execPath
   }))
-  const providerSessions = new ProviderSessionHost<AntigravityProcessSession>()
+  const providerSessions = deps.providerSessions ?? new ProviderSessionHost<AntigravityProcessSession>()
   const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id) => createSmokeProviderAdapter(id)) : createBuiltInProviderAdapters(
     homeDir,
     join(userDataDir, 'codex-home-v1'),

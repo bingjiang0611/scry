@@ -69,8 +69,8 @@ it('keeps a session with background tasks past the idle window, up to four hours
     const host = new ProviderSessionHost<{ name: string }>({
       now: () => Date.now(),
       idleMs: 15 * 60_000,
-      onReleased: (key, reason) => {
-        released = `${key}:${reason}`
+      onReleased: (record) => {
+        released = `${record.key}:${record.reason}`
       }
     })
     const { closed } = fakeSessions()

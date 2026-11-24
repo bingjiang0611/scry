@@ -31,7 +31,7 @@ describe('daemon background service status (local op)', () => {
           runControlsEnabled: true,
           providerManifestUrl: null
         },
-        orchestration: { mode: 'on', writeIndeterminate: false }
+        orchestration: { mode: 'on', writeIndeterminate: false, providerSessions: [] }
       })
     } finally {
       await daemon.dispose()

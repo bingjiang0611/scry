@@ -354,8 +354,11 @@ export function runAntigravity(
       externalSessionId = sid
       sessionEstablished = true
       session.sessionId = sid
-      if (deps.sessions && sessionKey && sessionKeyParts && request.resume === undefined) {
-        deps.sessions.alias(sessionKey, providerSessionKey({ ...sessionKeyParts, continuationKey: sid }))
+      if (deps.sessions && sessionKey && sessionKeyParts) {
+        deps.sessions.noteNativeSessionId(sessionKey, sid)
+        if (request.resume === undefined) {
+          deps.sessions.alias(sessionKey, providerSessionKey({ ...sessionKeyParts, continuationKey: sid }))
+        }
       }
       request.onExternalSessionId?.(sid)
 

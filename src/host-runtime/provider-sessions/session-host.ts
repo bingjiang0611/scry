@@ -14,7 +14,11 @@ export interface ProviderSessionHostOptions {
   /** Global cap; the least recently used idle session is evicted first. */
   maxSessions?: number
   now?: () => number
-  onReleased?: (key: string, reason: ProviderSessionReleaseReason) => void
+  /** Identity written next to the session row; every adapter reports its own Provider id. */
+  provider?: string
+  onOpened?: (record: { key: string; provider: string; at: number }) => void
+  onNativeSessionId?: (record: { key: string; provider: string; nativeSessionId: string; at: number }) => void
+  onReleased?: (record: { key: string; provider: string; reason: ProviderSessionReleaseReason; at: number }) => void
 }
 
 interface Entry<T> {
@@ -52,13 +56,19 @@ export class ProviderSessionHost<T> {
   readonly #maxBackgroundHoldMs: number
   readonly #maxSessions: number
   readonly #now: () => number
-  readonly #onReleased?: (key: string, reason: ProviderSessionReleaseReason) => void
+  readonly #provider: string
+  readonly #onOpened?: (record: { key: string; provider: string; at: number }) => void
+  readonly #onNativeSessionId?: (record: { key: string; provider: string; nativeSessionId: string; at: number }) => void
+  readonly #onReleased?: (record: { key: string; provider: string; reason: ProviderSessionReleaseReason; at: number }) => void
 
   constructor(options: ProviderSessionHostOptions = {}) {
     this.#idleMs = Math.min(30 * 60_000, Math.max(15 * 60_000, options.idleMs ?? DEFAULT_IDLE_MS))
     this.#maxBackgroundHoldMs = options.maxBackgroundHoldMs ?? DEFAULT_MAX_BACKGROUND_HOLD_MS
     this.#maxSessions = Math.max(1, options.maxSessions ?? DEFAULT_MAX_SESSIONS)
     this.#now = options.now ?? Date.now
+    this.#provider = options.provider ?? 'unknown'
+    this.#onOpened = options.onOpened
+    this.#onNativeSessionId = options.onNativeSessionId
     this.#onReleased = options.onReleased
   }
 
@@ -96,6 +106,7 @@ export class ProviderSessionHost<T> {
       close: opened.close
     }
     this.#entries.set(key, entry)
+    this.#onOpened?.({ key, provider: this.#provider, at: entry.openedAt })
     return { value: entry.value, sessionId: entry.sessionId, reused: false }
   }
 
@@ -141,6 +152,17 @@ export class ProviderSessionHost<T> {
     if (!entry.busy) this.#scheduleIdle(entry)
   }
 
+  /** Records the Provider's own session id once the turn established it. */
+  noteNativeSessionId(key: string, nativeSessionId: string): void {
+    if (!this.#entries.has(key)) return
+    this.#onNativeSessionId?.({
+      key,
+      provider: this.#provider,
+      nativeSessionId,
+      at: this.#now()
+    })
+  }
+
   async release(key: string, reason: ProviderSessionReleaseReason): Promise<void> {
     const entry = this.#entries.get(key)
     if (!entry) return
@@ -149,7 +171,7 @@ export class ProviderSessionHost<T> {
       if (other === entry) this.#entries.delete(candidate)
     }
     this.#clearIdle(entry)
-    this.#onReleased?.(key, reason)
+    this.#onReleased?.({ key, provider: this.#provider, reason, at: this.#now() })
     try {
       await entry.close()
     } catch {
