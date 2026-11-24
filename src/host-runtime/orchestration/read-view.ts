@@ -1,5 +1,6 @@
 import type { EventSinkStatements } from './event-sink-statements'
 import {
+  listQueuedRunsRaw,
   listNonTerminalChildRunsBySessionRaw,
   listNonTerminalChildRunsRaw,
   readInteractionRaw,
@@ -39,6 +40,7 @@ export function createOrchestratorReadView(input: OrchestratorReadViewInput): Or
     listNonTerminalChildRunsBySession: (sessionKey) => listNonTerminalChildRunsBySessionRaw(stmts, sessionKey),
     hasActiveRunForSession: (sessionKey) => Boolean(stmts.hasActiveSessionRun.get(sessionKey)),
     nextQueuePosition: (sessionKey) => stmts.nextQueuePosition.get(sessionKey) as number,
+    listQueuedRuns: (sessionKey) => listQueuedRunsRaw(stmts, sessionKey),
     activeRunCount: () => (stmts.activeRunCount.get() as { count: number }).count,
     maxActiveRuns: () => input.maxActiveRuns,
     isProviderAuthenticating: (provider, profile) => input.isProviderAuthenticating(provider, profile)

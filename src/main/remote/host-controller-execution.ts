@@ -205,6 +205,9 @@ export function createExecution(input: ExecutionDeps): {
       },
       onSettled: (runId, lifecycle, detail) => {
         deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
+        // D1: a terminal run may have released the head of its session's queue; drain it now
+        // instead of waiting for the next submit or restart.
+        try { dispatcher.pump() } catch { /* the queue drains on the next pass */ }
       },
       // B1/A4: stop and answer effects must reach completion from the durable queue, not only
       // from the in-memory request path, so a restart cannot lose them.

@@ -17,7 +17,7 @@ import {
   type OrchestratorReadView
 } from './orchestrator-handlers'
 import { isTerminalRunLifecycle } from './run-transitions'
-import { decideSubmitQueue, queuedRunEvent } from './orchestrator-queue'
+import { decideSubmitQueue, heldQueueEvents, queuedRunEvent } from './orchestrator-queue'
 import {
   DEFAULT_PENDING_TTL_MS,
   PROMPT_PREVIEW_MAX_CHARS,
@@ -193,17 +193,14 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       const target = view.getRun(cmd.payload.runId)
       if (!target) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
       if (isTerminalRunLifecycle(target.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
-
-      const events: PendingOrchestrationEvent[] = [
-        makeEvent(cmd, 0, {
+      const events: PendingOrchestrationEvent[] = [...heldQueueEvents(cmd, target, view), makeEvent(cmd, 0, {
           type: 'run.stop_requested',
           stream: `run:${target.runId}`,
           sessionKey: target.sessionKey,
           runId: target.runId,
           cwd: target.cwd,
           payload: { runId: target.runId, ...(cmd.payload.reason ? { reason: cmd.payload.reason } : {}) }
-        })
-      ]
+        })]
       const shadowOnly = Boolean(cmd.payload.shadowOnly)
       const effects: PendingOutboxEffect[] = [
         makeEffect(cmd, 0, {

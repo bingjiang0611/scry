@@ -36,6 +36,8 @@ export interface OrchestratorReadView {
   hasActiveRunForSession(sessionKey: string): boolean
   /** D1: next free queue slot for a session; 1-based so position 0 never means "first". */
   nextQueuePosition?(sessionKey: string): number
+  /** D1: runs waiting in a session's queue, in release order. */
+  listQueuedRuns?(sessionKey: string): RunProjectionRow[]
   activeRunCount(): number
   maxActiveRuns(): number
   isProviderAuthenticating(provider: string, profile: string | null): boolean

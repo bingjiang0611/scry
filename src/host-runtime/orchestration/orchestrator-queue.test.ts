@@ -83,3 +83,28 @@ it('D1: a plain submit while the session is busy still returns session_run_activ
   const decision = decide(submit('immediate-run', 'immediate'), view())
   expect(decision).toMatchObject({ kind: 'rejected', reason: 'session_run_active' })
 })
+
+it('D1: stopping a session holds its queued runs instead of letting them fire', () => {
+  const queued = { ...busyRun(), runId: 'queued-run', lifecycle: 'queued' as const, queuePosition: 1 }
+  const base = view()
+  const withQueue = {
+    ...base,
+    listQueuedRuns: () => [queued as never]
+  } as unknown as OrchestratorReadView
+  const stop: OrchestrationCommand = {
+    type: 'run.stop',
+    commandId: 'cmd-stop',
+    actor: PEER_A,
+    scope: 'local',
+    at: 2_000,
+    payloadSha256: sha256Hex('stop'),
+    payload: { runId: 'busy-run' }
+  } as OrchestrationCommand
+  const decision = decide(stop, withQueue)
+  expect(decision.kind).toBe('accepted')
+  if (decision.kind !== 'accepted') return
+  const held = decision.events.find((event) => event.type === 'run.queue_held')
+  expect(held?.runId).toBe('queued-run')
+  expect(held?.payload?.heldBy).toBe('busy-run')
+})
+

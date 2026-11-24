@@ -82,3 +82,9 @@ export function listAllOutboxRaw(db: Database.Database): OutboxEffectRow[] {
     .all() as Array<Record<string, unknown>>
   return rows.map(mapOutboxRow)
 }
+
+/** D1: the session's queued runs in release order: held ones last, then by position. */
+export function listQueuedRunsRaw(stmts: EventSinkStatements, sessionKey: string): RunProjectionRow[] {
+  const rows = stmts.listQueuedRuns.all(sessionKey) as Array<Record<string, unknown>>
+  return rows.map(mapRunRow)
+}

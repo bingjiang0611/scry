@@ -31,3 +31,26 @@ export function queuedRunEvent(
     payload: { runId: payload.runId, queuePosition: view.nextQueuePosition?.(payload.sessionKey ?? '') ?? 1 }
   })
 }
+
+/**
+ * D1: stopping a session holds every queued run behind it. The stop cannot silently let the queue
+ * keep firing; only an explicit release resumes it.
+ */
+export function heldQueueEvents(
+  cmd: OrchestrationCommand,
+  target: { runId: string; sessionKey: string | null },
+  view: OrchestratorReadView
+): PendingOrchestrationEvent[] {
+  if (!target.sessionKey) return []
+  return (view.listQueuedRuns?.(target.sessionKey) ?? []).map((queued) =>
+    makeEvent(cmd, 0, {
+      type: 'run.queue_held',
+      stream: `run:${queued.runId}`,
+      sessionKey: queued.sessionKey,
+      runId: queued.runId,
+      cwd: queued.cwd,
+      payload: { runId: queued.runId, heldBy: target.runId }
+    })
+  )
+}
+
