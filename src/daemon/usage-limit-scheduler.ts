@@ -25,6 +25,11 @@ export interface UsageLimitSchedulerDeps {
   now?: () => number
   schedule?: (fn: () => void, ms: number) => { unref?: () => void }
   log?: (line: string) => void
+  /**
+   * C4: the resume is written into the outbox, so something must drive the dispatcher afterwards.
+   * Submit paths pump; this scheduler is the only writer with no request behind it.
+   */
+  pump?: () => void
 }
 
 export interface UsageLimitScheduler {
@@ -93,6 +98,9 @@ export function createUsageLimitScheduler(deps: UsageLimitSchedulerDeps): UsageL
       const claimedAt = now()
       if (!claimUsageLimitResume(db, row.sessionKey, row.recordedAt, claimedAt)) continue
       const submitted = submitUsageLimitResume(deps.sink(), pending, claimedAt)
+      if (submitted.status !== 'unavailable') {
+        try { deps.pump?.() } catch (error) { deps.log?.(`usage-limit resume not pumped: ${String(error)}`) }
+      }
       if (submitted.status === 'unavailable') {
         // The resume never entered the queue, so the claim is released and the reason is kept: the row
         // stays pending instead of claiming a resume that did not happen.

@@ -73,6 +73,9 @@ export class HostController {
     this.#disposeExecution = wiring.dispose
   }
 
+  /** C4: a writer with no request behind it (the usage-limit scheduler) still has to drive dispatch. */
+  pump(): void { this.#dispatcher.pump() }
+
   // Startup only: reconcile orphaned dispatched runs and pump undispatched intents.
   recover(): void {
     recoverDispatchedLedgerRuns(this.#ledger, this.#injected.orchestration)

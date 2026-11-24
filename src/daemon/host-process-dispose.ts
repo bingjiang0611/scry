@@ -17,6 +17,8 @@ export async function attachHostProcessOrchestration<
   requestRunStop: (runId: string) => boolean
   attentionSnapshot: () => SessionAttentionSnapshot
   log: (line: string) => void
+  /** C4: the resume is an outbox write, so the scheduler needs the dispatcher's pump. */
+  pumpDispatcher?: () => void
 }): Promise<DaemonOrchestrationAuthority> {
   const { options, conversationStore, runs, requestRunStop, attentionSnapshot, log } = input
   // C4: the scheduler is created before the authority and reads it lazily, because the authority
@@ -28,7 +30,9 @@ export async function attachHostProcessOrchestration<
       return db?.open ? db : undefined
     },
     sink: () => attached?.sink,
-    settings: () => ({ autoResume: process.env.SCRY_USAGE_LIMIT_AUTO_RESUME === '1' })
+    settings: () => ({ autoResume: process.env.SCRY_USAGE_LIMIT_AUTO_RESUME === '1' }),
+    ...(input.pumpDispatcher ? { pump: input.pumpDispatcher } : {}),
+    log
   })
   const authority = await attachDaemonOrchestrationAuthority({
     userDataDir: options.userDataDir,

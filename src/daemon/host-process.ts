@@ -248,7 +248,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     runs: pipeline.runs,
     requestRunStop,
     attentionSnapshot: () => session.dockBadge.snapshot(),
-    log
+    log,
+    // Created further down, so the scheduler reads it lazily.
+    pumpDispatcher: () => remoteHostService?.controller.pump()
   })
   orchestrationAuthority = authority
   userDataAuthority = authority.sink

@@ -118,3 +118,30 @@ describe('usage-limit scheduler: a resume that was not submitted keeps its row p
     scheduler.stop()
   })
 })
+
+// C4 (review): the resume is an outbox write, and the dispatcher is the only thing that drains it. The
+// scheduler had no pump, so a resume submitted at the reset time sat pending until unrelated activity.
+describe('usage-limit scheduler: a submitted resume drives the dispatcher', () => {
+  it('pumps after an accepted resume and not when the submit is refused', () => {
+    const { sink, db } = store()
+    let clock = 1_000
+    let pumped = 0
+    let available = false
+    const scheduler = createUsageLimitScheduler({
+      db: () => db,
+      sink: () => (available ? sink : undefined),
+      settings: () => ({ autoResume: true }),
+      now: () => clock, schedule: () => ({}),
+      pump: () => { pumped += 1 },
+      log: () => {}
+    })
+    scheduler.record(input(2_000))
+    clock = 2_000
+    scheduler.pump()
+    expect(pumped).toBe(0)
+    available = true
+    scheduler.pump()
+    expect(pumped).toBe(1)
+    scheduler.stop()
+  })
+})
