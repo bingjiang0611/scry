@@ -116,6 +116,18 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 记录仍是唯一事实源。原地改写已有记录不会被文件名对齐发现，所以未来任何改写记录字段的路径必须删掉该缓存；目前没有这样的路径：提交只追加、归档只把文件移出、`content-repair` 不改记录。
 - 实测（3,000 条 × ~88 KB）：`listRecords()` 1,011 ms / 峰值 352 MiB；冷重建 925 ms / 79 MiB；热读 9 ms / 55 MiB。`npm run bench:record-summary` 复现，每个模式独立进程计峰值。
 
+### 0.2.86：静默轮次改低频复查
+
+- 一次 recovery pass 以前会把每个仍有 open 轮次的会话重新判一遍，包括那些结论不会再变、证据也没动过的会话。工作区里存在几十个陈旧轮次时，这份重复劳动是常驻 CPU 的主要来源。
+- 现在：某次 pass 判过“仍然开着、且它自己的文件已经超过 stale 窗口没动静”的会话，会记住当时的文件指纹，之后**一小时**才复查一次；任何 hook 到达、或任何它读的文件发生变化（`open.json`、`session.json`、当前 generation 目录与 `events/`、`inbox/`、transcript），下一次 pass 立即恢复常规频率。
+- 只改调度。不收尾轮次、不动 marker、不删证据；记录在内存里，进程重启后第一遍复查全部——偏向安全的一侧。
+- 只对尚未收敛的会话生效：已收尾的会话不留记录；操作者用 `recover --session` 点名的会话永远照常复查。`--expire-open` 等显式动作不受影响。
+- 实测（45 个陈旧会话，两个模式用同一个 `npm run bench:quiet-revisit`，`--mode=visit` 在每遍之间改 `open.json` 的 mtime，就是改动前“每遍重新判一遍”的行为）：
+  - 合成 fixture（45 个会话，每轮 64 KB transcript）：整遍约 0.9 s → 约 0.2 s CPU（同机负载波动约 ±30%）。剩下的 0.2 s 里几乎全部是每遍结束时的 health 扫描（45 × 约 4 ms），与本节无关。
+  - `rate-native` 工作区真实 `.scry` 的只读副本（1,120 个会话、3,212 条记录、其中 45 个陈旧轮次、2 个 managed 轮次）：陈旧轮次这部分每遍 401–702 ms CPU → 21–29 ms CPU（约 19 倍）。
+  - 同一副本上整遍仍要 3–5 s CPU，因为大头不在这里：managed 恢复（2 个会话，约 3.1 s）与每遍 health 扫描（约 0.24 s）。前者正是摘要缓存（上面 0.2.86 第一节）要解决的问题。
+  - 结论：本节只降低“重复判静默会话”那一份；工作区里没有陈旧轮次时它什么也不省。
+
 不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
 存量 workspace 升级 CLI 后需要重新生成 hook 脚本才能拿到快路径:`scry integrations repair --yes`(不做也不会错,只是慢)。
 
