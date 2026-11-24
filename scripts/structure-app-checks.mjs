@@ -103,8 +103,6 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await cdp.send('Page.captureScreenshot', { format: 'png' })
     await wait(`document.querySelector('.surface-menu').getAnimations().every(a => a.playState === 'finished')`)
     await capture(`${theme}-surface-menu`)
-    // The side-chat entry and its history item are the first two items of the same add
-    // menu; the six tool items follow unchanged.
     check(await evaluate(`(() => {
       const items = [...document.querySelectorAll('.surface-menu [role="menuitem"]')]
       if (items.length !== 8) return false

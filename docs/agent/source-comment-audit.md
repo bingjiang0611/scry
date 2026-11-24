@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `3da3b861`, reviewed all 21 lexical comments in the three direct `scripts/structure-*.mjs` files. Removed four repeated or overstated labels in the App and side-chat checks. Preserved the catalog-preview contract and the structure fixture function serialized as executable source. Comment-free emit and tool directives matched, 17 fixture-wiring tests and the ratchet passed. The native App smoke was not run.
+
 At `2c1c78ef`, reconciled all 176 lexical comment tokens in 25 direct `scripts/concurrent-diff*`, `scripts/concurrent-performance*` and `scripts/daemon-*` JS/TS files (excluding `daemon-mode-*`). Removed two redundant labels and kept the operator, fixture, and evidence contracts. Comment-free emit and tool directives matched; both focused suites passed all 22 tests and the ratchet passed. No live App or performance benchmark was run.
 
 At `1366d1e0`, reviewed 54 lexical comments across seven files: the four tracked JS skill tools, the bundled Pi history reader, and the two performance-evidence experiment files. Removed three redundant section labels in the UI contract checker. Its three report sections ran successfully; shebang, tool directives and comment-free emit matched, and the source-comment ratchet passed. The report is a review aid, not a UI smoke result.

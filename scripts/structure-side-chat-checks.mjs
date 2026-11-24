@@ -23,7 +23,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount, ...point })
   }
-  /** The history item is the second side-chat menu entry; its position is what a user hits. */
   const clickHistoryItem = async () => {
     const point = await evaluate(`(() => {
       const item = document.querySelectorAll('.surface-menu [role="menuitem"]')[1]
@@ -113,7 +112,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
   check(await evaluate(`document.querySelector('${mainComposer}')?.value.endsWith('main draft kept') === true`),
     'Reopening a child overwrote the main draft')
 
-  // Switching tabs is a tab action: focus stays on the tab and no metadata is rewritten.
   const beforeSwitch = counts()
   await click(`${currentSurface} [data-surface-tab="side-chat"] button[role="tab"]`)
   await idle()
