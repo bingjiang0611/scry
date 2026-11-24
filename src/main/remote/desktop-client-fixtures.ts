@@ -56,7 +56,6 @@ export async function setup(setupOptions: { catalogSnapshot?: (request: Record<s
     if (request.op === 'intentStatusAtLog' && setupOptions.unknownIntent) return { error: 'unknown_intent' }
     if (request.op === 'resolveIntent' && setupOptions.resolveIntentResponse) return setupOptions.resolveIntentResponse()
     if (request.op === 'subscribe' && setupOptions.subscribeResponse) return setupOptions.subscribeResponse(request)
-    // revision so the unchanged path can be exercised.
     if (request.op === 'catalogSnapshot') {
       if (setupOptions.catalogSnapshot) return { catalogSnapshot: await setupOptions.catalogSnapshot(request) }
       const revision = 'fixture-catalog-1'

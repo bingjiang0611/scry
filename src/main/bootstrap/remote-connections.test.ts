@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// 该模块顶层只读取 electron 的 app/safeStorage，测试只用到纯函数分支。
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp/scry-test' }, safeStorage: {} }))
 
 const { unsafeCredentialStorageReason } = await import('./remote-connections')
