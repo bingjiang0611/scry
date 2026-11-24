@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 12
+export const ORCHESTRATION_SCHEMA_VERSION = 13
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -372,7 +372,29 @@ const ORCH_DDL_V12: readonly string[] = [
   'ALTER TABLE orch_p_run ADD COLUMN rolled_back_at INTEGER'
 ]
 
+/**
+ * C4: a usage limit the Provider named a reset time for becomes a pending item, so the resume is a
+ * stored fact rather than a timer that dies with the process. `resumed_at` records the one resume,
+ * and a null reset time means the item can never be resumed automatically.
+ */
+const ORCH_DDL_V13: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_usage_limit (
+    session_key TEXT NOT NULL,
+    reset_at INTEGER,
+    provider TEXT NOT NULL,
+    profile TEXT,
+    cwd TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    source TEXT,
+    window TEXT,
+    recorded_at INTEGER NOT NULL,
+    resumed_at INTEGER,
+    PRIMARY KEY (session_key, recorded_at)
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_orch_usage_limit_due ON orch_usage_limit(resumed_at, reset_at)'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
   ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
-  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11, ORCH_DDL_V12
+  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11, ORCH_DDL_V12, ORCH_DDL_V13
 ]

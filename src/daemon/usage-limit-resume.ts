@@ -13,7 +13,8 @@ import type { UsageLimit } from '../main/providers/usage-limit'
  * - the command id is derived from the session and the reset time, so a timer that fires twice (or a
  *   daemon restart that re-arms it) submits one resume, not two.
  */
-export interface UsageLimitPending extends UsageLimit {
+export interface UsageLimitPending extends Omit<UsageLimit, 'provider'> {
+  provider: string
   sessionKey: string
   profile: string | null
   cwd: string
