@@ -79,7 +79,6 @@ describe('Pi detached subagent evidence', () => {
       .toMatchObject([{ taskId: 'child', status: 'unconfirmed' }])
     expect(work.pending).toBe(false)
     expect(work.observe({ type: 'agent_settled' })?.phase).toBe('inactive')
-    // Live work in a later snapshot outranks the earlier clear.
     work.observe(widget('running', 5, 'child-2'))
     expect(work.pending).toBe(true)
   })

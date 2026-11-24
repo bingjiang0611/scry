@@ -44,7 +44,6 @@ interface Submitted {
   text: string
 }
 
-/** Captures the one user message the adapter hands to the SDK input stream. */
 function captureSubmitted(): { submitted: Submitted; promise: Promise<Submitted> } {
   const submitted = { uuid: '', text: '' }
   let resolve: (value: Submitted) => void = () => {}

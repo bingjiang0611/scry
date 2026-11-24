@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+At `306921f7`, rechecked 120 lexical comments across 44 direct Pi, Qoder, Claude, Codex, and OpenCode test or fixture files, including paths covered by earlier passes. Removed three redundant prose comments. The other recommendations remain in place pending contract or wording follow-up. The three changed files produced identical comment-free emit, all 33 focused tests passed, and the ratchet passed. No live Provider probes were run.
+
 At `419d782f`, confirmed that `src/main/text-spool.ts` advances the file offset after a short write but passes the original string again. [#192](https://github.com/bingjiang0611/scry/issues/192) tracks the fix and regression coverage; no real short write or corruption was observed. Removed the unsupported comment without changing the write loop. Comment-free emit matched; all six existing spool tests and the ratchet passed.
 
 At `d2b91e62`, reviewed 58 retained comment tokens introduced by the machines feature outside the dedicated host-metrics and machines files. Matched current lexical comments against the upstream trees before and after the feature, then read the surrounding source. Removed five redundant or overstated notes, preserving privacy and missing-data contracts. Comment-free emit and tool directives matched, 44 focused tests passed, and the ratchet passed. No live UI was run.

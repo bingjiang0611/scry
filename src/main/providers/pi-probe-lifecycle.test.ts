@@ -15,7 +15,6 @@ describe('Pi capability probe lifecycle', () => {
       ])
       expect(results.map((result) => result.state)).toEqual(['ready', 'ready', 'ready'])
       expect(starts()).toHaveLength(1)
-      // A later read still asks the live child, but no second child is started for it.
       await expect(probePiAgent(profile, cwd)).resolves.toMatchObject({ state: { cwd } })
       expect(starts()).toHaveLength(1)
       expect(readFileSync(join(cwd, 'commands'), 'utf8').trim().split('\n')).toHaveLength(8)
