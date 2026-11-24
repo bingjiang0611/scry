@@ -50,6 +50,12 @@ describe('A5: Codex app-server exclusivity', () => {
   it('reports an exclusive app-server client only when this run is its only activity', async () => {
     const resolvers: Array<(value: unknown) => void> = []
     appServer.onNotification.mockReturnValue(() => {})
+    // The real client always hands back an unsubscribe function; a bare vi.fn() would make the run's
+    // finally block call undefined, which is a fixture defect, not adapter behaviour.
+    appServer.onRequest.mockReturnValue(() => {})
+    // A running client always answers with a pending failure promise; without one the run cannot
+    // race native completion against a transport failure and the finally block never runs.
+    appServer.failureForCurrentGeneration.mockImplementation(() => new Promise<never>(() => {}))
     appServer.request.mockImplementation(async (method) => {
       if (method === 'account/read') return { account: { type: 'chatgpt' } }
       if (method === 'thread/start') return new Promise((resolve) => resolvers.push(resolve))
