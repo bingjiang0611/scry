@@ -110,7 +110,6 @@ export function registerCodexUsageBaselineSuite(): void {
     // code would reject the whole record. The sentence is the contract until they catch up.
     expect(records[0].usage.omissionCodes).toBeUndefined()
     expect(records[0].usage.omissionReason).toBe(USAGE_BASELINE_MISSING_REASON)
-    // 后一轮的基线是第一帧的累计值，是真实的帧，不需要再推导。
     expect(records[1].usage.status).toBe('available')
     expect(records[1].usage.value).toEqual(expect.objectContaining({ inputTokens: 100, outputTokens: 100 }))
   })

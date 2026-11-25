@@ -62,8 +62,6 @@ export function registerSuite2(): void {
     const name = (await readdir(join(dataRoot, 'records')))[0]
     const path = join(dataRoot, 'records', name)
     const stored = JSON.parse(await readFile(path, 'utf8'))
-    // A newer recorder may explain a usage gap with a code this build does not know. The whole
-    // record must stay readable; one unknown code may not invalidate every other section.
     stored.usage = {
       status: 'unavailable',
       quality: 'unavailable',
@@ -133,7 +131,6 @@ export function registerSuite2(): void {
         omissionCodes: ['usage_baseline_missing']
       }
     })).rejects.toThrow('refusing to commit a record with codes this version must not write: usage_baseline_missing')
-    // The diff codes are what this version is allowed to write.
     const committed = await commitRecord(dataRoot, {
       ...stored,
       recordId: 'c'.repeat(32),
@@ -176,7 +173,6 @@ export function registerSuite2(): void {
       ...large,
       termination: { ...large.termination, omissionReason: 'x', omissionCodes: ['usage_baseline_missing'] }
     })).rejects.toThrow('usage_baseline_missing')
-    // The same large record with only writable codes commits.
     const committed = await commitRecord(dataRoot, {
       ...large,
       recordId: 'e'.repeat(32),

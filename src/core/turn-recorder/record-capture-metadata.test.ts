@@ -50,8 +50,6 @@ describe('diff omission codes', () => {
   })
 
   it('tolerates an unfamiliar code instead of rejecting the record, and still rejects a broken list', () => {
-    // A record written by a newer recorder must stay readable: one unknown code would otherwise
-    // invalidate every other section of the record. Readers keep the code as written.
     const unknown = {
       status: 'partial',
       quality: 'exact',

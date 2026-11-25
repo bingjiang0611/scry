@@ -90,7 +90,6 @@ export function registerSuite12(): void {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 5
           },
-          // Codex writes both counters into every frame; equal values prove the session started at zero.
           last_token_usage: {
             input_tokens: 100,
             output_tokens: 20,
