@@ -48,12 +48,13 @@ export async function exerciseProductionPerformance(smokeContext) {
         if (document.querySelector('.llm-perf-modal, .sb-navitem[title="LLM 性能"]')) throw new Error('The removed performance modal is still reachable')
         if (view && view.querySelector('.analytics-tabs [aria-selected="true"]')?.textContent === 'LLM 性能'
           && view.querySelector('#analytics-comparison h2')?.textContent === '模型对比'
-          && view.querySelector('.analytics-empty')?.textContent.includes('这段时间没有在 Scry 里运行'))
+          && view.querySelector('.analytics-empty')?.textContent.includes('这段时间没有在 Scry 里运行')) {
           // 页面要有可访问名：aria-labelledby 必须指向页面里真实的标题元素。
           const named = view.getAttribute('aria-labelledby')
           const title = named ? document.getElementById(named) : null
           if (!title || !title.textContent.trim()) throw new Error('Analytics page lost its accessible name')
           return { defaultTab: 'LLM 性能', labelled: title.textContent.trim() }
+        }
         await new Promise(requestAnimationFrame)
       }
       throw new Error('Production analytics page did not load real IPC history: ' + (document.querySelector('.analytics-page')?.textContent ?? document.body.innerText).slice(0, 600))
