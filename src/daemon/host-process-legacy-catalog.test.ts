@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { appendFileSync, mkdirSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { importCatalogEntries } from '../host-runtime/orchestration/legacy-catalog-and-repair'
 import { createAppSessionStore } from '../main/app-store'
@@ -13,7 +13,49 @@ import { cleanupTempDirs, tempDir } from './host-process.fixtures'
 import { attachDaemonOrchestrationAuthority } from './orchestration-authority'
 import { createOrchestrationCatalogAccess } from './orchestration-catalog-access'
 
+import { startTestDaemon } from './host-process.harness'
+
 afterEach(cleanupTempDirs)
+
+it('R10: the daemon replays pending metadata after deferred import', async () => {
+  const root = tempDir()
+  const userDataDir = join(root, 'userData')
+  mkdirSync(join(root, 'workspace'))
+  const cwd = realpathSync(join(root, 'workspace'))
+  const sessionId = 'late-native'
+  const ledger = join(userDataDir, 'remote', 'ledger')
+  mkdirSync(ledger, { recursive: true })
+  const at = Date.now() - 60_000
+  const lines = Array.from({ length: 2001 }, (_, i) => {
+    const runId = randomUUID()
+    const seq = i * 3 + 1
+    return [
+      { seq, at, kind: 'intent_recorded', runId, intentId: randomUUID(),
+        detail: JSON.stringify({ providerId: 'codex', cwd, resume: i === 2000 ? sessionId : undefined }) },
+      { seq: seq + 1, at, kind: 'run_dispatched', runId },
+      { seq: seq + 2, at, kind: 'run_settled', runId }
+    ]
+  }).flat()
+  writeFileSync(join(ledger, 'session-ledger.log'), lines.map(line => JSON.stringify(line)).join('\n') + '\n')
+  writeFileSync(join(userDataDir, 'session-metadata-pending.json'), JSON.stringify([{
+    externalSessionId: sessionId, providerId: 'codex', cwd, actor: 'user:local', change: { kind: 'rename', title: 'Replayed title' }
+  }]))
+  let resume!: () => void
+  const pause = new Promise<void>(resolve => { resume = resolve })
+  const daemon = await startTestDaemon({ root, orchestrationPauseBackfill: pause })
+  try {
+    const authority = daemon.host.orchestrationAuthority!
+    expect(authority.sink.getSession(sessionId)).toBeUndefined()
+    resume()
+    await authority.importComplete
+    await vi.waitFor(() => {
+      expect(authority.sink.getSession(sessionId)?.title).toBe('Replayed title')
+    })
+  } finally {
+    resume()
+    await daemon.dispose()
+  }
+}, 20_000)
 
 function seedHistory() {
   const userDataDir = tempDir()

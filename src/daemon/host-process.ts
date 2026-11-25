@@ -313,7 +313,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
         runQuestions: (runId) => pipeline.runs.get(runId)?.state.pendingQuestions,
         readFirstPage: createAuthorityDetailReader(historyChannels, (id) => catalog.conversationService().read(id)),
         scans: createDaemonCatalogScans(authority.sink, options.userDataDir, workspace,
-          catalog.appSessionStore, () => publishData({ kind: 'catalog_recovered' }), log)
+          catalog.appSessionStore, () => {
+            void sessionLinks.reconcileSessionMetadata?.()
+            publishData({ kind: 'catalog_recovered' })
+          }, log)
       }),
       log
     }),
@@ -331,6 +334,9 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // transport so a locally enrolled grant cannot be replayed over the network.
   const identity = buildIdentity(options.appVersion)
   authority.startImport()
+  void authority.importComplete.then(() => {
+    if (!isShuttingDown) void sessionLinks.reconcileSessionMetadata?.()
+  })
   const { channel, enrollSocket, adminSocket, localHost } = await attachDaemonEndpoints({
     daemonStateDirectory: options.daemonStateDirectory,
     appVersion: options.appVersion,
