@@ -10,8 +10,7 @@ export const SESSION_IDLE_MAX_MS = 30 * 60_000
 export const SESSION_IDLE_DEFAULT_MS = 20 * 60_000
 export const SESSION_POOL_CAP = 8
 
-/** `crashed` says the process died under the pool, so the close is a cleanup, not a policy choice. */
-export type SessionReleaseReason = 'idle' | 'lru' | 'dispose' | 'crashed'
+export type SessionReleaseReason = 'idle' | 'lru' | 'dispose'
 
 export interface SessionLifecycleObserver {
   onOpened?: (key: string, provider: string, at: number) => void

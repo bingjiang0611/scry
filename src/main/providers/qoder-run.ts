@@ -162,8 +162,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     const bindings: QoderTurnBindings = {
       canUseTool: request.requestUserInput ? qoderCanUseTool(request, waitForUser) : undefined,
       onExit: (code, signal) => {
-        // R12: the pool must not hand this process to the next turn.
-        lease?.markExited()
         if (stopped || streamSettled) return
         exitTimer = setTimeout(() => {
           rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
@@ -195,8 +193,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
             currentTurn()?.onPid?.(pid)
           },
           (code, signal) => {
-            // R12: the pool must not hand a dead process to the next turn.
-            lease?.markExited()
             // A turned-over session reports its exit to the turn that is live right now.
             const live = currentTurn()
             if (live?.onExit) { live.onExit(code, signal); return }
@@ -348,7 +344,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       if (exitTimer) clearTimeout(exitTimer)
       if (lease) {
         // The turn is over; the session stays open for the next turn under the shared idle window.
-        // A turn that ended because the process went away cannot serve one (R12).
         lease.release()
       } else {
         try {
