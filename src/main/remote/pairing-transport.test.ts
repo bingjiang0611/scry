@@ -79,7 +79,7 @@ describe('PairingTransport (device-facing pairing prove/status)', () => {
     const proved = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: rid, operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'My iPhone' })
     expect(proved.kind).toBe('pair.pending')
     expect(proved.requestId).toBe(rid)
-    // The fingerprint came from the verified TLS peer cert, matching the CSR key.
+    // The returned fingerprint matches the expected CSR key fingerprint.
     expect(proved.publicKeySHA256).toBe(expected.publicKeySHA256)
 
     const status = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: 'req-2', operation: 'pair.status', pairingId: pair.pairingId, secret: pair.secret })

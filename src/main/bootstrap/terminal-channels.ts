@@ -3,10 +3,8 @@ import type { TerminalManager } from '../terminal-manager'
 import type { TerminalOutputBridge } from '../terminal-output'
 import type { ChannelHandlers } from './startup-channels'
 
-// The `terminal:*` channels, as main has always answered them, shared with the daemon
-// (P3-terminal.md) so daemon mode runs the same logic. The caller checks stay the
-// caller's: main asserts the IPC event and that its window can receive; the daemon's App
-// asks those before it sends, and the daemon passes none.
+// Daemon terminal handlers receive no Electron IPC event. The App bridge checks
+// the caller and window where required; the daemon supplies its own readiness check.
 
 export interface TerminalChannelDependencies<E> {
   getTerminalManager: () => Promise<TerminalManager>

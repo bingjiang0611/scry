@@ -28,10 +28,10 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
 /**
  * Run-scoped ephemeral HTTP MCP bridge for `request.historyReader` (P7 §5.3).
  *
- * A0 empirical testing (`06-mcp.json`) proved `agy 1.5.12` persists `session/new.mcpServers`
- * bearer headers into `conversations/<id>.db`. Minting a fresh per-run random token on an
- * ephemeral loopback proxy guarantees the upstream token never reaches `agy`, and closing
- * the proxy + revoking the token in `finally` renders any persisted DB token immediately useless.
+ * A0 testing (`06-mcp.json`) observed `agy 1.5.12` persisting `session/new.mcpServers`
+ * bearer headers in its conversation database. The config given to `agy` uses the
+ * loopback bridge's per-run credential, not the upstream bearer. When disposal
+ * runs, it revokes that credential before closing the bridge.
  */
 export async function prepareAntigravityHistoryMcp(
   request: ProviderRunRequest,

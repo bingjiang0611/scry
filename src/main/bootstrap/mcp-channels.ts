@@ -11,11 +11,9 @@ import { providerOperationKey } from '../provider-operation-gate'
 import { shellEnv } from '../claude-locate'
 import type { ChannelHandlers } from './startup-channels'
 
-// The five MCP channels, as main has always answered them, shared with the daemon
-// (B4-L4) so daemon mode runs the same trust and fingerprint checks: every live probe,
-// test and re-auth re-verifies the MCP execution snapshot and fails closed. What differs
-// is injected: who may authenticate here, and how an OAuth page reaches a browser (main
-// opens it; the daemon hands it to its App, which opens it only for its own request).
+// Daemon MCP handlers delegate execution checks by Provider and operation.
+// Required trust and fingerprint checks fail closed. Authentication ownership
+// and OAuth handoff are injected; the App opens OAuth only for its own request.
 
 export interface McpChannelDependencies {
   providerRegistry: ProviderRegistry

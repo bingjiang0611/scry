@@ -152,9 +152,7 @@ export function qoderOptions(
 ): Record<string, unknown> {
   const executable = qoderExecutable()
   if (!executable) throw new Error('Qoder CLI 未找到')
-  // Corporate EDR blocks the qodercli symlink entry from reading ~/.qoder/.auth/user.
-  // Resolving the same signed CLI to its JavaScript bundle lets the SDK launch it
-  // through Node, preserving the original config/auth/session paths.
+  // Prefer the resolved executable path; fall back to the detected path.
   const runtimeEnv = runtimeCliEnv(
     undefined,
     managedRecorder ? { managedRecorder: true, providerId: 'qoder' } : { providerId: 'qoder' }

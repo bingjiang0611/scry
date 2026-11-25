@@ -1,16 +1,15 @@
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
 // Retry rules are explicit, not error-string guesses:
-//   - Opening a channel may retry: no request byte has been sent yet, so a stale
-//     tunnel or a closed host leg cannot have run anything.
-//   - A request whose bytes never reached the socket is re-sent on a new channel,
-//     at most twice.
-//   - A request whose bytes were written is re-sent once only when the caller
-//     marked it replayable (reads). A write surfaces the error so the caller keeps
-//     the outcome unknown and reconciles by intent id; it is never replayed.
-//   - Only a reply starting with `{"keepAlive":true,` proves the host keeps the
-//     tunnel open. Anything else is a protocol mismatch, never a silent fallback
-//     to one-shot requests.
+//   - Channel-open failures and sends proven unsent share at most two retries.
+//   - If bytes may have reached the host, only a caller-marked replayable read
+//     may replay, at most once across send and reply failures. Do not replay a
+//     possibly sent mutation: keep its outcome unknown and reconcile receipts
+//     using the same intent ID.
+//   - Cancellation or lane retirement prevents further retries.
+//   - A lane reply must begin with `"keepAlive":true` as its first object field;
+//     the marker-only `{"keepAlive":true}` is valid too. A protocol mismatch
+//     never falls back to one-shot requests.
 import { laneNotSent, laneWasNotSent, laneOutcomeUnknown } from './desktop-lane-phase'
 export { laneNotSent, laneOutcomeUnknown, laneWasNotSent, laneWasWrittenUnknown } from './desktop-lane-phase'
 

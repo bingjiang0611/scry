@@ -8,6 +8,8 @@ At `906adb081`, the second batch resolved 38 of the 132 remaining wording candid
 
 At `f1f268fb`, the third batch handled 64 of the 94 remaining wording tokens across 39 files. The changes distinguish fixture evidence from production guarantees, including packaged artifact selection, startup timing, Recorder caches and machine metrics. Exact edit replay and comment-free emit matched; the comment ratchet and 75 targeted tests passed. The 30 remaining tokens include trust-related rationale that needs care in shortening and claims that require separate validation. No live smoke or benchmark was run.
 
+At `c104dd5b`, closed the remaining 30 wording decisions: 22 revised and eight retained for their local fixture or authority rationale. A separate ADR reconciliation closed 20 exact wording tokens (19 grouped review entries; the Qoder note contains two tokens). The combined changes cover 14 source files; exact edit replay, non-comment source, emit, directives, the ratchet, and 211 focused tests passed. No runtime or assertion changes were made. The 31 evidence follow-up tokens in this ledger are separate.
+
 ## Candidate locations
 
 Line numbers refer to the pinned commit, not the cleanup result. Review the current blob and adjacent assertions before applying further changes. Follow-ups belong in separate behavior or validation work if confirmed; consolidate them by contract, not per token.
@@ -42,9 +44,9 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `scripts/unified-conversation-smoke.mjs` | 196 | — | — | — |
 | `scripts/workspace-numstat-bench.mjs` | — | — | — | 76 |
 | `scripts/workspace-session-ui-checks.mjs` | 180 | — | — | — |
-| `src/core/turn-recorder/recorder-quiet-revisit.test.ts` | 119, 135 | 46 | 99 | 108, 109, 194 |
-| `src/core/turn-recorder/recorder.ts` | — | 325 | — | — |
-| `src/core/turn-recorder/store-summary.test.ts` | — | 141 | — | 62 |
+| `src/core/turn-recorder/recorder-quiet-revisit.test.ts` | 46, 119, 135 | — | 99 | 108, 109, 194 |
+| `src/core/turn-recorder/recorder.ts` | 325 | — | — | — |
+| `src/core/turn-recorder/store-summary.test.ts` | 141 | — | — | 62 |
 | `src/daemon/host-metrics-p95.test.ts` | — | — | — | 4 |
 | `src/daemon/host-metrics-parsers.ts` | — | — | — | 137, 138 |
 | `src/daemon/host-metrics.test.ts` | — | — | 115 | — |
@@ -54,9 +56,9 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `src/main/bootstrap/daemon-run-lazy.ts` | — | — | 17 | — |
 | `src/main/bootstrap/daemon-run-mode.ts` | — | — | — | 53 |
 | `src/main/bootstrap/known-project-daemon.ts` | — | — | — | 12 |
-| `src/main/bootstrap/mcp-channels.ts` | — | 14, 15, 16, 17, 18 | — | — |
+| `src/main/bootstrap/mcp-channels.ts` | — | — | — | 14, 15, 16, 17, 18 |
 | `src/main/bootstrap/query-channels.ts` | — | — | — | 99 |
-| `src/main/bootstrap/terminal-channels.ts` | — | 6, 7, 8, 9 | — | — |
+| `src/main/bootstrap/terminal-channels.ts` | — | — | — | 6, 7, 8, 9 |
 | `src/main/bootstrap/terminal-daemon.test.ts` | — | — | 54 | — |
 | `src/main/bootstrap/workspace.ts` | — | — | — | 105 |
 | `src/main/providers/acp-client.ts` | 132 | — | — | — |
@@ -68,12 +70,12 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `src/main/providers/antigravity-run.test.ts` | — | — | 172 | — |
 | `src/main/providers/catalog-performance.test.ts` | — | — | — | 11, 12 |
 | `src/main/providers/fixtures/fake-agy-acp.mjs` | 39 | — | — | — |
-| `src/main/providers/host-continuation-identity.ts` | — | 9 | — | 277 |
+| `src/main/providers/host-continuation-identity.ts` | 9 | — | — | 277 |
 | `src/main/providers/private-mcp-config.ts` | — | — | — | 88, 111 |
 | `src/main/providers/provider-warm-pool.ts` | — | — | — | 113, 114 |
 | `src/main/providers/qoder-launch.ts` | — | — | 68 | — |
 | `src/main/providers/smoke-history-reader.test.ts` | — | — | 76 | — |
-| `src/main/providers/smoke-history-reader.ts` | — | 15 | — | — |
+| `src/main/providers/smoke-history-reader.ts` | — | — | — | 15 |
 | `src/main/providers/smoke-scenarios.ts` | — | — | — | 82, 83, 84 |
 | `src/main/providers/smoke.ts` | — | — | — | 70, 71 |
 | `src/main/remote/desktop-attachments.ts` | — | — | — | 194 |
@@ -88,15 +90,15 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `src/main/remote/desktop-trace-delta-hints-controls.test.ts` | 58 | — | — | 57 |
 | `src/main/remote/desktop-trace-delta.ts` | — | — | — | 55, 56, 57, 62, 63, 64 |
 | `src/main/remote/history-reader.ts` | — | — | — | 151, 152 |
-| `src/main/remote/host-controller-surface.ts` | 30 | 27, 28, 29, 31, 254, 255 | — | — |
+| `src/main/remote/host-controller-surface.ts` | 30 | — | — | 27, 28, 29, 31, 254, 255 |
 | `src/main/remote/host-controller-types.ts` | 20, 21 | — | — | 171, 172 |
 | `src/main/remote/inner-mtls-dispatch.ts` | 287 | — | 288 | — |
-| `src/main/remote/pairing-file.ts` | — | 94 | — | — |
+| `src/main/remote/pairing-file.ts` | — | — | — | 94 |
 | `src/main/remote/pairing-retention.test.ts` | 187 | — | — | 186 |
 | `src/main/remote/pairing-state.ts` | 42, 43, 148, 151, 152 | — | — | 1, 2, 3, 4, 149, 150 |
-| `src/main/remote/pairing-transport.test.ts` | — | 82 | — | — |
-| `src/main/remote/pairing-transport.ts` | — | 21, 22, 23, 24, 96 | — | — |
-| `src/main/remote/remote-host-service-deps.ts` | — | 70, 71, 72 | — | — |
+| `src/main/remote/pairing-transport.test.ts` | — | — | — | 82 |
+| `src/main/remote/pairing-transport.ts` | 21, 22, 23, 24 | — | — | 96 |
+| `src/main/remote/remote-host-service-deps.ts` | — | — | — | 70, 71, 72 |
 | `src/main/session-diff.test.ts` | — | — | 872, 873 | — |
 | `src/main/text-spool.ts` | — | — | — | 82 |
 | `src/renderer/components/MachineMeters.tsx` | — | — | — | 40 |

@@ -67,9 +67,9 @@ export interface RemoteHostServiceDependencies {
   // prove endpoint), so the relay keeps a separate warm pool per mode. The
   // context carries the stable hostId + anchor the relay routes/authenticates by.
   createTransport?: (ctx: { hostId: string; anchorSHA256: string; mode: 'run' | 'pair' }) => RelayTransport
-  // The device-facing coordinates of the SAME relay, embedded in the scannable
-  // pairing code so the phone can reach this host. For a public wss relay
-  // a local dev relay uses tls: 'plaintext'. Absent => no device code is emitted.
+  // Device-facing coordinates for the same relay, embedded in the pairing code.
+  // WSS uses tls: 'system'; WS uses tls: 'plaintext'. No device code is emitted
+  // without both a relay advertisement and a configured relay.
   relayAdvertisement?: { host: string; port: number; tls: 'system' | 'plaintext' }
 }
 

@@ -91,7 +91,7 @@ export class PairingFileStore implements PairingPersistence {
       this.syncDirectory()
     } catch (error) {
       if (fd !== undefined) closeSync(fd)
-      try { unlinkSync(temp) } catch { /* Only this write's exclusive temp file. */ }
+      try { unlinkSync(temp) } catch { /* Best-effort cleanup; an unlink failure does not replace the commit error. */ }
       throw error
     }
   }

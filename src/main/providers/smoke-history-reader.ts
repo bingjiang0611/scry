@@ -13,11 +13,10 @@ export function smokeReaderRead(request: { runId: string; historyReader?: { url:
 import { appendFileSync } from 'node:fs'
 
 /**
- * Reads one page of the omitted manifest and three complete bodies over real MCP JSON-RPC.
- *
- * The request travels the same loopback endpoint a Provider uses, with the run-scoped
- * bearer token, and every body is reconstructed from its returned page cursors so the
- * evidence is a real retrieval rather than a declared capability.
+ * Uses the Provider's loopback MCP JSON-RPC endpoint and run-scoped bearer token.
+ * Pages the omitted manifest and reads the first, middle, and last entries when
+ * present. It reconstructs each selected body from page cursors and verifies
+ * its frozen hash, demonstrating retrieval rather than declared capability.
  */
 export async function readFrozenHistory(connection: { url: string; token: string; snapshotId: string }, runId: string, readsFile: string): Promise<void> {
   return readFrozenHistoryPages(connection, runId, readsFile).catch((error: unknown) => {

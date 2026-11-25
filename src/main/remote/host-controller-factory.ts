@@ -13,8 +13,8 @@ import { createProviderPrewarmer } from './remote-provider-prewarm'
 import type { LedgerStore } from './session-ledger'
 import type { OrchestrationAuthorityHooks } from './orchestration-seam'
 
-// The daemon injects SQLite authority. Pairing and run output have separate
-// durable stores and leases; standalone protocol fixtures use a transient dispatcher.
+// The daemon injects SQLite authority. Without orchestration hooks, only the ledger
+// falls back to a non-persisting store; pairing and run output keep separate stores and leases.
 const transientLedgerStore: LedgerStore = {
   assertAvailable: () => undefined,
   loadAll: () => [],

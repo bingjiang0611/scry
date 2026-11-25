@@ -1,9 +1,9 @@
 import type { DaemonLockRecord } from '../../daemon/ledger-lock'
 import { processIdentityKey, type ProcessRow } from '../process-diagnostics'
 
-// The last check before the App signals the daemon holding `scry-userdata.lock`
-// (background-service-stop.ts). The App itself never holds that lock: the daemon owns
-// userData, and the App only stops it on the user's explicit choice.
+// In daemon mode the daemon owns userData. After the user confirms a stop,
+// background-service-stop.ts rechecks the holder of `scry-userdata.lock` and
+// its process identity before signaling.
 
 export type SignalCheckFailure =
   | 'lock-released'

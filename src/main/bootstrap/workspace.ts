@@ -27,12 +27,12 @@ export interface WorkspaceBootstrapDependencies {
 }
 
 /**
- * The workspace channels that stay in the App: the window's selection (agent:setCwd),
- * main's read-only file references (scry-file: and ~), and the two that need this App's
- * shell (openExternal, trash). Whether a directory is a known project is the daemon's
- * answer, asked on every call (known-project-daemon.ts); the App keeps no copy of those
- * stores. The rest of workspace:*, sourceControl:* and terminal:* are the daemon's
- * (daemon-local-ops/workbench.ts, terminal.ts), bound here to this window's selection.
+ * The App owns window selection (agent:setCwd), home and read-only file reference
+ * handling, and local shell actions (openExternal, openKnownExternal, trash).
+ * When a handler needs known-project authority, it asks the daemon rather than
+ * keeping a copy of its project stores. A blank selection can be cleared locally.
+ * Forwarded workspace, source-control, and terminal requests remain bound to
+ * this window's selection.
  */
 export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies): void {
   const { handleTrusted, getCurrentCwd, setCurrentCwd, homeFileAccess, openLocalPath, shell, dialog, getWindow, isShuttingDown, rendererCanReceive, dockBadge } = deps

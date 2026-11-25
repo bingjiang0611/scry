@@ -24,11 +24,11 @@ import { assertExpectedLog, resolveIntentCommand, submitIntent, submitReceivedIn
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
-// Device-facing API of the remote host: one method per operation the paired
-// device may call, each carrying the VERIFIED peer certificate fingerprint. The
-// wiring lives in host-controller-execution.ts and the per-domain helpers beside this file. A device
+// Device-facing operations for paired devices carry the verified peer certificate
+// fingerprint. See host-controller-execution.ts and the per-domain helpers. A device
 // submission is a durable intent (recorded is not executed); the dispatcher
-// drives exactly-once execution through the gated executor.
+// checks the gate and durably marks dispatch before invoking the executor,
+// fencing repeat dispatch without guaranteeing completion.
 
 export { HOST_RESTARTED_DETAIL } from './host-controller-routing'
 
@@ -251,8 +251,8 @@ export class HostController {
     }, peerCertSHA256, input)
   }
 
-  // Device-facing: one session's real conversation content, authorized by the
-  // same verified peer certificate. Async (reads the trace archive/transcript).
+  // Asynchronous workspace read. The gateway authorizes the verified peer
+  // before parsing the query and delegating to the workspace reader.
   readWorkspace(peerCertSHA256: string, query: unknown) {
     return this.#gateway.readWorkspace(peerCertSHA256, query)
   }
