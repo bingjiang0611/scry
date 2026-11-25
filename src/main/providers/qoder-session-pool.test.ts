@@ -107,4 +107,37 @@ describe('Qoder kept-session pool', () => {
     expect(fake.disposed.sort()).toEqual(['k1', 'k2'])
     expect(fake.pool.keys()).toEqual([])
   })
+
+  // R12: a crashed process cannot serve the next turn, and a busy key must not be overwritten.
+  it('opens a fresh session after the previous one died', () => {
+    const fake = fakePool()
+    const dead = fake.pool.acquire('k1', fake.opener('k1'))
+    dead.release({ dead: true })
+    const next = fake.pool.acquire('k1', fake.opener('k1'))
+    expect(fake.opened).toHaveLength(2)
+    expect(next.query).not.toBe(dead.query)
+    expect(fake.released.map((row) => row.reason)).toEqual(['crashed'])
+  })
+
+  it('does not reuse a session that reported the process gone', () => {
+    const fake = fakePool()
+    const first = fake.pool.acquire('k1', fake.opener('k1'))
+    first.markExited()
+    const second = fake.pool.acquire('k1', fake.opener('k1'))
+    expect(fake.opened).toHaveLength(2)
+    expect(second.query).not.toBe(first.query)
+  })
+
+  it('keeps a busy key separate instead of overwriting its live entry', () => {
+    const fake = fakePool()
+    const busy = fake.pool.acquire('k1', fake.opener('k1'))
+    const collided = fake.pool.acquire('k1', fake.opener('k1'))
+    expect(fake.opened).toHaveLength(2)
+    expect(collided.query).not.toBe(busy.query)
+    // The old lease still owns its own process: releasing it must not close the new one.
+    busy.release()
+    expect(fake.opened[1]!.sdk.close).not.toHaveBeenCalled()
+    // And reuse takes the idle entry rather than reopening.
+    expect(fake.pool.acquire('k1', fake.opener('k1')).query).toBe(busy.query)
+  })
 })
