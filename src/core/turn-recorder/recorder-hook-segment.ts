@@ -25,7 +25,7 @@ export async function holdStopForBackgroundWork(args: {
   const read = await stableTranscript(
     open.transcriptPath, `${open.provider}:${open.sessionId}:${open.generation}`, open.provider,
     open.promptHash, open.providerTurnId, 0, open.requestSetId, open.sessionId, enablement.workspaceRoot,
-    undefined, open.captureTranscriptEndOffset
+    undefined, open.captureTranscriptEndOffset, enablement.dataRoot
   )
   if ((read.pendingBackgroundTasks?.length ?? 0) === 0) return undefined
   const root = sessionRoot(enablement.dataRoot, input.provider, args.sessionId)

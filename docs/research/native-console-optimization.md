@@ -426,7 +426,8 @@ claim is made.
   rewind budget, including exact Provider identity and assistant recovery.
 - Size and latency are now bounded rather than merely measured (0.2.89). The window is capped at
   64 MiB and keeps the newest bytes; the backwards anchor scan stops after 64 MiB, keeps at most 4 MiB
-  of a pending line and starts 8 MiB before a turn's recorded start. A capped window is reported as
+  of a pending line. It first uses the recorded start minus 8 MiB as a floor; on a miss it can
+  retry without that hint, still within the newest 64 MiB. A capped window is reported as
   `sourceCompleteness: partial` with a fixed `incompleteReasons` sentence (kept/dropped bytes) and
   `complete: false`, so a reader can tell an unread byte range apart from an empty turn; no byte tail
   silently changes completeness. Same-reason read/parse failures now count toward the session failure

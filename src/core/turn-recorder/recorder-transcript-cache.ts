@@ -7,6 +7,7 @@ import { nestedRecord, stringAt, type PiTranscriptAnchor, type TranscriptRead } 
 import { textContent } from './recorder-codex-calls.js'
 import { recordTranscriptAnchorBytes, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 import { openTranscriptRead, statTranscript } from './recorder-transcript-fs.js'
+import { updateHealth } from './store.js'
 
 interface TranscriptSnapshotCacheEntry {
   key: string
@@ -182,8 +183,9 @@ async function latestAnchorFrom(
   from: number,
   endOffset: number,
   provider: ProviderId,
-  promptHash?: string,
-  providerTurnId?: string
+  promptHash: string | undefined,
+  providerTurnId: string | undefined,
+  skipOversized: () => void
 ): Promise<AnchorScan> {
   if (from >= endOffset) return { offset: -1, scannedTo: from }
   const handle = await openTranscriptRead(path)
@@ -192,6 +194,7 @@ async function latestAnchorFrom(
   let pending = Buffer.alloc(0)
   let pendingStart = from
   let latest = -1
+  let discarding = false
   try {
     while (cursor < endOffset) {
       const length = Math.min(chunkBytes, endOffset - cursor)
@@ -204,22 +207,24 @@ async function latestAnchorFrom(
       for (;;) {
         const newline = combined.indexOf(0x0a, lineStart)
         if (newline < 0) break
-        if (newline > lineStart && transcriptLineAnchor(
+        const length = newline - lineStart
+        if (!discarding && length > TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) skipOversized()
+        if (!discarding && length > 0 && length <= TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES && transcriptLineAnchor(
           combined.subarray(lineStart, newline).toString('utf8'), provider, promptHash, providerTurnId
         )) {
           latest = Math.max(latest, Math.max(0, pendingStart + lineStart - 1))
         }
+        discarding = false
         lineStart = newline + 1
       }
-      pending = Buffer.from(combined.subarray(lineStart))
+      if (!discarding && combined.length - lineStart > TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) {
+        skipOversized()
+        discarding = true
+      }
+      pending = discarding ? Buffer.alloc(0) : Buffer.from(combined.subarray(lineStart))
       pendingStart += lineStart
       cursor += bytesRead
-      // Same bound as the backwards scan: an oversized line is a record body, and keeping it would
-      // copy the whole line on every chunk. Resume line tracking at the next chunk's first byte.
-      if (pending.length > TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) {
-        pending = Buffer.alloc(0)
-        pendingStart = cursor
-      }
+      if (discarding) pendingStart = cursor
     }
   } finally {
     await handle.close()
@@ -228,7 +233,8 @@ async function latestAnchorFrom(
   if (cursor === endOffset && pending.length && transcriptLineAnchor(pending.toString('utf8'), provider, promptHash, providerTurnId)) {
     latest = Math.max(latest, Math.max(0, pendingStart - 1))
   }
-  return { offset: latest, scannedTo: pendingStart }
+  // Do not resume the next pass inside a discarded line.
+  return { offset: latest, scannedTo: discarding ? endOffset + 1 : pendingStart }
 }
 
 /** Read the single JSONL line a cached offset points at (the offset may be its preceding newline). */
@@ -259,16 +265,48 @@ async function anchorOffsetFor(
   path: string,
   endOffset: number,
   provider: ProviderId,
-  promptHash?: string,
-  providerTurnId?: string,
-  floor = 0
+  promptHash: string | undefined,
+  providerTurnId: string | undefined,
+  floor: number,
+  dataRoot?: string
 ): Promise<number> {
+  let oversized = 0
+  const skipOversized = () => { oversized++ }
+  try {
+    return await selectAnchorOffset(path, endOffset, provider, promptHash, providerTurnId, floor, skipOversized)
+  } finally {
+    if (oversized && dataRoot) {
+      // Diagnostics must not turn a readable transcript into a failed recovery.
+      await updateHealth(dataRoot, { increment: { oversizedTranscriptAnchorLines: oversized } }).catch(() => undefined)
+    }
+  }
+}
+
+async function selectAnchorOffset(
+  path: string,
+  endOffset: number,
+  provider: ProviderId,
+  promptHash: string | undefined,
+  providerTurnId: string | undefined,
+  floor: number,
+  skipOversized: () => void
+): Promise<number> {
+  if (endOffset <= 0 || !promptHash && !providerTurnId) return 0
+  const scanBackwards = async (): Promise<AnchorScan> => {
+    const scan = (at: number) => transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId, at, skipOversized)
+    const hinted = await scan(floor)
+    // Replay can observe a much later file size than the hook's own turn. Retry only if removing
+    // the hint actually expands the recent-byte search; offset zero is a valid match, not a miss.
+    return hinted.offset < 0 && floor > Math.max(0, endOffset - TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES)
+      ? scan(0)
+      : hinted
+  }
   // A Codex turn is anchored on its own `task_started` line, which `lineAtAnchor` can re-prove from
   // one line when the turn id is known. Without that id the backwards scan is the only authority and
   // it runs every pass: that is the every-pass cost this cache exists to remove.
   const reProvable = provider !== 'codex' || !!providerTurnId
   if (!reProvable || !promptHash && !providerTurnId) {
-    return (await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId, floor)).offset
+    return Math.max(0, (await scanBackwards()).offset)
   }
   // A Codex `user_message` is an anchor for the backwards scan only (it says where the prompt is),
   // not for the turn boundary the window must start at. Judged with the hash it would look like a
@@ -293,32 +331,38 @@ async function anchorOffsetFor(
       // An unreadable path falls through to the authoritative scan.
     }
     if (reusable) {
-      const newer = await latestAnchorFrom(path, cached.scannedTo, endOffset, provider, proofHash, providerTurnId)
+      const newer = await latestAnchorFrom(path, cached.scannedTo, endOffset, provider, proofHash, providerTurnId, skipOversized)
       const offset = newer.offset >= 0 ? newer.offset : cached.offset
-      rememberAnchor(key, { offset, scannedTo: newer.scannedTo, size: endOffset, dev: cached.dev, ino: cached.ino })
+      if (newer.scannedTo <= endOffset) {
+        rememberAnchor(key, { offset, scannedTo: newer.scannedTo, size: endOffset, dev: cached.dev, ino: cached.ino })
+      } else {
+        anchorCache.delete(key)
+      }
       return offset
     }
     anchorCache.delete(key)
   }
-  const scan = await transcriptAnchorOffset(path, endOffset, provider, promptHash, providerTurnId, floor)
-  try {
-    const info = await statTranscript(path)
-    rememberAnchor(key, { ...scan, size: endOffset, dev: info.dev, ino: info.ino })
-  } catch {}
-  return scan.offset
+  const scan = await scanBackwards()
+  if (scan.offset >= 0) {
+    try {
+      const info = await statTranscript(path)
+      rememberAnchor(key, { ...scan, size: endOffset, dev: info.dev, ino: info.ino })
+    } catch {}
+  }
+  return Math.max(0, scan.offset)
 }
 
 async function transcriptAnchorOffset(
   path: string,
   endOffset: number,
   provider: ProviderId,
-  promptHash?: string,
-  providerTurnId?: string,
+  promptHash: string | undefined,
+  providerTurnId: string | undefined,
   /** Lowest byte the scan may read. The caller passes a turn's recorded start, so a scan stays
    * inside one turn instead of walking the session; 0 means "the whole session, up to the limit". */
-  floor = 0
+  floor: number,
+  skipOversized: () => void
 ): Promise<AnchorScan> {
-  if (endOffset <= 0 || !promptHash && !providerTurnId) return { offset: 0, scannedTo: 0 }
   const handle = await openTranscriptRead(path)
   const chunkBytes = 1024 * 1024
   // Bounded both ways: never below the caller's floor, never more than one scan limit back. Without
@@ -327,6 +371,7 @@ async function transcriptAnchorOffset(
   let scannedTo = 0
   let cursor = endOffset
   let suffix = Buffer.alloc(0)
+  let discarding = false
   let matchedUserOffset: number | undefined
   let matchedTurnOffset: number | undefined
   try {
@@ -335,18 +380,27 @@ async function transcriptAnchorOffset(
       const chunk = Buffer.allocUnsafe(cursor - start)
       const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
       recordTranscriptAnchorBytes(bytesRead)
-      if (bytesRead !== chunk.length) return { offset: 0, scannedTo: 0 }
+      if (bytesRead !== chunk.length) return { offset: -1, scannedTo: 0 }
       if (scannedTo === 0) {
         const newline = chunk.lastIndexOf(0x0a)
         if (newline >= 0) scannedTo = start + newline + 1
       }
-      const combined = Buffer.concat([chunk, suffix])
+      // If a line crossed the limit in the previous chunk, drop the rest of that same line.
+      const lastNewline = discarding ? chunk.lastIndexOf(0x0a) : -1
+      if (discarding && lastNewline < 0) {
+        cursor = start
+        continue
+      }
+      const combined = discarding ? chunk.subarray(0, lastNewline) : Buffer.concat([chunk, suffix])
+      discarding = false
       let lineEnd = combined.length
       // `lastIndexOf` is the native scan; a byte-per-byte loop here made a NUL-filled or
       // record-body-heavy region cost seconds per pass instead of milliseconds.
       for (let index = combined.lastIndexOf(0x0a); index >= 0; index = index > 0 ? combined.lastIndexOf(0x0a, index - 1) : -1) {
         const lineStart = index + 1
-        if (lineEnd > lineStart) {
+        const length = lineEnd - lineStart
+        if (length > TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) skipOversized()
+        if (length > 0 && length <= TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) {
           const absoluteOffset = start + lineStart
           const anchor = transcriptLineAnchor(combined.subarray(lineStart, lineEnd).toString('utf8'), provider, promptHash, providerTurnId)
           const windowOffset = Math.max(0, absoluteOffset - 1)
@@ -370,9 +424,11 @@ async function transcriptAnchorOffset(
       // NUL cannot occur in a valid JSONL record. Sparse/uninitialized prefixes are
       // therefore a hard format boundary, not evidence that must be loaded to byte 0.
       if (matchedTurnOffset != null && suffix.includes(0)) return { offset: matchedTurnOffset, scannedTo }
-      // One oversized line is a record body, never an anchor line. Keeping it would copy it again
-      // for every earlier chunk, so the scan drops the partial line and keeps walking.
-      if (suffix.length > TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) suffix = Buffer.alloc(0)
+      if (suffix.length > TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES) {
+        skipOversized()
+        suffix = Buffer.alloc(0)
+        discarding = true
+      }
       cursor = start
     }
     if (suffix.length && lowest === 0) {
@@ -382,7 +438,7 @@ async function transcriptAnchorOffset(
       if (provider === 'codex' && matchedTurnOffset != null && transcriptLineAnchor(firstLine, provider) === 'turn') return { offset: matchedTurnOffset, scannedTo }
       if (anchor === 'user' && matchedUserOffset == null) matchedUserOffset = 0
     }
-    return { offset: matchedTurnOffset ?? matchedUserOffset ?? 0, scannedTo }
+    return { offset: matchedTurnOffset ?? matchedUserOffset ?? -1, scannedTo }
   } finally {
     await handle.close()
   }
@@ -459,7 +515,8 @@ export async function stableTranscript(
    * Frozen end of the readable window. A captured session records this at stop time so the next
    * prompt, written after stop, can never be parsed back into the turn that just ended.
    */
-  endOffsetLimit?: number
+  endOffsetLimit?: number,
+  dataRoot?: string
 ): Promise<TranscriptRead> {
   path = await readableTranscriptPath(path, provider)
   if (provider === 'pi' && !piTranscriptAnchor) {
@@ -506,7 +563,7 @@ export async function stableTranscript(
     const boundary = Math.min(frozenIdentity.size, Math.max(0, endOffsetLimit))
     return cachedTranscriptSnapshot({
       path,
-      startOffset: await anchorOffsetFor(path, boundary, provider, promptHash, providerTurnId, anchorFloor),
+      startOffset: await anchorOffsetFor(path, boundary, provider, promptHash, providerTurnId, anchorFloor, dataRoot),
       stable: true,
       runId,
       provider,
@@ -536,7 +593,7 @@ export async function stableTranscript(
         startOffset = offsets.startOffset
         endOffset = offsets.endOffset
       } else {
-        startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId, anchorFloor)
+        startOffset = await anchorOffsetFor(path, identity.size, provider, promptHash, providerTurnId, anchorFloor, dataRoot)
       }
       return cachedTranscriptSnapshot({ path, startOffset, stable: true, runId, provider, promptHash, providerTurnId, requestSetId, sessionId, cwd, piTranscriptAnchor, endOffset, identity }, selectionKey(identity))
     }
@@ -549,7 +606,7 @@ export async function stableTranscript(
     startOffset = offsets.startOffset
     endOffset = offsets.endOffset
   } else if (latestIdentity) {
-    startOffset = await anchorOffsetFor(path, latestIdentity.size, provider, promptHash, providerTurnId, anchorFloor)
+    startOffset = await anchorOffsetFor(path, latestIdentity.size, provider, promptHash, providerTurnId, anchorFloor, dataRoot)
   }
   return latestIdentity
     ? cachedTranscriptSnapshot({

@@ -13,6 +13,9 @@ import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from 
  * marker, or deletes evidence. A suspended session keeps its `open.json` and its attention marker.
  */
 export const SESSION_FAILURE_SUSPEND_AFTER = 3
+// The daemon polls every 1–15 seconds. A five-minute streak spans many polls, not one burst.
+export const TURN_FAILURE_MIN_AGE_MS = 5 * 60_000
+const TRANSIENT_SYSTEM_CODES = new Set(['EMFILE', 'ENFILE', 'ENOSPC', 'EAGAIN', 'EBUSY', 'EIO'])
 export const SESSION_FAILURE_RETRY_MS = 60 * 60 * 1_000
 const MAX_ERROR_LENGTH = 300
 
@@ -23,6 +26,8 @@ export interface SessionFailureRecord {
   failures: number
   lastError: string
   lastAt: string
+  firstAt?: string
+  code?: string
   /**
    * Absent in records written before the scope existed, and read as `session`. The scope decides who
    * may clear the streak: a readable directory clears only an entry-level failure, never a turn that
@@ -41,8 +46,8 @@ export function sessionFailureKey(provider: ProviderId, sessionKey: string): str
 
 /**
  * Failures that say "this entry is not a session I can read", never "the evidence I read is bad".
- * These are skipped on the first occurrence; every other failure is counted by message and only
- * suspends once the same one repeats, because a read error can still change a verdict.
+ * These are skipped on the first occurrence and keep the original session-entry suspension rule.
+ * Failures inside a readable session have a separate minimum streak age.
  */
 const UNUSABLE_SESSION_CODES = new Set(['ENOTDIR', 'ENOENT', 'EACCES', 'EPERM', 'ELOOP', 'ENAMETOOLONG'])
 
@@ -79,8 +84,8 @@ export function suspendedSessionKeys(ledger: SessionFailureLedger, now = Date.no
 }
 
 /**
- * Count one failed pass for a session. Reaching the threshold suspends it and leaves one log line;
- * every later failure re-suspends from now, so the retry stays hourly instead of every pass.
+ * Count one failed pass for a session. Turn scope additionally requires a sustained streak.
+ * A repeat after an hourly re-probe restarts the pause without another suspension log.
  *
  * Only the same failure counts twice. A pass that fails differently has learned something new
  * (a different file, a lock that was not there before), so the streak restarts: the ledger suspends a
@@ -94,20 +99,29 @@ export async function noteSessionFailure(
   sessionKey: string,
   error: unknown,
   scope: SessionFailureScope = 'session'
-): Promise<SessionFailureRecord> {
+): Promise<SessionFailureRecord | undefined> {
+  const rawCode = (error as NodeJS.ErrnoException | undefined)?.code
+  const code = typeof rawCode === 'string' ? rawCode : undefined
+  // The same resource shortage can affect every session. Do not turn it into a per-session pause.
+  if (code && TRANSIENT_SYSTEM_CODES.has(code)) return undefined
   const message = (error instanceof Error ? error.message : String(error)).slice(0, MAX_ERROR_LENGTH)
   const key = sessionFailureKey(provider, sessionKey)
   return withDirectoryLock(join(dataRoot, 'locks', 'session-failures.lock'), async () => {
     const ledger = await readSessionFailures(dataRoot)
     const previous = ledger[key]
-    const now = new Date()
-    const repeats = previous?.lastError === message && (previous.scope ?? 'session') === scope
+    const now = new Date(Date.now())
+    const repeats = previous?.lastError === message && (previous.scope ?? 'session') === scope &&
+      (scope === 'session' || previous.code === code)
+    const firstAt = repeats && previous.firstAt ? previous.firstAt : now.toISOString()
     const failures = repeats ? previous.failures + 1 : 1
-    const suspended = failures >= SESSION_FAILURE_SUSPEND_AFTER
+    const suspended = failures >= SESSION_FAILURE_SUSPEND_AFTER &&
+      (scope === 'session' || now.getTime() - Date.parse(firstAt) >= TURN_FAILURE_MIN_AGE_MS)
     const record: SessionFailureRecord = {
       failures,
       lastError: message,
       lastAt: now.toISOString(),
+      firstAt,
+      ...(code ? { code } : {}),
       scope,
       ...(suspended ? { suspendedAt: now.toISOString() } : {})
     }

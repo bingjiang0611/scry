@@ -11,7 +11,7 @@ import {
 } from './recorder-transcript-io'
 import { parseTranscriptSnapshot } from './recorder-transcript-parse'
 import { handleRecorderHook, recoverRecorder } from './recorder'
-import { listRecords } from './store'
+import { listRecords, readHealth } from './store'
 import {
   resetTranscriptAnchorCache,
   resetTranscriptSnapshotCache,
@@ -157,8 +157,9 @@ describe('anchor scans are bounded', () => {
   it('starts the scan at the offset the turn recorded when it opened', async () => {
     const root = await workdir()
     const size = 120 * 1024 * 1024
+    const tail = '\n' + turnLine('previous') + turnLine('wanted-turn')
     const path = await sparseTranscript(root, 'floor.jsonl', size, [
-      { at: size - turnLine('wanted-turn').length, text: turnLine('wanted-turn') }
+      { at: size - Buffer.byteLength(tail), text: tail }
     ])
     resetTranscriptAnchorCache()
     resetTranscriptReadStats()
@@ -168,6 +169,44 @@ describe('anchor scans are bounded', () => {
     await stableTranscript(path, 'run', 'codex', undefined, 'wanted-turn', size, undefined, 'session', root)
 
     expect(transcriptReadStats().anchorBytesScanned).toBeLessThanOrEqual(TRANSCRIPT_ANCHOR_LOOKBACK_BYTES + (1024 * 1024))
+  })
+
+  it('finds an anchor outside the replay hint but within the most recent 64 MiB', async () => {
+    const root = await workdir()
+    const newest = 100 * 1024 * 1024
+    const at = newest - TRANSCRIPT_ANCHOR_LOOKBACK_BYTES - 2 * 1024 * 1024
+    const anchor = '\n' + turnLine('wanted-turn')
+    const terminal = '\n' + JSON.stringify({
+      timestamp: '2026-09-09T00:01:00.000Z', type: 'event_msg',
+      payload: { type: 'task_complete', turn_id: 'wanted-turn' }
+    }) + '\n'
+    const path = await sparseTranscript(root, 'replayed.jsonl', newest, [
+      { at, text: anchor }, { at: newest - terminal.length, text: terminal }
+    ])
+    resetTranscriptAnchorCache()
+    resetTranscriptReadStats()
+    const read = await stableTranscript(path, 'run', 'codex', undefined, 'wanted-turn', newest, undefined, 'session', root)
+    expect(read).toMatchObject({
+      complete: true, terminalStatus: 'completed',
+      source: { startOffset: at + 1, sourceCompleteness: 'complete' }
+    })
+    expect(read.incompleteReasons).toBeUndefined()
+    expect(transcriptReadStats().anchorBytesScanned).toBeLessThanOrEqual(
+      TRANSCRIPT_ANCHOR_LOOKBACK_BYTES + TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES
+    )
+  })
+
+  it('counts a skipped oversized line once in workspace health', async () => {
+    const root = await workdir()
+    const path = join(root, 'large-line-and-anchor.jsonl')
+    await writeFile(path, turnLine('previous') + turnLine('wanted') +
+      `{"type":"body","text":"${'x'.repeat(TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES + 2 * 1024 * 1024)}"}\n`)
+    resetTranscriptAnchorCache()
+    const dataRoot = join(root, '.scry')
+    const read = await stableTranscript(path, 'run', 'codex', undefined, 'wanted', 0, undefined, 'session', root,
+      undefined, undefined, dataRoot)
+    expect(read.identityMatched).toBe(true)
+    expect((await readHealth(dataRoot)).oversizedTranscriptAnchorLines).toBe(1)
   })
 
   it('does not grow one oversized line across chunks', async () => {
@@ -291,6 +330,31 @@ describe('transcript evidence on disk', () => {
       status: 'partial',
       omissionReason: expect.stringContaining('transcript read limit'),
       value: { sourceCompleteness: 'partial', endOffset: size, startOffset: size - Buffer.byteLength(tail) + 1 }
+    })
+  })
+
+  it('stores Codex usage as partial with the truncation reason', async () => {
+    const { root, env } = await hookFixture()
+    const size = 80 * 1024 * 1024
+    const timestamp = new Date().toISOString()
+    const counters = { input_tokens: 200, output_tokens: 10, cached_input_tokens: 0, reasoning_output_tokens: 0 }
+    const tail = '\n' + [
+      { type: 'task_started', turn_id: 'capped-turn' },
+      { type: 'user_message', message: 'fixture prompt' },
+      { type: 'token_count', info: { total_token_usage: counters, last_token_usage: counters } },
+      { type: 'task_complete', turn_id: 'capped-turn' }
+    ].map(payload => JSON.stringify({ timestamp, type: 'event_msg', payload })).join('\n') + '\n'
+    const rollout = await sparseTranscript(root, 'usage-capped.jsonl', size, [{ at: size - Buffer.byteLength(tail), text: tail }])
+    await handleRecorderHook({
+      workspace: root, provider: 'codex', event: 'turn.started', quiet: true, env,
+      payload: { session_id: 'usage-capped', cwd: root, rollout_path: rollout, timestamp }
+    })
+    await recoverRecorder(root, env)
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].usage).toMatchObject({
+      status: 'partial', omissionReason: expect.stringContaining('transcript read limit'),
+      value: { inputTokens: 200, outputTokens: 10 }
     })
   })
 

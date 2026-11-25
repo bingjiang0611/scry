@@ -294,7 +294,9 @@ export async function recoverRecorder(
                     open.requestSetId,
                     open.sessionId,
                     enablement.workspaceRoot,
-                    open.piTranscriptAnchor
+                    open.piTranscriptAnchor,
+                    undefined,
+                    enablement.dataRoot
                   )
                 : undefined
               if (transcript?.terminalStatus && transcript.completedAt && transcript.identityMatched !== false) {

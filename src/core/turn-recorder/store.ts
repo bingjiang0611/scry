@@ -43,6 +43,8 @@ export interface RecorderHealth {
    * evidence is untouched and they are retried hourly; see `session-failures.ts`.
    */
   suspendedSessions?: number
+  /** Oversized lines skipped during anchor scans (repeat visits may count again). */
+  oversizedTranscriptAnchorLines?: number
   recoveredRecords: number
 }
 
@@ -355,7 +357,7 @@ export async function readHealth(dataRoot: string): Promise<RecorderHealth> {
 export async function updateHealth(
   dataRoot: string,
   update: Partial<Omit<RecorderHealth, 'schemaVersion'>> & {
-    increment?: Partial<Pick<RecorderHealth, 'droppedEvents' | 'orphanEvents' | 'missingStartTerminals' | 'recoveredRecords'>>
+    increment?: Partial<Pick<RecorderHealth, 'droppedEvents' | 'orphanEvents' | 'missingStartTerminals' | 'recoveredRecords' | 'oversizedTranscriptAnchorLines'>>
   }
 ): Promise<RecorderHealth> {
   return withDirectoryLock(join(dataRoot, 'locks', 'health.lock'), async () => {
@@ -368,6 +370,9 @@ export async function updateHealth(
       orphanEvents: current.orphanEvents + (update.increment?.orphanEvents ?? 0),
       missingStartTerminals: current.missingStartTerminals + (update.increment?.missingStartTerminals ?? 0),
       recoveredRecords: current.recoveredRecords + (update.increment?.recoveredRecords ?? 0)
+    }
+    if (update.increment?.oversizedTranscriptAnchorLines) {
+      next.oversizedTranscriptAnchorLines = (current.oversizedTranscriptAnchorLines ?? 0) + update.increment.oversizedTranscriptAnchorLines
     }
     delete (next as RecorderHealth & { increment?: unknown }).increment
     await writeJsonAtomic(join(dataRoot, 'health.json'), next)

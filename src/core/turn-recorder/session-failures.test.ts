@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from './recorder'
 import {
   clearSessionFailure,
@@ -9,11 +9,12 @@ import {
   readSessionFailures,
   SESSION_FAILURE_RETRY_MS,
   SESSION_FAILURE_SUSPEND_AFTER,
+  TURN_FAILURE_MIN_AGE_MS,
   suspendedSessionKeys
 } from './session-failures'
 
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 async function dataRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'scry-session-failures-'))
@@ -39,6 +40,19 @@ describe('the failure ledger suspends a reason, not a session', () => {
     expect(log).toContain('session suspended after 3 identical failed passes')
     expect(log).toContain('read failed for the same reason')
     expect(log.trim().split('\n')).toHaveLength(1)
+  })
+
+  it.each(['EMFILE', 'ENFILE', 'ENOSPC', 'EAGAIN', 'EBUSY', 'EIO'])('does not count %s in either scope', async (code) => {
+    const root = await dataRoot()
+    const clock = vi.spyOn(Date, 'now')
+    const first = Date.now()
+    for (let attempt = 0; attempt < 4; attempt++) {
+      clock.mockReturnValue(first + attempt * TURN_FAILURE_MIN_AGE_MS)
+      const error = Object.assign(new Error('resource temporarily unavailable'), { code })
+      await noteSessionFailure(root, 'codex', 'session', error, 'turn')
+      await noteSessionFailure(root, 'codex', 'entry', error)
+    }
+    expect(await readSessionFailures(root)).toEqual({})
   })
 
   it('restarts the streak when the failure is a different one', async () => {
@@ -104,16 +118,28 @@ describe('a pass that keeps failing the same way stops being work', () => {
     return { root, env, dataRootPath: join(root, '.scry') }
   }
 
-  it('suspends the session after the third identical failure and keeps the turn open', async () => {
+  it('leaves quick failures active, then suspends a five-minute streak without closing the turn', async () => {
     const { root, env, dataRootPath } = await fixture()
-    const passes = SESSION_FAILURE_SUSPEND_AFTER
-
-    for (let attempt = 0; attempt < passes; attempt++) await recoverRecorder(root, env)
+    const first = Date.now()
+    const clock = vi.spyOn(Date, 'now')
+    for (let attempt = 0; attempt < 3; attempt++) {
+      clock.mockReturnValue(first + attempt * 1_000)
+      await recoverRecorder(root, env)
+    }
+    const quick = await readSessionFailures(dataRootPath)
+    const [key] = Object.keys(quick)
+    expect(quick[key]).toMatchObject({ scope: 'turn', failures: 3, firstAt: new Date(first).toISOString() })
+    expect(suspendedSessionKeys(quick).size).toBe(0)
+    clock.mockReturnValue(first + TURN_FAILURE_MIN_AGE_MS - 1)
+    await recoverRecorder(root, env)
+    expect(suspendedSessionKeys(await readSessionFailures(dataRootPath)).size).toBe(0)
+    clock.mockReturnValue(first + TURN_FAILURE_MIN_AGE_MS)
+    await recoverRecorder(root, env)
 
     const ledger = await readSessionFailures(dataRootPath)
     const entry = Object.entries(ledger).find(([key]) => key.startsWith('claude__'))
     expect(entry).toBeDefined()
-    expect(entry![1].failures).toBe(passes)
+    expect(entry![1].failures).toBe(5)
     expect(entry![1].suspendedAt).toBeDefined()
     expect(entry![1].lastError).toContain('EISDIR')
 
@@ -123,7 +149,7 @@ describe('a pass that keeps failing the same way stops being work', () => {
     const open = JSON.parse(await readFile(join(providerRoot, sessionDir, 'open.json'), 'utf8'))
     expect(open.status).toBe('open')
 
-    // A suspended session is no longer visited, so a fourth pass cannot repeat the same read.
+    // A suspended session is no longer visited, so the next pass cannot repeat the same read.
     const before = await readSessionFailures(dataRootPath)
     await recoverRecorder(root, env)
     const after = await readSessionFailures(dataRootPath)

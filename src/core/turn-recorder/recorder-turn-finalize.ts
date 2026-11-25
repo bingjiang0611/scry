@@ -76,7 +76,8 @@ export async function finalizeOpenTurn(
           open.sessionId,
           enablement.workspaceRoot,
           open.piTranscriptAnchor,
-          open.captureTranscriptEndOffset
+          open.captureTranscriptEndOffset,
+          enablement.dataRoot
         )
       : {
           ...unobservedTranscript,
