@@ -10,16 +10,8 @@ export async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
-/** Strings at or above this size are streamed instead of materialized inside one JSON string. */
 const JSON_CHUNK_STRING_BYTES = 1 << 20
 
-/**
- * Serialize without ever holding one string the size of the whole payload.
- *
- * A record that carries a 100 MB patch is one 100 MB JSON string plus a full-size copy inside
- * `writeFile`; streaming the few large string fields keeps the output byte-identical while the
- * transient allocation stays bounded by one slice.
- */
 async function writeJsonChunks(
   handle: import('node:fs/promises').FileHandle,
   value: unknown
@@ -37,15 +29,10 @@ async function writeJsonChunks(
     await writeContent(handle, `${skeleton}\n`)
     return
   }
-  // Generated placeholders contribute exactly two tokens per part. Any extra token belongs to
-  // user data (including keys). Decide the fallback before writing; a late fallback appends a
-  // second document, while a valid-looking colliding marker silently substitutes the wrong value.
   if (skeleton.split(token).length !== parts.length * 2 + 1) {
     await writeContent(handle, `${JSON.stringify(value)}\n`)
     return
   }
-  // Each placeholder was itself serialized as a JSON string, so the skeleton holds `"<token>N<token>"`.
-  // Replacing that whole quoted literal with the real quoted string keeps the output identical.
   let cursor = 0
   for (;;) {
     const at = skeleton.indexOf(token, cursor)
@@ -59,15 +46,12 @@ async function writeJsonChunks(
   await handle.writeFile(skeleton.slice(cursor) + '\n')
 }
 
-/** Emit exactly `JSON.stringify(value)`, one surrogate-safe slice at a time. */
 async function writeQuotedChunks(handle: import('node:fs/promises').FileHandle, value: string): Promise<void> {
   await handle.writeFile('"')
   for (let start = 0; start < value.length;) {
     let end = Math.min(start + WRITE_SLICE_CHARS, value.length)
     const last = value.charCodeAt(end - 1)
     if (end < value.length && last >= 0xd800 && last <= 0xdbff) end--
-    // Escaping is per code point, so escaping each slice and dropping its own quotes produces the
-    // same text as escaping the whole value once.
     const quoted = JSON.stringify(value.slice(start, end))
     await handle.writeFile(quoted.slice(1, -1))
     start = end
@@ -95,18 +79,12 @@ export async function writeJsonAtomic(path: string, value: unknown, options: { s
       }
     }
   } catch (error) {
-    try { await handle?.close() } catch { /* preserve original error */ }
+    try { await handle?.close() } catch {}
     await rm(temp, { force: true }).catch(() => {})
     throw error
   }
 }
 
-/**
- * `FileHandle.writeFile` turns a whole string into one Buffer before writing. For a 200 MB record
- * that copy on top of the record itself is the difference between 918 MB and 1,285 MB peak RSS, so
- * large payloads are written in bounded slices. Slices never split a surrogate pair, otherwise the
- * two halves would be encoded as replacement characters.
- */
 const WRITE_SLICE_CHARS = 4 * 1024 * 1024
 
 async function writeContent(handle: import('node:fs/promises').FileHandle, content: Buffer | string): Promise<void> {
@@ -143,7 +121,7 @@ export async function writeTextAtomic(path: string, content: string, options: { 
       }
     }
   } catch (error) {
-    try { await handle?.close() } catch { /* preserve original error */ }
+    try { await handle?.close() } catch {}
     await rm(temp, { force: true }).catch(() => {})
     throw error
   }
@@ -175,16 +153,13 @@ async function ensureDirectory(path: string, mode: number): Promise<void> {
   }
 }
 
-/** Create each missing directory component and durably link it from its parent. */
 export async function mkdirDurable(path: string, mode = 0o700): Promise<void> {
   const absolute = resolve(path)
   const root = parse(absolute).root
   let current = root
   for (const part of relative(root, absolute).split(sep).filter(Boolean)) {
     const next = join(current, part)
-    // Most ancestors already exist; a concurrent creator must still produce a directory.
     await ensureDirectory(next, mode)
-    // Even an existing entry may come from an attempt that failed its parent fsync.
     await syncDirectory(current)
     current = next
   }
@@ -200,7 +175,6 @@ interface ExclusiveWriteOptions {
   syncDirectory?: (path: string) => Promise<void>
 }
 
-/** Durable cross-filesystem copy primitive that never replaces an existing destination. */
 export async function writeFileAtomicExclusive(
   path: string,
   content: Buffer | string,
@@ -210,7 +184,6 @@ export async function writeFileAtomicExclusive(
   await publishPreparedFile(path, content, options)
 }
 
-/** Existing destinations are not success: the caller must verify their complete bytes. */
 export async function writeFileAtomicExclusiveCopies(
   paths: readonly string[],
   content: Buffer
@@ -218,14 +191,11 @@ export async function writeFileAtomicExclusiveCopies(
   return writeFileAtomicExclusiveBatch(paths.map(path => ({ path, content })))
 }
 
-/** One bounded publication group; existing destinations still require complete-byte verification. */
 export async function writeFileAtomicExclusiveBatch(
   entries: readonly { path: string; content: Buffer | string }[]
 ): Promise<Array<'published' | 'existing'>> {
   const prepared = new Set<string>()
   const parents = new Set<string>()
-  // Batch only directory preparation. No final content name is visible until ALL
-  // ancestor entries are durable, including entries left by a failed earlier attempt.
   for (const { path } of entries) {
     const directory = resolve(dirname(path))
     const root = parse(directory).root
@@ -266,8 +236,6 @@ async function publishPreparedFile(path: string, content: Buffer | string, optio
     await handle.sync()
     await handle.close()
     handle = undefined
-    // Sync the new final link before deleting the temporary link. A journaled caller can then
-    // recover either name after a crash without ever mistaking a partial file for the final copy.
     await link(temp, path)
     await sync(dirname(path))
     published = true
@@ -275,7 +243,7 @@ async function publishPreparedFile(path: string, content: Buffer | string, optio
     await rm(temp)
     await sync(dirname(path))
   } catch (error) {
-    try { await handle?.close() } catch { /* preserve original error */ }
+    try { await handle?.close() } catch {}
     if (!published) await rm(temp, { force: true }).catch(() => {})
     throw error
   }
@@ -341,9 +309,6 @@ async function staleOwner(lockDir: string, ttlMs: number): Promise<LockOwner | '
   }
   if (Number.isInteger(owner.pid) && (owner.pid ?? 0) > 0) {
     if (!pidAlive(owner.pid as number)) return owner
-    // PID reuse cannot be distinguished portably from the original owner. No recorder
-    // critical section is expected to live for minutes, so cap a live-PID lock instead
-    // of allowing an unrelated reused PID to block the workspace forever.
     const maxLiveOwnerAgeMs = Math.max(ttlMs * 10, 5 * 60_000)
     try {
       const heartbeat = await stat(ownerPath)
@@ -400,8 +365,6 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// Local waiters do not poll each other. Every admitted action still acquires
-// the filesystem lock; this queue grants no cross-process ownership or fairness.
 const localLockWaiters = new Map<string, Set<() => void>>()
 
 function lockTimeout(lockDir: string): NodeJS.ErrnoException {
@@ -438,8 +401,6 @@ export async function withDirectoryLock<T>(
     localLockWaiters.set(path, waiters)
   }
   try {
-    // Timers may be delayed by the event loop. Expired admission cannot clear
-    // an overdue timer and run later just because the filesystem lock is free.
     if (queued && Date.now() >= deadline) throw lockTimeout(path)
     return await withFilesystemDirectoryLock(path, action, { ...options, waitMs: Math.max(0, deadline - Date.now()) })
   } finally {
@@ -529,7 +490,6 @@ export async function appendRotatingLog(path: string, line: string, maxBytes = 1
     const info = await stat(path)
     if (info.size >= maxBytes) await rename(path, `${path}.1`).catch(() => undefined)
   } catch {
-    // New log.
   }
   await writeFile(path, `${line}\n`, { flag: 'a', mode: 0o600 })
 }

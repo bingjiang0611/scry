@@ -1,4 +1,3 @@
-/* 对话消息（蓝本 chat.html）：bubble-user / who(av+runid) / model-text / files-summary / turn-footer */
 .turn-user {
   display: flex;
   flex-direction: column;

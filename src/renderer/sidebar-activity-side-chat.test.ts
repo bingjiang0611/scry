@@ -17,7 +17,6 @@ const projects: ProjectMeta[] = [{
 
 const empty = new Set<string>()
 
-/** A side chat is never a row of its own; its live run lifts the row of its source. */
 describe('side chats in the activity projection', () => {
   it('never lists a side chat as its own row; its live run lifts the parent row instead', () => {
     const parent = '主会话：重构侧边栏'
@@ -37,7 +36,6 @@ describe('side chats in the activity projection', () => {
       conversations: [{ id: 'parent', cwd: '/work/store', title: parent, revision: 1, turnCount: 3, ...parentExtra }, child(childExtra)]
     }], new Set(['child-run']), waiting, '')
       .map((row) => [row.kind === 'conversation' ? row.conversation.id : row.kind, row.group])
-    // A running child is background work of its parent: one row, the parent's.
     expect(rows({ activeRunId: 'child-run' })).toEqual([['parent', 'working']])
     // A child waiting for an answer needs the user even when the parent itself finished.
     expect(rows({ activeRunId: 'child-run' }, new Set(['child-run']), { lastRunOutcome: 'completed' }))

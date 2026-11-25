@@ -10,8 +10,6 @@ import type {
   TerminalRecordingRequest, TerminalSessionDescriptor, TerminalSessionInfo, TerminalStartRequest
 } from './terminal'
 
-// These are explicit desktop operations, not arbitrary IPC/channel forwarding.
-// The authenticated host authorizes cwd again for every operation and continuation.
 export interface DesktopWorkspaceApi {
   workspaceList(request: WorkspaceListRequest): Promise<WorkspaceListResult>
   workspaceRead(request: WorkspacePathRequest): Promise<WorkspaceFileSnapshot>
@@ -76,13 +74,6 @@ export const DESKTOP_WORKBENCH_METHODS = {
   terminal: ['terminalStart', 'terminalActive', 'terminalAttach', 'terminalWrite', 'terminalResize', 'terminalReady', 'terminalAck', 'terminalClose', 'terminalDetach', 'terminalRecordingList', 'terminalRecordingRead', 'terminalRecordingDelete', 'terminalEvents']
 } as const satisfies { [Surface in keyof DesktopWorkbenchApis]: readonly (keyof DesktopWorkbenchApis[Surface])[] }
 
-/**
- * Workbench calls that change nothing on the host. Only these may be asked again after a
- * lost reply; every other method (file writes, Git/PR mutations, drafts, PTY input,
- * resize, ack, close) is a write that is sent once and reported unknown if its reply is
- * lost. Shared by the paired-device client, the lane routing and the daemon forwards so
- * the three never disagree about what may be replayed.
- */
 export const DESKTOP_WORKBENCH_READ_METHODS: ReadonlySet<string> = new Set([
   'workspaceList', 'workspaceRead', 'workspaceReadKnown', 'workspaceReadPage', 'workspaceReadPageKnown',
   'terminalActive', 'terminalEvents', 'terminalRecordingList', 'terminalRecordingRead',

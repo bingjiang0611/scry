@@ -45,8 +45,6 @@ export function buildConcurrencyReport(parts) {
     startupCpu: startupResources,
     spanningCpu: spanningResources,
     providerProcess: unavailable('the daemon runs the offline adapter without a separate Provider process'),
-    // forced:false only means no collection was forced; this harness collects no GC events, so post-GC
-    // residency cannot be observed and is not attributed to a natural GC.
     gc: { forced: false, postCollectionResidency: unavailable('GC events are not collected by this harness'),
       note: 'no GC was forced; that is not evidence that a natural collection ran or freed anything' },
     rendererCommit: rendererCommitLane(),
@@ -101,7 +99,6 @@ export function buildConcurrencyReport(parts) {
     switches: switches.blocked ?? [],
     sidebarSessions,
     processCleanup: cleanup,
-    // Facts a reader must not have to infer from the numbers above.
     honesty: {
       paint: 'offscreen-hidden-window',
       offscreen: true,

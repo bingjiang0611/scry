@@ -1,6 +1,5 @@
 export async function runSessionRouting({ driver }) {
   const { read, wait, check, click, key, insert, fixture, remoteShown, composerValue, pointFor, send, formEnter } = driver
-  // Native input through production App: insertion must retain the owning host/session.
   await click('textarea[aria-label="描述任务"]'); await insert('remote draft')
   await read(`localStorage.setItem('scry.meta-prompts.v1', JSON.stringify([{id:'remote-meta',title:'Remote routing',body:'host scoped prompt'}]))`)
   await click('.sb-navitem', 'Meta Prompts')

@@ -47,11 +47,6 @@ export interface SubscribeEngineOptions {
 
 type SubscribeAccess = { scope: 'local' | 'remote'; canReadCwd: (cwd: string | null) => boolean }
 
-/**
- * Orchestration-backed `subscribe` read engine (`P4-orchestration-protocol.md` §5.1–§5.5).
- * Reads `orch_event` + projection tables synchronously in one better-sqlite3 turn so
- * snapshot `seq` matches projection state atomically, and wakes immediately on commits.
- */
 export class SubscribeEngine {
   readonly #sink: EventSink
   readonly #hub: SubscribeHub

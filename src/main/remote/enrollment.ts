@@ -20,8 +20,6 @@ type PeculiarCrypto = Parameters<typeof cryptoProvider.set>[0]
 const NODE_CRYPTO = webcrypto as unknown as PeculiarCrypto
 cryptoProvider.set(NODE_CRYPTO)
 
-// Host-side X.509 adapters for the pairing authority, ported from the proven
-// experiments/remote-g0 reference now that a production @peculiar/x509 dependency
 // is approved. This module is pure cryptographic verification/issuance. It is
 // NOT enrollment or local approval: PairingAuthority still binds the secret,
 // the live inner-mTLS channel proof and explicit user intent, and only calls

@@ -259,7 +259,7 @@ export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow
   const byProvider = analytics.byProvider.map((row) => row.provider === 'qoder' ? enrich(row, evidence) : row)
   const projectedQoder = byProvider.find((row) => row.provider === 'qoder')
   const creditsOn = (day: string) => aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === day))
-  // Q12：只有 Credits、没有账本记录的日期也要补一个点，否则曲线会漏掉这天。
+  // Q12：没有账本记录时，仅在当天有已知 Credits 且有可折算的金额时补点。
   const qoderDay = (day: string): UsageAnalyticsDailyProviderRow | undefined => {
     const existing = analytics.dailyByProvider.find((row) => row.provider === 'qoder' && row.day === day)
     if (existing) return enrich(existing, creditsOn(day))

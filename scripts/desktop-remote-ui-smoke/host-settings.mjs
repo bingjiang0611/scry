@@ -1,6 +1,5 @@
 export async function runHostSettings({ driver, localBefore, submissionsBefore }) {
   const { read, wait, check, click, key, insert, capture, fixture, remoteShown, formEnter, contents } = driver
-  // Back to this Mac: a new draft picks the local machine; local new sessions stay intact.
   await click('.sb-new')
   // The old session also has a location button. Wait for the new draft before
   // measuring it, or the transition can move the target before native input.
@@ -29,7 +28,6 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   check(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture desktop")'), 'Remote settings omitted saved host')
   check(!(await read('document.querySelector(".remote-connections-settings").textContent.includes("Fixture iPhone")')), 'Inbound grants mixed into outbound hosts')
   check(!(await read('document.querySelector(".hosts-view") || document.querySelector(".remote-client-settings") || document.querySelector(".sb-hosts")')), 'Legacy hosts page or jump remains')
-  // 机器页要显示这台机器和这个目标的真实读数，不是占位。
   await wait('document.querySelector(".machine-card--local")?.textContent.includes("34%")', 'local machine CPU from the metrics read')
   check(await read('document.querySelector(".machine-card--local").textContent.includes("已用 9.1 GB / 16 GB") && document.querySelector(".machine-card--local").textContent.includes("剩余 212 GB")'), 'Local card omitted memory or disk numbers')
   check(await read('document.querySelector(".machine-card--local").textContent.includes("在线")'), 'Local card did not report the machine as online')
@@ -72,7 +70,6 @@ export async function runHostSettings({ driver, localBefore, submissionsBefore }
   await wait('document.querySelectorAll(".hosts-projects li").length === 3', 'host projects listed')
   await capture('remote-hosts')
 
-  // Editing changes routing only. Cancel, validation, storage failure and double-submit use real DOM input.
   await click('.hosts-address-summary button')
   await wait('document.activeElement?.name === "hostname"', 'address editor initial focus')
   check(await read('document.querySelector(\'input[name="hostname"]\').value === "fixture.invalid" && document.querySelector(\'input[name="username"]\').value === "fixture" && document.querySelector(\'input[name="port"]\').value === "22"'), 'Address editor did not prefill the saved target')

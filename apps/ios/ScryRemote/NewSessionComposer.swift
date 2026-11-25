@@ -1,11 +1,6 @@
 import SwiftUI
 import RemoteTransport
 
-// The new-session page's composer. It is the home screen's composer (project and
-// Provider capsules, attachments, permission, model · effort, send) plus the
-// pre-send states the old standalone new-task page reported: submit errors, the
-// missing project/Provider hint, Provider control refresh, slash commands, and a
-// metadata reload when the app returns to the foreground.
 struct NewSessionComposer: View {
   /// Non-nil asks for the keyboard (`MessageComposer.focusTicket`).
   var focusTicket: Int?

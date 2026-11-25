@@ -1,7 +1,6 @@
 import { dialog } from 'electron'
 import type { BrowserWindow, MessageBoxOptions } from 'electron'
 
-// This window's confirmation and failure dialogs for the session lifecycle. The lifecycle
 // itself (delete, rename, pin, archive) runs in the daemon without dialogs;
 // session-lifecycle-daemon.ts asks here first and reports here after.
 

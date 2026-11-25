@@ -139,7 +139,6 @@ describe('TurnStreamProjectionCache bounded structural updates', () => {
       expect(projection.liveText).toBe(text)
       expect(projection.liveKey).toBe('d-1')
     }
-    // 500 批流式增量只允许 1 次结构化重算（首次建立）。
     expect(recomputes).toBe(1)
     expect(firstStructural).toEqual(base)
   })
@@ -212,7 +211,6 @@ describe('TurnStreamProjectionCache bounded structural updates', () => {
     const d1 = delta('d-1', 'x')
     const corrected = { ...t1, output: 'done' }
     cache.project([t1, t2, d1])
-    // 中间事件被更正（新对象引用）不能被当成纯尾部增量复用。
     const afterCorrection = cache.project([corrected, t2, d1])
     expect(afterCorrection.structuralRecomputed).toBe(true)
     expect(afterCorrection.structuralItems[0]).toBe(corrected)
@@ -269,7 +267,6 @@ describe('TurnStreamProjectionCache bounded structural updates', () => {
     const t1 = tool('t-1')
     const d1 = delta('d-1', 'answer')
     cache.project([t1, d1])
-    // 终态到达（result 事件）必须把尾部并回结构化投影，不留悬空的流式段。
     const terminal = cache.project([
       t1,
       d1,

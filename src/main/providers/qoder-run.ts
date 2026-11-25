@@ -41,7 +41,6 @@ import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from '.
 
 export interface QoderRunDependencies {
   homeDir: string
-  /** Adapter-level diagnostics read by `describe()`; not execution evidence. */
   hookFallback: QoderHookFallbackState
   /**
    * C1: when the host supplies a pool, one CLI session serves the conversation instead of one
@@ -145,8 +144,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     const providerPrompt = request.cwd && projectCommandMatch(request.prompt)
       ? await expandQoderProjectCommand(request.prompt, request.cwd)
       : request.prompt
-    // The run-owned UUID is the only user identity Scry can later match in the
-    // native transcript; it is not a receipt by itself.
     const outgoingText = history.text(providerPrompt)
     // Written before the attempt is recorded: a failed write sends nothing.
     const mcp = qoderMcpLaunch(request.mcpExecution)
@@ -171,8 +168,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     turnSlot = createQoderTurnSlot(bindings)
     const currentTurn = (): QoderTurnBindings | undefined => turnSlot.current as QoderTurnBindings | undefined
     const openQuery = (promptStream: AsyncIterable<SDKUserMessage>): Query => query({
-      // Keep control-response stdin open while Qoder-owned Agents or Bash
-      // tasks are active, including model-policy requests on notification turns.
       prompt: promptStream,
       options: {
         transport: {

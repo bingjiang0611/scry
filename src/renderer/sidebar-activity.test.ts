@@ -67,7 +67,6 @@ describe('sidebar activity projection', () => {
       sessions: [{ ...projects[0].sessions[0], lastRunOutcome: undefined }],
       conversations: [{ ...projects[0].conversations![0], activeRunId: undefined, lastRunOutcome: undefined }]
     }]
-    // Absence of an outcome is not evidence, so nothing is shown for it.
     expect(sidebarActivity(unknown, empty, empty, '')).toEqual([])
     for (const lastRunOutcome of ['failed', 'cancelled', 'interrupted'] as const) {
       const source = [{ ...projects[0],
@@ -93,7 +92,6 @@ describe('sidebar activity projection', () => {
     const rows = sidebarActivity(catalog, empty, empty, '', [], unread)
     expect(rows).toHaveLength(1)
     expect(rows[0].group).toBe('updates')
-    // Without unread evidence an unknown outcome is not activity at all.
     expect(sidebarActivity(catalog, empty, empty, '', [], empty)).toEqual([])
     expect(sidebarActivity(catalog, new Set(['run-a']), empty, '', [], unread)[0].group).toBe('working')
     expect(sidebarActivity(catalog, new Set(['run-a']), new Set(['run-a']), '', [], unread)[0].group).toBe('attention')
@@ -207,7 +205,6 @@ describe('sidebar activity projection', () => {
       expect(group({ activeRunId: 'run-scoped', fork: { status },
         blockedReason: `原生分支结果尚未确认：${status}；不会自动重建` })).toEqual(['attention'])
     }
-    // An unresolved delivery with no live run is a block the user has to clear.
     expect(group({ blockedReason: '投递结果尚未确认，且没有可关联的运行；请重启核查' })).toEqual(['attention'])
     expect(group({ fork: { status: 'accepted' }, activeRunId: 'run-scoped' })).toEqual(['working'])
   })

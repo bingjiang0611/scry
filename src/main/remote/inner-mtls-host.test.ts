@@ -100,8 +100,6 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
-  // The device declares the run-channel version on every request, exactly like
-  // the desktop client and the phone do.
   const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request as Record<string, unknown> } : request
   socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
@@ -112,7 +110,6 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
 
 const routing = (over: Partial<RemoteIntentRouting> = {}) => JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
-// The loopback production stack: real TLS, real pairing, real controller.
 describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
   it('routes read-only workspace requests through verified TLS and canonical-project authorization', async () => {
     const start = vi.fn(async () => {})
@@ -245,7 +242,6 @@ describe('InnerMtlsHost (production transport end-to-end, loopback)', () => {
     const pair = await controller.authority.begin()
     await controller.authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM, deviceLabel: 'iPhone' }, verified.publicKeySHA256)
     const grant = await controller.authority.confirmLocal(pair.pairingId, verified.publicKeySHA256)
-    // Works before revocation.
     expect((await call(addr, caPEM, grant.certificatePEM, keyPEM, { op: 'projects' })).projects).toBeDefined()
     await controller.authority.revoke(grant.deviceId)
     expect((await call(addr, caPEM, grant.certificatePEM, keyPEM, { op: 'projects' })).error).toBe('device_not_authorized')

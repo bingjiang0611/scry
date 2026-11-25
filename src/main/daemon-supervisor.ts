@@ -1,9 +1,3 @@
-// App-side supervision of the local daemon: probe, adopt, launch, wait for ready.
-//
-// The daemon is a separate process on purpose - it keeps serving paired devices and
-// runs while the App is closed - so this supervisor never owns killing it. Every
-// step is injected, because the interesting behaviour is the ordering (never launch a
-// second daemon, never treat "still starting" as ready) and the version rule.
 import { sameBuild, type BuildIdentity } from '../shared/build-identity'
 import type { DaemonProbeInfo } from './daemon-client'
 
@@ -29,7 +23,6 @@ export interface DaemonSupervisorOptions {
 }
 
 export type DaemonSupervisorResult =
-  // A daemon was already serving this socket; nothing was launched.
   | { status: 'adopted'; version: string }
   | { status: 'started'; version: string }
   // The daemon answers but was built from different sources (another version, or the
@@ -41,7 +34,6 @@ export type DaemonSupervisorResult =
 export const DAEMON_READY_TIMEOUT_MS = 10_000
 const READY_POLL_MS = 250
 
-/** Bring up a usable daemon, or explain exactly why there is none. */
 export async function ensureDaemon(options: DaemonSupervisorOptions): Promise<DaemonSupervisorResult> {
   const first = await probeQuietly(options.probe)
   if (first !== undefined) return adopt(first, options)

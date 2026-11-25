@@ -228,7 +228,6 @@ export async function* projectTranscript(
   yield* projectJsonlRecords(handle, size, claudeRecords, evidence)
 }
 
-/** The projector a plain Claude transcript needs. */
 export function claudeRecords(): RecordProjector<JsonlEvent> {
   return new ClaudeRecordProjector()
 }

@@ -1,4 +1,3 @@
-// Antigravity Provider 界面固定文案。
 export const ANTIGRAVITY_COPY = {
   residualRiskNotice: '用户级来源：~/.gemini/config/mcp_config.json 与 ~/.gemini/config/hooks.json；启动前校验工作区配置指纹。残余风险：检查与执行之间存在时间差（TOCTOU），且本机 ~/.gemini 目录为多会话共享。',
   usagePartial: '部分用量',

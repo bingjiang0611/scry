@@ -35,7 +35,6 @@ it.each([
     { type: 'user', timestamp: '2026-10-24T12:00:00Z', message: { role: 'user', content: 'Say OK' } },
     { type: 'assistant', timestamp: '2026-10-24T12:01:00Z', message: { role: 'assistant', content: [{ type: 'text', text: 'OK' }] } }
   ].map(row => JSON.stringify(row)).join('\n'))
-  // Advance only Date, not timers or I/O: a real turn need not fit the stale-terminal grace window.
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-10-24T12:00:00Z'))
   await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...common, hook_event_name: 'UserPromptSubmit', prompt: 'Say OK' } })
@@ -74,7 +73,6 @@ it.each(['claude', 'codex', 'qoder'] as const)('V1 %s declares stop_hook_active 
   } }
   expect(await handleRecorderHook(input)).toMatchObject({ status: 'duplicate' })
   expect(await readHealth(join(root, '.scry'))).toMatchObject({ orphanEvents: 0, missingStartTerminals: 0 })
-  // The exemption is only for absent open turns, never a reason to leave a real turn open.
   await handleRecorderHook({ ...input, event: 'UserPromptSubmit', payload: {
     session_id: 'continued', hook_event_name: 'UserPromptSubmit', prompt: 'go', timestamp: '2026-10-24T12:00:00Z'
   } })
@@ -102,17 +100,14 @@ it('Qoder late ID-less Stop requires an unchanged native snapshot and never clos
   await handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, assistant_response: 'old answer', promptId: 'old-prompt' } })
   await recoverRecorder(root)
 
-  // No open turn: duplicate is accepted only while the native transcript identity is unchanged.
   await expect(handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, last_assistant_message: 'old answer' } }))
     .resolves.toMatchObject({ status: 'duplicate' })
 
-  // A new identified Stop repeating the previous answer is not a duplicate of the old record.
   await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...native, prompt: 'new prompt', promptId: 'new-prompt' } })
   await writeSession('old answer', true)
   await expect(handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, promptId: 'new-prompt', last_assistant_message: 'old answer' } }))
     .resolves.not.toMatchObject({ status: 'duplicate' })
 
-  // A new ID-less Stop with the same text is ambiguous and must use the stale-terminal fence.
   await handleRecorderHook({ ...base, event: 'UserPromptSubmit', payload: { ...native, prompt: 'third prompt', promptId: 'third-prompt' } })
   await expect(handleRecorderHook({ ...base, event: 'Stop', payload: { ...native, last_assistant_message: 'old answer' } }))
     .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('deferred') })
@@ -167,8 +162,6 @@ it.each([
   const recordsRoot = join(root, '.scry/records')
   const [file] = await readdir(recordsRoot)
   const record = JSON.parse(await readFile(join(recordsRoot, file), 'utf8'))
-  // The record contract accepts ISO offsets and precision variants. Keep the same instants,
-  // identity and duration; this is a stored-record fixture, not a changed production parser.
   await writeFile(join(recordsRoot, file), JSON.stringify({ ...record, startedAt, completedAt }))
   expect(await handleRecorderHook({ ...base, event: 'Stop', payload: { session_id: 'formats', timestamp: terminalAt } }))
     .toMatchObject({ status: expected })

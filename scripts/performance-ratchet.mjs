@@ -64,7 +64,6 @@ export function validateObservations(report) {
   return report
 }
 
-/** Compare one candidate observation report against the ledger. */
 export function checkRatchet(ledger, report) {
   validateLedger(ledger)
   validateObservations(report)

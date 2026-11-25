@@ -30,7 +30,6 @@ export interface AuthoritySubscribeRuntimeDeps {
   scans?: SubscribeEngineOptions['scans']
 }
 
-/** Creates the volatile hint hub and commit wakeup binding. */
 export function createAuthoritySubscribeHub(
   sink: EventSink,
   stateHints?: () => Array<{ kind: 'attention'; snapshot: SessionAttentionSnapshot }>
@@ -40,7 +39,6 @@ export function createAuthoritySubscribeHub(
   return hub
 }
 
-/** Builds the `LocalEndpointHandlers['subscribe']` function backed by `SubscribeEngine`. */
 export function createAuthoritySubscribeHandler(
   sink: EventSink,
   hub: SubscribeHub,
@@ -123,7 +121,6 @@ async function readRemoteDetailPage(
   return { kind: 'remoteHistory', history: reply.history as DesktopRemoteHistory }
 }
 
-/** Resolves history using the projected session identity. */
 export function createAuthorityDetailReader(
   historyChannels: Record<string, (event: unknown, ...args: never[]) => unknown>,
   readConversation: (id: string) => Promise<import('../shared/conversation-api').ConversationPage>
@@ -149,7 +146,6 @@ export function createAuthorityDetailReader(
   }
 }
 
-/** Updates in-memory live run binding/admission metadata in `SubscribeHub` without extra SQLite fsyncs. */
 export function noteProgressMarkerForSubscribeHub(
   hub: SubscribeHub,
   canonicalRunId: string,
@@ -176,7 +172,6 @@ export function noteProgressMarkerForSubscribeHub(
       if (progress) hub.noteRunWorkspaceProgress(canonicalRunId, progress)
     }
   } catch {
-    // Non-JSON progress markers do not affect subscribe metadata.
   }
 }
 
@@ -184,7 +179,6 @@ export type AppHint = Exclude<SubscribeHint, { kind: 'run' | 'window' }>
   | { kind: 'run'; runId: string }
   | { kind: 'window'; channel: string; payload: unknown }
 
-/** Publishes volatile hints alongside durable orchestration events (protocol §5.3). */
 export function forwardAppHintToSubscribeHub(
   hub: SubscribeHub,
   event: AppHint,
@@ -219,7 +213,6 @@ export function forwardAppHintToSubscribeHub(
   }
 }
 
-/** Routes H1 run_progress markers into both `SubscribeHub` (live meta) and `AuthorityEngine` (durable events). */
 export function handleAuthorityRunProgress(
   engine: AuthorityEngine,
   hub: SubscribeHub,
@@ -261,7 +254,6 @@ export function handleAuthorityRunProgress(
       })
     }
   } catch {
-    // Opaque non-JSON progress marker; no orchestration state change needed.
   }
 }
 

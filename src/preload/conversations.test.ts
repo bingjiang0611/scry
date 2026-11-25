@@ -61,7 +61,6 @@ describe('conversation preload boundary', () => {
     const conversationSource = { kind: 'conversation' as const, conversationId: 'conversation-id' }
     await conversationsApi.previewSideChat(conversationSource)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewSideChat', conversationSource)
-    // A preview forwards an explicit typed boundary and the requested first-send target.
     const options = { terminalThroughOrdinal: 3, initialTarget: { providerId: 'pi' as const, agentProfileId: 'pi:0123456789abcdef', permissionMode: 'default' as const } }
     await conversationsApi.previewSideChat(conversationSource, options)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:previewSideChat', conversationSource, options)
@@ -77,7 +76,6 @@ describe('conversation preload boundary', () => {
       initialTarget: { providerId: 'codex' as const, model: { id: 'gpt-5' }, effort: 'high', permissionMode: 'default' as const } }
     await conversationsApi.createSideChat(create)
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:createSideChat', create)
-    // Creation recovery is a read-only lookup of one command inside one source scope.
     await conversationsApi.findSideChatCommand(nativeSource, 'side-chat-1')
     expect(electron.invoke).toHaveBeenLastCalledWith('conversation:findSideChatCommand', nativeSource, 'side-chat-1')
     await conversationsApi.readSideChatSnapshot('conversation-id', '3:120')

@@ -12,7 +12,6 @@ import { isRunTerminationReason } from '../shared/runtime-types'
  */
 export type ArchivedTurnStatus = 'completed' | 'failed' | 'unavailable'
 
-/** Status a legacy turn carries when its own record proves no outcome. */
 export const ARCHIVED_TURN_STATUS_UNKNOWN: ArchivedTurnStatus = 'unavailable'
 
 export interface ArchivedTurnEvidence {

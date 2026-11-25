@@ -38,8 +38,7 @@ const withMcp = args.includes('--with-mcp')
 if (mode === 'in-process') throw new Error('in-process mode was removed with S3: the App always runs Agents in its daemon')
 if (mode !== 'daemon') throw new Error(`unknown mode: ${mode}`)
 
-// 20 deltas 150 ms apart: a stream whose steady state is observable in both modes,
-// instead of one burst that any path can only deliver as a single lump.
+// Paced fixture output lets the benchmark observe spacing between arrivals.
 const PROMPT = 'performance paced stream'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -54,7 +53,7 @@ const stopDaemon = (stateDir) => {
       const argv = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' })
       if (!/daemon(\.js)?|supervisor/.test(argv)) continue
       process.kill(pid, 'SIGKILL')
-    } catch { /* already gone */ }
+    } catch { /* best-effort cleanup */ }
   }
 }
 
@@ -77,7 +76,7 @@ if (withMcp) {
     `[mcp_servers.bench_node]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ["-e", "setTimeout(() => {}, 1000)"]\n`
   )
 }
-// The App only starts in a directory its own picker recorded.
+// Seed the benchmark workspace in the isolated project list without opening the picker.
 writeFileSync(join(userDataDir, 'projects.json'), JSON.stringify([{ cwd: workspace, lastOpenedAt: 1 }]))
 
 const electron = process.platform === 'darwin'
@@ -157,7 +156,6 @@ const measure = async (count, chunkIndex) => {
     child = launch({
       spawn, executable: electron, devApp: true, root, port, userDataDir, home,
       appendLog: (chunk) => { log.push(chunk); if (log.length > 4000) log.splice(0, 2000) }, env: {
-        // An isolated instance whose daemon serves the packaged smoke fixture.
         SCRY_DAEMON_SMOKE_PROVIDER: '1', SCRY_DAEMON_CREDENTIAL_PLAINTEXT: '1',
         ...(process.env.SCRY_ORCHESTRATION_FULLFSYNC !== undefined ? { SCRY_ORCHESTRATION_FULLFSYNC: process.env.SCRY_ORCHESTRATION_FULLFSYNC } : {}),
         SCRY_REMOTE_HOST: '0',
@@ -171,8 +169,7 @@ const measure = async (count, chunkIndex) => {
     cdp = connectCdp(target.webSocketDebuggerUrl)
     const evaluate = createEvaluate(cdp)
     await evaluate(`window.scry.setCwd(${JSON.stringify(workspace)})`)
-    // One subscription for the whole instance: every text event is stamped where the user
-    // sees it arrive, and the stamp costs the renderer nothing at measurement time.
+    // One subscription for this instance records model-event arrival times in the renderer.
     await evaluate(`(() => {
       window.__timing = { events: [], done: null }
       window.scry.onTrace((events) => {
@@ -211,8 +208,8 @@ const measure = async (count, chunkIndex) => {
       })()`)
       const submittedWall = await evaluate('window.__timing.submittedAtWall')
       newRunMarks()
-      // Use a unique 32 KiB PNG image attachment so `request.prompt` remains the exact
-      // paced-stream trigger (yielding real `firstTextMs`) while ledger `detail` exceeds 16 KiB (~43 KB JSON).
+      // Use a unique synthetic PNG-labeled attachment to enlarge the ledger detail
+      // without changing the exact prompt that triggers the paced stream.
       const largeAttachmentBytes = largeBody
         ? Buffer.concat([
             Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),

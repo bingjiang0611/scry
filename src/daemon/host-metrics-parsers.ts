@@ -15,7 +15,6 @@ export interface ProcessRow {
   comm: string
 }
 
-/** Sums the per-core CPU times `os.cpus()` reports. */
 export function cpuTimesFromCpus(cpus: ReadonlyArray<{ times: Record<string, number> }>): CpuTimes {
   let idle = 0
   let total = 0
@@ -107,10 +106,7 @@ export function parseProcMeminfo(text: string): {
   }
 }
 
-/**
- * Linux PSI `/proc/pressure/memory` avg10 onto the same three levels the macOS
- * kernel reports: under 10% low, under 40% medium, from 40% high.
- */
+/** Maps Linux PSI avg10 to the shared UI bands (P8 §3). */
 export function parsePsiMemory(text: string): HostMemoryPressure | null {
   const avg10 = text.match(/avg10=([\d.]+)/)
   if (!avg10) return null
@@ -138,8 +134,8 @@ export function parsePsTable(text: string): ProcessRow[] {
   return rows
 }
 
-// The executable names that name a Provider. Arguments are never inspected, so a
-// child running under an unrecognised name stays 「其他」.
+// Executable basenames are a fallback after recorded Provider roots and inherited attribution.
+// If neither applies and the basename is unknown, use 「其他」. Arguments are not inspected.
 const PROVIDER_EXECUTABLES: Record<string, string> = {
   claude: 'claude',
   codex: 'codex',

@@ -183,7 +183,6 @@ const DONE: Record<BackgroundServiceAction, string> = {
   quit: '后台服务已退出，Scry 正在退出。'
 }
 
-/** The line shown under the buttons once an action returns. */
 export function describeActionResult(action: BackgroundServiceAction, result: BackgroundServiceActionResult): BackgroundServiceNotice {
   if (result.status === 'done') return { tone: 'info', text: DONE[action] }
   if (result.status === 'cancelled') return { tone: 'info', text: '已取消，后台服务没有被停止。' }

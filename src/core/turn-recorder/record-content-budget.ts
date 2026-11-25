@@ -4,56 +4,31 @@ import { degradedSection } from './managed-capture.js'
 import { recordContentItems, RECORD_CONTENT_PRIORITY, type RecordContentPriority } from './store-index.js'
 import { limitToolContent } from './tool-content.js'
 
-/**
- * Transport budget for one committed turn record.
- *
- * The receiver holds one decoding envelope, so the record JSON, every referenced body and their
- * base64/JSON framing must fit it together. Enforcing this only at the shared commit boundary keeps
- * the guarantee in one place: the App-managed path and the standalone CLI both publish through
- * `commitRecord`, and both may hand it references written earlier in the turn.
- */
 
-/** Largest single body whose base64 still fits half the envelope, leaving room for the record. */
 export const RECORDER_CONTENT_MAX_BYTES = 8 * 1024 * 1024
-/** Distinct SHA-256 bodies one record may reference; the receiver rejects the 513th. */
 export const RECORDER_CONTENT_MAX_REFS = 512
-/** Complete decoded transport envelope: record JSON plus base64 content plus its JSON framing. */
 export const RECORDER_TRANSPORT_MAX_BYTES = 16 * 1024 * 1024
-/** Inline preview kept when a diff body is dropped or shrunk by this budget. */
 export const RECORDER_INLINE_PREVIEW_BYTES = 8 * 1024
-/** Same envelope shape the uploader validates before sending (`recorder-content-v1`). */
 export const RECORDER_TRANSPORT_ENCODING = 'recorder-content-v1'
-/** Reason recorded on a field or section whose complete body this budget dropped. */
 export const CONTENT_ENVELOPE_REASON = 'record transport budget dropped complete bodies'
 
-/** The budget is size-driven, so it applies to a prepared draft exactly as it does to a committed record. */
 type RecordDraft = Omit<AgentTurnRecord, 'sequence'>
 
 function base64Bytes(bytes: number): number {
   return 4 * Math.ceil(bytes / 3)
 }
 
-/** A content entry occupies its JSON literal plus a separator; both grow by outer-string escaping. */
 function entryBytes(ref: ToolContentRef): number {
   const literal = JSON.stringify({ sha256: ref.sha256, bytes: ref.bytes, dataBase64: '' })
   return Buffer.byteLength(JSON.stringify(literal)) - 2 + 1
 }
 
-/**
- * Exact decoded size of the uploader envelope without materializing base64: the content JSON is
- * serialized once with empty bodies, then each body's exact base64 length is added. Base64 uses no
- * character that JSON would escape, so the two parts stay additive.
- */
 function envelopeBytes(recordJson: string, refs: readonly ToolContentRef[]): number {
-  // The wrapper itself counts even when nothing is referenced: the receiver measures the envelope,
-  // and escaping the record string into it is real bytes. Returning the bare record length here
-  // would undercount exactly the case with no slack from base64.
   const contentJson = JSON.stringify(refs.map(({ sha256, bytes }) => ({ sha256, bytes, dataBase64: '' })))
   return Buffer.byteLength(JSON.stringify({ scryEncoding: RECORDER_TRANSPORT_ENCODING, recordJson, contentJson })) +
     refs.reduce((sum, ref) => sum + base64Bytes(ref.bytes), 0)
 }
 
-/** The bodies this record would transmit if nothing were dropped. */
 export function recordContentRefs(record: RecordDraft): ToolContentRef[] {
   const refs = new Map<string, ToolContentRef>()
   for (const { ref } of recordContentItems(record)) {
@@ -64,7 +39,6 @@ export function recordContentRefs(record: RecordDraft): ToolContentRef[] {
   return [...refs.values()]
 }
 
-/** Highest priority any path of this body carries; one body referenced twice keeps its best class. */
 function refPriorities(record: RecordDraft): Map<string, RecordContentPriority> {
   const priorities = new Map<string, RecordContentPriority>()
   const rank = (priority: RecordContentPriority) => RECORD_CONTENT_PRIORITY.indexOf(priority)
@@ -75,7 +49,6 @@ function refPriorities(record: RecordDraft): Map<string, RecordContentPriority> 
   return priorities
 }
 
-/** Size the receiver will check: record JSON plus every referenced body in its transport encoding. */
 export function recordTransportBytes(record: RecordDraft): number {
   return envelopeBytes(JSON.stringify(record), recordContentRefs(record))
 }
@@ -83,8 +56,6 @@ export function recordTransportBytes(record: RecordDraft): number {
 function degradeField(field: ToolContent, dropped: Set<string>): { field: ToolContent; lost: boolean } {
   if (!field.contentRef || !dropped.has(field.contentRef.sha256)) return { field, lost: false }
   const { contentRef: _contentRef, ...rest } = field
-  // A complete inline body already carries every byte the reference did: dropping only the
-  // reference loses nothing, so the field keeps its status and gains no budget reason.
   if (rest.storage === 'complete' && rest.content !== undefined) return { field: rest, lost: false }
   return {
     lost: true,
@@ -148,7 +119,6 @@ function diffSection(
       const body = degradeField(file.patchContent, dropped)
       lost ||= body.lost
       const patchContent = body.field
-      // The patch status must stay truthful about what is now reachable from this record.
       return {
         ...file,
         ...(patchContent.content !== undefined ? { patch: patchContent.content } : {}),
@@ -171,7 +141,6 @@ function assistantSection(
   return refs.lost ? degradedSection({ ...section, value: refs.value }, CONTENT_ENVELOPE_REASON) : section
 }
 
-/** A transcript body has no inline preview and its reference is required, so a drop is unavailable. */
 function transcriptSection(
   section: Evidence<TurnTranscriptSource> | undefined,
   dropped: Set<string>
@@ -201,12 +170,6 @@ function applyDrops(record: RecordDraft, dropped: Set<string>): RecordDraft {
   }
 }
 
-/**
- * Inline diff bodies are the only unbounded previews in a record (tool bodies are capped by the
- * turn budget, model previews by 32 KiB, and transcripts carry no inline copy). When references
- * alone could not bring the envelope down, shrink the largest patch previews, keeping the complete
- * body only where a retained reference still points at it.
- */
 function shrinkInlineDiffBodies(record: RecordDraft, overBy: number): RecordDraft {
   const candidates: Array<{ snapshot: number; file: number; bytes: number }> = []
   for (const [snapshotIndex, snapshot] of (record.diff.value ?? []).entries()) {
@@ -228,8 +191,6 @@ function shrinkInlineDiffBodies(record: RecordDraft, overBy: number): RecordDraf
     const field = file.patchContent!
     const target = Math.max(RECORDER_INLINE_PREVIEW_BYTES, field.savedBytes - remaining)
     const shrunk = limitToolContent(field, target, 'turn_budget')
-    // A shrunk body without a retained reference makes this patch incomplete, so the section can no
-    // longer claim exact evidence: the record now holds a preview of a larger patch.
     if (!shrunk.contentRef) lost = true
     remaining -= field.savedBytes - shrunk.savedBytes
     const files = [...snapshot.files]
@@ -246,16 +207,11 @@ function shrinkInlineDiffBodies(record: RecordDraft, overBy: number): RecordDraf
   return lost ? { ...next, diff: degradedSection(next.diff, CONTENT_ENVELOPE_REASON) } : next
 }
 
-/**
- * Converge one record onto the transport budget. Returns the record unchanged when it already
- * fits, so the common path allocates nothing.
- */
 export function applyRecordContentBudget(record: RecordDraft): RecordDraft {
   const refs = recordContentRefs(record)
   const priorities = refPriorities(record)
   const kept = new Map<string, ToolContentRef>()
   const dropped = new Set<string>()
-  // Fill in priority order, so the 513th body is always the least valuable one still available.
   for (const priority of RECORD_CONTENT_PRIORITY) {
     for (const ref of refs) {
       if (priorities.get(ref.sha256) !== priority || kept.has(ref.sha256) || dropped.has(ref.sha256)) continue
@@ -266,8 +222,6 @@ export function applyRecordContentBudget(record: RecordDraft): RecordDraft {
   const recordJson = JSON.stringify(record)
   let size = envelopeBytes(recordJson, [...kept.values()])
   while (size > RECORDER_TRANSPORT_MAX_BYTES && kept.size > 0) {
-    // Evict from the lowest priority class that still holds bodies; base64 dominates the envelope,
-    // so the largest body of that class buys the most room per lost reference.
     let victim: ToolContentRef | undefined
     for (let index = RECORD_CONTENT_PRIORITY.length - 1; index >= 0 && !victim; index--) {
       const priority = RECORD_CONTENT_PRIORITY[index]
@@ -285,8 +239,6 @@ export function applyRecordContentBudget(record: RecordDraft): RecordDraft {
   }
   if (dropped.size === 0 && size <= RECORDER_TRANSPORT_MAX_BYTES) return record
   let next = dropped.size > 0 ? applyDrops(record, dropped) : record
-  // Dropping references cannot shrink inline bodies; bound those too rather than commit an envelope
-  // the receiver would reject. A retained reference still points at the complete body.
   for (let pass = 0; pass < 4; pass++) {
     size = envelopeBytes(JSON.stringify(next), [...kept.values()])
     if (size <= RECORDER_TRANSPORT_MAX_BYTES) break

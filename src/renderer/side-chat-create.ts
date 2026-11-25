@@ -9,8 +9,8 @@ import type { SideChatInitialTarget, SideChatSource } from '@shared/conversation
  * Durable record of one side-chat creation command.
  *
  * It is written before the create IPC starts, so a lost reply is resolved by reading the
- * same command id back instead of guessing or dispatching a second child. It contains
- * ids and fingerprints only: no prompt, no credentials, no transcript text.
+ * same command id back instead of guessing or dispatching a second child. The command
+ * stores source and target metadata and snapshot fingerprints, not transcript bodies.
  */
 export interface SideChatCreateCommand {
   commandId: string
@@ -25,7 +25,6 @@ export interface SideChatCreateCommand {
 }
 
 const STORAGE_KEY = 'scry.side-chat-create-commands.v1'
-/** Bounded command ledger: older attempts leave the window instead of growing forever. */
 export const MAX_CREATE_COMMANDS = 8
 const HASH = /^[a-f0-9]{64}$/
 
@@ -122,7 +121,6 @@ export function clearCreateCommand(
   }
 }
 
-/** The exact request one durable command may dispatch; identity is pinned, not recomputed. */
 export function createRequestOf(command: SideChatCreateCommand): ConversationSideChatRequest {
   return {
     source: command.source,
@@ -180,7 +178,6 @@ export type CreationResolution =
  */
 export function resolveCreateReceipt(receipt: SideChatCommandReceipt): CreationResolution {
   if (receipt.status === 'found') return { kind: 'created', conversation: receipt.conversation }
-  // The host is still running that create: its result is not known, so the command stays.
   if (receipt.status === 'in-flight') return { kind: 'unknown' }
   return { kind: 'not-created' }
 }
@@ -233,7 +230,6 @@ export async function findCreatedSideChat(
   try {
     return resolveCreateReceipt(await api.findSideChatCommand(command.source, command.commandId))
   } catch {
-    // An unreadable lookup proves nothing about the command.
     return { kind: 'unknown' }
   }
 }
@@ -261,7 +257,6 @@ export async function settleFullLedger(
   return settled
 }
 
-/** One page of the child history of this source. */
 export async function listSideChatPage(
   api: { listSideChats: (request: SideChatListRequest) => Promise<SideChatList> },
   source: SideChatSource,
@@ -275,10 +270,9 @@ export type SideChatRestoreAnswer = ReadonlyMap<string, ConversationSummary> | '
 /**
  * Decision for a restored tab layout from bounded summary metadata only.
  *
- * A missing id inside a successful selected-id answer is conclusive for that id, because
- * the answer covered exactly the ids that were asked for. A read that threw proves
- * nothing, so every tab stays open with no records and no drop. No child transcript is
- * read to make this decision.
+ * Pass only the IDs covered by the selected-ID request as openIds. An omitted ID is
+ * conclusive only after a successful read. A failed read leaves those tabs open.
+ * This decision does not inspect child transcripts.
  */
 export function restoreTabOutcome(
   openIds: readonly string[],
@@ -291,8 +285,8 @@ export function restoreTabOutcome(
 /**
  * Bounded summary lookup for the ids a restored layout still wants to show.
  *
- * A child that is missing from the answer is not treated as deleted here: only a
- * conclusive `not-found` for a specific id is, and that decision stays with the caller.
+ * Queries at most eight unique IDs. The caller decides whether an omission in the
+ * successful response permits dropping a tab.
  */
 export async function lookupSideChatSummaries(
   api: { listSideChats: (request: SideChatListRequest & { ids?: readonly string[] }) => Promise<SideChatList> },

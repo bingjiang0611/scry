@@ -5,8 +5,6 @@ import { RunRegistry } from './run-registry'
 import { RunTraceRouter } from './run-trace-router'
 import type { RunControl } from './bootstrap/run-control'
 
-// P3f W2: in daemon mode the conversation view subscribes to runs this window follows
-// from its daemon, which its own registry never holds.
 
 const runState = (runId: string, extra: Partial<ActiveRun> = {}): ActiveRun =>
   ({ runId, providerId: 'claude', cwd: '/workspace', userText: runId, items: [], done: false, providerSettled: false, ...extra })
@@ -42,7 +40,6 @@ describe('a second run source (daemon mode, P3f W2)', () => {
     daemonRun = { ...daemonRun!, done: true }
     h.router.settle('3f2b8c1d-5e6a-4b7c-8d9e-0f1a2b3c4d5e')
     expect(h.sent.at(-1)).toMatchObject({ kind: 'terminal', subscriptionId: 'sub-daemon', run: { done: true } })
-    // Detached (the daemon connection went away): a new subscription finds nothing.
     h.router.unsubscribe('sub-daemon')
     detach()
     expect(h.router.subscribe({ runId: '3f2b8c1d-5e6a-4b7c-8d9e-0f1a2b3c4d5e', subscriptionId: 'sub-later' })).toEqual({ status: 'unavailable' })

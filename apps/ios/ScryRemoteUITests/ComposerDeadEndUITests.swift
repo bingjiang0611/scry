@@ -1,10 +1,5 @@
 import XCTest
 
-// Regressions for three composer dead-ends found on a real device:
-//   1. the folder sheet stayed on “读取文件夹…” because `.idle` never asked the host,
-//   2. a blocked send showed a grey arrow with no reason and an unusable “retry”,
-//   3. the model selection used a custom clipped list instead of a native picker,
-//      making the current/default choice hard to discover and select.
 // Fixtures never touch a relay or a Provider.
 final class ComposerDeadEndUITests: XCTestCase {
   private var app: XCUIApplication!

@@ -82,7 +82,6 @@ describe('transcript parser worker client', () => {
     expect(worker.terminations).toBe(0)
     worker.emit('message', { id: worker.messages[1].id, ok: true, result })
     await expect(second).resolves.toEqual(result)
-    // A late reply for the canceled request cannot settle an unrelated one.
     worker.emit('message', { id: worker.messages[0].id, ok: true, result })
     expect(worker.terminations).toBe(0)
   })

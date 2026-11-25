@@ -53,8 +53,6 @@ function turn(runId: string, userText: string, turnDiff?: TurnDiffSnapshot): Tur
   return { runId, userText, items, done: true }
 }
 
-// 一轮里可以同时带「本轮 turn_diff」和「会话 session_diff」；测试要证明会话选择器读的是
-// 权威 session_diff（净 diff），而不是逐轮累计。
 function sessionTurn(
   runId: string,
   userText: string,

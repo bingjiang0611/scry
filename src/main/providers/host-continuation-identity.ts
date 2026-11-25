@@ -28,7 +28,6 @@ type RuntimeEnv = Readonly<Record<string, string | undefined>>
 
 const MAX_AUTH_BYTES = 1024 * 1024
 const EXECUTABLE_CHUNK_BYTES = 1024 * 1024
-/** Enough for a Provider CLI plus its bundled re-launch path, never unbounded. */
 const MAX_CACHED_EXECUTABLES = 4
 
 interface FileStamp {
@@ -276,9 +275,10 @@ export async function openCodeContinuationKey(
 const antigravityLaunchEnv = (): RuntimeEnv => runtimeCliEnv(undefined, { providerId: 'antigravity' })
 
 /**
- * Antigravity native continuation identity (P7 D4 option a):
- * hashes executable identity, canonical `~/.gemini` (or allowed `GEMINI_HOME`), allowed env vars,
- * and file-storage token file hash when present (Keychain mode records `keychain_or_absent`).
+ * Antigravity continuation identity combines workspace, agent profile, executable,
+ * Gemini root, and selected authentication inputs. It uses the canonical Gemini
+ * root when available, otherwise the resolved path. An absent token file does
+ * not establish that Keychain is in use.
  */
 export async function antigravityContinuationKey(
   context: ProviderContext,

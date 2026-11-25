@@ -21,7 +21,6 @@ vi.mock('node:child_process', async importOriginal => {
     const owner = callbacks.get(command)
     if (!owner) return actual.spawn(command, args, options)
     owner.signal.throwIfAborted()
-    // Only the exact callback executable written by this fixture is adopted.
     const child = actual.spawn(command, args, { ...options, detached: true })
     owner.register(child)
     return child
@@ -179,8 +178,6 @@ process.stdin.on('end', () => {
     ])
     socket = connected[0]
     await once(socket!, 'data', { signal: processes.signal })
-    // The original output read is demonstrably too early: drain can return
-    // while the already ACKed transport's callback still holds the delivery lock.
     await drainRecorderDelivery(f.root, f.env)
     await expect(f.delivered()).rejects.toMatchObject({ code: 'ENOENT' })
     const closed = daemon.close()

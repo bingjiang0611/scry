@@ -28,8 +28,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const managed = args.flags.has('managed')
     const daemonEnabled = !managed && process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
     const daemonTried = daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
-    // The shell fast path already saw an explicit pre-apply refusal (404 on a legacy daemon, or the
-    // version handshake): replace the owner and deliver once instead of repeating that attempt.
     const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
     let daemonUnknownDelivery = false
     const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
@@ -37,25 +35,18 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       event,
       workspace,
       payload,
-      // A versioned endpoint answers immediately; the timeout only bounds the applied path.
       timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
     })
     const replaceDaemon = async (): Promise<boolean> => {
       const scriptPath = process.argv[1]
       if (!scriptPath) return false
-      // Existing replacement path: stop the current owner, wait for the socket, start this CLI.
       return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
     }
-    // `delivered` 已应用；`not-applied` 有证据证明守护进程没收到或明确拒绝；`unknown` 可能是
-    // “已经应用但响应没回来”。只有前两种能直接落到本进程，最后一种必须排队重放，绝不重发。
     type SendOutcome = 'delivered' | 'not-applied' | 'unknown'
     const classify = (error: unknown): SendOutcome => {
-      // A completed non-2xx answer without a replacement hint is a refusal before apply only for the
-      // pre-apply statuses the daemon uses; anything else (5xx, missing ACK) may follow a partial apply.
       if (error instanceof RecorderHookRejected) {
         return error.statusCode >= 500 ? 'unknown' : 'not-applied'
       }
-      // Never connected: the request cannot have been applied.
       const code = (error as NodeJS.ErrnoException | undefined)?.code
       return code === 'ENOENT' || code === 'ECONNREFUSED' ? 'not-applied' : 'unknown'
     }
@@ -70,8 +61,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
         } catch (error) {
           outcome = classify(error)
           if (daemonRejected || outcome === 'unknown') return outcome
-          // Only a completed 404/409 proves the event was not applied; replace the owner and resend
-          // exactly once. A timeout stays unknown delivery and is never resent.
           if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return outcome
           if (!await replaceDaemon()) return 'not-applied'
           try {
@@ -85,7 +74,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       }
       const outcome = await redeliver()
       if (outcome === 'delivered') return 0
-      // The daemon may already hold this event: queue it for replay instead of applying it here.
       if (outcome === 'unknown') daemonUnknownDelivery = true
     }
     delegatedToCore = true
@@ -96,10 +84,8 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       payload,
       managed,
       queueOnly: daemonTried || daemonUnknownDelivery,
-      // This process was started by the hook script, so its parent chain is the host's chain.
       ancestryFromPid: process.ppid
     })
-    // A failed curl response is unknown delivery, not permission to stop/restart a live peer.
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
       if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
@@ -110,7 +96,6 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     if (!delegatedToCore && enablement?.enabled) await recordError(enablement.dataRoot, error)
     if (!quiet) process.stderr.write(`scry recorder hook: ${error instanceof Error ? error.message : String(error)}\n`)
   }
-  // Hook mode is observational and must never block the Provider.
   return 0
 }
 
@@ -140,9 +125,6 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
         return 2
       }
     }
-    // Only proof closes a turn that never wrote a terminal event: silence alone, or a host that may
-    // still be running, is not evidence. `--session` narrows that proof to the sessions whose host
-    // is known to be gone, so one unprovable turn cannot block the rest of the workspace.
     const expireOpen = args.flags.has('expire-open')
     const expireSessions = args.repeated?.get('session') ?? (flag(args, 'session') ? [flag(args, 'session')!] : [])
     if (expireSessions.length && !expireOpen) throw new Error('--session requires --expire-open')
@@ -161,7 +143,6 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
     if (action === 'notify-retry' && (args.positionals.length !== 2 || (sequence !== undefined) === args.flags.has('all-dead') || sequence === 0)) {
       throw new Error('notify-retry requires exactly one of --sequence N (positive integer) or --all-dead')
     }
-    // Unbounded attempts, but deferred retries still respect their persisted due time.
     const workspace = workspaceOf(args)
     const enablement = await recorderEnablement(workspace)
     if (!enablement.enabled) {
@@ -178,15 +159,12 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
       ? await retryCommitNotifications(enablement.dataRoot, env, sequence)
       : await drainCommitNotifications(enablement.dataRoot, env)
     print({ action, workspace, activation: activation.status, ...result })
-    // An unknown backlog (delivery state unreadable) is pending work, not success.
     return result.pending === null || result.pending > 0 ? 3 : 0
   }
   if (action === 'serve') {
     await serveRecorderDaemon({
       workspace: workspaceOf(args),
       socketPath: flag(args, 'socket'),
-      // The daemon is the only trigger that reaches a machine nobody runs `scry` on by hand, and
-      // its idle shutdown is the one moment where replacing the CLI cannot split a turn.
       idleUpdate: () => runIdleAutoUpdate(RECORDER_VERSION, process.argv[1])
     })
     return 0
@@ -218,11 +196,6 @@ export async function recorderCommand(args: ParsedArgs): Promise<number> {
   throw new Error('usage: scry recorder hook|recover|notify-drain|notify-retry|start|serve|status|stop|restart ...')
 }
 
-/**
- * Exit codes: 0 ok (trusted, host-provided, or nothing configured), 2 storage/config
- * unavailable, 5 bundle invalid. Valid repository commit hooks are auto-authorized after
- * fingerprint validation; `--yes` remains accepted for backward-compatible scripts.
- */
 export async function commitHookCommand(args: ParsedArgs): Promise<number> {
   const action = args.positionals[1] ?? 'status'
   if (!['status', 'trust', 'revoke'].includes(action)) {
@@ -297,7 +270,6 @@ export async function commitHookCommand(args: ParsedArgs): Promise<number> {
   return activation.status === 'bundle-invalid' ? 5 : 0
 }
 
-/** App 的 userData 默认目录，与 Electron `app.getPath('userData')` 的平台规则一致。 */
 export function defaultAppDataDir(platform: NodeJS.Platform = process.platform): string {
   const home = homedir()
   if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'scry')
@@ -305,10 +277,6 @@ export function defaultAppDataDir(platform: NodeJS.Platform = process.platform):
   return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'scry')
 }
 
-/**
- * 修复记录引用、但本库缺失的正文。默认只读演练：报告汇总与未命中清单，`--apply` 才按 sha256 从
- * App trace 库复制（读时校验长度与摘要）。它不重写记录：记录语义仍由提交边界决定。
- */
 async function contentCommand(args: ParsedArgs): Promise<number> {
   if (args.positionals[2] !== 'repair') {
     throw new Error('usage: scry recorder content repair [--apply] [--record-id <id>]... [--app-data <dir>] [--workspace <root>]')
@@ -330,8 +298,6 @@ async function contentCommand(args: ParsedArgs): Promise<number> {
     action: 'content-repair',
     workspace,
     appData,
-    // 缺失与损坏是两件事：前者是“本库没有这份字节”，后者是“有这个名字的字节但不对”。两者都
-    // 意味着引用仍无法兑现，所以都退出 3，但报告必须分开。
     status: report.missing > 0 && report.corrupt > 0
       ? (report.applied ? 'applied-with-unresolved' : 'unresolved')
       : report.missing > 0

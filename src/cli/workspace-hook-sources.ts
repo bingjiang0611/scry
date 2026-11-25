@@ -4,18 +4,11 @@ import { object } from './workspace-files.js'
 export type InitProvider = 'claude' | 'codex' | 'qoder' | 'opencode'
 export const PROVIDERS = ['claude', 'codex', 'qoder', 'opencode'] as const
 export const EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const
-/**
- * Session-end hooks per Provider, registered only where the Provider really has the event. Claude
- * publishes `SessionEnd` in its SDK `HOOK_EVENTS`; Qoder CLI 1.1.81 was verified to invoke a
- * project SessionEnd command on native /quit, including before any model turn. Codex has no
- * verified session-end hook and OpenCode has no such event, so they stay unregistered.
- */
 export const PROVIDER_SESSION_END_EVENTS: Record<Exclude<InitProvider, 'opencode'>, readonly string[]> = {
   claude: ['SessionEnd'],
   codex: [],
   qoder: ['SessionEnd']
 }
-/** Session end must only persist and enqueue, so it gets a much tighter budget than a turn end. */
 export const SESSION_END_HOOK_TIMEOUT_SECONDS = 3
 
 export function providerEvents(provider: Exclude<InitProvider, 'opencode'>): readonly string[] {
@@ -39,8 +32,6 @@ export const PROJECT_DIR_ENV: Record<Exclude<InitProvider, 'opencode'>, string> 
 }
 
 export function hookCommand(provider: Exclude<InitProvider, 'opencode'>, event: string): string {
-  // Only shell builtins run on successful lookup. Stop at the nearest git boundary so a
-  // nested repository cannot silently send its hooks to an enclosing workspace's recorder.
   const body = [
     `root="\${${PROJECT_DIR_ENV[provider]}:-$PWD}"`,
     'case "$root" in /*) ;; *) root="$PWD/$root" ;; esac',

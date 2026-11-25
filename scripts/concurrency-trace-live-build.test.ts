@@ -74,7 +74,6 @@ describe('live concurrency trace build instrumentation', () => {
     expect(foundation.indexOf('publishRun')).toBeGreaterThan(foundation.indexOf('const [activeRun, setActiveRun] = useState<ActiveRun | null>(null)'))
     expect(foundation).not.toContain('__scryTraceLivePublishedRun')
 
-    // A file that is not instrumented is left alone.
     expect(plugin.transform('const x = 1\n', join(root, 'src/renderer/other.ts'))).toBeUndefined()
   })
 

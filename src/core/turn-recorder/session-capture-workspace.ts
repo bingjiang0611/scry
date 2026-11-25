@@ -5,10 +5,6 @@ import { resolveRecorderLocation, type RecorderConfig } from './config.js'
 import { gitCommand } from './git-command.js'
 import { CaptureRequestError } from './session-capture-contract.js'
 
-/**
- * The data dir the CLI was handed may be spelled through a symlink (`/tmp` on macOS). Compare and
- * store one canonical path so the recorder, the guard and the uploader reach the same files.
- */
 async function canonicalPath(path: string): Promise<string> {
   const resolved = resolve(path)
   return realpath(resolved).catch(async () =>
@@ -42,12 +38,6 @@ function workspaceIdFor(workspaceRoot: string): string {
   return workspaceRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop()?.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace'
 }
 
-/**
- * The uploader resolves `workspaceId`/`dataDir` from `scry.config.json`, so a captured session
- * cannot deliver without one. The recorder writes it once, before the ACK, in the same process that
- * then records. Ordinary hooks stay gated by `capture.sessions`, so creating the file does not
- * silently capture every other session in this workspace.
- */
 export async function ensureWorkspaceConfig(workspaceRoot: string, dataDir: string): Promise<RecorderConfig> {
   const dataRoot = dataDir
   const fromRoot = relative(workspaceRoot, dataRoot)
@@ -61,9 +51,6 @@ export async function ensureWorkspaceConfig(workspaceRoot: string, dataDir: stri
     }
     if (!location.config.enabled) throw new CaptureRequestError('recorder_unavailable', 'this workspace config disables the recorder')
     if (location.config.capture.sessions === 'opt-in') return location.config
-    // A workspace that already ran `scry init` has a config without `capture.sessions`, so ordinary
-    // hooks there would keep recording. Claiming a session is the point where this workspace becomes
-    // opt-in; every other key is left as the user wrote it.
     await enableOptIn(location.workspaceRoot, fromRoot)
     const updated = await resolveRecorderLocation(workspaceRoot)
     if (!updated.valid) throw new CaptureRequestError('recorder_unavailable', 'scry.config.json could not be read back')
@@ -86,7 +73,6 @@ export async function ensureWorkspaceConfig(workspaceRoot: string, dataDir: stri
   return written.config
 }
 
-/** Keep the config and data dir out of `git status` without touching a tracked file. */
 async function excludeFromStatus(workspaceRoot: string, entries: string[]): Promise<void> {
   try {
     const configured = await gitCommand(['rev-parse', '--git-path', 'info/exclude'], {
@@ -102,6 +88,5 @@ async function excludeFromStatus(workspaceRoot: string, entries: string[]): Prom
     const source = `${existing}${existing && !existing.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`
     await writeTextAtomic(path, source, { sync: false })
   } catch {
-    // Excluding is a convenience; a non-repository workspace still captures.
   }
 }

@@ -41,7 +41,6 @@ struct RemoteKeychain {
     guard status == errSecSuccess else { throw Failure(status: status) }
   }
 
-  // The granted cert may be replaced on renewal; update in place or insert.
   func upsertGrantedCert(_ bytes: Data) throws {
     let attributes: [String: Any] = [kSecValueData as String: bytes,
                                       kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]

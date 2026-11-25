@@ -11,11 +11,9 @@ import { providerOperationKey } from '../provider-operation-gate'
 import { shellEnv } from '../claude-locate'
 import type { ChannelHandlers } from './startup-channels'
 
-// The five MCP channels, as main has always answered them, shared with the daemon
-// (B4-L4) so daemon mode runs the same trust and fingerprint checks: every live probe,
-// test and re-auth re-verifies the MCP execution snapshot and fails closed. What differs
-// is injected: who may authenticate here, and how an OAuth page reaches a browser (main
-// opens it; the daemon hands it to its App, which opens it only for its own request).
+// Daemon MCP handlers delegate execution checks by Provider and operation.
+// Required trust and fingerprint checks fail closed. Authentication ownership
+// and OAuth handoff are injected; the App opens OAuth only for its own request.
 
 export interface McpChannelDependencies {
   providerRegistry: ProviderRegistry
@@ -51,8 +49,6 @@ export function mcpChannelHandlers(deps: McpChannelDependencies) {
         )
       }
       if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
-      // A live check is registered under its own key so a person can cancel exactly it;
-      // the adapter honours the signal only where MCP_LIVE_CHECK_CANCEL allows.
       const key = liveCheckKey(p.context)
       const controller = new AbortController()
       const running = liveChecks.get(key) ?? new Set<AbortController>()

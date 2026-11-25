@@ -1,5 +1,3 @@
-// Lane names and their response policy (split out of desktop-lane.ts to keep it
-// under the per-file size limit).
 export type DesktopLaneName = 'control' | 'workbench' | 'terminal' | 'long' | 'status' | 'watch' | 'bulk' | 'events' | 'targetWork' | 'localHistory'
 
 export const LANE_POLICY: Record<DesktopLaneName, { responseTimeoutMs: number; abortOnCancel: boolean }> = {

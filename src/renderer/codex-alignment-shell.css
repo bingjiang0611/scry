@@ -155,7 +155,6 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-/* Shell and sidebar ---------------------------------------------------------- */
 
 .sidebar {
   padding: 12px 8px 8px;
@@ -378,7 +377,6 @@ select:focus-visible,
   border-bottom-color: transparent;
 }
 
-/* Conversation chrome ------------------------------------------------------- */
 
 .topbar {
   gap: 8px;

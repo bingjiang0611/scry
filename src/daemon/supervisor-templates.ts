@@ -3,21 +3,9 @@ import { join } from 'node:path'
 import { daemonLogPath } from './daemon-log'
 import { isLoginStartPolicyEnvKey } from './login-start/policy-env'
 
-// Login service definitions for the background service (P5 §2.1): a launchd LaunchAgent
-// and a systemd --user unit. Rendered only; nothing here installs or loads them.
-//
-// What the files must and must not carry:
-// - no version: the supervisor takes it from its own bundle (daemon-config.ts), so the
-//   file stays valid across in-place upgrades;
-// - Node and loader variables the service manager's own environment may hold are
-//   cleared (launchd: set to empty; systemd: UnsetEnvironment=); the supervisor still
-//   filters the daemon's environment through its allowlist;
-// - stop: the supervisor waits up to 25 s for the daemon (supervisor.ts), below the 30 s
-//   both service managers allow; restart only after an abnormal death.
 
 export const LAUNCHD_LABEL = 'com.scry.daemon'
 export const SYSTEMD_UNIT_NAME = 'scry-daemon.service'
-/** electron-builder.yml `appId`: shows the job as Scry under Login Items. */
 export const SCRY_BUNDLE_IDENTIFIER = 'com.scry.app'
 export const SERVICE_STOP_TIMEOUT_SECONDS = 30
 
@@ -39,14 +27,10 @@ export interface ServiceTemplateInput {
   appPath: string
   resourcesPath: string
   isPackaged: boolean
-  /** Validated non-secret policy env snapshot (P5 §2.2). */
   policyEnv?: ReadonlyArray<readonly [string, string]>
-  /** LaunchAgent label override (test instances only; defaults to LAUNCHD_LABEL). */
   label?: string
 }
 
-// A newline would end a systemd line early or split an XML string; neither format can
-// carry other control characters faithfully. Spaces and non-ASCII text are fine.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/
 const SAFE_LABEL = /^[A-Za-z0-9._-]+$/
 
@@ -78,15 +62,12 @@ function xml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 }
 
-/** One quoted word for Environment=: C escapes inside the quotes; `%` is a specifier. `$` is literal there. */
 function systemdEnvironmentWord(value: string): string {
   return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')}"`
 }
-/** One quoted ExecStart= argument: as above, and `$` would expand a variable, so `$$`. */
 function systemdCommandWord(value: string): string {
   return systemdEnvironmentWord(value).replaceAll('$', () => '$$')
 }
-/** The path after `append:`: taken verbatim to the end of the line, specifiers expanded. */
 function systemdOutputPath(value: string): string {
   return value.replaceAll('%', '%%')
 }

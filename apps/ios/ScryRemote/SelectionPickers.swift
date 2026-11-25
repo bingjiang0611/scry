@@ -94,8 +94,6 @@ struct ProjectPickerSheet: View {
     }
   }
 
-  /// Shared by `.idle` and `.loading`: both are "no listing yet", but only `.idle`
-  /// issues the first read (see the `.task` in `body`).
   @ViewBuilder private var readingPlaceholder: some View {
     VStack(alignment: .leading, spacing: 0) {
       if let pendingDirectory {

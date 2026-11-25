@@ -1,6 +1,5 @@
 import type { DaemonLocalOpTable } from './types'
 
-// Unified conversation ledger (B4-L4-2).
 export const CONVERSATION_LOCAL_OPS: DaemonLocalOpTable = {
   // Conversation ledger reads (B4-L4-2a). previewSideChat streams the source prefix into
   // a capture manifest, so it is not replayed after a lost reply.
@@ -14,8 +13,6 @@ export const CONVERSATION_LOCAL_OPS: DaemonLocalOpTable = {
   'conversation:listSideChats': { op: 'conversation', method: 'listSideChats', read: true },
   'conversation:findSideChatCommand': { op: 'conversation', method: 'findSideChatCommand', read: true },
   'conversation:readSideChatSnapshot': { op: 'conversation', method: 'readSideChatSnapshot', read: true },
-  // Conversation ledger writes the daemon makes on its own (B4-L4-2b). Never replayed after
-  // a lost reply.
   'conversation:create': { op: 'conversation', method: 'create', read: false },
   'conversation:update': { op: 'conversation', method: 'update', read: false },
   'conversation:adopt': { op: 'conversation', method: 'adopt', read: false },

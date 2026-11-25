@@ -55,11 +55,8 @@ function fixture() {
 }
 
 const SKIP = 'required=false\ndesktop=false\nnode_performance=false\nnative_performance=false\n'
-// Every gate, including the macOS native comparison: dispatch, new branches and native harness PRs.
 const ALL = 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=true\n'
-// An ordinary App PR: every CI gate and the Node comparison; native timings are measured after merge.
 const APP = 'required=true\ndesktop=true\nnode_performance=true\nnative_performance=false\n'
-// A main push: every CI gate and the post-merge native comparison; the Node ABAB comparison is PR-only.
 const PUSH = 'required=true\ndesktop=true\nnode_performance=false\nnative_performance=true\n'
 const NO_DESKTOP = 'required=true\ndesktop=false\nnode_performance=true\nnative_performance=false\n'
 const IOS_ONLY = 'required=true\ndesktop=false\nnode_performance=false\nnative_performance=false\n'

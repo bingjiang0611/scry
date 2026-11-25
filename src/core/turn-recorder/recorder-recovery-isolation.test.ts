@@ -50,8 +50,6 @@ async function fixture() {
     commitHook: { entry: 'commit-hook.sh', files: ['commit-hook.sh'] }
   }))
   const dataRoot = join(root, '.scry')
-  // Grants and CLI state belong to this fixture. An empty env, or one inherited from the runner,
-  // resolves to whoever runs the suite: commitHookGrantPath falls back to $HOME/.scry/grants.
   const env = { HOME: root, XDG_STATE_HOME: join(root, 'state'), SCRY_GRANT_DIR: join(root, 'grants') }
   const seed = async (provider: 'claude' | 'codex' | 'qoder', sessionId: string, deferDelivery = false) => {
     await handleRecorderHook({
@@ -60,7 +58,6 @@ async function fixture() {
     })
     const path = join(dataRoot, 'runtime', provider, safeKey(sessionId), 'open.json')
     const open = JSON.parse(await readFile(path, 'utf8'))
-    // Seed an observed terminal boundary; no elapsed-time inference or real Provider is involved.
     await writeFile(path, JSON.stringify({
       ...open, status: 'closing', closingAt: '2026-10-24T12:00:01.000Z',
       terminalAt: '2026-10-24T12:00:01.000Z', terminalAtSource: 'provider_terminal_event'
@@ -81,7 +78,6 @@ async function directorySnapshot(path: string): Promise<Array<[string, string]>>
 describe('recorder recovery session isolation', () => {
   it('continues after S1 finalize fails, commits S2 and drains its trusted callback', async () => {
     const f = await fixture()
-    // runtimeSessions visits Claude before Codex, independent of filesystem entry order.
     const first = await f.seed('claude', 's1')
     await f.seed('codex', 's2')
     faults.finalize = true
@@ -110,7 +106,7 @@ describe('recorder recovery session isolation', () => {
     expect((await listRecords(f.dataRoot)).map((record) => record.sessionId)).toEqual(['s2'])
     expect(await notifications(f.capture)).toEqual([expect.objectContaining({ sessionId: 's2' })])
     expect((await readHealth(f.dataRoot)).droppedEvents).toBe(0)
-  }, 15_000) // The production session-lock deadline is 10 seconds; do not shorten it in this test.
+  }, 15_000)
 
   it('drains already committed notifications even when the final health refresh throws', async () => {
     const f = await fixture()

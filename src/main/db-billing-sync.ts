@@ -1,8 +1,3 @@
-// Admin billing sync and fixture import. Writes ledger rows, then re-reads the
-// projection from db-billing-state.ts so both paths share one definition of state.
-// P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
-// 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
-// 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { PROVIDER_RAW_USAGE_COLS, USAGE_LEDGER_COLS, MODEL_PRICE_VERSION_COLS, TEAM_LABEL_COLS, GATEWAY_POLICY_COLS, BILLING_AUDIT_LOG_COLS, BILLING_RETENTION_POLICY_COLS, CONTRACT_PRICE_COLS, CHARGEBACK_ENTRY_COLS, sqlInsert } from './span-ledger'

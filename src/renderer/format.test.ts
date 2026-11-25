@@ -149,7 +149,6 @@ describe('aggregateCalls', () => {
       totalCalls: 6
     })
     expect(r.toolTotal).toBe(6) // 兼容旧调用方：全部逻辑调用
-    // mcp 按 server total 降序：tracker(3) 在 oauth(1) 前
     expect(r.mcp.map((g) => g.server)).toEqual(['tracker', 'oauth'])
     const tracker = r.mcp.find((g) => g.server === 'tracker')!
     expect(tracker.total).toBe(3)
@@ -157,7 +156,6 @@ describe('aggregateCalls', () => {
       { action: 'query_issue', tool: 'mcp__tracker__query_issue', count: 2 },
       { action: 'search', tool: 'mcp__tracker__search', count: 1 }
     ])
-    // mcp 调用不应混进普通 tools
     expect(r.tools).toEqual([])
   })
 

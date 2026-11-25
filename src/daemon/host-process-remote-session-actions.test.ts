@@ -10,9 +10,6 @@ import { MemoryOutputStore, call, cleanupTempDirs, tempDir } from './host-proces
 import { generateDesktopDeviceIdentity } from '../main/remote/desktop-transport'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 
-// W17: verify daemon hosts advertise & execute remote desktop session actions
-// (rename/pin/archive/restore/delete/fork) with the same authorization as in-process,
-// and bridge workbench openPath/trashItem through the primary Scry App only.
 
 async function enrollLocal(
   service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service'],
@@ -132,7 +129,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
 
       const ctx = { cwd: workspace, providerId: 'codex', externalSessionId: 'w17-sess-1' }
 
-      // Rename + pin + archive + restore
       const renamed = await remote({ op: 'sessionAction', context: ctx, action: { kind: 'rename', title: 'Renamed W17' } })
       expect(renamed.sessionAction).toBe(true)
       const pinned = await remote({ op: 'sessionAction', context: ctx, action: { kind: 'pin', pinned: true } })
@@ -143,7 +139,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(row.label).toBe('Renamed W17')
       expect(row.pinnedAt).toBeTypeOf('number')
 
-      // Unauthorized workspace refused
       const badWorkspace = await remote({
         op: 'sessionAction',
         context: { cwd: unauthorized, providerId: 'codex', externalSessionId: 'w17-sess-1' },
@@ -151,7 +146,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       })
       expect(badWorkspace.error).toBeTruthy()
 
-      // Remote delete requires confirmed:true and archived session
       const unconfirmed = await remote({
         op: 'sessionDelete',
         request: { providerId: 'codex', cwd: workspace, externalSessionId: 'w17-sess-1', confirmed: false }
@@ -164,7 +158,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       })
       expect(unarchived.error).toContain('远程删除只允许已存档会话')
 
-      // Archive then delete succeeds
       const archived = await remote({ op: 'sessionAction', context: ctx, action: { kind: 'archive', archived: true } })
       expect(archived.sessionAction).toBe(true)
       const deleted = await remote({
@@ -174,7 +167,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(deleted.error).toBeUndefined()
       expect(deleted.sessionDelete?.ok).toBe(true)
 
-      // Fork is wired (not desktop_session_fork_unsupported) and still enforces workspace authority
       const badFork = await remote({
         op: 'sessionFork',
         request: {
@@ -185,7 +177,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(badFork.error).toBeTruthy()
       expect(badFork.error).not.toBe('desktop_session_fork_unsupported')
 
-      // Revoked peer is refused on session actions
       await host.service.revokeDevice(peer.deviceId)
       const revoked = await remote({ op: 'sessionAction', context: ctx, action: { kind: 'pin', pinned: false } })
       expect(revoked.error).toBe('device_not_authorized')
@@ -203,7 +194,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       const peer = await pairRemoteDesktop(host.service)
       const remote = (req: Record<string, unknown>) => callTcp(runPort, ca, peer.certPEM, peer.keyPEM, req)
 
-      // 1. App absent: workbenchOps reports false/false and both calls fail closed.
       const absentInfo = await remote({ op: 'desktop', query: { kind: 'info' } })
       expect(absentInfo.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
       const absentOpen = await remote({
@@ -218,7 +208,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(absentTrash.error).toBe('desktop_workbench_operation_unavailable:trashItem')
       expect(existsSync(join(workspace, 'note.txt'))).toBe(true)
 
-      // 2. Non-primary local peer cannot hijack the bridge.
       const nonPrimary = await enrollLocal(host.service, 'non-primary-helper')
       const hijacked = await call(host.channel.socketPath, ca, nonPrimary.certPEM, nonPrimary.keyPEM, {
         op: 'executionTargetWork', waitMs: 50
@@ -226,18 +215,15 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(hijacked.error).toBe('execution_target_bridge_unauthorized')
       expect((await remote({ op: 'desktop', query: { kind: 'info' } })).desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
 
-      // 3. Primary App connects and polls executionTargetWork -> workbenchOps becomes available (omitted on info).
       const appPeer = await enrollLocal(host.service, 'Scry App')
       appSock = await openKeepAliveSocket(host.channel.socketPath, ca, appPeer.certPEM, appPeer.keyPEM)
       let pollLoop = appSock.request({ op: 'executionTargetWork', waitMs: 15_000 })
-      // Wait briefly for poll registration on daemon.
       await new Promise((r) => setTimeout(r, 80))
 
       const liveInfo = await remote({ op: 'desktop', query: { kind: 'info' } })
       expect(liveInfo.desktop.workbench).toBe(1)
       expect(liveInfo.desktop.workbenchOps).toBeUndefined()
 
-      // Remote openPath forwards canonical path to primary App.
       const openPromise = remote({
         op: 'desktopWorkbench',
         query: { surface: 'workspace', cwd: workspace, method: 'workspaceOpenExternal', args: [{ cwd: workspace, path: 'note.txt' }] }
@@ -252,7 +238,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(openReply.error).toBeUndefined()
       expect(opened).toEqual([join(workspace, 'note.txt')])
 
-      // Path escape is rejected by workspace authorization BEFORE reaching the bridge.
       const escapeReply = await remote({
         op: 'desktopWorkbench',
         query: { surface: 'workspace', cwd: workspace, method: 'workspaceTrash', args: [{ cwd: workspace, path: '../escape.txt' }] }
@@ -260,7 +245,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(escapeReply.error).toBeTruthy()
       expect(trashed).toEqual([])
 
-      // Remote trashItem forwards canonical path to primary App.
       pollLoop = appSock.request({ op: 'executionTargetWork', waitMs: 15_000 })
       await new Promise((r) => setTimeout(r, 50))
       const trashPromise = remote({
@@ -277,7 +261,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       expect(trashReply.error).toBeUndefined()
       expect(trashed).toEqual([join(workspace, 'note.txt')])
 
-      // 4. Primary App disconnects -> workbenchOps immediately drops back to false/false.
       appSock.destroy()
       appSock = undefined
       await new Promise((r) => setTimeout(r, 80))
@@ -303,8 +286,6 @@ describe('daemon remote session actions & bridged workbench shell ops (W17)', ()
       const remote = (req: Record<string, unknown>) => callTcp(runPort, ca, peer.certPEM, peer.keyPEM, req)
       const appPeer = await enrollLocal(host.service, 'Scry App')
       appSock = await openKeepAliveSocket(host.channel.socketPath, ca, appPeer.certPEM, appPeer.keyPEM)
-      // A live poll that must stay empty: every escape below is refused by the
-      // daemon's workspace check, so no call may be queued for the App.
       const poll = appSock.request({ op: 'executionTargetWork', waitMs: 1_500 })
       await new Promise((r) => setTimeout(r, 80))
       const cases: Array<[string, string, string]> = [

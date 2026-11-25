@@ -2,11 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// `authorizeSession` is optional on `createDesktopHostReader`, and the desktop lane
-// throws `history_session_authority_unavailable` for *every* session-scoped read when
-// it is missing — sends still work, history never displays. Nothing else in the unit
-// suite mounts this assembly (the host smoke hardcodes its history claim), so guard the
-// one wiring that must supply it.
+// Guard the desktop reader's session authority binding at host assembly.
+// This is a source-wiring check, not an end-to-end behavior test.
 const SOURCE = resolve(__dirname, 'host-runtime.ts')
 
 function desktopReaderWiring(): string {

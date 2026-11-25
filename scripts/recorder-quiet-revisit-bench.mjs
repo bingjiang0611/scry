@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-/** L2 harness, not a real host: no daemon, no upload, no host hooks, nothing written outside a temp
- * workspace (or the workspace copy given by --workspace).
+/** L2 harness, not a real host: no daemon, no upload, no host hooks. Pass a disposable copy
+ * to --workspace; the harness uses it in place. The report is written separately to --out
+ * or its default path.
  * node scripts/recorder-quiet-revisit-bench.mjs --mode=visit|defer --sessions=45 --transcript-kb=64 --passes=20
  * node scripts/recorder-quiet-revisit-bench.mjs --mode=defer --workspace=/tmp/copied-store --passes=10
  *
@@ -56,7 +57,7 @@ async function fixture(root) {
   return env
 }
 
-/** Everything the pass reads has to look two hours old, or silence is not yet an answer. */
+/** Backdates recovery fixture timestamps by two hours to model inactive sessions. */
 async function backdate(root) {
   const at = minutesAgo(120)
   const touch = path => utimes(path, at, at).catch(() => undefined)
@@ -78,7 +79,7 @@ async function backdate(root) {
   }
 }
 
-/** What a new event does first: the open state's size and mtime change, so the next pass must look. */
+/** Refreshes open-state timestamps between visit-mode passes without changing file contents. */
 async function nudge(root) {
   const at = new Date()
   for (const provider of await readdir(join(root, '.scry', 'runtime')).catch(() => [])) {

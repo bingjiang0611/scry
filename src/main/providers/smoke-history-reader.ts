@@ -2,12 +2,9 @@ import { createHash } from 'node:crypto'
 
 /** Explicit smoke-only reader gate: the fixture advertises and uses a real reader. */
 export const smokeHistoryReaderGate = process.env.SCRY_ELECTRON_SMOKE_READER === '1'
-/** Where the fixture records what the reader actually served this run. */
 export const smokeHistoryReadsPath = process.env.SCRY_ELECTRON_SMOKE_READS
-/** The adapter facet the gate enables; without it the fixture claims no reader. */
 export const smokeHistoryReaderFacet = smokeHistoryReaderGate ? { historyReader: true as const } : {}
 
-/** The reader work of one run: nothing at all unless the gate, a connection and a log exist. */
 export function smokeReaderRead(request: { runId: string; historyReader?: { url: string; token: string; snapshotId: string } }): Promise<void> {
   return smokeHistoryReaderGate && request.historyReader && smokeHistoryReadsPath
     ? readFrozenHistory(request.historyReader, request.runId, smokeHistoryReadsPath)
@@ -16,11 +13,10 @@ export function smokeReaderRead(request: { runId: string; historyReader?: { url:
 import { appendFileSync } from 'node:fs'
 
 /**
- * Reads one page of the omitted manifest and three complete bodies over real MCP JSON-RPC.
- *
- * The request travels the same loopback endpoint a Provider uses, with the run-scoped
- * bearer token, and every body is reconstructed from its returned page cursors so the
- * evidence is a real retrieval rather than a declared capability.
+ * Uses the Provider's loopback MCP JSON-RPC endpoint and run-scoped bearer token.
+ * Pages the omitted manifest and reads the first, middle, and last entries when
+ * present. It reconstructs each selected body from page cursors and verifies
+ * its frozen hash, demonstrating retrieval rather than declared capability.
  */
 export async function readFrozenHistory(connection: { url: string; token: string; snapshotId: string }, runId: string, readsFile: string): Promise<void> {
   return readFrozenHistoryPages(connection, runId, readsFile).catch((error: unknown) => {

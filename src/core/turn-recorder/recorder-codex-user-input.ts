@@ -7,8 +7,6 @@ export type CodexUserInputSource = 'event_msg_user_message' | 'response_item_use
 const CONTEXT_INPUT = /^\s*(?:<recommended_plugins>|# AGENTS\.md instructions|<environment_context>)/
 
 export function isCodexAppContextInput(text: string): boolean {
-  // Stop at the first matching close tag: a second packet or surrounding prose
-  // is not a single app envelope. Payload JSON and part counts are opaque.
   const packet = /^\s*<(external_codex_apps_[A-Za-z0-9_.:-]+)>[\s\S]*?<\/\1>/.exec(text)
   return !!packet && text.slice(packet[0].length).trim() === ''
 }
@@ -90,10 +88,6 @@ export function flushCodexUserInputs(
 ): string | undefined {
   const pending = state.pendingInputs
   state.pendingInputs = []
-  // Codex persists canonical ResponseItems before deriving legacy user_message
-  // notifications; steering may have only the ResponseItem. Select the canonical
-  // human-input stream, not skill/context injections, without text/clock/count pairing.
-  // Producer: openai/codex rust-v0.62.0, record_input_and_rollout_usermsg.
   const conversationInputs = pending.filter(input => input.source === 'response_item_user')
   const hasConversationInput = conversationInputs.some(input => !isContextInput(input.text) && !skillInjection(input.text))
   const inputs = hasConversationInput ? conversationInputs : pending

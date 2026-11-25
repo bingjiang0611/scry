@@ -1,4 +1,3 @@
-// P0 账本 schema 与表列定义（纯常量，无 electron/Database 依赖）。
 // v1（旧）：保留建表兼容旧库，P0 起不再写/读。
 export const DDL_V1 = [
   `CREATE TABLE IF NOT EXISTS sessions (session_id TEXT PRIMARY KEY, cwd TEXT, preview TEXT, created_ts INTEGER)`,

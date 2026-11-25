@@ -1,5 +1,3 @@
-// Build helper for the live concurrency trace fixture (R6.2).
-//
 // Bundles the fixture renderer with production React (profiling build) and the
 // build-time instrumentation the driver needs. The production sources are never
 // edited on disk: every insertion is anchored on one exact source line, and the

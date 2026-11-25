@@ -23,7 +23,6 @@ export const HARNESS_FILES = ['scripts/session-concurrency-bench.mjs', 'scripts/
   'scripts/session-open-bench-daemon.mjs', 'scripts/session-open-bench-mode.mjs',
   'scripts/b4v/fixture.mjs', 'scripts/b4v/isolation.mjs', 'scripts/b4v/process-identity.mjs']
 
-// Harness identity: every harness file's content, so editing one changes harnessSha256.
 export const harnessSha256 = root => hash(HARNESS_FILES.map(file => `${file}\0${readFileSync(join(root, file), 'utf8')}`).join('\0'))
 
 // Identity of the compiled build, hashed from every file under out/ so a rebuild between runs shows

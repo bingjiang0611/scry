@@ -54,7 +54,6 @@ async function readSmallFile(path: string, limit: number, deadline: number): Pro
       await file.close()
     }
   } catch (error) {
-    // Only a missing loose ref may fall back to packed-refs.
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined
   }
 }
@@ -68,7 +67,6 @@ export function normalizeGitOrigin(raw: string): string | undefined {
     try { url = new URL(raw) } catch { return undefined }
     if (!url.hostname) return undefined
     host = url.host.toLowerCase()
-    // Use the literal path so URL dot-segment and backslash resolution cannot change the identity.
     path = /^\w+:\/\/[^/?#]+\/([^?#]*)/i.exec(raw)?.[1] ?? ''
     if (path && url.pathname !== `/${path}`) return undefined
     if ((url.protocol === 'ssh:' && url.port === '22') || (url.protocol === 'git:' && url.port === '9418')) {
@@ -159,7 +157,6 @@ export async function readGitRepositoryLocation(
 
 let pending = 0
 
-/** Metadata can use time already spent capturing the diff, but never extends that wait. */
 export function sampleGitRepositoryLocation(repoRoot: string, includeOrigin: boolean): () => GitRepositoryLocation {
   const location: GitRepositoryLocation = {}
   if (pending < TURN_REPOSITORY_LOCATION_LIMITS.repositories) {

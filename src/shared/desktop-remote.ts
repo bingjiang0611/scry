@@ -44,9 +44,7 @@ export interface RemoteProviderRef {
   efforts?: RemoteControlOption[]
   permissions?: RemoteControlOption[]
   forkSession?: true
-  /** Host observation time, not the Provider's underlying catalog update time. */
   observedAt?: number
-  /** Publication sequence for metadata; independent of wall-clock adjustments. */
   metadataRevision?: number
 }
 export function isRemoteProviderObservationTime(value: unknown): value is number {
@@ -76,9 +74,7 @@ export interface RemoteSessionRef {
   pinnedAt?: number
   archivedAt?: number
   isActive?: boolean
-  /** Host-observed questions this run is blocked on. Absence is unknown, not zero. */
   pendingQuestions?: number
-  /** Host-persisted terminal evidence. Absence is unknown, not success. */
   lastRunId?: string
   lastRunOutcome?: import('./turn-record').AgentTurnRecord['status']
 }
@@ -91,8 +87,6 @@ export type DesktopRemoteSessionAction =
   | { kind: 'pin'; pinned: boolean }
   | { kind: 'archive'; archived: boolean }
 
-// SSH coordinates are independent of the pinned Scry host identity. The first
-// desktop version deliberately accepts no SSH config aliases or arbitrary flags.
 export interface DesktopSshTarget { hostname: string; username: string; port: number }
 export interface DesktopHostInvitation {
   version: 1
@@ -140,31 +134,21 @@ export interface DesktopRemoteCatalog {
   providers: RemoteProviderRef[]
   sessions: RemoteSessionRef[]
   attachments?: DesktopRemoteAttachmentCapability
-  // A cached Provider picker is not a current authentication/capability proof.
   providerEvidence: 'host_snapshot' | 'legacy_host'
-  // Selected controls are exact for the requested Provider/profile/cwd only when
-  // this negotiated capability is present. Older hosts expose legacy snapshots.
   providerDiscovery?: 2
-  // The host owns repository validation and managed worktree preparation.
   managedWorktrees?: 1
-  // Absent on older hosts; never imply that arbitrary directory selection works.
   directorySelection?: true
   workbench?: 1
   workbenchOps?: { openPath: boolean; trashItem: boolean }
   sessionActions?: true
-  // Fork and delete are independent because an older host may implement only one.
   sessionFork?: true
   sessionDelete?: true
-  // Absent on older hosts: the client keeps reading full trace snapshots.
   traceDelta?: 1
-  // Absent on older hosts or when experimental host CLI approval is disabled (P5-7).
   hostAdminNotices?: 1
   // P8: the host can answer the read-only machine summary. Absent => 「请升级」.
   hostMetrics?: 1
   subscribe?: 1
   hostAdminNoticeItems?: HostAdminNotice[]
-  // Client-local attention projection from the connection baseline and host
-  // catalogs. These keys are not host evidence and are never sent to the host.
   unreadSessionKeys?: string[]
 }
 export interface DesktopRemoteUpdate {
@@ -188,13 +172,9 @@ export interface DesktopRemoteHistory {
   /** D6: cursor for older turns of the host's detail view; absent when nothing older remains. */
   detailCursor?: string
 }
-// Oversized history pages and live traces are transferred losslessly in bounded byte chunks.
-// The assembled page is capped separately from the 4 MiB wire response limit.
 export const DESKTOP_HISTORY_CHUNK_BYTES = 512 * 1024
 export const DESKTOP_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 
-// Version spoken on the run channel. Both ends refuse to talk across a mismatch
-// instead of degrading: a silent half-supported protocol is worse than a refusal.
 export const REMOTE_PROTOCOL_VERSION = 3
 
 export type DesktopHostRead =
@@ -210,22 +190,14 @@ export type DesktopHostReadResult =
   | { kind: 'validateWorkspaceBranch'; value: ScRead<{ name: string }> }
   | { kind: 'history'; history: DesktopRemoteHistory }
   | { kind: 'history_chunk'; id: string; offset: number; totalBytes: number; data: string }
-  // `revision` is present only when the query asked for `delta`; with it the
-  // snapshot is a reset that replaces everything the client held.
   | { kind: 'trace'; run: ActiveRun | null; imageCount?: number; revision?: string; reset?: true }
   | { kind: 'trace_delta'; run: DesktopTraceRunMeta; imageCount?: number; base: string; revision: string; count: number; changes: DesktopTraceChange[] }
   | { kind: 'image_chunk'; id: string; offset: number; totalBytes: number; data: string; name: string; mimeType: AgentInputAttachment['mimeType']; historyScope?: 'session' }
 
-// Trace delta (`traceDelta: 1`). A revision names one host-side item list of
-// a live run; `count` is that list's length. A delta lists every index whose
-// item differs from the `base` revision plus every appended index, so applying
-// it to exactly `base`/`count` reproduces the host list. Any other base is a
-// gap: the client discards its copy and reads a full snapshot instead.
 export interface DesktopTraceCursor { revision: string; count: number }
 export interface DesktopTraceChange { index: number; item: TraceEvent }
 export type DesktopTraceRunMeta = Omit<ActiveRun, 'items'>
 export type DesktopRemoteTraceRead =
-  // `cursor` is absent when the host cannot serve deltas (older host).
   | { kind: 'snapshot'; run: ActiveRun | null; cursor?: DesktopTraceCursor }
   | { kind: 'delta'; run: DesktopTraceRunMeta; base: string; cursor: DesktopTraceCursor; changes: DesktopTraceChange[] }
 
@@ -248,8 +220,6 @@ export interface DesktopRemoteSubmit {
   permissionMode?: AgentPermissionMode
   workspace?: WorkspaceStartSelection
 }
-// Durable receipt: recorded is not executed, and unknown must never be retried
-// with a fresh intent id. The main process owns the id and pending receipt.
 export interface DesktopRemoteIntentOrigin {
   phonePeerFingerprint: string
   phoneIntentId: string
@@ -257,16 +227,12 @@ export interface DesktopRemoteIntentOrigin {
   payloadHash: string
 }
 export interface DesktopRemoteIntent {
-  // This is the stable downstream intent key. Phone-originated receipts keep
-  // their upstream identity separately so the desktop submit path remains
-  // idempotent without exposing a second local execution ledger.
   intentId: string
   connectionId: string
   context: DesktopRemoteContext
   createdAt: number
   status: 'recorded' | 'unknown'
   runId?: string
-  // Bounded diagnostic from the original unconfirmed submit, never its payload.
   failure?: string
   origin?: DesktopRemoteIntentOrigin
 }
@@ -283,14 +249,8 @@ export interface DesktopRemoteRunStatus {
   cwd?: string
   detail?: string
   workspaceProgress?: WorkspacePrepareProgress
-  // The long poll saw new ledger evidence or a new lifecycle state. A device uses
-  // this to skip redundant content reads; absent means "not reported", never "no
-  // change", so a missing flag must not suppress a read.
   changed?: boolean
 }
-// A host run on an opened session that this client did not submit (host UI,
-// phone or another desktop). `runId` is the host's stop/answer identity;
-// `scryRunId` is the canonical trace identity once the host has bound it.
 export interface DesktopRemoteLiveRun {
   runId: string
   origin: 'remote' | 'mac'
@@ -345,8 +305,6 @@ export interface DesktopRemoteAPI {
   intents(connectionId: string): Promise<DesktopRemoteIntent[]>
   submit(connectionId: string, input: DesktopRemoteSubmit): Promise<DesktopRemoteIntent>
   intentStatus(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
-  // Explicit recovery: find an accepted submit or fence its id on the host.
-  // Neither recovery nor reconnect resends the prompt or stops an accepted run.
   resolveIntent(connectionId: string, intentId: string): Promise<DesktopRemoteIntent>
   runStatus(connectionId: string, runId: string): Promise<DesktopRemoteRunStatus>
   liveRun(connectionId: string, context: DesktopRemoteContext): Promise<DesktopRemoteLiveRun | null>

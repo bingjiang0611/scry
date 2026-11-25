@@ -12,13 +12,6 @@ import { createDaemonRunSurface } from '../main/bootstrap/daemon-run-surface'
 
 afterEach(cleanupTempDirs)
 
-// The native session-open bench (scripts/native-composer-probe.mjs) arms its first Stop
-// on the fixture's `harness`/`init` event ("Awaiting native turn: <prompt>"), which a
-// `native composer stop-immediate` run emits before the Provider names its native turn.
-// In daemon mode that event reaches the window only through the daemon's trace and the
-// App's own delivery (DaemonRunRuntime -> `agent:trace`). This pins that contract on a
-// real daemon, for a run sent into an existing session as the bench does: the event
-// arrives on `agent:trace` under the run id the start returned, before the run ends.
 
 async function until<T>(read: () => T | undefined, timeoutMs: number): Promise<T | undefined> {
   const deadline = Date.now() + timeoutMs
@@ -50,7 +43,6 @@ describe('daemon native-turn trace (what the session-open bench arms Stop on)', 
       prompt, providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID(), ...extra
     })
     // The trace can finish before the host commits its terminal projection.
-    // The native composer waits for both the view and the terminal notice.
     const waitForTerminal = (runId: string) =>
       until(() => runtime.runView(runId)?.done === true ? terminalStops.get(runId) : undefined, 10_000)
     try {

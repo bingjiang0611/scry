@@ -77,7 +77,6 @@ describe('live lane report summary', () => {
   })
 
   it('matches expectedSeeds for the whole fixed lane', () => {
-    // 16 completed visits of the fixed lane are 16 x 1000 seeds, not 16 x 7 x 1000.
     const result = summary.summarize({ waves: [wave(Array.from({ length: 16 }, () => completed()))] }, PLAN)
     expect(result.completedVisits).toBe(16)
     expect(result.roundsRead).toBe(16 * 7)

@@ -169,7 +169,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
           childPid = rec.spawnedChildPids[0]
           break
         }
-      } catch { /* wait */ }
+      } catch {  }
       await new Promise((r) => setTimeout(r, 40))
     }
     expect(childPid).toBeGreaterThan(0)
@@ -196,7 +196,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
     temps.push(dir)
     const pidFile = join(dir, 'detached-grandchild.pid')
     // Root ignores SIGTERM and spawns an intermediate child (which exits on SIGTERM) that spawns a detached grandchild (which ignores SIGTERM).
-    // After SIGTERM: root is STILL alive, intermediate exits -> grandchild is reparented to PID 1 (detached from root tree).
+    // The assertions check liveness before and after cleanup, not intermediate parentage.
     const script = `
       const { spawn } = require('node:child_process');
       const { writeFileSync } = require('node:fs');
@@ -222,7 +222,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
           childPid = parsed
           break
         }
-      } catch { /* wait */ }
+      } catch {  }
       await new Promise((r) => setTimeout(r, 40))
     }
     expect(childPid).toBeGreaterThan(0)
@@ -238,8 +238,8 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
       expect(isPidAlive(root.pid!)).toBe(false)
       expect(isPidAlive(childPid)).toBe(false)
     } finally {
-      try { process.kill(root.pid!, 'SIGKILL') } catch { /* ignore */ }
-      try { process.kill(childPid, 'SIGKILL') } catch { /* ignore */ }
+      try { process.kill(root.pid!, 'SIGKILL') } catch {  }
+      try { process.kill(childPid, 'SIGKILL') } catch {  }
     }
   })
 
@@ -283,16 +283,13 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
       { sigkillDelayMs: 25, ps, kill }
     )
 
-    // Root PGID (-2000) is verified; descendant independent PGIDs (-3050/-3051/-3052) MUST NEVER be signalled (kills M6a).
     expect(signals).toContainEqual({ pid: -2000, signal: 'SIGTERM' })
     expect(signals.some((s) => s.pid === -3050 || s.pid === -3051 || s.pid === -3052)).toBe(false)
 
-    // SIGTERM signalled all 3 verified descendants individually.
     expect(signals).toContainEqual({ pid: 2050, signal: 'SIGTERM' })
     expect(signals).toContainEqual({ pid: 2051, signal: 'SIGTERM' })
     expect(signals).toContainEqual({ pid: 2052, signal: 'SIGTERM' })
 
-    // SIGKILL stage MUST skip reused PID 2050 and command-changed PID 2051 (kills M6b), and only SIGKILL verified PID 2052.
     expect(signals).not.toContainEqual({ pid: 2050, signal: 'SIGKILL' })
     expect(signals).not.toContainEqual({ pid: 2051, signal: 'SIGKILL' })
     expect(signals).toContainEqual({ pid: 2052, signal: 'SIGKILL' })

@@ -6,32 +6,12 @@ import { appendCoalescedTrace } from './live-trace'
 import { APP_TRACE_CONTENT_SOURCE, readAppTraceContentPage } from './trace-tool-content'
 import { MAX_CONVERSATION_HISTORY_TEXT_BYTES } from './conversation-history-limits'
 
-/**
- * Complete visible text of one source turn, read inside one shared byte budget.
- * This is the same extractor the recorder and handoff use, so a side-chat
- * snapshot cannot invent a different body than the one Scry already recorded.
- */
 
-/** One shared byte budget for a bounded source read; never a per-turn allowance. */
 export interface HistoryReadBudget { textBytes: number; unbounded?: boolean }
 export const historyReadBudget = (): HistoryReadBudget => ({ textBytes: 0 })
 
-/**
- * Budget for reading a source into a frozen snapshot.
- *
- * Capture streams the prefix one message at a time into the sealed manifest, so the
- * prefix length is not a resident budget: a hundred MiB of history costs the manifest,
- * not memory. What remains resident is the single message being projected, which is why
- * a per-prefix cap would refuse a long session for no memory reason.
- */
 export const captureReadBudget = (): HistoryReadBudget => ({ textBytes: 0, unbounded: true })
 
-/**
- * This read ran out of its one shared byte budget.
- *
- * It is a real, tagged limit rather than prose: a side-chat preview may offer a smaller
- * frozen boundary for it, while every other failure keeps its own meaning.
- */
 export class HistoryReadBudgetExceeded extends Error {
   constructor(message: string) {
     super(message)
@@ -79,7 +59,6 @@ export async function fullText(userData: string, cwd: string, event: TraceEvent,
   return body.content
 }
 
-/** Complete bodies of one contiguous event slice, using the recorder's delta/final rules. */
 function assistantTextOf(events: readonly TraceEvent[]): string {
   const bodies: string[] = []
   for (const group of modelEventBodies(events)) {
@@ -106,24 +85,12 @@ async function hydrateVisible(userData: string, conversation: Pick<Conversation,
   return projected
 }
 
-/** One visible message of a frozen source turn, in proven conversational order. */
 export interface ProjectedTurnMessage {
   role: 'user' | 'assistant'
   text: string
-  /** Present only for a human steering prompt accepted by the Provider. */
   steerMessageId?: string
 }
 
-/**
- * Project one source turn into ordered visible messages.
- *
- * Only evidence-confirmed transitions become messages: the initial prompt, then
- * contiguous visible assistant text, then each `steer.status === 'accepted'`
- * prompt. Pending/rejected/unavailable steers contribute no message and no
- * boundary, and reasoning/tool protocol events are never projected as text.
- * An accepted steer whose answer is not inside this turn leaves the projection
- * ending mid-turn; that order cannot be proven, so the capture fails closed.
- */
 export async function turnMessageProjection(
   userData: string,
   conversation: Pick<Conversation, 'cwd'>,
@@ -140,7 +107,6 @@ export async function turnMessageProjection(
       slice.push(event)
       continue
     }
-    // An unaccepted steer is not a message and must not merge the event runs around it.
     if (steer.status !== 'accepted') {
       slice.push(event)
       continue
@@ -159,7 +125,6 @@ export async function turnMessageProjection(
   return messages
 }
 
-/** Assistant body of one completed turn, unchanged for steered and unsteered turns. */
 export async function turnAssistantText(
   userData: string,
   conversation: Pick<Conversation, 'cwd'>,

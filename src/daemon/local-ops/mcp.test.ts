@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ProviderOperationGate } from '../../main/provider-operation-gate'
 
-// The daemon has no browser: a re-auth's OAuth page goes to its App on the event feed.
-// Main's own safety check runs first, here, so an unsafe page never leaves the daemon.
 
 vi.mock('../../main/bootstrap/trust', () => ({
   ensureMcpExecutionAuthorized: vi.fn(async () => null),

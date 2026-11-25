@@ -92,7 +92,6 @@ async function deviceCall(devicePort: number, caPEM: string, certPEM: string, ke
   await once(raw, 'connect')
   const socket: TLSSocket = tlsConnect({ socket: raw, ca: caPEM, cert: certPEM, key: keyPEM, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined })
   await once(socket, 'secureConnect')
-  // Speak the wire like a client: every request declares its protocol version.
   const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request as Record<string, unknown> } : request
   socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
@@ -165,8 +164,6 @@ describe('RemoteHostService (lifecycle facade)', () => {
     const pair = await service.authority.begin()
     expect(pair.pairingId).toMatch(/[0-9a-f-]{36}/)
     expect(service.anchorSHA256).toMatch(/^[0-9a-f]{64}$/)
-    // Dormant: no relay dialed, so no scannable device code is emitted (honest
-    // 'not reachable yet' rather than a code the phone could never use).
     const dormantCode = await service.beginPairing()
     expect(dormantCode.deviceCode).toBeNull()
   })
@@ -176,7 +173,6 @@ describe('RemoteHostService (lifecycle facade)', () => {
     const service = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore })
     cleanups.push(() => service.dispose())
 
-    // Empty host: honest enabled state, no pending, no devices.
     let status = service.status()
     expect(status.enabled).toBe(true)
     if (!status.enabled) throw new Error('unreachable')
@@ -203,10 +199,8 @@ describe('RemoteHostService (lifecycle facade)', () => {
     expect(JSON.stringify(status)).not.toContain('BEGIN')
     expect(JSON.stringify(status)).not.toContain(code.secret)
 
-    // Confirming with a WRONG expected fingerprint fails closed.
     await expect(service.confirmPairing(code.pairingId, 'f'.repeat(64))).rejects.toThrow()
 
-    // Confirming with the displayed fingerprint grants the device.
     const device = await service.confirmPairing(code.pairingId, publicKeySHA256)
     expect(device.deviceLabel).toBe('My iPhone')
     expect(device.revoked).toBe(false)
@@ -263,7 +257,6 @@ describe('RemoteHostService (lifecycle facade)', () => {
     await failed.start()
     expect(failed.status().enabled).toBe(true)
     expect(failed.desktopStatus()).toMatchObject({ enabled: false, reason: expect.stringContaining('EADDRINUSE') })
-    // The authority remains operational while only SSH restore is unavailable.
     await pairDevice(failed)
     const status = failed.status()
     if (!status.enabled) throw new Error('phone authority disabled by SSH failure')
@@ -315,7 +308,6 @@ describe('RemoteHostService (lifecycle facade)', () => {
     await first.dispose() // idempotent
     const second = await RemoteHostService.create({ stateDirectory: dir, authorizeWorkspace: (c) => c, startRun: async () => {}, gate: new ProviderOperationGate(), createOutputStore })
     cleanups.push(() => second.dispose())
-    // Same persisted identity across restarts.
     expect(second.hostId).toBe(hostId)
   })
 })

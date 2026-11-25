@@ -62,7 +62,6 @@ describe('managed runner receipt settlement', () => {
       status: 'unknown', reason: '统一对话 runner 返回了不同的 runId'
     }])
 
-    // An unknown attempt offers no explicit resend and no duplicate Provider start.
     await expect(service.send(request(created.id, created.revision, 'command-runid-1')))
       .rejects.toThrow('该命令的投递结果尚未确认')
     expect(dispatches).toBe(1)

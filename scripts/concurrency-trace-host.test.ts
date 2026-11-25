@@ -59,7 +59,6 @@ describe('concurrency trace host component', () => {
     await withHost(0, runs, async (host) => {
       expect(host.peers).toHaveLength(0)
       for (const step of WORKLOAD_STEPS) applyWorkloadStep(run, step, 24)
-      // Every write still happened; there is no reader to pay for.
       expect(run.items).toHaveLength(24)
       expect(run.done).toBe(true)
       const stats = host.stats()

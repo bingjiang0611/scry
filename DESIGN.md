@@ -268,6 +268,10 @@ iOS 使用 Circle、Capsule 与 continuous RoundedRectangle。Notice 为 12pt �
 
 动效 token 在 `motion.css`：hover 用 `--duration-hover`（120ms），进入／退出按 sm／md／lg 档位，缓动只引用 `--ease-*`。所有位移和缩放动效必须有 `prefers-reduced-motion` 回退。焦点环是可操作性提示，不作为装饰光晕扩散。
 
+退出中的浮层只保留动效，立即停止命中。原生动画事件或兜底计时器结束时同步提交关闭，否则下一次点击可能先提交重新打开，把上一份 inert 节点留在原位。macOS CI 的删除弹窗曾触发这条路径（jobs 131767009947、131460326299）。同一元素有多个有限动画时不能在第一个结束事件就卸载。兜底随实际开始调整，但始终受关闭请求的截止时间限制；软件合成的 CI 曾在关闭后约 165ms 才收到开始事件，约 296ms 结束。测试计时不是生产机器的延迟承诺。
+
+加载指示器可延迟显示并维持最短可见时间；不能用它阻塞已到达的数据、改变 `aria-busy` 或延长操作锁。
+
 iOS 的 GlassBackground 实际是 96% 不透明度的固定颜色、continuous 圆角和 1pt 描边，没有使用 Material 或背景模糊；不要从名称推断玻璃效果。
 
 ## Components

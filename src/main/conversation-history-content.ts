@@ -3,7 +3,6 @@ import { dirname, join } from 'node:path'
 import { lstat, realpath, rm } from 'node:fs/promises'
 import type { Conversation } from '../shared/conversation'
 
-/** One frozen source message; the sealed artifact is the only authority for its text. */
 export interface HistoryMessage {
   ref: Conversation['turns'][number]['items'][number]
   providerId: string
@@ -18,12 +17,10 @@ export interface HistoryMessage {
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
-/** Private per-conversation content root; the child owns everything written here. */
 export function conversationHistoryRoot(userData: string, conversation: Pick<Conversation, 'id' | 'cwd'>): string {
   return join(userData, 'conversation-history-v1', hash(JSON.stringify([conversation.id, conversation.cwd])))
 }
 
-/** Only this conversation's frozen bodies; never workspace .scry content. */
 export async function deleteConversationHistory(userData: string, conversation: Pick<Conversation, 'id' | 'cwd'>): Promise<void> {
   const directory = conversationHistoryRoot(userData, conversation)
   let parent = await realpath(userData)

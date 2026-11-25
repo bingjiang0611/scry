@@ -1,4 +1,3 @@
-// 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { latestBackgroundWork } from '@shared/background-work'
 import { backgroundWorkStatus } from '../background-work-status'
@@ -151,7 +150,6 @@ function AssistantTurnImpl({
   const toolN = useMemo(() => aggregateCalls(visibleItems).totalCalls, [visibleItems])
   const errs = useMemo(() => structuralItems.filter(isOverviewToolErrorEvent).length, [structuralItems])
   const runtime = runtimeTitleForTurn(turn)
-  // P1：subagent 内部步骤（parentToolUseId 指向父 Task tool_use）按父分组，折叠进父 Task 卡
   const childrenByParent = useMemo(() => {
     const m = new Map<string, TraceEvent[]>()
     for (const ev of visibleItems) {
@@ -329,7 +327,6 @@ function AssistantTurnImpl({
         const pendingQuestion = pendingQuestions.find(
           (request) => request.runId === ev.runId && request.questionId === ev.toolUseId
         )
-        // 若该 tool_use 催生了 subagent（其 toolUseId 是某些事件的 parentToolUseId），折叠渲染子步骤
         const kids = ev.toolUseId ? childrenByParent.get(ev.toolUseId) : undefined
         const childHasLiveTail = ev.toolUseId && projection.liveParentToolUseId === ev.toolUseId
         const childLiveText = childHasLiveTail ? nestedLiveText : ''

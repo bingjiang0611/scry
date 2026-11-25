@@ -1,7 +1,5 @@
 import type { DaemonForwardTable, DaemonLocalOpTable } from './types'
 
-// Read-only queries: usage, LLM performance, git diff, recorder content, skills, commands.
-// Every entry here changes nothing, so a read lost to a reconnect may be asked again.
 export const QUERY_LOCAL_OPS: DaemonLocalOpTable = {
   'agent:usageStats': { op: 'usage', method: 'usageStats', read: true },
   'agent:usageAnalytics': { op: 'usage', method: 'usageAnalytics', read: true },

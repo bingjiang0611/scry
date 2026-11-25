@@ -1,12 +1,5 @@
 import type { ProjectMeta, SessionMeta } from './env'
 
-/**
- * Quiet save status for one sidebar row while an optimistic change is written
- * behind it. Only catalog metadata (pin, archive, title) is changed this way:
- * main writes it to the app's own session index, it almost always succeeds and
- * is quietly reversible. Provider transcripts, git state and deletes are never
- * optimistic.
- */
 export type SessionSaveAction = 'pin' | 'archive'
 export type SessionSaveState =
   | { status: 'saving'; action: SessionSaveAction }
@@ -16,11 +9,6 @@ export type SessionSaveState =
 export const sessionRowKey = (cwd: string, session: Pick<SessionMeta, 'providerId' | 'agentProfileId' | 'sessionId'>): string =>
   `${cwd}:${session.providerId}:${session.agentProfileId ?? ''}:${session.sessionId}`
 
-/**
- * Applies a change to the one matching session in the project list; `null` removes it.
- * Rows are matched by cwd + provider + profile + session id, the sidebar's own key.
- * Returns the same array when nothing matched, so a stale rollback is a no-op.
- */
 export function patchProjectSession(
   projects: ProjectMeta[],
   cwd: string,

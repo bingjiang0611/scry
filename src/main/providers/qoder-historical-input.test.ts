@@ -44,7 +44,6 @@ interface Submitted {
   text: string
 }
 
-/** Captures the one user message the adapter hands to the SDK input stream. */
 function captureSubmitted(): { submitted: Submitted; promise: Promise<Submitted> } {
   const submitted = { uuid: '', text: '' }
   let resolve: (value: Submitted) => void = () => {}
@@ -211,7 +210,6 @@ describe('Qoder managed historical input', () => {
     })
     const handle = startRun([])
 
-    // The run outcome stays a failure: acceptance never relabels a failed turn.
     await expect(handle.promise).resolves.toMatchObject({ status: 'failed' })
     expect(handle.getInputReceipt?.()).toEqual(expect.objectContaining({
       status: 'accepted',

@@ -11,7 +11,6 @@ import { parseRecordName, recordFiles, existingFile, existingPath, readRecordFil
 
 export interface ArchiveState {
   schemaVersion: 1
-  /** Highest sequence intentionally moved out of `records/`. */
   archivedThrough: number
 }
 
@@ -32,7 +31,6 @@ interface ArchiveJournal {
   throughSequence: number
   archivedThroughBefore: number
   records: ArchiveJournalRecord[]
-  /** Optional only for journals created before Recorder content artifacts existed. */
   contents?: ToolContentRef[]
 }
 
@@ -108,16 +106,10 @@ async function verifiedArchiveContent(path: string, expected: ArchiveJournalReco
 export interface ArchiveOptions {
   throughSequence: number
   target: string
-  /** Deterministic crash seam used only by recorder durability tests. */
   onStep?: (phase: 'target-published' | 'copied' | 'source-removed', sequence: number) => Promise<void> | void
-  /** Deterministic fsync fault seam used only by durability tests. */
   syncDirectory?: (path: string) => Promise<void>
 }
 
-/**
- * Move a contiguous prefix through a durable journal. A retry with the same target resumes any
- * verified copy/remove/floor step; a pending journal blocks sequence allocation until reconciled.
- */
 export async function archiveRecords(
   dataRoot: string,
   options: ArchiveOptions
@@ -172,7 +164,6 @@ export async function archiveRecords(
         })
       }
       const contents = collectContentRefs(sourceRecords)
-      // Fail before publishing a journal when a referenced source was already missing/corrupt.
       for (const ref of contents) await readRecorderContent(dataRoot, ref)
       journal = {
         schemaVersion: 1,
@@ -189,7 +180,6 @@ export async function archiveRecords(
     }
 
     if (!journal.contents) {
-      // Upgrade an interrupted pre-content journal from whichever verified record copy survived.
       const sourceRecords: AgentTurnRecord[] = []
       for (const record of journal.records) {
         const livePath = join(canonicalLive, record.name)
@@ -225,8 +215,6 @@ export async function archiveRecords(
       const sourceExists = await existingFile(source)
       let targetExists = await existingFile(target)
       const temporaryExists = await existingFile(temporary)
-      // A pending journal owns both copies, but neither may be silently discarded if its content
-      // differs from the bytes hashed before the archive began.
       const sourceContent = sourceExists ? await verifiedArchiveContent(source, record) : undefined
       if (targetExists) await verifiedArchiveContent(target, record)
       if (temporaryExists) await verifiedArchiveContent(temporary, record)
@@ -250,8 +238,6 @@ export async function archiveRecords(
         await rm(temporary)
         await sync(canonicalRecordsTarget)
       }
-      // This barrier is deliberately unconditional: an existing target may come from a prior
-      // attempt whose link publication succeeded but directory fsync failed.
       await sync(canonicalRecordsTarget)
       await options.onStep?.('copied', record.sequence)
       if (sourceExists) {

@@ -65,7 +65,6 @@ it('delivers a captured session straight to the daemon socket and publishes the 
     },
     env
   })
-  // The ACK is what the guard persists: without these paths it cannot use the fast path.
   expect(started.ack).toMatchObject({ protocol: 'codelens.session-capture.v1', action: 'start', status: 'started' })
   expect(started.transport.contextPath).toBe((started.transport.contextPath as string))
   const receiver = captureReceiverPath(join(root, '.scry'))
@@ -75,16 +74,13 @@ it('delivers a captured session straight to the daemon socket and publishes the 
   expect(source).toContain('recorder hook')
   expect(source).toContain('--capture-mode session')
   expect(source).toContain('x-scry-capture-mode: session')
-  // 采集接收器也要报自己的 pid：没有它，采集轮次的 open.json 记不到宿主进程链。
   expect(source).toContain('x-scry-client-pid: $$')
   expect(source).toContain(started.transport.socketPath as string)
-  // The same versioned handshake ordinary hooks use: an older daemon refuses before applying.
   expect(started.transport.eventPath).toBe(HOOK_EVENT_PATH)
   expect(source).toContain(`http://localhost${HOOK_EVENT_PATH}`)
   expect(source).toContain(`x-scry-recorder-version: ${RECORDER_VERSION}`)
   expect(source).toContain('SCRY_RECORDER_DAEMON_REJECTED=1')
 
-  // 采集轮次的 open.json 也要记宿主进程链：claim 打开的那一轮来自 start 的调用者。
   const sessionDir = join(root, '.scry', 'runtime', 'codex', safeKey('sess-d'))
   const claimOpen = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8'))
   expect(claimOpen.host[0].pid).toBe(process.pid)
@@ -92,7 +88,6 @@ it('delivers a captured session straight to the daemon socket and publishes the 
 
   const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
   try {
-    // The receiver posts the Provider hook payload unchanged; the claim state supplies the context.
     const body = encodeHookEnvironment(env, {
       session_id: 'sess-d',
       hook_event_name: 'Stop',
@@ -114,8 +109,6 @@ it('delivers a captured session straight to the daemon socket and publishes the 
       },
       body
     })
-    // A daemon from another recorder version must refuse before applying, so the guard falls back
-    // instead of recording the event twice.
     const mismatched = await post('0.0.0-other')
     expect(mismatched.statusCode).toBe(409)
     expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
@@ -132,7 +125,6 @@ it('delivers a captured session straight to the daemon socket and publishes the 
     expect(records).toHaveLength(1)
     expect(records[0].capture).toMatchObject({ captureId: 'capture-daemon', source: 'manual', task: null })
 
-    // 下一轮由采集 hook 自己打开：daemon 转进来的 pid 必须继续带到 open.json。
     const nextBody = encodeHookEnvironment(env, {
       session_id: 'sess-d',
       hook_event_name: 'UserPromptSubmit',

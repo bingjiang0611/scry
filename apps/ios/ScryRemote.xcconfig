@@ -1,4 +1,3 @@
-// Shared App target settings. Debug/Release-specific options remain in the project.
 PRODUCT_NAME = $(TARGET_NAME)
 PRODUCT_BUNDLE_IDENTIFIER = com.scry.remote
 INFOPLIST_FILE = ScryRemote/Info.plist

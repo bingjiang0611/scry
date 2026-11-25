@@ -198,8 +198,6 @@ struct HomeSessions: View {
       }
       activitySection(ConnectionCopy.homeNeedsReply, rows: catalog.waiting)
       activitySection(ConnectionCopy.sectionRunning, rows: catalog.running)
-      // Ended tasks keep their place here instead of vanishing from 动态; the
-      // section only exists because the host persisted the turn's outcome.
       activitySection(ConnectionCopy.sectionCompleted, rows: catalog.completed, completed: true)
     }
     .animation(reduceMotion ? nil : Motion.animation(.reorder, reduceMotion: false), value: catalog.waiting.map(\.id))
@@ -211,7 +209,6 @@ struct HomeSessions: View {
 
   @ViewBuilder private func activitySection(_ title: String, rows: [HomeSessionCatalog.Row], completed: Bool = false) -> some View {
     if !rows.isEmpty {
-      // SPEC 4: 已完成 keeps a quieter label/hairline than the two live sections.
       section(title, directory: completed)
       ForEach(Array(rows.prefix(40).enumerated()), id: \.element.id) { index, row in
         sessionRow(row, index: index, activity: !completed, completed: completed)

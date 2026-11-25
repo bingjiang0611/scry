@@ -59,7 +59,6 @@ describe('run pipeline seams', () => {
     expect(source).toMatch(/private readonly apply|constructor\(/)
   })
 
-  // Self-check: the pattern set must be able to detect the real thing.
   it('detects shell usage where it exists', () => {
     const workspace = readdirSync(BOOTSTRAP).filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
     const offenders = workspace.filter((name) => FORBIDDEN.some((pattern) => pattern.test(readFileSync(resolve(BOOTSTRAP, name), 'utf8'))))

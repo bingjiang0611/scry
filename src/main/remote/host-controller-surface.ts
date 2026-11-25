@@ -24,11 +24,11 @@ import { assertExpectedLog, resolveIntentCommand, submitIntent, submitReceivedIn
 import type { AgentQuestionResponse } from '../../shared/runtime'
 import { type ToolPanelPayload } from '../../shared/tool-panel'
 
-// Device-facing API of the remote host: one method per operation the paired
-// device may call, each carrying the VERIFIED peer certificate fingerprint. The
-// wiring lives in host-controller-execution.ts and the per-domain helpers beside this file. A device
+// Device-facing operations for paired devices carry the verified peer certificate
+// fingerprint. See host-controller-execution.ts and the per-domain helpers. A device
 // submission is a durable intent (recorded is not executed); the dispatcher
-// drives exactly-once execution through the gated executor.
+// checks the gate and durably marks dispatch before invoking the executor,
+// fencing repeat dispatch without guaranteeing completion.
 
 export { HOST_RESTARTED_DETAIL } from './host-controller-routing'
 
@@ -103,8 +103,6 @@ export class HostController {
     return await commitAttachment(this.#deps(), peer, input)
   }
 
-  // Device-facing (inner-mTLS): submit a durable intent, then drive the
-  // dispatcher so the gated executor picks it up exactly once.
   submitIntent(peerCertSHA256: string, input: { intentId: string; detail?: string }): SubmitResult {
     return submitIntent(this.#deps(), peerCertSHA256, input)
   }
@@ -246,8 +244,6 @@ export class HostController {
     return await runSessionDelete(this.#deps(), peerCertSHA256, input)
   }
 
-  // Device-facing: the host session catalog this device may browse, authorized
-  // by the same verified peer certificate as every method.
   listSessions(peerCertSHA256: string): RemoteSessionRef[] {
     return this.#gateway.listSessions(peerCertSHA256)
   }
@@ -256,8 +252,6 @@ export class HostController {
     return this.#gateway.listSessionsPage(peerCertSHA256, input)
   }
 
-  // One device round trip for the whole catalog opening a host needs, with a
-  // content revision so an unchanged host answers without re-sending it.
   async catalogSnapshot(peerCertSHA256: string, input: { revision?: string }): Promise<CatalogSnapshotReply> {
     return await catalogSnapshot({
       authorizeDevice: (peer) => this.authorizeDevice(peer),
@@ -268,8 +262,8 @@ export class HostController {
     }, peerCertSHA256, input)
   }
 
-  // Device-facing: one session's real conversation content, authorized by the
-  // same verified peer certificate. Async (reads the trace archive/transcript).
+  // Asynchronous workspace read. The gateway authorizes the verified peer
+  // before parsing the query and delegating to the workspace reader.
   readWorkspace(peerCertSHA256: string, query: unknown) {
     return this.#gateway.readWorkspace(peerCertSHA256, query)
   }

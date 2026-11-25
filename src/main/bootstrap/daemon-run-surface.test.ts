@@ -6,9 +6,6 @@ import type { ActiveRun } from '../../shared/trace'
 import type { AgentStartRequest } from '../../shared/runtime'
 import type { SubscribeActiveRunRow } from '../../shared/orchestration-subscribe'
 
-// The App's run controls in daemon mode. The registry is in the daemon, so these must
-// become frames - and an answer the App cannot read must be reported, never shown as
-// "sent".
 
 const run = (runId: string): ActiveRun => ({ runId, state: 'running', providerId: 'claude', cwd: '/w', items: [] } as unknown as ActiveRun)
 
@@ -87,7 +84,6 @@ describe('daemon run surface start reconciliation', () => {
       expect(request).toHaveBeenCalledWith({ op: 'intentStatusAtLog', intentId: submit?.intentId }, undefined)
       expect(send.mock.calls.filter(([channel]) => channel === 'agent:focusedRun'))
         .toEqual([['agent:focusedRun', expect.objectContaining({ runId: canonicalId })]])
-      // Recovery follows the same run as a fresh start: its live trace is read, not adopted once.
       await vi.waitFor(() => expect(request.mock.calls.some(([frame]) => frame.op === 'desktop')).toBe(true))
     } finally {
       runtime.dispose()
@@ -104,7 +100,6 @@ describe('daemon run surface start reconciliation', () => {
       await runtime.applySubscribeSnapshot([row({ scryRunId: canonicalId, admitted: true })])
       await expect(start).resolves.toEqual({ runId: canonicalId, commandStatus: 'executed' })
       expect(send).toHaveBeenCalledWith('agent:focusedRun', expect.objectContaining({ runId: canonicalId }))
-      // The admitted row starts the run's own trace read; nothing is submitted again.
       await vi.waitFor(() => expect(request.mock.calls.map(([frame]) => frame.op)).toEqual(['submit', 'intentStatusAtLog', 'subscribe', 'desktop']))
     } finally {
       runtime.dispose()
@@ -159,7 +154,6 @@ describe('daemon run surface controls', () => {
     const { value, frames } = surface({ live: [run('run-abc-1'), run('run-def-2')] })
     await expect(value.adopt('run-abc-1')).resolves.toMatchObject({ runId: 'run-abc-1' })
     expect(frames[0]).toEqual({ method: 'adopt', runId: 'run-abc-1' })
-    // Adopting is a view decision: the focused read now answers with that run.
     await expect(value.focusedRunSnapshot()).resolves.toMatchObject({ runId: 'run-abc-1' })
   })
 

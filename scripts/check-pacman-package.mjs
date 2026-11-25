@@ -25,7 +25,6 @@ function findArtifact() {
 function readArchive() {
   const probe = spawnSync('bsdtar', ['--version'], { encoding: 'utf8' })
   assert.equal(probe.error, undefined, 'bsdtar (libarchive) is required to read the pacman archive; install libarchive-tools')
-  // bsdtar 的参数顺序是 bsdtar <flags> ARCHIVE [PATTERN]。
   const run = (args) => {
     const result = spawnSync('bsdtar', [...args, artifact], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
     assert.equal(result.status, 0, `bsdtar ${args.join(' ')} failed: ${result.stderr}`)

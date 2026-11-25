@@ -127,7 +127,6 @@ struct RemoteProbe {
       for s in sessions { print("session \(s.providerId) \(s.externalSessionId ?? "-") \(s.label)") }
       print("sessions-count \(sessions.count)")
     case "history":
-      // <arg> layout: args[7]=providerId args[8]=cwd args[9]=externalSessionId
       guard args.count >= 10 else { throw CLIError.invalidArguments }
       let turns = try await G0Transport.relayRunHistory(endpoint: endpoint, identity: identity, providerId: args[7], cwd: args[8], externalSessionId: args[9])
       for (i, t) in turns.enumerated() { print("turn \(i) user=\(t.userText.prefix(40)) items=\(t.items.count)") }

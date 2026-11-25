@@ -30,7 +30,6 @@ import {
 // visible from here even though the primitives live in their own module.
 export type { NormalizeCtx } from './normalize-core.js'
 
-// SDK message → TraceEvent[]
 export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent[] {
   const m = msg as Record<string, unknown>
   if (!m || typeof m !== 'object') return []
@@ -272,7 +271,6 @@ export function normalizeSdkMessage(msg: unknown, ctx: NormalizeCtx): TraceEvent
   return []
 }
 
-// 用户 prompt → human 事件
 export function humanEvent(prompt: string, ctx: NormalizeCtx): TraceEvent {
   return base(ctx, { kind: 'human', stage: 'prompt', text: prompt.slice(0, 500) })
 }
@@ -472,7 +470,6 @@ export function appendTranscriptToTurns(content: string, ctx: NormalizeCtx, stat
   return turns
 }
 
-// 把整个 transcript jsonl 解析成对话轮次（加载历史会话用）
 export function parseTranscriptToTurns(content: string, ctx: NormalizeCtx): ParsedTurn[] {
   return appendTranscriptToTurns(content, ctx, createTranscriptParseState())
 }

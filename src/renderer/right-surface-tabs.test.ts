@@ -30,11 +30,9 @@ describe('flat right-surface tabs', () => {
     expect(activeToolId(current)).toBeNull()
     current = reduceRightSurfaceState(current, { type: 'open-side-chat', conversationId: 'child-b' })
     expect(current.sideChats).toEqual(['child-a', 'child-b'])
-    // Opening an existing instance activates it instead of duplicating it.
     current = reduceRightSurfaceState(current, { type: 'open-side-chat', conversationId: 'child-a' })
     expect(current.sideChats).toEqual(['child-a', 'child-b'])
     expect(activeRightSurfaceTabKey(current)).toBe('side-chat:child-a')
-    // Activating a tool tab does not close the child views.
     current = reduceRightSurfaceState(current, { type: 'activate', kind: 'files' })
     expect(current.sideChats).toEqual(['child-a', 'child-b'])
     expect(activeRightSurfaceTabKey(current)).toBe('files')
@@ -52,7 +50,6 @@ describe('flat right-surface tabs', () => {
     expect(activeRightSurfaceTabKey(current)).toBe('overview')
     const empty = reduceRightSurfaceState(createRightSurfaceState({ openIds: [] }), { type: 'close-side-chat', conversationId: 'child-a' })
     expect(rightSurfaceIsChooser(empty)).toBe(true)
-    // Closing an inactive child keeps the current active tab untouched.
     const inactive = reduceRightSurfaceState(state({ sideChats: ['a', 'b'], activeSideChatId: 'b' }),
       { type: 'close-side-chat', conversationId: 'a' })
     expect(activeRightSurfaceTabKey(inactive)).toBe('side-chat:b')

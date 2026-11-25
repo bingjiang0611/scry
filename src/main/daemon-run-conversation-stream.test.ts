@@ -47,7 +47,6 @@ describe('conversation runs on the window-wide trace stream', () => {
     expect(isConversationRunId('d428f668-cf65-493b-bc39-92a8ea149edd', LEDGER)).toBe(true)
     expect(isConversationRunId('remote-run-mwqm0k6u-0', LEDGER)).toBe(false)
     expect(isConversationRunId('run-abc-1', LEDGER)).toBe(false)
-    // Not bound yet, or bound to its own ledger id: nothing proves a conversation run.
     expect(isConversationRunId(undefined, LEDGER)).toBe(false)
     expect(isConversationRunId(LEDGER, LEDGER)).toBe(false)
   })

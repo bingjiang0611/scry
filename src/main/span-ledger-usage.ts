@@ -1,4 +1,3 @@
-// Usage Analytics 与 canonical billing 去重 SQL / 聚合纯函数。
 import type { UsageAnalytics, UsageAnalyticsAggregate, UsageAnalyticsRangeDays } from '../shared/trace'
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
 import { usageIdentity, type UsageAgentId } from '../shared/usage-identity'
@@ -37,7 +36,6 @@ export const canonicalCostWhere = (a = 'usage_ledger', peerScope?: string): stri
 )`
 }
 
-// 现有 rollup / preflight / showback 契约都是美元金额；Credits 只在带 costUnit 的对账中展示。
 export const canonicalUsdCostWhere = (a = 'usage_ledger'): string =>
   `(${canonicalCostWhere(a)} AND ${a}.cost_unit='usd')`
 const canonicalSessionUsdCostWhere = (a: string): string =>
@@ -82,7 +80,6 @@ export const USAGE_ANALYTICS_COSTS_SQL = `SELECT
     AND ${USAGE_TOKENS_PRESENT_SQL('u')}`
 
 export interface UsageAnalyticsTokenRow {
-  // Query proves no existing model/whole-turn USD cost would be double counted.
   officialCostEligible?: number
   tsStart: number
   provider: BillingProvider
@@ -116,7 +113,6 @@ export interface UsageAnalyticsCostRow {
   reasoningTokens?: number | null
 }
 
-// 0 Token 的记录没有可展示的量；「没有上报」与「上报了 0」要分开处理。
 type TokenCounters = Pick<UsageAnalyticsCostRow, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'reasoningTokens'>
 
 const reportedTokens = (row: TokenCounters): number[] =>
@@ -313,7 +309,6 @@ export function buildUsageAnalytics(args: {
     const inputTokens = uncachedInputTokens(row.inputTokens ?? null, row.cacheReadTokens ?? null, accounting)
     return inputTokens === row.inputTokens ? row : { ...row, inputTokens }
   }
-  // 0 Token 的记录不成行，也不计入轮次：它没有可展示的量。
   const tokens = args.tokens.filter(tokenRowHasUsage).map(normalizeInput)
   for (const row of tokens) {
     const day = localDay(row.tsStart)

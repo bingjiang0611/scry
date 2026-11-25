@@ -6,7 +6,7 @@
 // environment (no SHELL, no inherited user env), verifies handshake + daemon self-report
 // (launchedBy=service, supervisorPid, remoteConfig), and verifies SIGTERM lets the daemon
 // exit cleanly before the supervisor leaves with no lock/socket leftovers.
-//
+
 // Usage:
 //   npm run build && node scripts/login-start-smoke.mjs
 //   node scripts/login-start-smoke.mjs --app dist/mac-arm64/Scry.app/Contents/MacOS/Scry
@@ -175,7 +175,6 @@ try {
     fail('daemonReady', `enroll.sock not ready; exit=${supervisor.exitCode}`)
   }
 
-  // 4. Enroll, verify build/version handshake, and verify daemon self-report.
   const credentials = await enrollLocalDevice(stateDirectory)
   const info = await frame(stateDirectory, credentials, { op: 'daemonInfo' })
   if (info?.op !== 'daemonInfo' || info.version !== expectedVersion) {

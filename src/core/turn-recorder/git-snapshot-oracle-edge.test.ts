@@ -17,10 +17,6 @@ import {
   type Scenario
 } from './git-snapshot-oracle-harness.js'
 
-// Oracle part two: repository states that change how Git itself interprets the worktree
-// (sparse checkout, rewritten index, attribute/ignore rules, filter drivers, nested
-// repositories and submodules). Every case still compares the implementation under test
-// against the full reference path on an identical twin fixture.
 
 afterAll(async () => { await removeTrackedRoots() })
 
@@ -39,7 +35,6 @@ async function commitWithFixedDate(repo: string, message: string): Promise<strin
 describe('git snapshot oracle: repository interpretation inputs', () => {
   const scenarios: Scenario[] = [
     {
-      // O6 sparse checkout: paths outside the cone are skip-worktree, never deletions.
       id: 'o6-sparse',
       setup: async (repo) => {
         await writeFileAt(repo, 'cone/a.txt', 'inside\n')
@@ -59,7 +54,6 @@ describe('git snapshot oracle: repository interpretation inputs', () => {
       }
     },
     {
-      // O7 the real index is rewritten by staged work while the turn is running.
       id: 'o7-index-rewrite',
       setup: async (repo) => {
         await writeFileAt(repo, 'staged.txt', 'v1\n')
@@ -75,7 +69,6 @@ describe('git snapshot oracle: repository interpretation inputs', () => {
       options: { mutationRewritesIndex: true, mutationWritesObjects: true }
     },
     {
-      // O8 the turn edits .gitattributes / .gitignore, changing conversion and ignore rules.
       id: 'o8-git-semantics',
       setup: async (repo) => {
         await writeFileAt(repo, 'a.txt', 'plain\n')
@@ -106,15 +99,12 @@ describe('git snapshot oracle: filter drivers (known defect)', () => {
       const marker = join(root, 'filter-ran')
       await writeFileAt(repo, 'a.txt', 'v1\n')
       await writeFileAt(repo, '.gitattributes', '* filter=marker\n')
-      // The committed driver is inert; only after the commit does it gain a side effect.
       await git(['config', 'filter.marker.clean', 'cat'], repo)
       await git(['config', 'filter.marker.required', 'false'], repo)
       await stamp(repo, 'a.txt')
       await commitAll(repo)
       await git(['config', 'filter.marker.clean', `touch ${marker}`], repo)
       await git(['config', 'filter.marker.required', 'true'], repo)
-      // An index older than its own entries is racy, so the next status must rehash the file
-      // and therefore would run the configured clean driver.
       await utimes(join(repo, '.git', 'index'), new Date('2019-01-01T00:00:00.000Z'), new Date('2019-01-01T00:00:00.000Z'))
       const result = await runTurn(root, repo, { forceFull: label === 'full' }, async (cwd) => {
         await writeFileAt(cwd, 'a.txt', 'v2 with side effect\n')

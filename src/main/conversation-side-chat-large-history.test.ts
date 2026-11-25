@@ -45,7 +45,6 @@ async function largeParent(current: SideChatFixture): Promise<Conversation> {
   return (await current.store.read(parent.id))!
 }
 
-/** Total committed archive bytes of the parent's own turns. */
 async function archiveBytes(current: SideChatFixture, parent: Conversation): Promise<number> {
   let total = 0
   for (const turn of parent.turns) {
@@ -122,7 +121,6 @@ describe('large side-chat history through the production service', () => {
     expect(text.length).toBeGreaterThan(HUGE_VISIBLE)
     expect(hash(text)).toBe(huge.ref.contentHash)
     expect(text.startsWith('huge question v')).toBe(true)
-    // No tool payload leaked into a frozen body.
     for (const index of [0, 1, refs.length - 1]) {
       expect(await readFrozenBody(current, record, index)).not.toContain('tool-payload-')
     }
@@ -174,7 +172,6 @@ describe('large side-chat history through the production service', () => {
     const ledger = dispatched.omittedItems.length +
       (dispatched.omittedRanges ?? []).reduce((sum, range) => sum + range.to - range.from + 1, 0)
     expect(ledger + dispatched.importedItems.length).toBe((TURNS + 1) * 2)
-    // 74 frozen messages must not become 74 references in the durable record.
     expect(JSON.stringify(dispatched).length).toBeLessThan(8_000)
     // One contiguous frozen prefix stays one range however many messages it holds.
     const omitted = (dispatched.omittedRanges ?? []).flatMap(range =>

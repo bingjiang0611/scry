@@ -18,7 +18,6 @@ export interface BaseCommand {
   scope: OrchestrationScope
   at: number
   payloadSha256: string
-  /** Optional deterministic id generator for tests/replays. */
   idPrefix?: string
 }
 
@@ -40,15 +39,10 @@ export interface RunSubmitPayload {
   /** C3: `agent` marks a run the host started to wake the session after background work. */
   origin?: 'local' | 'remote' | 'system' | 'agent'
   isConversationRun?: boolean
-  /** P4-1 shadow writes mark outbox rows done + shadowOnly so P4-2 recovery never dispatches them. */
   shadowOnly?: boolean
-  /** Historical terminal backfill: never claims or clobbers a session's active live run slot. */
   historicalBackfill?: boolean
-  /** Historical backfill when H3 ordinal is missing: skip `turn.began` rather than fabricating MAX+1. */
   skipTurnProjection?: boolean
-  /** H1 SessionLedger `detailDigest(detail)` so DB-rebuilt H1 snapshots match exact idempotency digests. */
   intentDetailSha256?: string
-  /** Single-commit immediate dispatch: atomically emit run.admitted + run.dispatched after §2.3 recheck. */
   dispatchImmediately?: boolean
 }
 
@@ -139,9 +133,7 @@ export interface RunEffectResultPayload {
   gapReason?: 'output_capture_failed' | 'history_capture_failed'
   settledAt?: number | null
   recoveredAt?: number | null
-  /** Historical terminal backfill: preserves newer live session `last_run_id` / `last_run_outcome`. */
   historicalBackfill?: boolean
-  /** Present only for test negative-control assertions; forbidden in provider_settled. */
   extra?: Record<string, unknown>
 }
 
@@ -151,7 +143,6 @@ export interface QuestionAnswerPayload {
   answerId: string
   answerSha256: string
   answerPayload?: Record<string, unknown>
-  /** R3 explicit attribution; defaults to peer actor or `'unavailable'` when peer is unknown. */
   answeredBy?: string
   shadowOnly?: boolean
 }
@@ -276,17 +267,14 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'session.import'; payload: SessionImportPayload })
   | (BaseCommand & { type: 'host.start'; payload: HostStartPayload })
 
-/** Pre-dispatch recheck input (core §2.3 + §2.10 R4). */
 export interface PreDispatchRecheckInput {
   actor: string
-  /** R4: grant check reads `principal` (equals actor for peer: commands). */
   principal: string
   cwdMatches: boolean
   workspaceAuthorized: boolean
   grantValid: boolean
   operationGateAcquired: boolean
   trustGatePassed: boolean
-  /** R4 agent-only lines (never evaluated when actor is not `agent:`). */
   callerRunTerminal?: boolean
   callerRunStopRequested?: boolean
   agentCredentialRevoked?: boolean
@@ -300,10 +288,6 @@ export type PreDispatchRecheckResult =
   | { ok: false; action: 'fail'; reason: string }
   | { ok: false; action: 'requeue'; reason: 'provider_authenticating' }
 
-/**
- * Pure pre-dispatch recheck (core §2.3 + R4).
- * The 6 R4 agent rules only execute for `agent:` actors and never trigger in P4.
- */
 export function evaluatePreDispatchRecheck(input: PreDispatchRecheckInput): PreDispatchRecheckResult {
   if (!input.cwdMatches) return { ok: false, action: 'fail', reason: 'cwd_changed' }
   if (!input.workspaceAuthorized) return { ok: false, action: 'fail', reason: 'workspace_not_authorized' }
@@ -325,10 +309,6 @@ export function evaluatePreDispatchRecheck(input: PreDispatchRecheckInput): PreD
   return { ok: true }
 }
 
-/**
- * R9 event decoder contract: unknown optional payload fields are ignored for forward
- * compatibility; unknown event types are rejected so clients reset to snapshot.
- */
 export function decodeOrchestrationEvent(raw: unknown):
   | { ok: true; type: OrchestrationEventType; payload: Record<string, unknown> }
   | { ok: false; reason: 'invalid_shape' | 'unknown_event_type' } {

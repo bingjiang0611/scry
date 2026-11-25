@@ -50,7 +50,6 @@ describe('stop lifecycle projection', () => {
     const requested = applyStopState({}, stopState('r1', 'interrupt_requested', '2024-01-01T00:00:01.000Z'))
     const escalated = applyStopState(requested, stopState('r1', 'force_kill_requested', '2024-01-01T00:00:07.000Z'))
     expect(escalated.r1.phase).toBe('force_kill_requested')
-    // 乱序到达的旧快照不能把阶段退回去。
     const outOfOrder = applyStopState(escalated, stopState('r1', 'interrupt_requested', '2024-01-01T00:00:01.000Z'))
     expect(outOfOrder).toBe(escalated)
     expect(applyStopState(escalated, stopState('r1', 'settled', '2024-01-01T00:00:11.000Z'))).toEqual({})
@@ -62,13 +61,10 @@ describe('stop lifecycle projection', () => {
     const finished: Turn = { runId: 'r1', userText: 'go', items: [], done: true }
     const failed: Turn = { runId: 'r1', userText: 'go', items: [], done: false, error: 'boom' }
 
-    // 停止的任何阶段都不解除会话占用：main 的 admission 仍按 providerSettled 判断，
-    // 未 settle 时同一会话的新一轮会被直接拒绝，所以必须继续排队而不是立刻发送。
     expect(turnBlocksInput(inFlight)).toBe(true)
     expect(sessionBusy([inFlight], { restoring: false, running: true })).toBe(true)
     expect(sessionBusy([inFlight], { restoring: false, running: false })).toBe(true)
 
-    // 只有真实终态（done / error）才解除占用。
     expect(turnBlocksInput(finished)).toBe(false)
     expect(turnBlocksInput(failed)).toBe(false)
     expect(sessionBusy([finished], { restoring: false, running: false })).toBe(false)
@@ -92,11 +88,9 @@ describe('stop lifecycle projection', () => {
     expect(unsettled.tone).toBe('unsettled')
     expect(unsettled.label).toBe('Provider 未确认终止')
     expect(unsettled.hint).toContain('可能还在后台运行')
-    // 必须说明新消息只是入队，不会立刻开始——否则用户会以为可以马上发下一轮。
     expect(unsettled.hint).toContain('先进队列')
     expect(unsettled.providerSettled).toBe(false)
     const noSafeKill = runStopStatus(stopState('r1', 'no_safe_force_kill', 'x'))
-    // 共享 transport 上没有安全硬杀：UI 不能说已经强制终止，必须说清为何没杀。
     expect(noSafeKill.tone).toBe('unsettled')
     expect(noSafeKill.label).toBe('Provider 未确认终止')
     expect(noSafeKill.hint).toContain('没有发出强制终止')
@@ -104,11 +98,9 @@ describe('stop lifecycle projection', () => {
     expect(noSafeKill.hint).toContain('先进队列')
     expect(noSafeKill.providerSettled).toBe(false)
     const interruptFailed = runStopStatus(stopState('r1', 'interrupt_request_failed', 'x'))
-    // 取消调用失败必须可见：不能显示“停止中”，也不能显示“已终止”。
     expect(interruptFailed.tone).toBe('unsettled')
     expect(interruptFailed.label).toBe('停止请求未生效')
     expect(interruptFailed.hint).toContain('取消调用失败')
-    // 升级不是无条件承诺：没有安全硬杀范围时只能如实报告未确认终止。
     expect(interruptFailed.hint).toContain('只有存在安全的硬杀范围时')
     expect(interruptFailed.hint).not.toContain('仍会按窗口升级强制终止')
     expect(interruptFailed.hint).toContain('不会显示完成')
@@ -152,7 +144,6 @@ describe('paged session history projection', () => {
       completeness: 'partial'
     })
     expect(applied?.turns.map((turn) => turn.runId)).toEqual(['s1-38', 's1-39', 's1-40', 's1-41'])
-    // pagedOlder 记录“时间线确实往前翻过页”，首个窗口没有它，空转录也不会被当成翻到最早。
     expect(applied?.window).toEqual({ sessionId: 's1', offset: 38, totalTurns: 100, hasOlder: true, completeness: 'partial', pagedOlder: true })
 
     const complete = prependOlderSessionTurns(prev, { ...window, offset: 2 }, 's1', {
@@ -172,9 +163,7 @@ describe('paged session history projection', () => {
     const older = { turns: parsed(38, 2), offset: 38, totalTurns: 100, hasOlder: true, completeness: 'partial' as const }
     expect(prependOlderSessionTurns([], null, 's1', older)).toBeNull()
     expect(prependOlderSessionTurns([], window, 's2', older)).toBeNull()
-    // 会话总轮数变了说明历史已被重新加载，旧响应不能拼接。
     expect(prependOlderSessionTurns([], window, 's1', { ...older, totalTurns: 101 })).toBeNull()
-    // 不相邻（缺口或重叠）都拒绝。
     expect(prependOlderSessionTurns([], window, 's1', { ...older, offset: 30 })).toBeNull()
     expect(prependOlderSessionTurns([], window, 's1', { ...older, turns: [] })).toBeNull()
   })
@@ -268,7 +257,6 @@ describe('live trace resync acknowledgement', () => {
       },
       (run) => applied.push(run)
     )
-    // 没有权威快照就没有对齐证据：必须保持降级。
     expect(outcome).toEqual({ aligned: false, acknowledged: false })
     expect(acknowledged).toBe(0)
     expect(applied).toEqual([])
@@ -308,7 +296,6 @@ describe('live trace resync acknowledgement', () => {
     let activeRunCalls = 0
     const outcome = await resynchronizeLiveTrace(
       {
-        // done=true 的 run：activeRun 会返回 null，focusedRunSnapshot 仍给出权威事件序列。
         focusedRunSnapshot: async () => snapshot({ done: true }),
         activeRun: async () => { activeRunCalls += 1; return null },
         traceResynchronized: async () => true
@@ -345,7 +332,6 @@ describe('live trace resync acknowledgement', () => {
       { focusedRunSnapshot: async () => snapshot(), activeRun: async () => null },
       (run) => applied.push(run)
     )
-    // 没有确认口就没有确认：main 仍保留 resyncRequired，不能报 acknowledged。
     expect(outcome).toEqual({ aligned: true, acknowledged: false })
     expect(applied).toHaveLength(1)
   })
@@ -360,7 +346,6 @@ describe('live trace resync acknowledgement', () => {
       },
       (run) => applied.push(run)
     )
-    // 对齐已经发生，但没确认成功：main 保持 resyncRequired，下次健康事件会再试。
     expect(outcome).toEqual({ aligned: true, acknowledged: false })
     expect(applied).toHaveLength(1)
   })

@@ -4,8 +4,6 @@ import { connect as tlsConnect } from 'node:tls'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
-// Transport helpers for the host smoke. Kept apart from the phases so each phase
-// reads as a sequence of checks instead of TLS plumbing.
 export const RUN_PROTOCOL_VERSION = 3
 
 export async function freePort() {

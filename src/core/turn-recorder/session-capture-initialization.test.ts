@@ -151,7 +151,6 @@ it('acknowledges an existing capture with an incomplete-turn warning, but refuse
   })).rejects.toThrow('interrupted later turn')
   expect(await io.readJson(f.openPath)).toMatchObject({ initialization: 'pending', generation: 2 })
   const exclusion = join(f.options.workspace, 'next-stage')
-  // The session remains opted in. Repeating its claim does not certify the current turn's baseline.
   const ack = await startSessionCapture({
     ...f.options, context: { ...f.options.context, diffExclude: [exclusion] }
   })
@@ -200,7 +199,6 @@ it.each(['Stop', 'recover', 'expire'])('seals an interrupted baseline honestly t
   const tracked = join(f.options.workspace, 'tracked.txt')
   await writeFile(tracked, 'changed without a baseline\n')
   if (closing === 'expire') {
-    // Controlled gone-host evidence and clock advancement; this is not a real-host expiry test.
     const pending = await io.readJson<RecorderOpenTurnState>(f.openPath)
     await io.writeJsonAtomic(f.openPath, {
       ...pending, host: [{ pid: 2147483647, startedAt: 'Tue Nov 17 12:00:00 2026' }]
@@ -214,7 +212,6 @@ it.each(['Stop', 'recover', 'expire'])('seals an interrupted baseline honestly t
     expect(result.expired).toBe(1)
     vi.useRealTimers()
   } else {
-    // A later tool can discover a repository, but its late baseline cannot cover the lost interval.
     await applySessionCaptureHook({
       ...f.options, event: 'PreToolUse', payload: {
         ...f.options.payload, timestamp: '2026-11-17T12:02:02.000Z',

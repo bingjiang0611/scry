@@ -79,7 +79,6 @@ export async function call(addr: { port: number; host: string }, caPEM: string, 
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
-  // Every run-channel request declares the protocol version (remote-protocol.ts).
   const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request } : request
   socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''

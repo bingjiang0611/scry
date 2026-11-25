@@ -130,7 +130,6 @@ export async function reapOwned(fixture) {
   return { signals, remaining: remaining.map(({ pid, role }) => ({ pid, role })) }
 }
 
-/** What is left of this fixture after its App and daemon were stopped. */
 export function fixtureLeftovers(fixture) {
   const files = leftoverPaths(fixture.userDataDir).filter((path) => existsSync(path))
   const processes = fixtureDaemonProcesses(fixture)

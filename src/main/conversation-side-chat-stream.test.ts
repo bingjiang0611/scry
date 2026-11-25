@@ -62,7 +62,6 @@ const readTurn = async (turn: { messages: ReadonlyArray<{ text: AsyncIterable<st
   return texts
 }
 
-/** Spill directories recorded during this test that still exist. */
 async function leftovers(): Promise<string[]> {
   const remaining: string[] = []
   for (const directory of spills.created) {

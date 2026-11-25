@@ -118,10 +118,7 @@ async function readSessionTurns(args: HistoryContext, active: boolean): Promise<
     ...(nativeWarning ? { sourceWarning: 'native_unavailable' as const } : {}) }
 }
 
-// Native reconciliation needs the whole selected branch, as on desktop. Build
-// once per persistent revision, then page the projection. At most two cached
-// sessions, 256 MiB total text/object budget and two concurrent materializations.
-// Larger histories need an on-disk projection index, not a larger IPC payload.
+// The cache budget estimates retained projections, not peak materialization memory.
 async function sessionDisplay(args: HistoryContext, parts: string[], active: boolean): Promise<SessionDisplay> {
   const key = JSON.stringify([args.cwd, args.providerId, args.sessionId, args.userDataDir,
     args.agentProfileId, args.piSessionRoot, parts[0], parts[1], parts[4], active])
@@ -151,8 +148,7 @@ async function sessionDisplay(args: HistoryContext, parts: string[], active: boo
   return build
 }
 
-// Read only the requested archive window. Claude retains the desktop's native
-// transcript/archive merge authority; its host-side parse is not constant-time.
+// Return one page. Session reconciliation and the unscoped Claude merge may read beyond it.
 export async function readRemoteHistoryTurnsPage(
   args: HistoryContext, request: PageRequest, active: ActiveReader
 ): Promise<RemoteHistoryTurnsPage> {

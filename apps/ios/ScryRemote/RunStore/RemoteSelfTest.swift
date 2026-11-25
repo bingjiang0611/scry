@@ -64,8 +64,6 @@ enum RemoteSelfTest {
       check("enrollment.restore", restored.publicKeySHA256 == material.publicKeySHA256)
     } catch { check("enrollment", false); print("  error: \(error)") }
 
-    // 2. Pairing code: a well-formed code parses to the exact fields; tampered
-    //    variants are rejected field-by-field (fail closed).
     do {
       let anchor = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n"
       let json: [String: Any] = ["relayHost": "relay.example.com", "relayPort": 443,
@@ -86,7 +84,6 @@ enum RemoteSelfTest {
       var plain = json; plain["relayTLS"] = "plaintext"
       let plainData = try JSONSerialization.data(withJSONObject: plain)
       check("code.tlsPlaintext", (try PairingCode.parse("scry1:" + PairingCode.base64urlEncode(plainData))).relayTLS == .plaintext)
-      // An unknown relayTLS value is rejected, never silently downgraded.
       var badTLS = json; badTLS["relayTLS"] = "weird"
       let badTLSData = try JSONSerialization.data(withJSONObject: badTLS)
       check("code.badTLS", (try? PairingCode.parse("scry1:" + PairingCode.base64urlEncode(badTLSData))) == nil)
@@ -98,7 +95,6 @@ enum RemoteSelfTest {
     check("markdown.heading", markdown.contains { if case .heading(1) = $0.kind { return $0.text == "标题" }; return false })
     check("markdown.list", markdown.contains { if case .unordered = $0.kind { return $0.text == "项目" }; return false })
     check("markdown.code", markdown.contains { if case .code("swift") = $0.kind { return $0.text == "let answer = 42" }; return false })
-    // GFM tables: preserve inline source, alignment, row width and block boundaries.
     let tableSource = "| 问题 | 证据 | 判断 |\r\n|---|:---:|---:|\r\n| **扫描太慢** | `141` 次 | [优化](https://example.com) |"
     let tableBlocks = ConversationMarkdownParser.parse(tableSource)
     check("markdown.tableStructured", tableBlocks.count == 1)

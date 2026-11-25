@@ -75,7 +75,6 @@ async function earlyStopLockOwners(root: string): Promise<{ entries: unknown[]; 
           })
         }
       } catch (error) {
-        // Missing or changing owner metadata is not evidence that no lock exists.
         found.push({ path: lockPath.slice(root.length + 1), state: 'unavailable', error: String(error) })
       }
       if (current.depth < 4) queue.push({ path: lockPath, depth: current.depth + 1 })
@@ -86,7 +85,6 @@ async function earlyStopLockOwners(root: string): Promise<{ entries: unknown[]; 
 }
 
 async function reportEarlyStopDiagnostic(diagnostic: EarlyStopDiagnostic): Promise<void> {
-  // The timed-out async test can still advance while lock metadata is read.
   const snapshot = {
     currentPhase: diagnostic.currentPhase,
     currentPhaseElapsedMs: Math.round(monotonicMs() - diagnostic.phaseStartedAtMs),

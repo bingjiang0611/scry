@@ -21,7 +21,7 @@ const close = server => new Promise(resolve => server.close(resolve))
 // own authentication is the caller's responsibility (out of scope for this fixture).
 export async function authenticatedRelay(certificates, { admission } = {}) {
   const admit = admission ?? new RelayAdmission()
-  const peers = new Map() // `${sessionId}:${role}` -> ws
+  const peers = new Map()
   const bridged = new Set() // sessionId once wired, to avoid double-wiring
   const sockets = new Set()
   const streams = new Set()

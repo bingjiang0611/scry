@@ -1,4 +1,3 @@
-/* 顶栏 */
 .topbar {
   display: grid;
   grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
@@ -37,7 +36,6 @@
   color: var(--fg);
 }
 
-/* 对话区 */
 .body {
   grid-row: 2;
   display: flex;

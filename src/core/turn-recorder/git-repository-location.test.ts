@@ -30,8 +30,6 @@ async function read(root: string, includeOrigin = true): Promise<GitRepositoryLo
   return location
 }
 
-// A best-effort production sample never waits. Read the real Git files before handing the
-// observation to each boundary so a slow CI filesystem cannot make these mapping tests flaky.
 async function sampleNextBoundary(root: string, includeOrigin: boolean): Promise<void> {
   const observed = await read(root, includeOrigin)
   vi.mocked(sampleGitRepositoryLocation).mockReturnValueOnce(() => observed)
@@ -329,7 +327,6 @@ describe('location status follows the value it finally carries', () => {
   const oid = 'a'.repeat(40)
 
   it('reports a value backfilled from status as observed, not unavailable', () => {
-    // The most common case: the 50 ms sample gave up before it published anything usable.
     const location = withRepositoryLocation(snapshot, { remoteStatus: 'unavailable', branchStatus: 'unavailable', commitStatus: 'unavailable' },
       {}, { head: oid, branchHead: 'main' }).repositoryLocation
     expect(location).toEqual({

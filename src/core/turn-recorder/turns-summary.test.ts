@@ -506,7 +506,6 @@ describe('turn CLI file grouping', () => {
     ])
     expect(summary.files.writeCoverage).toEqual({ written: 2, readBefore: 2, inferredReadBefore: 0, blind: [] })
     expect(summary.files.coverage).toEqual({ knownTurns: 2, totalTurns: 2, complete: false, quality: 'inferred' })
-    // Reusing the input object must not reuse a cached projection from the previous call.
     legacy.files = exact([{ path: '/repo/c.ts', operation: 'write' }])
     expect(summarizeTurnRecords([first, legacy], 'session-1').files.rows.map(row => row.path)).toEqual(['/repo/a.ts', '/repo/c.ts'])
   })
@@ -552,7 +551,6 @@ describe('turn CLI identity coverage', () => {
     expect(summary.identity.model.coverage).toMatchObject({ knownTurns: 0, totalTurns: 2, complete: false })
     expect(summary.identity.role.statusCounts).toEqual({ observed: 1, unobserved: 1 })
     expect(summary.identity.role.roleCounts).toEqual({ main: 1 })
-    // An explicitly unbound turn must never be counted as a bound (task) turn.
     expect(summary.identity.taskLink.statusCounts).toEqual({ bound: 1, unbound: 1 })
     expect(summary.identity.taskLink.coverage).toMatchObject({ knownTurns: 1, totalTurns: 2, complete: false })
   })

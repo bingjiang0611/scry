@@ -2,9 +2,6 @@ import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { loginStartTargetFromBundle, type LoginStartTarget } from './login-start'
 
-// Default userData and bundle layout for `scry-host` (P5-host-cli §3.1).
-// Matches Electron's default `app.getPath('userData')` for productName "Scry"
-// so service files rendered by `scry-host login-start` are byte-for-byte identical to main.
 
 const APP_DATA_NAME = 'Scry'
 

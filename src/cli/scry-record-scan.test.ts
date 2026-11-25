@@ -13,7 +13,6 @@ function captureStderr(): { text: () => string } {
   return { text: () => output }
 }
 
-/** 写盘中辍留下的临时文件名；它绝不会被 rename 上屏，也绝不能冒充一条记录。 */
 const leftover = `00000000000000002328-${'a'.repeat(32)}.json.4242.6f1e.tmp`
 const damaged = `00000000000000000003-${'b'.repeat(32)}.json`
 
@@ -40,7 +39,6 @@ describe('scry record scanning', () => {
     await mkdir(records, { recursive: true })
     await writeFile(join(records, damaged), '{"schemaVersion":1}')
 
-    // 严格读取：损坏的证据让命令失败，而不是被安静地当成“没有这条记录”。
     const failure = await runScryCli(['records', 'archive', '--before', '1d', '--yes', '--workspace', root])
       .then((code) => `resolved: ${code}`, (error: unknown) => String(error))
 
@@ -53,7 +51,6 @@ describe('scry record scanning', () => {
     const records = join(root, '.scry', 'records')
     await mkdir(records, { recursive: true })
     await writeFile(join(records, leftover), '')
-    // 过期才不是“可能有进程正在写”的阻断项；这里考的是怎么报告，不是宽限期。
     const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1_000)
     await utimes(join(records, leftover), old, old)
     const stdout = captureStdout()

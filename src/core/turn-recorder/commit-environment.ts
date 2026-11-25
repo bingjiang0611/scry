@@ -1,8 +1,6 @@
 import { join } from 'node:path'
 import { readJson, writeJsonAtomic } from './io.js'
 
-// Only deployment/transport settings are pinned. Executable and trust identity always come
-// from the current activation gate, never from a queued hook or a persisted environment.
 export const UPLOAD_ENV_KEYS = [
   'SCRY_TURN_UPLOAD_ENABLED', 'SCRY_UPLOAD_DEADLINE_SECONDS',
   'SCRY_UPLOAD_LOCK_WAIT_SECONDS', 'SCRY_MANAGED_UPLOAD_WAIT_SECONDS',
@@ -43,7 +41,6 @@ export async function persistUploadEnvironment(dataRoot: string, recordId: strin
 
 export async function recordUploadEnvironment(dataRoot: string, recordId: string, env: NodeJS.ProcessEnv): Promise<NodeJS.ProcessEnv> {
   const saved = await readJson<{ schemaVersion: number; recordId: string; values: unknown }>(environmentPath(dataRoot, recordId))
-  // Old records have no snapshot. Their environment cannot be reconstructed retrospectively.
   if (saved === null) return env
   if (saved.schemaVersion !== 1 || saved.recordId !== recordId) throw new Error('invalid record upload environment identity')
   validateEnvironment(saved.values)
@@ -55,9 +52,6 @@ export async function recordUploadEnvironment(dataRoot: string, recordId: string
   return result
 }
 
-// NUL-delimited key/value pairs, an empty key, then the unchanged Provider JSON. Environment
-// values cannot contain NUL. This preserves absence, empty strings and arbitrary UTF-8/control
-// characters without shell JSON escaping, header injection, or an extra encoder process.
 export function encodeHookEnvironment(env: NodeJS.ProcessEnv, payload: Record<string, unknown>): string {
   return HOOK_ENV_KEYS.flatMap(key => env[key] === undefined ? [] : [key, env[key]]).join('\0') +
     (HOOK_ENV_KEYS.some(key => env[key] !== undefined) ? '\0' : '') + '\0' + JSON.stringify(payload)

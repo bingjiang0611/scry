@@ -23,8 +23,6 @@ it.each(['Stop', 'SessionEnd'])('a wedged daemon receives only one %s attempt; f
   const root = await mkdtemp(join(tmpdir(), 'scry-fallback-'))
   roots.push(root)
   execFileSync('git', ['init', '-q', root])
-  // Capture the generated shell's CLI handoff, then enter the real CLI in this process so
-  // handler invocations are observable. Daemon startup alone is stubbed: never start a peer.
   const cli = join(root, 'capture-cli')
   await writeFile(cli, `#!/bin/sh\nprintf '%s' "\${SCRY_RECORDER_DAEMON_TRIED:-}" > '${root}/tried'\ncat > '${root}/payload'\n`)
   await chmod(cli, 0o700)
@@ -83,8 +81,6 @@ it('a stale socket (curl rc=7) applies hooks directly and requests daemon startu
   await chmod(cli, 0o700)
   await initWorkspace({ workspace: root, providers: 'claude', cliPath: cli })
   const socket = join(root, '.scry/recorder-v1.sock')
-  // Kill only this newly spawned fixture. Unlike server.close(), SIGKILL leaves a real socket
-  // inode behind, reproducing the crash path without Python, sudo or a simulated curl exit.
   const peer = spawn(process.execPath, ['-e',
     'require("node:net").createServer().listen(process.argv[1], () => process.stdout.write("ready"))', socket],
   { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -129,7 +125,6 @@ it('a stale socket (curl rc=7) applies hooks directly and requests daemon startu
       expect.soft(open).toMatchObject({ status: 'open' })
       expect.soft(await listRecords(join(root, '.scry'))).toEqual([])
     } else {
-      // Without a provider turn id, Claude Stop finalizes synchronously (it is not deferred).
       expect.soft(open).toBeNull()
       const records = await listRecords(join(root, '.scry'))
       expect.soft(records).toHaveLength(1)

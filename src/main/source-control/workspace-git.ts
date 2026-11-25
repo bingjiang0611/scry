@@ -51,7 +51,6 @@ export async function assertWorkspaceCheckoutSafe(git: ScGit, identity: GitIdent
       if (driver === 'unspecified' || driver === 'unset' || driver === 'set') continue
       drivers.add(driver)
     }
-    // 没有 filter driver 时不必再读整份 config：多一次 git 进程启动就多几百毫秒。
     if (drivers.size === 0) return
     const config = new Map((await git.run(identity.root, ['config', '--null', '--list', '--includes']))
       .split('\0').filter(Boolean).map(row => {
@@ -78,7 +77,6 @@ export async function switchWorkspaceBranch(git: ScGit, identity: GitIdentity, r
 
 const CHECKOUT_PROGRESS_RE = /Updating files:\s*(\d{1,3})%\s*\((\d+)\/(\d+)\)/g
 
-/** Parse real Git `checkout --progress` stderr output; returns null if no valid progress line is present. */
 export function parseGitCheckoutProgress(text: string): WorkspaceCheckoutProgress | null {
   let latest: WorkspaceCheckoutProgress | null = null
   CHECKOUT_PROGRESS_RE.lastIndex = 0
@@ -177,7 +175,6 @@ export async function cleanupAbortedWorkspaceWorktree(
       try {
         await git.run(identity.root, [...readOnly, 'worktree', 'unlock', '--', path], false, 30_000)
       } catch {
-        // Worktree may not be locked or may already be partially gone.
       }
       try {
         await git.run(identity.root, [...readOnly, 'worktree', 'remove', '--force', '--force', '--', path], false, 30_000)
@@ -205,7 +202,6 @@ export async function cleanupAbortedWorkspaceWorktree(
       }
     }
 
-    // Verify clean state: target path gone, branch gone, and no worktree registered at path.
     try {
       await lstat(path)
       return { cleaned: false, reason: '目标 worktree 目录仍然存在' }

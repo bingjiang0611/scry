@@ -13,7 +13,6 @@ import { dispatchRemoteRequest } from './inner-mtls-dispatch'
 import { protocolMismatch } from './remote-protocol'
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
-// Protocol constants live in inner-mtls-protocol.ts; re-exported for callers.
 export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT } from './inner-mtls-protocol'
 
 // Production inner-mTLS host: the TLS 1.3 mutually-authenticated endpoint that a
@@ -21,8 +20,6 @@ export { HOST_TRANSPORT_CAPABILITIES, INNER_IDLE_TIMEOUT_MS, MAX_MUX_INFLIGHT } 
 // inner keys). It is the transport in front of HostController. Every request is
 // authorized by the fingerprint DERIVED FROM THE VERIFIED PEER CERTIFICATE
 // (socket.getPeerCertificate().raw), never from anything in the request body -
-// the same invariant proven by experiments/remote-g0/g1-smoke, now in src/main.
-//
 // Line-delimited JSON. A request without `keepAlive: true` is a one-shot exchange
 // and the connection ends after its reply. A device may opt a connection into
 // reuse: every following request must also opt in, and every reply then starts

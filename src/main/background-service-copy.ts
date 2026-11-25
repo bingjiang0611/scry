@@ -1,9 +1,6 @@
 import { daemonCredentialUnavailableMessage, isDaemonCredentialUnavailable, type BackgroundServiceAction } from '../shared/background-service'
 import { BACKGROUND_SERVICE_STOP_TIMEOUT_MS } from './background-service-stop'
 
-// Words for the «后台服务» confirmations and failures. background-service-actions.ts
-// decides; this only names the decision, free of Electron, so the consequence a dialog
-// states is checked next to the rule that shows it.
 
 export const CONFIRM_BUTTON = 0
 export const CANCEL_BUTTON = 1
@@ -86,7 +83,6 @@ export function reasonMessage(reason: string, platform: NodeJS.Platform = proces
   return `后台服务操作没有完成（${reason}）。`
 }
 
-/** Shown before quitting when the stopped daemon left something behind. */
 export function leftoverNotice(leftovers: readonly string[]): BackgroundServicePrompt {
   return {
     type: 'warning',
@@ -129,7 +125,6 @@ export function versionMismatchPrompt(running: string | null, expected: string):
   }
 }
 
-/** A restart started from the startup prompt did not finish; `message` is reasonMessage(). */
 export function restartFailedNotice(message: string): BackgroundServicePrompt {
   return {
     type: 'warning',
@@ -142,7 +137,6 @@ export function restartFailedNotice(message: string): BackgroundServicePrompt {
   }
 }
 
-/** Native confirmation shown before installing the login-start background service (P5 §2.3). */
 export function confirmLoginStartPrompt(policyEnvKeys: readonly string[]): BackgroundServicePrompt {
   const details = [
     '开启后会安装一个随系统登录自动启动并常驻的后台服务：即使不打开 Scry，已配对设备也可以远程访问本机。',
@@ -162,7 +156,6 @@ export function confirmLoginStartPrompt(policyEnvKeys: readonly string[]): Backg
   }
 }
 
-/** Native confirmation shown before enabling host CLI pairing approval (P5-host-security §4.1, §4.3). */
 export function confirmHostCliApprovalPrompt(): BackgroundServicePrompt {
   return {
     type: 'warning',

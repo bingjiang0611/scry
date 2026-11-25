@@ -74,7 +74,6 @@ async function run() {
   return { ...result, evidence: 'component-fixture UI proof of the mounted hook, not App or Provider evidence' }
 }
 
-/** Native pointer clicks and on-demand answers against the mounted hook. */
 async function exercise(contents) {
   const read = (expression) => contents.executeJavaScript(expression)
   const frames = () => read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))')

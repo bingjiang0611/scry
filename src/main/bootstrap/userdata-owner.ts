@@ -1,12 +1,11 @@
 import type { DaemonLockRecord } from '../../daemon/ledger-lock'
 import { processIdentityKey, type ProcessRow } from '../process-diagnostics'
 
-// The last check before the App signals the daemon holding `scry-userdata.lock`
-// (background-service-stop.ts). The App itself never holds that lock: the daemon owns
-// userData, and the App only stops it on the user's explicit choice.
+// In daemon mode the daemon owns userData. After the user confirms a stop,
+// background-service-stop.ts rechecks the holder of `scry-userdata.lock` and
+// its process identity before signaling.
 
 export type SignalCheckFailure =
-  /** The holder released the lock on its own; nothing to signal. */
   | 'lock-released'
   /** The process is gone or a zombie; its record is stale and the takeover rules apply. */
   | 'holder-exited'
@@ -16,7 +15,6 @@ export type SignalCheckFailure =
   | 'identity-changed'
   /** The pid's identity could not be read, so it cannot be proven to be the daemon. */
   | 'identity-unreadable'
-  /** The record carries no identity key to compare with. */
   | 'identity-unrecorded'
 
 export type SignalCheck = { ok: true } | { ok: false; reason: SignalCheckFailure }

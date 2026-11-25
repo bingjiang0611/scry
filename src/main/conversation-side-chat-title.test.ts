@@ -55,7 +55,6 @@ describe('side-chat child title', () => {
     const question = `  first\n question  ${'长'.repeat(200)}  `
     await sendTurn(fixture, childId, 'child-0001', question)
     const stored = await fixture.store.read(childId)
-    // Cleaned to one line, trimmed and truncated; the full prompt is not the title.
     expect(stored?.title).toBe(`first question ${'长'.repeat(200)}`.slice(0, 120))
     expect(stored?.title?.length).toBe(120)
     expect(stored?.title).not.toContain('\n')

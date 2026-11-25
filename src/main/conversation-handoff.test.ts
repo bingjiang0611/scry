@@ -115,7 +115,6 @@ describe('ordinary conversation send: bounded history, real reader and native im
     const conversation = await seed('source', 'x'.repeat(20_000))
     const start = vi.fn()
     const api = service(start, false)
-    // A refusal proven before dispatch is a typed not_sent answer, not an unknown outcome.
     await expect(api.send(await input(api, conversation))).resolves.toMatchObject({
       status: 'not_sent', reason: expect.stringContaining('历史检索工具')
     })
@@ -132,7 +131,6 @@ describe('ordinary conversation send: bounded history, real reader and native im
     await expect(api.send(request)).resolves.toEqual({ status: 'not_sent', reason: 'native reader not ready' })
     expect((await store.read(conversation.id))!.turns.at(-1)).toMatchObject({ delivery: { status: 'not_sent' } })
     await expect(fetch(connection!.url)).rejects.toThrow()
-    // The retry reports the durable not_sent delivery instead of claiming it was accepted.
     await expect(api.send(request)).resolves.toEqual({ status: 'not_sent', reason: 'native reader not ready' })
     expect(start).toHaveBeenCalledTimes(1)
   })

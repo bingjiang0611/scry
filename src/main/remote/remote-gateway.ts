@@ -84,10 +84,6 @@ import { listDirectories, listDirectoriesPage, type RemoteGatewayDirectoryContex
 import { listCommands, listProviderControls, listProviders, listProvidersFull, type RemoteGatewayCatalogContext } from './remote-gateway-catalog'
 import { listSessions, listSessionsPage, type RemoteGatewaySessionContext } from './remote-gateway-session-list'
 
-// G1 application service: the device-facing surface that a verified remote peer
-// reaches once its inner-mTLS identity is established. It composes the two host
-// subsystems already proven in isolation — the pairing authority (who is an
-// authorized owner device) and the session ledger (durable intents + cursor).
 //
 // Security boundary (mirrors PairingAuthority.prove):
 //   - The peer's certificate fingerprint is supplied by the transport from the
@@ -101,7 +97,6 @@ import { listSessions, listSessionsPage, type RemoteGatewaySessionContext } from
 //   - Single-owner model: authorized owner devices share the host feed, so poll
 //     returns the host-global cursor stream. Per-device partitioning is a later
 //     concern and is not faked here.
-//
 // This module is pure and NOT wired into live IPC/network/RunRegistry yet.
 
 const HASH = /^[0-9a-f]{64}$/
@@ -157,7 +152,6 @@ export class RemoteGateway {
     this.#fileDownloads = deps.fileDownloads
   }
 
-  // Fail closed on anything that is not a currently-authorized owner device.
   #authorize(peerCertSHA256: string): void {
     if (typeof peerCertSHA256 !== 'string' || !HASH.test(peerCertSHA256)) throw new RemoteGatewayError('device_not_authorized')
     if (!this.#authority.authorizesCertificate(peerCertSHA256)) throw new RemoteGatewayError('device_not_authorized')
@@ -186,8 +180,6 @@ export class RemoteGateway {
     const scope = this.grantScope(peerCertSHA256)
     // Register peer & scope before recordIntent for synchronous shadow observers.
     this.#rememberRunMeta(candidateRunId, peerCertSHA256, scope)
-    // Arrival, before anything durable: the segment to `intentDurable` is the ledger's
-    // own cost, not the caller's.
     recordRunStage(candidateRunId, 'submit')
     let receipt: ReturnType<SessionLedger['recordIntent']>
     try {
@@ -233,7 +225,6 @@ export class RemoteGateway {
     return this.#authority.grantScope?.(peerCertSHA256) === 'local' ? 'local' : 'remote'
   }
 
-  /** Scope of the peer that submitted this run, for policy that differs by scope. */
   /** R5: the recorded meta is keyed by the ledger run id, the caller may hold the canonical one. */
   #meta(runId: string): { peerCertSHA256: string; grantScope: 'local' | 'remote' } | undefined {
     const direct = this.#runMeta.get(runId)
@@ -299,10 +290,6 @@ export class RemoteGateway {
   }
 
 
-  // The host-authorized project directories a device may target. Authorization
-  // is the SAME owner-device check as every other method (a revoked device gets
-  // nothing), and the list is a display-only snapshot - selecting one still
-  // passes through the workspace authorizer on submit.
   listProjects(peerCertSHA256: string): RemoteProjectRef[] {
     this.#authorize(peerCertSHA256)
     return projectRefs(this.#projects?.list() ?? [])
@@ -360,10 +347,6 @@ export class RemoteGateway {
     return readHistoryTurnsPage(this.#historyContext(), peerCertSHA256, query)
   }
 
-  // The REAL conversation content of one session so the device can OPEN it,
-  // authorized by the same owner-device check as every method. Bounded (turns,
-  // items/turn, text length); an unknown/unauthorized/unreadable session returns
-  // an empty list (honest: no content, never a fake transcript).
   async readHistory(peerCertSHA256: string, query: RemoteHistoryQuery): Promise<RemoteHistoryTurn[]> {
     return readHistory(this.#historyContext(), peerCertSHA256, query)
   }
@@ -409,9 +392,6 @@ export class RemoteGateway {
     }
   }
 
-  // The assistant's real streamed output CONTENT for one run, strictly after the
-  // caller's cursor. Authorized by the same verified owner-device check as poll;
-  // an unknown/evicted run yields an honest empty page (never fabricated).
   async pollOutput(peerCertSHA256: string, input: { runId: string; cursor: number }): Promise<RunOutputPage> {
     this.#authorize(peerCertSHA256)
     const cursor = Number.isSafeInteger(input.cursor) && input.cursor >= 0 ? input.cursor : 0

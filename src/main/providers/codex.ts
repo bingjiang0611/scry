@@ -33,7 +33,6 @@ import {
   type CodexThreadResponse
 } from './codex-protocol'
 
-/** Encode the native UserInput union once for both initial turns and same-turn steering. */
 // Root items that run a tool the model called. Their completion is tool activity, not model output.
 export function createCodexAdapter(
   isolatedHomePath?: string,

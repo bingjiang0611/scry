@@ -26,10 +26,6 @@ export interface AgentSessionCallbacks {
 }
 
 function mergeProgressiveTrace(snapshot: TraceEvent, local: TraceEvent): TraceEvent {
-  // main coalesces text/thinking deltas in place while retaining the first
-  // event id. A snapshot captured before loadSession may therefore contain a
-  // strict prefix of the renderer's newer local event with the same id. Keep
-  // whichever prefix is longer; divergent values still defer to the snapshot.
   const longerPrefix = (remote: string | undefined, current: string | undefined): string | undefined => {
     if (remote === undefined) return current
     if (current === undefined) return remote
@@ -67,7 +63,6 @@ export function mergeActiveRun(prev: Turn[], run: Turn): Turn[] {
   return next
 }
 
-/** Recovery can fill evidence gaps, but an older active snapshot cannot undo a live terminal. */
 export function mergeRecoveredRun(prev: Turn[], run: Turn): Turn[] {
   const local = prev.find((turn) => turn.runId === run.runId)
   const merged = mergeActiveRun(prev, run)
@@ -103,7 +98,6 @@ export const replayRunLifecycleDeltas = (prev: Turn[], deltas: RunLifecycleDelta
     prev
   )
 
-/** 总览的用量/成本只认终态 result；它缺失时补进归档里的终态证据，按 id 去重，不覆盖 live 证据。 */
 export const terminalEvidenceOf = (items: readonly TraceEvent[]): TraceEvent[] =>
   items.filter((item) => item.kind === 'harness' && (item.stage === 'result' || item.stage === 'session_diff' || item.stage === 'credit_usage'))
 
@@ -125,17 +119,12 @@ export const appendMissingTraceItems = (prev: Turn[], runId: string, events: rea
     changed = true
     return { ...turn, items: [...turn.items, ...missing] }
   })
-  // 没有新证据时保持原引用，不制造无谓的重新渲染。
   return changed ? next : prev
 }
 
 export const currentVisibleRunId = (turns: Turn[]): string | null =>
   [...turns].reverse().find((turn) => !turn.pendingStart && !turn.done && !turn.error)?.runId ?? null
 
-/**
- * live trace 镜像的健康状态。degraded 表示实时视图落后于权威证据（归档/runState 仍完整），
- * resyncRequired 表示积压已排空、可以用权威快照重新对齐。
- */
 export interface TraceLiveHealth {
   degraded: boolean
   skippedEvents: number
@@ -143,39 +132,23 @@ export interface TraceLiveHealth {
 
 export const TRACE_LIVE_HEALTHY: TraceLiveHealth = { degraded: false, skippedEvents: 0 }
 
-/**
- * 拿不到 live 流时的健康状态：降级而不是「健康」。没有流就没有证据，
- * 显示成健康等于把「看不到」说成「没问题」。
- */
 export const TRACE_LIVE_UNAVAILABLE: TraceLiveHealth = { degraded: true, skippedEvents: 0 }
 
 export function traceLiveHealthOf(state: TraceBacklogState): TraceLiveHealth {
   return { degraded: state.degraded, skippedEvents: state.skippedEvents }
 }
 
-/** live trace 降级恢复需要的 bridge 子集；单独抽出来是为了能直接测 null / 抛错 / 终态三条路径。 */
 export interface TraceResyncBridge {
-  /** 忽略 done 的权威快照口。旧 preload 可能没有，此时只能退回 activeRun。 */
   focusedRunSnapshot?: () => Promise<ActiveRun | null>
   activeRun: () => Promise<ActiveRun | null>
   traceResynchronized?: () => Promise<unknown>
 }
 
 export interface TraceResyncOutcome {
-  /** 是否真的拿到并应用了权威快照。false 时必须保持降级。 */
   aligned: boolean
   acknowledged: boolean
 }
 
-/**
- * 用权威快照重新对齐 live 视图。
- *
- * 硬性规则：只有在成功拿到快照**并且**已经把它应用到时间线之后，才向 main 确认。
- * null、抛错、或该 run 已被清空都算没有证据，一律保持降级，绝不清除降级标记。
- *
- * 快照优先用 focusedRunSnapshot：activeRun 会因为 done=true 返回 null，
- * 那样终态阶段被跳过的事件永远补不回来。
- */
 export async function resynchronizeLiveTrace(
   bridge: TraceResyncBridge,
   apply: (run: ActiveRun) => void,
@@ -189,13 +162,10 @@ export async function resynchronizeLiveTrace(
   }
   if (!run || isCleared(run.runId)) return { aligned: false, acknowledged: false }
   apply(run)
-  // 旧 preload 没有确认口：对齐已经发生，但 main 那边的降级标记没人清得掉，
-  // 不能因为调用被可选链吞掉就上报 acknowledged。
   if (!bridge.traceResynchronized) return { aligned: true, acknowledged: false }
   try {
     await bridge.traceResynchronized()
   } catch {
-    // 确认没送到不影响已经完成的对齐：main 仍保持 resyncRequired，下次健康事件会再触发。
     return { aligned: true, acknowledged: false }
   }
   return { aligned: true, acknowledged: true }
@@ -213,19 +183,13 @@ export function rendererTraceResyncBridge(): TraceResyncBridge {
   }
 }
 
-/** 权威历史整体替换可见时间线后的确认；此处对齐已由 main 交付的历史本身证明。 */
 export function acknowledgeTraceResync(): void {
   void window.scry.traceResynchronized?.().catch(() => {
-    // 确认没送到不影响正确性：main 仍然保持 resyncRequired，下次健康事件会再触发一次。
   })
 }
 
 export type StopStateMap = Readonly<Record<string, AgentStopState>>
 
-/**
- * 停止进度是 main 的权威快照；乱序到达时保留较新的 updatedAt，settled 直接摘掉标记
- * （真正的终态由 turnDone/error 表达，不由停止状态冒充）。
- */
 export function applyStopState(prev: StopStateMap, state: AgentStopState): StopStateMap {
   if (state.phase === 'settled') return clearStopState(prev, state.runId)
   const existing = prev[state.runId]
@@ -240,12 +204,6 @@ export function clearStopState(prev: StopStateMap, runId: string): StopStateMap 
   return next
 }
 
-/**
- * 这一轮是否还占着会话。停止请求的任何阶段都不解除占用——包括 provider_unsettled：
- * main 的 admission 仍按 providerSettled 判断，未 settle 时同一会话的新一轮会被直接拒绝
- * （waitForCompletedRuns 见到 done=false 立刻返回 false）。所以 UI 必须继续算 busy，
- * 让新消息进入队列而不是立刻发送并失败。输入框本身保持可编辑。
- */
 export function turnBlocksInput(turn: Turn): boolean {
   return !turn.done && !turn.error
 }
@@ -311,10 +269,6 @@ export function restoredRunRuntimeState(
   }
 }
 
-/**
- * indexOffset 是本页首轮在整个会话里的序号：分页后合成 runId 必须继续全局唯一，
- * 否则不同页的无 runId 历史轮次会撞名并互相覆盖。
- */
 export const parsedSessionTurns = (sessionId: string, parsed: ParsedTurn[], indexOffset = 0): Turn[] =>
   parsed.map((turn, index) => {
     const restored: Turn = {
@@ -359,7 +313,6 @@ export function sessionTurnsWithActiveRun(
   return turns
 }
 
-/** renderer 侧的历史窗口：它描述当前已挂载的是哪一段轮次，以及更早轮次是否仍可取回。 */
 export interface SessionHistoryWindow {
   sessionId: string
   projectionKey?: string
@@ -368,7 +321,6 @@ export interface SessionHistoryWindow {
   hasOlder: boolean
   sourceComplete?: boolean
   completeness: 'complete' | 'partial'
-  /** 这一会话确实向上翻过页；用于区分“本来就只有这么多”和“已经翻到最早一轮”。 */
   pagedOlder?: boolean
 }
 
@@ -391,10 +343,6 @@ export const sessionHistoryWindowOf = (
       }
     : { sessionId, offset: 0, totalTurns: loadedTurns, hasOlder: false, completeness: 'complete' }
 
-/**
- * 只接受严格相邻的更早页：offset + 本页轮数必须等于当前窗口 offset，且 sessionId 与总轮数一致。
- * 任何过期/错位/跨会话的响应都被丢弃而不是拼接，避免把别的会话的轮次混进时间线。
- */
 export function prependOlderSessionTurns(
   prev: Turn[],
   window: SessionHistoryWindow | null,
@@ -428,7 +376,6 @@ export function buildAgentStartRequest(text: string, options: Omit<AgentStartReq
   return {
     ...options,
     prompt,
-    // 每次提交一个命令标识：重投（连按发送、重放）由主进程按收据去重，而不是起第二轮。
     commandId: options.commandId ?? `cmd-${crypto.randomUUID()}`,
     attachments: attachments.map((attachment) => ({ ...attachment })) as AgentInputAttachment[]
   }

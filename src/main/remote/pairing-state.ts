@@ -1,7 +1,6 @@
-// Shape of the persisted pairing file plus its validation. Kept apart from the
-// PairingAuthority state machine on purpose: this file only answers "is this document
-// a valid pairing state?", which is exactly what a corrupted, hand-edited or
-// downgraded file must fail, and it stays pure so it can be tested alone.
+// Persisted pairing-state types and pure validation, separate from the
+// PairingAuthority state machine. Validation checks the supported schema and
+// record invariants, not how the document was produced.
 import { createHash } from 'node:crypto'
 
 export interface VerifiedPairingCSR {
@@ -146,8 +145,8 @@ export function validatePairingState(value: unknown): PairingState {
     return fail('invalid_pairing_state')
   })
   // publicKeySHA256 uniqueness applies only to ACTIVE grants: a revoked grant is
-  // retained for audit history (the newest 16, pairing-retention.ts) and may share
-  // a device key with a new active grant issued after the same device re-pairs.
+  // historical record and may share a device key with a new active grant issued
+  // after the same device re-pairs. Retention is handled separately.
   // deviceId and certificateSHA256 stay globally unique (each issuance mints a
   // distinct cert).
   const activeKeys = grants.filter(g => g.revokedAt === null).map(g => g.publicKeySHA256)

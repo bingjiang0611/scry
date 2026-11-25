@@ -54,8 +54,6 @@ describe('daemon run first text (F1: held text is handed over inside the step)',
       { kind: 'trace', run: { runId: CANONICAL, providerId: 'codex', cwd: '/w', userText: 'hi', items: [textItem('first words\n')], done: false, providerSettled: false }, cursor: { revision: 'r1', count: 1 } }
     ])
     await announceRun(runtime, RUN, { scryRunId: CANONICAL })
-    // The batched flush timer was never allowed to fire, so this text can only have been
-    // delivered by the step that read it.
     expect(timers.length).toBeGreaterThanOrEqual(0)
     expect(deliveredText(sent)).toEqual(['first words\n'])
     runtime.dispose()
@@ -74,7 +72,6 @@ describe('daemon run first text (F1: held text is handed over inside the step)',
     ])
     await announceRun(runtime, RUN, { scryRunId: CANONICAL })
     const batches = sent.filter((entry) => entry.channel === 'agent:trace')
-    // Two items, one step: still a single batch, so batching itself is not what changed.
     expect(batches).toHaveLength(1)
     expect((batches[0].payload as { events: TraceEvent[] }).events).toHaveLength(2)
     runtime.dispose()

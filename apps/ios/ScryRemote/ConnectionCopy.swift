@@ -1,9 +1,6 @@
 import Foundation
 import RemoteTransport
 
-// Copy for the connection and catalog feedback surface. Keeping this small
-// vocabulary in one place prevents the home projection from inventing a second
-// set of status meanings.
 enum ConnectionCopy {
   enum FileOpen {
     static let saveOrShare = "保存或分享"
@@ -360,7 +357,6 @@ enum ConnectionCopy {
   static let providersUnreadable = "没能读取 Provider"
   static let providersUnreadableDetail = "请确认 Mac 上的 Scry 已连接，再刷新列表。"
   static let hostReadAt = "读取"
-  // A panel that has not completed its first read has no timestamp to claim.
   static func panelProvenance(_ host: String, readAt: String?) -> String {
     guard let readAt else { return "来自 \(host) · \(archivedFetchedNone)" }
     return "来自 \(host) · \(readAt) \(hostReadAt)"
@@ -383,7 +379,6 @@ enum ConnectionCopy {
   static let moreRows = "再加载"
   static func rowsLimited(_ shown: Int) -> String { "已显示前 \(shown) 条" }
 
-  // 工具面板（P3）：只读投影，动作仍在 Mac 上。
   static let toolsNote = "只读投影：数值来自 Mac 最近一次读取，操作在 Mac 上完成。"
   static func toolUnavailable(_ reason: String) -> String { "不可用 · \(reason)" }
   static let analyticsReadFailed = "没能读取用量分析"

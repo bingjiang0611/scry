@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// S0-3: the B4-V acceptance table, scripted, with the daemon switch on.
+// S0-3: the B4-V acceptance table, scripted for the daemon-backed App.
 //
 //   npm run build && node scripts/b4v-scenarios.mjs [--only close-app,reopen,...] [--out report.json]
 //       [--no-controls] [--keep] [--restart-api <path>] [--quit-api <path>] [--old-daemon-entry <daemon.js>]
@@ -7,10 +7,8 @@
 // Every scenario runs on its own fresh temporary userData / HOME / workspace under /tmp,
 // asserts isolation before it acts (scry.db, daemon.lock and scry-userdata.lock in that
 // temp userData, held by the process it launched), and records step-level evidence:
-// expected, actual, pass / fail / not-run (with a reason). Where it is meaningful the
-// same scenario runs with the switch off as a control. Nothing passes by default: a
-// missing prerequisite or product hook is not-run, and a not-run step keeps the
-// scenario (and the round) from passing.
+// expected, actual, pass / fail / not-run (with a reason). A missing prerequisite or
+// product hook is not-run and cannot count as a pass.
 //
 // The report is JSON, written after every scenario. Exit code: 0 all pass, 2 any fail,
 // 3 incomplete (not-run / partial / preflight). Runbook:
@@ -31,7 +29,7 @@ import * as sigkill from './b4v/scenarios/sigkill.mjs'
 import * as trustGate from './b4v/scenarios/trust-gate.mjs'
 import * as upgrade from './b4v/scenarios/upgrade.mjs'
 
-// B4-V table order. Controls live inside their scenario module.
+// B4-V table order.
 export const SCENARIOS = Object.freeze({
   'close-app': closeApp.run,
   reopen: reopen.run,

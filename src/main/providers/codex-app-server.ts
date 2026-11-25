@@ -37,7 +37,6 @@ export interface CodexAppServerOptions {
   env?: NodeJS.ProcessEnv
   requestTimeoutMs?: number
   now?: () => number
-  /** Deterministic timeout seam; production uses an unref'd Node timer. */
   scheduleRequestTimeout?: (run: () => void, delayMs: number) => () => void
 }
 

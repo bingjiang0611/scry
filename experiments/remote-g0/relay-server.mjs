@@ -44,7 +44,6 @@ function tokenEqual(a, b) {
 // its own provisioning (env, KMS, DB). Never log the token.
 export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legIdleMs = 60_000 } = {}) {
   if (typeof authorizeHost !== 'function') throw new Error('authorizeHost required')
-  // hostId -> array of { stream, timer } warm legs waiting for a device.
   const warm = new Map()
   const openStreams = new Set()
 
@@ -96,7 +95,7 @@ export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legI
       if (!creds || typeof creds.hostId !== 'string' || !HOST_ID.test(creds.hostId) || typeof creds.token !== 'string' || !MODES.has(mode)) { stream.destroy(); return }
       let ok = false
       try { ok = authorizeHost({ hostId: creds.hostId, token: creds.token }) === true } catch { ok = false }
-      if (!ok) { try { stream.write('{"error":"host_unauthorized"}\n') } catch { /* closing */ } stream.destroy(); return }
+      if (!ok) { try { stream.write('{"error":"host_unauthorized"}\n') } catch {} stream.destroy(); return }
       authed = true
       stream.removeListener('data', onData)
       // Any bytes after the auth line belong to the inner stream; do not drop them.
@@ -130,7 +129,7 @@ export function createRelayServer({ authorizeHost, tls, maxLegsPerHost = 8, legI
       if (leg.writable) leg.write(data)
     })
     leg.on('data', (chunk) => { if (ws.readyState === ws.OPEN) ws.send(chunk, { binary: true }) })
-    const teardown = () => { try { ws.close() } catch { /* closed */ } leg.destroy() }
+    const teardown = () => { try { ws.close() } catch {} leg.destroy() }
     ws.on('close', teardown); ws.on('error', teardown)
     leg.on('close', teardown); leg.on('error', teardown)
   })

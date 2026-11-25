@@ -112,7 +112,7 @@ describe('HostMetricsSampler', () => {
     src.advance(HOST_METRICS_CACHE_MS + 1)
     const second = await sampler.read('local')
     expect(second.sampledAt).toBeGreaterThan(first.sampledAt)
-    // A second caller 1 ms later would otherwise sample again; the floor holds.
+    // Read again 1 ms before the minimum interval elapses; the completed sample is still cached.
     src.advance(HOST_METRICS_MIN_INTERVAL_MS - 1)
     const third = await sampler.read('local')
     expect(third.sampledAt).toBe(second.sampledAt)

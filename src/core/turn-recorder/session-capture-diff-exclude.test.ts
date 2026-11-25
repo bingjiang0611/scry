@@ -107,7 +107,6 @@ it('a repeated start only ever adds paths, and the union reaches every copy the 
   expect(await readJson(captureStatePath(join(root, '.scry'), 'codex', 'sess-1'))).toMatchObject({ diffExclude: merged })
   expect(await readJson(captureContextPath(join(root, '.scry'), 'codex', 'sess-1'))).toMatchObject({ diffExclude: merged })
   expect((await readJson<RecorderOpenTurnState>(recorderOpenPath(session)))?.capture?.diffExclude).toEqual(merged)
-  // A start that declares only the first path again cannot narrow the union.
   await start(root, transcriptPath, [first])
   expect(await readJson(captureStatePath(join(root, '.scry'), 'codex', 'sess-1'))).toMatchObject({ diffExclude: merged })
 })
@@ -128,7 +127,6 @@ it('the exclusion belongs to the capture, so the next capture of the session sta
   const state = await readJson<Record<string, unknown>>(captureStatePath(join(root, '.scry'), 'codex', 'sess-1'))
   expect(state?.captureId).toBe('capture-2')
   expect(state).not.toHaveProperty('diffExclude')
-  // An old open turn may still belong to capture-1; retrying capture-2 must not inherit it.
   await start(root, transcriptPath, undefined, 'capture-2')
   expect(await readJson(captureStatePath(join(root, '.scry'), 'codex', 'sess-1'))).not.toHaveProperty('diffExclude')
   expect(await readJson(captureContextPath(join(root, '.scry'), 'codex', 'sess-1'))).not.toHaveProperty('diffExclude')
@@ -147,7 +145,6 @@ it('the client travels with the claim and reaches the published context, next to
     cli: {}
   })
   expect(claimed.status).toBe('started')
-  // Two different facts: who asked (source) and which client the host ran inside (client).
   expect(await readJson(captureStatePath(join(root, '.scry'), 'codex', 'sess-1')))
     .toMatchObject({ source: 'friday', client: '3eye' })
   expect(await readJson(captureContextPath(join(root, '.scry'), 'codex', 'sess-1')))
@@ -163,12 +160,10 @@ it('a client that is not an identifier is refused instead of becoming a category
     expect(() => parseSessionCaptureContext({ ...base, client: value }, 'codex')).toThrow(CaptureRequestError)
   }
   expect(parseSessionCaptureContext({ ...base, client: '3eye' }, 'codex').client).toBe('3eye')
-  // Absent stays absent: no recording may read as "captured in a client I did not observe".
   expect(parseSessionCaptureContext(base, 'codex')).not.toHaveProperty('client')
 })
 
 it('rejects exclusion paths that are not absolute', () => {
-  // The wire document is what the recorder validates, so spell it the way CodeLens sends it.
   const base = { ...context(''), transcript_path: '/tmp/rollout.jsonl' }
   for (const value of [['relative/path'], '/tmp/single', [42], ['/tmp/ok', 'bad']]) {
     expect(() => parseSessionCaptureContext({ ...base, diffExclude: value }, 'codex'))
@@ -202,11 +197,9 @@ async function git(repo: string, args: string[]): Promise<void> {
 }
 
 async function repository(): Promise<string> {
-  // Git reports the resolved root, so the fixture compares against the same form.
   const root = await realpath(await workspace())
   await git(root, ['init', '-q', '-b', 'main'])
   await writeFile(join(root, 'tracked.txt'), 'v1\n')
-  // The recorder's own data directory is not part of what the turn changed.
   await writeFile(join(root, '.gitignore'), '.scry/\n')
   await git(root, ['add', 'tracked.txt', '.gitignore'])
   await git(root, ['commit', '-q', '-m', 'base'])
@@ -219,7 +212,6 @@ it('a claimed session keeps its run directory out of the record diff and says wh
   const run = join(root, 'friday-88733196')
   await start(root, transcriptPath, [run], 'capture-1', { client: '3eye' })
 
-  // The workflow writes its own stage material, and the turn also edits a tracked file.
   await mkdir(run, { recursive: true })
   for (const name of ['plan.md', 'notes.md', 'trace.json']) {
     await writeFile(join(run, name), `${name} body\n`)
@@ -240,15 +232,11 @@ it('a claimed session keeps its run directory out of the record diff and says wh
   expect(records).toHaveLength(1)
   const diffs = records[0].diff.value ?? []
   const workspace = diffs.find((diff) => diff.repoRoot === root)
-  // Excluded material keeps neither a清单 entry nor a body; the tracked edit is untouched.
   expect(workspace?.files.map((file) => file.path)).toEqual([join(root, 'tracked.txt')])
   expect(workspace?.files[0].change).toBe('modified')
-  // What the exclusion cost stays provable from the record: paths and counts, no bodies.
   expect(workspace?.diffExclude).toEqual({ paths: [run], files: 3 })
   expect(records[0].diff.omissionReason).toContain('3 file(s) were left out of this diff')
-  // The same two facts as codes: a platform matches these, not the sentence above.
   expect(records[0].diff.omissionCodes).toEqual(['baseline_after_turn_start', 'diff_exclude'])
-  // The record keeps the client next to the source it does not replace.
   expect(records[0].capture).toMatchObject({ source: 'friday', client: '3eye' })
   expect(JSON.stringify(records[0])).not.toContain('plan.md body')
 })
@@ -276,6 +264,5 @@ it('the same turn without a declaration records the material files', async () =>
   expect(workspace?.files.map((file) => file.path).sort())
     .toEqual([join(root, 'friday-88733196/plan.md'), join(root, 'tracked.txt')])
   expect(workspace?.diffExclude).toBeUndefined()
-  // The claim-based baseline caveat is expected; the exclusion note must not appear.
   expect(records[0].diff.omissionReason ?? '').not.toContain('left out of this diff')
 })

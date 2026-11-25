@@ -6,8 +6,6 @@ import { parseRecorderConfig } from './config.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { captureToolContent, isFullToolContentPolicy, limitToolContent, sanitizeCapturedContent, sanitizeToolEvents, type ToolContentPolicy } from './tool-content.js'
 
-// Sync App sinks (archive/SQLite outbox) must resolve the same capture policy before their first write.
-// Invalid/unreadable configuration must not silently bypass the workspace's capture budgets.
 export function workspaceToolContentPolicy(workspace: string): ToolContentPolicy | undefined {
   if (!workspace) return undefined
   let text: string
@@ -30,7 +28,6 @@ export interface ContentBearingTurn {
 }
 
 export function protectToolContent<T extends ContentBearingTurn>(turn: T, workspace: string): T {
-  // Keep retry byte budgets stable. Legacy full-redacted artifacts now select raw capture too.
   const pinned = isFullToolContentPolicy(turn.toolContentPolicy) ? turn.toolContentPolicy : workspaceToolContentPolicy(workspace)
   if (!pinned) return turn
   const policy: ToolContentPolicy = { ...pinned, toolOutput: 'full' }
@@ -42,8 +39,6 @@ export function protectToolContent<T extends ContentBearingTurn>(turn: T, worksp
   const calls = (key: 'tools' | 'skills' | 'mcps') => {
     const previous = evidence[key]
     if (!previous.value) return previous
-    // The canonical call list may be richer than retained trace. Never turn absent trace into []
-    // or replace timing/identity with a lower-authority projection just to add body content.
     const value = previous.value.map((call): TurnCall => {
       const matches = (projected[key].value ?? []).filter((candidate) =>
         call.id ? candidate.id === call.id && candidate.name === call.name
@@ -69,7 +64,6 @@ export function protectToolContent<T extends ContentBearingTurn>(turn: T, worksp
   for (const { section, call } of candidates.sort((a, b) => (a.call.order ?? 0) - (b.call.order ?? 0))) {
     for (const key of ['inputContent', 'outputContent'] as const) {
       const original = call[key]!
-      // Defend direct canonical callers as well as trace-derived content; flags are not authorization.
       const checked = sanitizeCapturedContent(original, policy.toolContentFieldBytes)
       const saved = limitToolContent(checked, remaining, 'turn_budget')
       call[key] = saved

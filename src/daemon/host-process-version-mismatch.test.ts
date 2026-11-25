@@ -10,11 +10,6 @@ import { createVersionMismatchPrompt } from '../main/background-service-mismatch
 import { MISMATCH_LATER_BUTTON, type BackgroundServicePrompt } from '../main/background-service-copy'
 import { DaemonClient, daemonClientPaths } from '../main/daemon-client'
 
-// The startup prompt against a real daemon of another version (B4-S, approved
-// 2026-11-12): the App's lazy run surface connects to it the way it does on first use,
-// with the grant the previous build stored in the same userData, as after an upgrade;
-// the daemon's answer is what reports the mismatch, and the prompt is shown once,
-// however many run calls hit it. No launch: the daemon is already there.
 
 const encrypt = (value: string) => Buffer.from(value.split('').reverse().join(''), 'utf8')
 const decrypt = (value: Buffer) => value.toString('utf8').split('').reverse().join('')
@@ -30,7 +25,6 @@ describe('version mismatch prompt against a real daemon', () => {
     const daemon = await startTestDaemon()
     process.env.SCRY_HOST_DAEMON = '1'
     const stateDirectory = join(daemon.userDataDir, 'daemon')
-    // The build the daemon came from (it reports 'test') enrolled and stored its grant.
     const previousBuild = () => new DaemonClient({ paths: daemonClientPaths(stateDirectory, daemon.userDataDir), appVersion: 'test', encrypt, decrypt })
     const enrolled = previousBuild()
     await expect(enrolled.connect()).resolves.toEqual({ version: 'test', enrolled: true })
@@ -38,7 +32,6 @@ describe('version mismatch prompt against a real daemon', () => {
     const lazy = createLazyDaemonRunSurface({
       userDataDir: daemon.userDataDir,
       daemonStateDirectory: stateDirectory,
-      // The upgraded App: same userData, another version.
       appVersion: '2.0.0',
       credentialCipher: () => ({ ok: true, encrypt, decrypt }),
       send: () => undefined,
@@ -68,7 +61,6 @@ describe('version mismatch prompt against a real daemon', () => {
       expect(asked).toHaveLength(1)
       expect(asked[0].detail).toContain('正在运行的后台服务版本是 test，本 App 的版本是 2.0.0')
       expect(restarts).toBe(0)
-      // 稍后 left the daemon and the stored grant as they were.
       const again = previousBuild()
       await expect(again.connect()).resolves.toEqual({ version: 'test', enrolled: false })
       again.close()
@@ -81,8 +73,6 @@ describe('version mismatch prompt against a real daemon', () => {
   it('names the running version when a fresh userData meets an older daemon at enrollment', async () => {
     const daemon = await startTestDaemon()
     process.env.SCRY_HOST_DAEMON = '1'
-    // No stored grant: the App enrolls, and the daemon's enrollment reply carries its
-    // version. That reply is the only place the App learns it; it must not be dropped.
     const lazy = createLazyDaemonRunSurface({
       userDataDir: daemon.userDataDir,
       daemonStateDirectory: join(daemon.userDataDir, 'daemon'),
@@ -107,8 +97,6 @@ describe('version mismatch prompt against a real daemon', () => {
   it('refuses a daemon of the same version from another build (A5) and names both builds', async () => {
     const oldBuild = '3b04ee8'.padEnd(64, 'a')
     const newBuild = '0bf3e97'.padEnd(64, 'b')
-    // The daemon reads its build id from its own bundle; unbundled, the define is the
-    // global the test sets, so the daemon answers as the older build.
     vi.stubGlobal('__SCRY_BUILD_ID__', oldBuild)
     const daemon = await startTestDaemon()
     process.env.SCRY_HOST_DAEMON = '1'
@@ -122,13 +110,11 @@ describe('version mismatch prompt against a real daemon', () => {
       send: () => undefined,
       currentCwd: () => daemon.workspace
     })
-    // Control: the build the daemon came from enrolls, stores its grant and works.
     const previous = app(oldBuild)
     const reinstalled = app(newBuild)
     try {
       await expect(previous.activeRuns()).resolves.toEqual([])
       previous.dispose()
-      // `install:mac:dev` reinstalled the same version; the old daemon kept running.
       const outcomes: DaemonRunModeResult[] = []
       reinstalled.onOutcome((result) => { outcomes.push(result) })
       await expect(reinstalled.activeRuns()).rejects.toThrow('daemon_version_mismatch')

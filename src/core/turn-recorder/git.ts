@@ -1,4 +1,3 @@
-// Public recorder Git API; snapshot storage and evidence collection remain shared.
 export {
   type GitTurnDiffCapture,
   type GitTurnDiffFinishOptions,

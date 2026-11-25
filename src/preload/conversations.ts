@@ -1,10 +1,6 @@
 import { ipcRenderer } from 'electron'
 import type { ConversationApi } from '../shared/conversation-api'
 
-/**
- * Typed, fixed conversation operations. Side-chat creation is local-only; no
- * Provider call happens until the first send of the new child.
- */
 export const conversationsApi = {
   create: (cwd: string): ReturnType<ConversationApi['create']> => ipcRenderer.invoke('conversation:create', cwd),
   fork: (request: Parameters<ConversationApi['fork']>[0]): ReturnType<ConversationApi['fork']> => ipcRenderer.invoke('conversation:fork', request),

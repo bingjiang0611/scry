@@ -133,7 +133,6 @@ describe('P4-0 pure orchestrator decide()', () => {
       leaseOwner: null
     })
 
-    // decide() itself clamps pendingTtlMs strictly to <= 60 s even if a caller passes a larger value
     const oversized = submitCmd({
       commandId: 'cmd-oversized-ttl',
       payload: {
@@ -497,7 +496,6 @@ describe('P4-0 pure orchestrator decide()', () => {
     const dispatchedRun: RunProjectionRow = { ...recordedRun, lifecycle: 'dispatched' }
     const dispatchedView = makeView({ runs: new Map([[dispatchedRun.runId, dispatchedRun]]) })
 
-    // Missing outcome must never fabricate exact quality
     const settledWithoutOutcome = decide(
       {
         type: 'run.effect_result',
@@ -520,7 +518,6 @@ describe('P4-0 pure orchestrator decide()', () => {
       })
     }
 
-    // Usage numbers are forbidden in ALL event types, not only run.provider_settled (data §3.3)
     for (const type of ['run.settled', 'run.finalized', 'session.created', 'turn.began'] as const) {
       expect(() => assertNoUsageNumbersInEvent(type, { nested: { inputTokens: 42 } }), type).toThrow(
         expect.objectContaining({ code: 'orchestration_usage_forbidden_in_event' })

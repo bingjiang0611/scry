@@ -315,7 +315,6 @@
   --panel: var(--overview-surface);
 }
 
-/* Quiet save status of an optimistic row change, in the time's place. */
 .sb-sess-save { display: inline-flex; align-items: center; gap: 4px; color: var(--dim2); }
 .sb-sess-save[data-save='saved'] { animation: sb-save-fade 1200ms var(--ease-out) forwards; }
 .sb-sess-save .ico { width: 10px; height: 10px; color: var(--ok); }

@@ -360,7 +360,6 @@ function strictToolNames(text: string, expectedId: number): string[] | null {
     const direct = parse(JSON.parse(text))
     if (direct) return direct
   } catch {
-    /* try SSE frames */
   }
   for (const line of text.split('\n')) {
     const match = line.match(/^data:\s*(.+)$/)
@@ -369,7 +368,6 @@ function strictToolNames(text: string, expectedId: number): string[] | null {
       const names = parse(JSON.parse(match[1]))
       if (names) return names
     } catch {
-      /* ignore malformed frame */
     }
   }
   return null
@@ -391,7 +389,6 @@ export function testStdioMcp(
       try {
         proc?.kill()
       } catch {
-        /* ignore */
       }
       resolve(r)
     }

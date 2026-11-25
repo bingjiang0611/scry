@@ -31,9 +31,6 @@ final class HomeUITests: XCTestCase {
     add(attachment)
   }
 
-  // L1b: launch is a new session with a collapsed drawer; the drawer's
-  // new-session entry focuses the composer without discarding what was typed.
-  // While the drawer is up it is the only touchable surface.
   func testLaunchShowsNewSessionWithCollapsedDrawerAndFocusesComposer() {
     app.launchArguments = ["-uiPreview", "-connected", "-uiMockData", "-route", "home"]
     app.launch()
@@ -86,7 +83,6 @@ final class HomeUITests: XCTestCase {
     XCTAssertTrue(row("重构远程会话列表").exists)
     app.buttons["设置"].firstMatch.tap()
     app.buttons["返回"].firstMatch.tap()
-    // Settings returns to the new-session page with the drawer collapsed by design.
     openDrawer()
     XCTAssertTrue(app.buttons["home-tab-projects"].isSelected)
   }

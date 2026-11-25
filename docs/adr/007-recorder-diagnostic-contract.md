@@ -1,0 +1,13 @@
+# 007: Separate recorder diagnostics from claims about capture and delivery
+
+**Status:** Accepted (documents existing behavior)
+
+Team CI consumes the versioned `doctor` JSON and its exit code. Keep the distinction between healthy (0), disabled (2), invalid or missing configuration (3), corrupt store (4), and degraded or runtime/delivery errors (5). A user-global skip log cannot identify the affected workspace; report it without attributing its failures to this workspace. An unreadable activated callback delivery state is an error, not a successful delivery. If records are queued without an active callback, warn that Scry will not upload them automatically. [Issue #153](https://github.com/bingjiang0611/scry/issues/153) tracks the case where the inactive backlog itself cannot be read. If an outcome is missing, name the sequence blocking ACK and the explicit retry command.
+
+Run the sequence check against the largest of committed and archived sequence numbers, using the issued watermark and any observed ACK. Contiguous surviving records do not prove that the highest issued record is present. Compare the watermark with both the live maximum and archive floor to detect a missing suffix. An outdated hook script or mixed recorder versions after upgrade warrants a warning without changing the exit code on that basis alone. Check a recent batch, not just the latest record, to detect split installations. Stale open turns are separate from work already pending finalization; silence alone does not prove termination.
+
+For `status`, observed records and hook events outrank config discovery: a user-level hook can record for a project without a local hook. Pi is a global extension. Provider hook trust is unknown, not inapplicable. Callback backlog and ACK are unknown when no callback is activated. The outstanding turn count includes open and pending work. For the command exit code, 2 means recorder disabled or no provider configured, 0 means a configured provider is capturing, and otherwise 3 means a configured provider lacks capture evidence.
+
+Report resolved capture defaults. Disabling prompt, assistant or tool-output capture does not remove tool inputs, file paths or patches. Support bundles are diagnostic metadata, not records: omit record bodies, file-path lists and environment values; rewrite workspace and home path prefixes. Emit to stdout unless a file is requested, and report what was omitted.
+
+See [doctor-command.ts](../../src/cli/doctor-command.ts), [status.ts](../../src/cli/status.ts), [workspace-commands.ts](../../src/cli/workspace-commands.ts), and [support-bundle.ts](../../src/cli/support-bundle.ts).

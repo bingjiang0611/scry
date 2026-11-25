@@ -1,4 +1,3 @@
-// Composer 工作目录选择器：当前绑定、最近使用、解绑与移除历史。
 import { useEffect, useId, useRef } from 'react'
 import { usePickerOpen, type PickerOpenProps } from './picker-state'
 import { basename } from '../format'

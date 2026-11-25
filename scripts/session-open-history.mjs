@@ -90,7 +90,6 @@ export async function measureHistory({ evaluate, wait, click, cdp, beginCounters
     if (index >= 2) samples.push(sample)
     else firstOpens.push(sample)
   }
-  // Adjacent paths: native typing, offscreen history recovery and scroll-back.
   await click(`document.querySelector('textarea')`)
   await evaluate(`window.__nativeInputFrame = new Promise(resolve => {
     document.querySelector('textarea').addEventListener('input', event => {

@@ -64,7 +64,6 @@ export {
 export type { BeginConversationTurn, BeginConversationTurnResult } from './conversation-turns'
 export type { ConversationSeed, SideChatConversationSeed } from './conversation-lifecycle'
 
-/** Internals shared with the cohesive ledger modules; never a second persisted authority. */
 export interface ConversationLedger {
   readonly userData: string
   readonly admission: ContextAdmission
@@ -157,7 +156,6 @@ export class ConversationStore implements ConversationLedger {
     const generation = this.ownershipGeneration
     if (this.ownershipScan?.generation === generation) return this.ownershipScan.promise
     const promise = this.scanOwnership().then((conversations) => {
-      // A scan that began before an invalidation may predate the publication behind it.
       if (generation === this.ownershipGeneration && !this.ownership) this.ownership = conversations
       return conversations
     }).finally(() => { if (this.ownershipScan?.promise === promise) this.ownershipScan = undefined })

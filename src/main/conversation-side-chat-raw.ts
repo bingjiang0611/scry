@@ -12,7 +12,6 @@ export interface ProjectedTurn {
   ordinal: number
   runId: string
   providerTurnId?: string
-  /** Exact captured outcome; only a terminal turn carries one. */
   status?: string
   /**
    * Provider termination evidence for this turn. Visible text never makes a turn terminal,

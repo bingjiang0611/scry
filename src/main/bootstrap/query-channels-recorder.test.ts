@@ -20,9 +20,6 @@ const { registerAgentRuntimeHandlers } = await import('./agent-runtime-ipc')
 const { registerDaemonOwnedChannels } = await import('./daemon-owned-channels')
 const { gateDaemonChannel, installDaemonChannelForwarder } = await import('../daemon-channel-gate')
 
-// Recorder content pages and the Provider command catalog, which the daemon serves as
-// local ops (B4-L4). Recorder content is read for the window's workspace: the App takes it
-// from its own selection, never from a renderer argument.
 
 type Table = Record<string, (...args: unknown[]) => Promise<unknown>>
 const dirs: string[] = []

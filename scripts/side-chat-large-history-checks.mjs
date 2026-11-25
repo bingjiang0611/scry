@@ -90,7 +90,6 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     `the descriptor must count every frozen message: ${json({ messageCount: descriptor.messageCount })}`)
   check(record.length < 20_000, `the child record grew with the history: ${json({ bytes: record.length })}`)
 
-  // The first send really dispatches, and the Provider really reads the omitted history.
   const readsBefore = readJsonLines(readsPath).length
   // The send plan must not carry one reference per frozen message across the IPC boundary.
   const planShape = await evaluate(`(async () => {
@@ -147,7 +146,6 @@ export async function exerciseSideChatLargeHistory({ cdp, evaluate, check, ipcCo
     check(sourceHashes.has(entry.hash),
       `a read body does not match any body the fixture wrote: ${json({ index, id: entry.id, hash: entry.hash })}`)
     check(entry.characters === row.characters, `a read body was truncated: ${json({ id: entry.id, read: entry.characters, sealed: row.characters })}`)
-    // Same length with different bytes still fails: the sealed digest is compared too.
     check(row.hash === entry.hash,
       `the sealed body differs from what the Provider read: ${json({ id: entry.id, sealed: row.hash, read: entry.hash })}`)
     check(entry.pages > 0, `a read body never completed: ${json({ id: entry.id, pages: entry.pages })}`)

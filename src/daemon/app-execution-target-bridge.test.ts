@@ -23,7 +23,6 @@ describe('AppExecutionTargetBridge edge contracts (W10 follow-ups)', () => {
       detachGraceMs: 5_000
     })
     try {
-      // 1. App disconnects while discovery is in-flight -> returns [] instead of rejecting.
       const poll1 = bridge.localHandlers.poll('app-1', 5_000)
       const discOffline = bridge.client.executionTargets()
       const work1 = await poll1
@@ -31,14 +30,12 @@ describe('AppExecutionTargetBridge edge contracts (W10 follow-ups)', () => {
       bridge.onPeerDisconnected('app-1')
       await expect(discOffline).resolves.toEqual([])
 
-      // 2. App stalls past timeout during discovery -> returns [] instead of rejecting.
       const poll2 = bridge.localHandlers.poll('app-1', 5_000)
       const discTimeout = bridge.client.executionTargets()
       const work2 = await poll2
       expect(work2.calls).toHaveLength(1)
       await expect(discTimeout).resolves.toEqual([])
 
-      // 3. Queue saturated (bridge_busy) -> discovery still returns [], while target request rejects.
       const bridgeBusy = createAppExecutionTargetBridge({
         isPrimaryAppPeer: (peer) => peer === 'app-1',
         callTimeoutMs: 5_000,
@@ -79,7 +76,6 @@ describe('AppExecutionTargetBridge edge contracts (W10 follow-ups)', () => {
       })
       const work = await poll
       expect(work.calls).toHaveLength(1)
-      // Wait past callTimeoutMs (40ms) but well before submitTimeoutMs (250ms).
       await new Promise((r) => setTimeout(r, 80))
       const ack = bridge.localHandlers.submitResult('app-1', {
         callId: work.calls[0]!.callId,
@@ -103,7 +99,6 @@ describe('AppExecutionTargetBridge edge contracts (W10 follow-ups)', () => {
       const stalePoll = bridge.localHandlers.poll('app-1', 5_000)
       const freshPoll = bridge.localHandlers.poll('app-1', 5_000)
 
-      // The older waiting poll must wake immediately with no calls.
       await expect(stalePoll).resolves.toEqual({ calls: [] })
 
       const req = bridge.client.mobileRequest(TARGET, { op: 'projects' })
@@ -132,7 +127,6 @@ describe('AppExecutionTargetBridge edge contracts (W10 follow-ups)', () => {
       conn1.abort()
       await expect(deadPoll).resolves.toEqual({ calls: [] })
 
-      // A call queued during the brief gap before the replacement poll reconnects must go to poll #2.
       const req = bridge.client.mobileRequest(TARGET, { op: 'projects' })
       const work = await bridge.localHandlers.poll('app-1', 5_000)
       expect(work.calls).toHaveLength(1)
@@ -159,14 +153,12 @@ describe('AppExecutionTargetBridge edge contracts (W10 follow-ups)', () => {
       const work = await poll
       const callId = work.calls[0]!.callId
 
-      // Different authorized peer cannot hijack or resolve app-a's in-flight call.
       expect(bridge.localHandlers.submitResult('app-b', {
         callId,
         ok: true,
         result: { projects: ['hijacked'] }
       })).toEqual({ accepted: false })
 
-      // Oversized result from the owning peer fails the call immediately (not after 10s timeout).
       const started = Date.now()
       const oversized = 'x'.repeat(MAX_EXECUTION_TARGET_RESULT_BYTES + 1)
       expect(() => bridge.localHandlers.submitResult('app-a', {

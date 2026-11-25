@@ -65,7 +65,6 @@ describe('本回合新建 worktree 的 diff 基线', () => {
     await rm(worktree, { recursive: true, force: true })
     const record = await endTurn(root, 'wt-deleted')
 
-    // Git 在 gitdir 记录里写的是 canonical 路径，所以已删除的 worktree 仍能报出它的路径。
     const snapshot = diffAt(record, join(canonicalRoot, 'trees', 'gone'))
     expect(snapshot).toMatchObject({
       status: 'unavailable',
@@ -79,7 +78,6 @@ describe('本回合新建 worktree 的 diff 基线', () => {
   }, 35_000)
 
   it('worktree 的 .git 链接被删掉：partial，不把整个目录算成新增文件', async () => {
-    // 少了 `<root>/.git`，Git 会向上解析到外层仓库，把 worktree 里每个文件都当成新增。
     const root = await gitWorkspace()
     await startTurn(root, 'wt-link-gone')
     const worktree = await addWorktree(root, 'link-gone')
@@ -145,7 +143,6 @@ describe('本回合新建 worktree 的 diff 基线', () => {
     const [first, ...rest] = (await readFile(reflogPath, 'utf8')).split('\n')
     const [header, ...message] = first.split('\t')
     const meta = header.split(' ')
-    // 收尾上限允许 60s 时钟偏移；把创建时间推到 1 小时后只会来自时钟或 reflog 异常。
     meta.splice(meta.length - 2, 1, String(Math.floor(Date.now() / 1_000) + 3_600))
     await writeFile(reflogPath, [[meta.join(' '), ...message].join('\t'), ...rest].join('\n'))
     const record = await endTurn(root, 'wt-skew')
@@ -181,7 +178,6 @@ describe('本回合新建 worktree 的 diff 基线', () => {
     const carried = diffAt(second, canonicalWorktree)
     expect(carried.status).toBe('captured')
     expect(carried).not.toHaveProperty('baselineSource')
-    // 只含第二轮自己的改动：上一轮的 first.txt 不再重复出现。
     expect(carried.files).toEqual([
       expect.objectContaining({ path: join(canonicalWorktree, 'second.txt'), added: 1, deleted: 0 })
     ])
@@ -333,7 +329,6 @@ describe('worktree reflog 创建记录解析', () => {
       baseline: { commit: '0'.repeat(40), at: new Date().toISOString() }
     }, { captureRoot, excludedPaths: [], events: [] })
 
-    // 快照自己的失败状态照实保留；只有基线标记降级成 partial，不再冒充可用。
     expect(snapshot.status).not.toBe('captured')
     expect(snapshot).toMatchObject({
       files: [],

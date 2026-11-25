@@ -42,7 +42,6 @@ function rememberRead(api: SourceControlApi, cwd: string, state: ScRead<ScReposi
   reads.set(cwd, { state, operations, at: Date.now() })
   while (reads.size > LAST_READ_LIMIT) reads.delete(reads.keys().next().value as string)
 }
-// After this long a running Git action says it is taking longer than usual.
 const LONG_WAIT_MS = 10_000
 const readTime = (at: number): string => new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 
@@ -60,7 +59,6 @@ export function SourceControlPanel({ cwd, active, api: injectedApi }: { cwd: str
   const [busy, setBusy] = useState(false)
   const [runningAction, setRunningAction] = useState<ScMutation['action'] | null>(null)
   const busyRef = useRef(false)
-  // The running push/fetch a person may cancel.
   const runningOperation = useRef<{ repositoryId: string; operationId: string } | null>(null)
   const [cancelState, setCancelState] = useState<'idle' | 'requested' | 'unavailable'>('idle')
   const alive = useRef(true)

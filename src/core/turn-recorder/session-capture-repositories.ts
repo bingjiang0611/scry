@@ -6,13 +6,8 @@ import { segmentCaptureDir } from './recorder-segment-diff.js'
 import type { RecorderEnablement } from './config.js'
 import { TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 
-/** A turn cannot baseline an unbounded set of repositories; discovery from tools stays bounded. */
 export const CAPTURE_REPOSITORY_LIMIT = 32
 
-/**
- * Remember repositories this session touched so later turns baseline them at turn start. Returns
- * only the newly added roots: an already known repository keeps the baseline it already has.
- */
 export async function updateCaptureRepositories(
   root: string,
   roots: string[]
@@ -28,10 +23,6 @@ export async function updateCaptureRepositories(
   return merged.slice(known.length)
 }
 
-/**
- * Baseline a repository the moment the turn is about to change it. The PreToolUse that names the
- * file arrives before the write, so this baseline is the pre-edit state, not an approximation.
- */
 export async function attachCaptureBaseline(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   open: RecorderOpenTurnState,
@@ -52,8 +43,6 @@ export async function attachCaptureBaseline(
       return true
     })
   }
-  // Beside the turn, not inside it: sealing removes the turn directory, and a background wake may
-  // continue this turn with this capture's end state as its baseline.
   const captureDir = segmentCaptureDir(sessionRoot, open.generation)
   const additions = await Promise.all(newRepositories.map(async (repository) => ({
     repository,

@@ -14,8 +14,6 @@ export function registerSuite6(): void {
     await mkdir(lock, { recursive: true })
     await writeFile(join(lock, 'owner.json'), JSON.stringify({ pid: process.pid, createdAt: Date.now() }))
     const release = new Promise<void>((resolve) => {
-      // Keep one real filesystem contention path, but synchronization does not require sleeping
-      // past the generic two-second lock default.
       setTimeout(() => void rm(lock, { recursive: true, force: true }).then(() => resolve()), 100)
     })
 

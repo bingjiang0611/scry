@@ -14,8 +14,6 @@ export interface WarmPoolOptions<V> {
   limit: number
   idleMs: number
   close(value: V): Promise<void> | void
-  // Whether the parked value can serve another read at all (e.g. a Provider
-  // process that did not fail or start closing).
   reusable(value: V): boolean
   // Environment equality decides reuse: a parked process started with different
   // auth, PATH or isolated-home inputs must not answer the next read.
@@ -35,7 +33,6 @@ export interface WarmPoolInvalidation {
   profileId?: string
 }
 
-// Key order must never depend on the caller's property order.
 export function providerWarmKey(parts: Readonly<Record<string, string | undefined>>): string {
   return Object.keys(parts).sort().map(name => `${name}=${parts[name] ?? ''}`).join('\u0000')
 }
@@ -113,8 +110,8 @@ export class ProviderWarmPool<V> {
 
   #arm(key: string, value: V): NodeJS.Timeout {
     const idle = setTimeout(() => {
-      // Expiry races a concurrent take/park; only the entry still owning the key
-      // may close its value, so a renewed entry is never closed by a stale timer.
+      // The key may have been taken or replaced since this timer was armed.
+      // Expire it only if it still holds the same value.
       const current = this.#entries.get(key)
       if (!current || current.value !== value) return
       this.#entries.delete(key)

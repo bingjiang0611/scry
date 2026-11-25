@@ -1,8 +1,5 @@
 // Writing a turn into SQLite, plus the session-scoped deletes and ownership reads
 // that share its tables. Caches and the connection live in db-connection.ts.
-// P0（RFC v2.4）：可信数据底座的 electron 胶水层。schema/行映射/查询 SQL 在纯模块 span-ledger.ts，
-// 本文件只负责 electron 路径解析 + 预编译语句执行 + 迁移闸控。WAL + user_version 增量迁移。
-// 原生模块，打包要 asarUnpack。加载失败（EDR/ABI）整体降级 no-op，不连累 app 启动。
 import { protectToolContent } from '../core/turn-recorder/content-policy.js'
 import { basename } from 'node:path'
 import { readFileSync } from 'node:fs'

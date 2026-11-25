@@ -9,14 +9,7 @@ import { createLazyDaemonRunSurface } from '../main/bootstrap/daemon-run-lazy'
 import type { ActiveRun } from '../shared/trace'
 import { ensureMcpExecutionAuthorized } from '../main/bootstrap/trust'
 
-// B4-V `trust-gate` against a real daemon, through the App's own run surface (what
-// `agent:start` calls in daemon mode). The repository MCP config is the scenario's:
-// a safe config is auto-authorized after re-verification, a config whose server env
-// carries NODE_OPTIONS fails verification and must be refused at the start, with the
-// same message the in-process pipeline gives, and never reach the Provider.
 
-// The trust module reads the user's Codex config under HOME at import: a temporary
-// HOME keeps the real one out of the fingerprint.
 vi.hoisted(() => {
   const { mkdtempSync } = require('node:fs') as typeof import('node:fs')
   const { tmpdir } = require('node:os') as typeof import('node:os')
@@ -87,15 +80,12 @@ describe('daemon trust gate (B4-V trust-gate)', () => {
       expect(runFor(daemon, 'trust-safe').events.map((event) => event.type)).toContain('run.admitted')
 
       writeConfig(daemon, UNSAFE)
-      // What the in-process pipeline's admission says about this config (the control).
       const inProcess = await ensureMcpExecutionAuthorized({ providerId: 'codex', cwd: daemon.workspace }, 'run')
         .then(() => 'admitted', (error: Error) => error.message)
       expect(inProcess).toMatch(/MCP 配置无法安全执行：.*NODE_OPTIONS/)
       const refusal = await surface.start({ prompt: 'trust-unsafe', providerId: 'codex', cwd: daemon.workspace, commandId: randomUUID() })
         .then((receipt) => `accepted ${receipt.runId}`, (error: Error) => error.message)
       expect(refusal).toBe(inProcess)
-      // The ledger is honest about it: the intent ended failed with the same reason, no
-      // run was admitted, and the Provider never started or produced anything.
       const refused = runFor(daemon, 'trust-unsafe')
       expect(refused.projection).toMatchObject({ lifecycle: 'failed', outputSeq: null })
       expect(refused.events.find((event) => event.type === 'run.failed')?.payload)

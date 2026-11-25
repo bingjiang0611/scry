@@ -3,8 +3,6 @@ import { rm } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import { setup, ssh, statusSnapshot } from './desktop-client-fixtures'
 
-// The catalog wire shape: one snapshot round trip, its unchanged path, and the
-// capability it carries for Provider controls.
 describe('DesktopRemoteClient catalog snapshot', () => {
   it.each([false, true])('negotiates before listing providers (selected support: %s)', async (supported) => {
     const fixture = await setup({ providerDiscovery: supported })
@@ -14,7 +12,6 @@ describe('DesktopRemoteClient catalog snapshot', () => {
       await fixture.client.finishPairing(id)
       await fixture.client.connect(id)
       fixture.tlsRequest.mockClear()
-      // Metadata and Provider capabilities come in one round trip.
       fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: {
         revision: 'r1',
         info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', ...(supported ? { providerDiscovery: 2 } : {}) },
@@ -23,7 +20,6 @@ describe('DesktopRemoteClient catalog snapshot', () => {
       } })
       expect(await fixture.client.catalog(id)).toMatchObject({ providerEvidence: supported ? 'host_snapshot' : 'legacy_host' })
       expect(fixture.tlsRequest.mock.calls.map(([value]) => value.request)).toEqual([{ protocol: REMOTE_PROTOCOL_VERSION, op: 'catalogSnapshot' }])
-      // Re-reading the same host sends the revision and costs no payload.
       fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: { unchanged: true, revision: 'r1' } })
       expect(await fixture.client.catalog(id)).toMatchObject({ providerEvidence: supported ? 'host_snapshot' : 'legacy_host', projects: [], sessions: [] })
       expect(fixture.tlsRequest.mock.calls.map(([value]) => value.request).at(-1)).toEqual({ protocol: REMOTE_PROTOCOL_VERSION, op: 'catalogSnapshot', revision: 'r1' })
@@ -117,7 +113,6 @@ describe('DesktopRemoteClient catalog snapshot', () => {
       expect(cat.hostAdminNoticeItems?.[0]?.id).toBe('n-1')
       expect(cat.hostAdminNoticeItems?.some((n) => (n as { id: string }).id === 'future-1')).toBe(false)
 
-      // Non-array hostAdminNoticeItems also degrades safely without breaking the catalog.
       fixture.tlsRequest.mockResolvedValueOnce({ catalogSnapshot: {
         revision: 'r-notices-non-array',
         info: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: fixture.host.hostId, execution: 'canonical', providerDiscovery: 2, hostAdminNotices: 1 },

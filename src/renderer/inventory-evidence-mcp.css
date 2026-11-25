@@ -170,7 +170,6 @@
   -webkit-line-clamp: 2;
 }
 
-/* 本次测试列移除后，测试结果贴在操作按钮下方，不再另起一列 */
 .mcp-test-inline {
   display: flex;
   align-items: flex-start;

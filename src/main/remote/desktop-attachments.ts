@@ -191,10 +191,9 @@ export class DesktopAttachmentStore {
 export function newAttachmentId(): string { return randomUUID() }
 export function attachmentSha256(attachment: AgentInputAttachment): string { return digest(Buffer.from(attachment.dataBase64, 'base64')) }
 
-/** Upper bound on a remote intent detail: the prompt plus inline attachment data. */
+/** Upper bound on the length of the serialized intent detail string, before parsing. */
 export const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 
-// Staging a desktop image: references carry metadata only, bytes go in chunks.
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

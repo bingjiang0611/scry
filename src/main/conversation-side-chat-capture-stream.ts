@@ -8,7 +8,6 @@ import type { CaptureMessageMeta } from './conversation-side-chat-capture'
 
 const hash = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
-/** One frozen message plus the metadata the snapshot record must claim for it. */
 export interface CapturedConversationMessage {
   message: StreamedMessage
   meta: CaptureMessageMeta

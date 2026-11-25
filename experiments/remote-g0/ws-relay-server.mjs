@@ -67,7 +67,6 @@ export function createWsRelayServer({
     return true
   }
 
-  // hostId -> Set of legs { ws, mode, authed, openedAt, lastPingAt, device }
   const rooms = new Map()
   // hostId -> last time a host leg opened, authenticated or closed. Only rooms
   // within the window matter, so stale entries are pruned as rooms empty.

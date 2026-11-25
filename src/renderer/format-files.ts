@@ -1,4 +1,3 @@
-// 文件足迹：结构化读写计数 + Bash 只读命令推断出的读取，并回答「第一次写入前有没有读取证据」。
 import type { TraceEvent } from '@shared/trace'
 import { inferredReadPaths } from './file-evidence'
 
@@ -10,7 +9,6 @@ export interface FileRow {
   edit: number
 }
 
-// P2 Files（RFC §8.4）：写/改文件的「读覆盖」——第一次写入前有没有读取证据。
 // tool_result 会继承 fileOp/filePath，必须排除；写后补读不反向洗掉盲改风险。
 export interface FileCoverage {
   written: number // 写或改过的文件数

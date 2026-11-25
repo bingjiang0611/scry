@@ -121,7 +121,6 @@ async function main() {
     userData: userDataDir, cwd: canonicalWorkspace, otherCwd: realpathSync(secondWorkspace), executable
   }) : undefined
   const openReceipt = join(temp, 'opened-paths.json')
-  // Its own app directory (smoke-app-entries.mjs): Electron reads the App version there.
   const filesEntry = join(temp, 'files-app', 'files-main.mjs')
   if (devFilesOnly) writeFileOpenEntry(filesEntry, openReceipt)
   const badgeReceipt = join(temp, 'dock-badge.json')

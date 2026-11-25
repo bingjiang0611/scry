@@ -18,7 +18,6 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const scenario = selectScenario(process.argv.slice(2))
 if (scenario === null) {
   // Each responsibility owns a fresh renderer/userData and the unchanged 55s budget.
-  // A failure stops the suite; it never advances by treating a timeout as success.
   for (const name of defaultScenarios) {
     console.log('DesktopRemote scenario: ' + name)
     await new Promise((resolve, reject) => {

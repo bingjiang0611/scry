@@ -10,9 +10,6 @@ export interface RemoteGatewayCatalogContext {
   commands?: RemoteCommandSource
 }
 
-// Capability reads are the slowest user-visible remote path (Pi catalog p50 1888 ms,
-// Provider controls 1304 ms) and several clients ask for the same context at once:
-// the sidebar refresh, the composer and a second device all land on one selection.
 // Sharing only the request that is still in flight removes that duplicate work
 // without ever answering a later refresh from a settled result - a read that
 // arrives after settlement starts its own Provider query.

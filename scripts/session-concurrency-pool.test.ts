@@ -13,7 +13,6 @@ function fakePage() {
   let now = 0
   const load = new Function('performance', `return (${runTaskPool.toString()})`)
   const pool = load({ timeOrigin: 1_000, now: () => now })
-  // advance returns the new page time, so a caller can read the clock and move it in one expression.
   return { pool, advance: ms => (now += ms), origin: 1_000 }
 }
 
@@ -24,7 +23,6 @@ describe('fixed batch size contract', () => {
     expect(parseTaskCount(undefined, 4)).toBe(4)
     expect(parseTaskCount('', 16)).toBe(16)
     expect(parseTaskCount('16', 4)).toBe(16)
-    // The batch can only be the in-flight limit or the full batch: no arbitrary work size is reserved.
     expect(() => parseTaskCount('4', 16)).toThrow(/tasks must equal concurrency \(16\) or 16/)
     expect(() => parseTaskCount('8', 4)).toThrow(/or 16/)
   })
@@ -95,7 +93,6 @@ describe('fixture task pool', () => {
       if (task.index === 1) return failure
       return successes.then(() => ({ startRequestedAtEpochMs: page.origin, terminalAtEpochMs: page.origin + 1 }))
     })
-    // Four slots took the first four tasks; nothing else can be dispatched while they are parked.
     expect(attempted).toEqual([0, 1, 2, 3])
     rejectFailure()
     // Resolves after the pool's own continuation has already run and recorded the failure.

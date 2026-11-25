@@ -40,8 +40,6 @@ export const TIMING = {
 export const errorMessage = (error) => (error instanceof Error ? error.message : String(error))
 const hashOf = (value) => createHash('sha256').update(value).digest('hex')
 export const hashFile = (path) => hashOf(readFileSync(path))
-// Source identity is evidence about what was measured, not a build-freshness proof: the hashes below are
-// taken before and after one run and can only show that the inputs did not change during it.
 export function readIdentity(root) {
   const git = (args) => execFileSync('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', ...args],
     { cwd: root, encoding: 'utf8' }).trim()

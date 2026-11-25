@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-/** Build-time only. Hash source + dependency/config identity, not the user's workspace at runtime. */
 export function performanceBuildId(root: string): string {
   const hash = createHash('sha256')
   const add = (relative: string): void => {

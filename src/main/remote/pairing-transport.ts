@@ -93,7 +93,7 @@ export class PairingTransport {
         .then((reply) => socket.end(JSON.stringify(reply) + '\n'))
         .catch(() => socket.destroy())
     })
-    socket.on('error', () => { /* peer reset; nothing to report */ })
+    socket.on('error', () => { /* Handle socket errors here without reporting details. */ })
   }
 
   async #dispatch(authority: PairingAuthority, publicKeySHA256: string, line: Buffer): Promise<unknown> {

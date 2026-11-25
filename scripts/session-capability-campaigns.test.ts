@@ -23,7 +23,6 @@ if (process.argv[2] === ${JSON.stringify(failAt)}) process.exit(9)
 
 describe('bounded capability campaigns', () => {
   it('retains every fixture and follow-up from the former monolithic campaign', () => {
-    // Summary mode includes workspace diff, summary sampling and the three core checks.
     expect(defaultCapabilityCampaigns).toEqual([
       '--motion-tokens-only', '--sidebar-activity-only', '--cache-only',
       '--meta-prompts-only', '--performance-only', '--summary-only',

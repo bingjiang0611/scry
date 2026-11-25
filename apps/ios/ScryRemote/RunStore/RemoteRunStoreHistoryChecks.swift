@@ -118,7 +118,6 @@ extension RemoteRunStore {
     store.completedLiveTurns[identity] = [.init(id: "fixture-run", runId: "fixture-run", prompt: "local prompt",
       attachments: [], lifecycle: .settled, output: [], resultSummary: nil, externalSessionId: "session")]
     store.history = .baseUnavailable
-    // Exercise the actual new mirror path, not the retired byte-suffix setter.
     let preview = try JSONDecoder().decode(G0Transport.RunHistoryPreview.self, from: Data("""
       {"status":"available","source":"indexed_archive","partial":true,"truncated":true,"bytes":0,
        "turns":[{"userText":"same prompt","userTextTruncated":false,"truncated":false,"items":[{"kind":"output","text":"first answer","truncated":false}]},

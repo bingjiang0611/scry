@@ -17,7 +17,6 @@ import { assertDaemonSocketFits, benchAppEnv, benchEvidenceSources, benchTempBas
 
 // Production main/preload/renderer, offline fixture data, native Chromium input.
 // Measures local history plus button/render/settlement acceptance, not real Provider latency.
-// The App always runs Agents in its daemon (S3; see session-open-bench-mode.mjs).
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const { scenario, mode } = parseBenchArguments(process.argv.slice(2), nativeWorkloads)
 const daemon = mode === 'daemon' ? await import('./session-open-bench-daemon.mjs') : null
@@ -194,7 +193,6 @@ try {
   // The detached daemon tree is not the App's; it is stopped and verified on its own.
   const cleanup = await stopOwnedApp(closing, { exclude: daemonTree.map(row => row.pid) })
   stopDaemon = null
-  // Before the disk proof, so that no live process (App or daemon) can serve it.
   const daemonCleanup = daemon ? await daemon.stopBenchDaemon(userData, daemonTree) : null
   // Independent disk read after process exit: an in-memory/cached session cannot satisfy this proof.
   const archiveRoot = join(userData, 'trace-archive-turns-v1')
@@ -245,7 +243,6 @@ try {
     mainLoads: loads, correctness: ['full initial page', 'latest turn visible', 'native typing', 'older turn recovery',
       'pagination preserves total', 'rapid selection isolates history', 'draft retained across selections'],
     // Existing main-process traces distinguish finalization work from renderer receipt delays.
-    // Preserve them on successful runs too; failed comparisons previously lost this evidence.
     lifecycleTraces: traces.filter(sample => sample.name.startsWith('agent.') || ['app.startup', 'ipc.agent:start', 'ipc.agent:stop'].includes(sample.name)),
     cleanup, daemonCleanup, localRecording }, null, 2))
 } catch (error) {

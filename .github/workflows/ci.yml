@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 2
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -40,6 +41,9 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Typecheck
         run: npm run typecheck
+      - name: Reject new prose comments
+        if: ${{ github.event_name == 'pull_request' }}
+        run: npm run check:source-comments -- --base HEAD^1
       # S3: the App main entry reaches no Provider SDK, node-pty, better-sqlite3, run
       # pipeline, ledger or non-allowlisted child_process (0 violations, no baseline).
       - name: Main import boundary (strict)
@@ -304,7 +308,6 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          # Every job must succeed, except jobs proven unaffected, which must be skipped.
           echo "$RESULTS" | jq -e --argjson desktop '["packaged-electron"]' '
             length == 8 and .changes.result == "success" and
             (.changes.outputs as $out

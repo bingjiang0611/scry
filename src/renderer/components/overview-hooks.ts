@@ -1,4 +1,3 @@
-// 会话级 Hook 证据的纯聚合：把生命周期事件收敛成可检查的脚本、实例与状态文案。
 import type { HookConfiguredCommand, TraceEvent } from '@shared/trace'
 import { basename, hookCancellationDetail, hookCommandLabel } from '../format'
 import type { HookInstanceRow, HookScriptRow } from '../format'

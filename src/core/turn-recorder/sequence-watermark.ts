@@ -2,19 +2,8 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeJsonAtomic } from './io.js'
 
-/**
- * Durable high-water mark of record sequence numbers.
- *
- * The sequence is the uploader's dedupe key and the delivery cursor, so it must never be reissued.
- * `records/` alone cannot prove which numbers were issued: an operator who deletes record files
- * without `scry turns archive` lowers the live maximum, and reusing that number makes the drain
- * skip every later record (delivery only walks sequences above `processedThrough`). The watermark
- * is written inside the commit lock before the record file exists, so a crash may skip a number
- * but can never repeat one.
- */
 export interface SequenceWatermark {
   schemaVersion: 1
-  /** Highest sequence ever allocated, whether or not its record file still exists. */
   lastIssued: number
 }
 
@@ -22,7 +11,6 @@ export function sequenceWatermarkPath(dataRoot: string): string {
   return join(dataRoot, 'sequence-watermark.json')
 }
 
-/** Strict read: a damaged watermark must fail closed instead of restarting numbering at 1. */
 export async function readSequenceWatermark(dataRoot: string): Promise<SequenceWatermark | null> {
   let source: string
   try {
@@ -43,14 +31,6 @@ export async function readSequenceWatermark(dataRoot: string): Promise<SequenceW
   return { schemaVersion: 1, lastIssued: raw.lastIssued as number }
 }
 
-/**
- * Highest sequence the workspace already issued according to delivery checkpoints alone.
- *
- * Only used once, when the watermark file does not exist yet because an older CLI wrote the
- * workspace. Steady-state allocation never derives the number from delivery state: checkpoints are
- * per fingerprint, can lag and can be quarantined. An unreadable checkpoint fails closed here
- * rather than silently lowering the floor it was meant to raise.
- */
 async function issuedFloorFromDeliveryCheckpoints(dataRoot: string): Promise<number> {
   const directory = join(dataRoot, 'notifications', 'commit-hooks')
   let names: string[]
@@ -76,10 +56,6 @@ async function issuedFloorFromDeliveryCheckpoints(dataRoot: string): Promise<num
   return floor
 }
 
-/**
- * Next sequence, computed but not yet reserved. The caller validates the record first; a rejected
- * draft must not burn a number, because a hole in `records/` reads as corruption afterwards.
- */
 export async function nextSequence(
   dataRoot: string,
   live: { liveMax: number; archivedThrough: number }
@@ -91,15 +67,10 @@ export async function nextSequence(
   return base + 1
 }
 
-/**
- * Durably raise the watermark to `sequence` before the record file is written. A crash after this
- * point can skip a number but can never reissue a delivered one.
- */
 export async function reserveSequence(dataRoot: string, sequence: number): Promise<void> {
   const watermark = await readSequenceWatermark(dataRoot)
   if (watermark !== null && sequence <= watermark.lastIssued) {
     throw new Error(`sequence ${sequence} is not above the issued watermark ${watermark.lastIssued}`)
   }
-  // Only our own lock serializes allocators, so `nextSequence` cannot have gone stale here.
   await writeJsonAtomic(sequenceWatermarkPath(dataRoot), { schemaVersion: 1, lastIssued: sequence } satisfies SequenceWatermark)
 }

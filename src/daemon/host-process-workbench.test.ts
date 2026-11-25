@@ -8,10 +8,6 @@ import { startTestDaemon, type TestDaemon } from './host-process.harness'
 
 afterEach(cleanupTempDirs)
 
-// The App's workbench channels forward to the `desktopWorkbench` op the daemon's host
-// already serves paired devices (B4-L4). These run against a real daemon on the App's
-// local socket and grant: the daemon owns the workspace authorization, the App only
-// builds the request.
 
 function workbench(daemon: TestDaemon, query: Record<string, unknown>): Promise<Record<string, any>> {
   return daemon.request({ op: 'desktopWorkbench', query })
@@ -39,7 +35,6 @@ describe('daemon workbench for the App', () => {
       expect(written.workbench.content).toBe('second\n')
       expect(readFileSync(join(daemon.workspace, 'notes.txt'), 'utf8')).toBe('second\n')
 
-      // A write against a stale revision is refused, not merged over the newer content.
       const stale = await workbench(daemon, {
         surface: 'workspace', cwd, method: 'workspaceWrite',
         args: [{ cwd, path: 'notes.txt', content: 'third\n', expectedRevision: read.workbench.revision }]
@@ -62,7 +57,6 @@ describe('daemon workbench for the App', () => {
       expect(unknown.error).toBeTruthy()
       expect(unknown).not.toHaveProperty('workbench')
 
-      // The window's workspace is authorized; the request inside it names another one.
       const cwd = daemon.workspace
       const mismatch = await workbench(daemon, {
         surface: 'workspace', cwd, method: 'workspaceWrite',
@@ -101,8 +95,6 @@ describe('daemon workbench for the App', () => {
       expect(draft.error).toBeUndefined()
       expect(draft.workbench).toBeNull()
 
-      // A repository id is a reference, not a grant: another authorized directory that is
-      // not that repository does not reach it.
       const other = join(cwd, 'nested')
       mkdirSync(other)
       execFileSync('git', ['init', '-q', other])

@@ -26,7 +26,6 @@ export interface SideChatHistory {
   total?: number
   /** Rows of exactly one page; the dialog never grows past `HISTORY_PAGE` rows. */
   items: readonly ConversationSummary[]
-  /** An older page exists. */
   canLoadMore: boolean
   /** Where this page's rows sit inside the whole history; absent for an empty page. */
   range?: { first: number; last: number }
@@ -123,7 +122,6 @@ export function useSideChatWorkspace({
   const busy = useRef(false)
   const inFlight = useRef<string>()
 
-  /** Whether the parent this continuation started in is still the one on screen. */
   const fenceHolds = useCallback((pinnedScope: string, pinnedSource: string): boolean =>
     latest.current.scopeKey === pinnedScope && sideChatSourceKey(latest.current.source) === pinnedSource, [])
 
@@ -148,7 +146,6 @@ export function useSideChatWorkspace({
     const pinnedScope = current.scopeKey
     const pinnedSource = sideChatSourceKey(current.source)
     const key = `${pinnedScope}\0${pinnedSource}\0${ids.join(',')}`
-    // A second read for the same tabs proves nothing new; the answer is already coming.
     if (inFlight.current === key) return
     inFlight.current = key
     const apply = (answer: SideChatRestoreAnswer): void => {
@@ -169,7 +166,6 @@ export function useSideChatWorkspace({
   }, [fenceHolds, mergeRecords])
 
   useEffect(() => {
-    // Only a semantic change revalidates: another scope, another source, other tab ids.
     void validateTabs()
   }, [scopeKey, sourceKey, openKey, api, validateTabs])
 

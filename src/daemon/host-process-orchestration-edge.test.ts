@@ -142,7 +142,6 @@ describe('Authoritative daemon startup and legacy import', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Persist the large intent in the authoritative database.
     let run1Id = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -157,7 +156,6 @@ describe('Authoritative daemon startup and legacy import', () => {
       })
       try {
         const device = await enrollLocal(host.service)
-        // Build a ~1.05 MB valid intent with 120 KB prompt + 690 KiB UTF-8 text attachments (~940 KB base64)
         const bigPrompt = `large:${'P'.repeat(120_000)}`
         const attA = Buffer.from('A'.repeat(450 * 1024), 'utf8')
         const attB = Buffer.from('B'.repeat(240 * 1024), 'utf8')
@@ -191,7 +189,6 @@ describe('Authoritative daemon startup and legacy import', () => {
       }
     })
 
-    // Settle a second run after a restart while the former setting is absent.
     let run2Id = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -221,7 +218,6 @@ describe('Authoritative daemon startup and legacy import', () => {
       }
     })
 
-    // Restart again and verify all three runs in the durable projection.
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,
@@ -364,7 +360,6 @@ describe('Authoritative daemon startup and legacy import', () => {
         // Orphan open run is recovered before the socket opens.
         expect(authority.sink.getRun(orphanId)?.lifecycle).toBe('interrupted')
 
-        // Live run can execute immediately while deferred backfill yields in background
         const device = await enrollLocal(host.service)
         const sub = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
           op: 'submit',

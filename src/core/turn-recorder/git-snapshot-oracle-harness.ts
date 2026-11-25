@@ -22,7 +22,6 @@ export async function removeTrackedRoots(): Promise<void> {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 }
 
-/** Fixture git runs with the host's global/system config, templates and repo-locating env removed. */
 export const fixtureEnv: NodeJS.ProcessEnv = {
   ...withoutRepoLocatingVariables(process.env),
   GIT_CONFIG_GLOBAL: '/dev/null',
@@ -59,7 +58,6 @@ export const COMMIT_IDENTITY = [
   '-c', 'commit.gpgsign=false'
 ]
 
-/** Fresh temporary root containing a `repo` directory with `git init` already done. */
 export async function newRepoRoot(label: string): Promise<{ root: string; repo: string }> {
   const root = trackRoot(await realpath(await mkdtemp(join(tmpdir(), `scry-oracle-${label}-`))))
   const repo = join(root, 'repo')
@@ -87,18 +85,14 @@ export interface OracleRun {
 
 export interface RunResult {
   run: OracleRun
-  /** Real `.git/index` identity is unchanged by the capture itself. */
   indexUnchanged: boolean
-  /** Real object database gained no loose objects. */
   objectsUnchanged: boolean
-  /** Gap between the real index and the in-memory mutation of the fixture. */
   indexUntouchedByMutation: boolean
   objectsUntouchedByMutation: boolean
 }
 
 export interface RunOptions {
   forceFull: boolean
-  /** Some fixtures intentionally rewrite the real index / object db while mutating. */
   mutationRewritesIndex?: boolean
   mutationWritesObjects?: boolean
   deadlineMs?: number
@@ -142,12 +136,6 @@ async function looseObjectCount(repo: string): Promise<number> {
   return total
 }
 
-/**
- * Run one turn snapshot on `repo`: begin while the worktree is at its pre-turn state, mutate,
- * then build the after tree with either the implementation under test or the full reference path.
- * The after tree is read from the internal `onAfter` seam because it is not part of the
- * persisted snapshot; file evidence is.
- */
 export async function runTurn(
   root: string,
   repo: string,
@@ -207,14 +195,12 @@ function same(left: IndexFingerprint | undefined, right: IndexFingerprint | unde
   return left.digest === right.digest && left.size === right.size && left.mtimeMs === right.mtimeMs
 }
 
-/** Repo-root-relative, forward-slash paths so two fixture copies compare on evidence, not location. */
 export function relativeFiles(files: DiffFile[], repo: string): DiffFile[] {
   return files
     .map((file) => ({ ...file, path: relative(repo, file.path).split(sep).join('/') }))
     .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
 }
 
-/** Build the after tree the reference way from an independent temporary index. */
 export async function referenceTree(root: string, repo: string): Promise<string> {
   const capture = await beginGitTurnDiff(repo, 20_000, captureRootFor(root), [])
   if (capture.status !== 'ready') throw new Error(`reference capture was not ready: ${capture.status}`)
@@ -236,7 +222,6 @@ export function expectIndexAndObjectsUntouched(left: RunResult, right: RunResult
   expect(right.objectsUntouchedByMutation).toBe(true)
 }
 
-/** Both implementations must agree on the after tree and the whole file evidence byte for byte. */
 export function expectSameEvidence(left: RunResult, right: RunResult, leftRepo: string, rightRepo: string): void {
   expect(right.run.tree).toBe(left.run.tree)
   expect(right.run.status).toBe(left.run.status)
@@ -249,7 +234,6 @@ export async function writeFileAt(repo: string, path: string, content: string | 
   await writeFile(target, content)
 }
 
-/** Fixed timestamp keeps stat signatures comparable between twins and enables racy-clean fixtures. */
 export const OLD_TIMESTAMP = new Date('2020-01-01T00:00:00.000Z')
 
 export async function stamp(repo: string, path: string, when = OLD_TIMESTAMP): Promise<void> {
@@ -258,21 +242,13 @@ export async function stamp(repo: string, path: string, when = OLD_TIMESTAMP): P
 
 export interface Scenario {
   id: string
-  /** Runs on a freshly `git init`-ed copy and must end with a commit. */
   setup: (repo: string) => Promise<void>
-  /** Runs after the commit and before the turn capture starts (repo-state fixtures). */
   prepare?: (repo: string) => Promise<void>
-  /** Runs after the turn capture started; describes the worktree change under test. */
   mutate: (repo: string) => Promise<void>
   options?: Partial<RunOptions>
-  /** Extra assertions on the paired runs, for invariants beyond "the two paths agree". */
   check?: (targeted: RunResult, full: RunResult, repos: { targeted: string; full: string }) => void
 }
 
-/**
- * Run the same scenario on two identical fixture copies: the implementation under test on one,
- * the full reference path on the other. Trees and file evidence must match exactly.
- */
 export async function runScenarioPair(scenario: Scenario): Promise<void> {
   const left = await newRepoRoot(`${scenario.id}-targeted`)
   const right = await newRepoRoot(`${scenario.id}-full`)

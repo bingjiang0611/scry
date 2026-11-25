@@ -33,7 +33,6 @@ elif [ -x "$HOME/.local/bin/scry" ]; then
 else
   command -v npm >/dev/null 2>&1 || fail "缺少 npm，无法安装 Scry CLI"
   printf '安装 Scry CLI 到 %s/.local ...\n' "$HOME"
-  # registry 是部署配置：未设置 SCRY_NPM_REGISTRY 时用本机 npm 配置，脚本不内置任何镜像地址。
   set -- scry-turn-recorder@latest
   if [ -n "${SCRY_NPM_REGISTRY:-}" ]; then
     set -- "$@" --registry="$SCRY_NPM_REGISTRY"

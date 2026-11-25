@@ -5,7 +5,6 @@ export interface TurnChangeHints {
   structuredPaths: string[]
 }
 
-// 结构化工具路径用于交叉证据；候选完整性由隔离 index 上的 Git status 保证。
 export class TurnChangeJournal {
   private readonly root: string
   private readonly paths = new Set<string>()
