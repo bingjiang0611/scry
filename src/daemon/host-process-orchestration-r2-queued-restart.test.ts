@@ -1,6 +1,6 @@
 import 'reflect-metadata'
-import { afterEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fork } from 'node:child_process'
 import { once } from 'node:events'
@@ -15,15 +15,17 @@ cryptoProvider.set(webcrypto as unknown as Parameters<typeof cryptoProvider.set>
 
 afterEach(cleanupTempDirs)
 
-function withOrchOnEnv() {
+function withOrchOnEnv(inputsPath: string) {
   const saved = {
     relay: process.env.SCRY_REMOTE_RELAY_ENABLED,
     smoke: process.env.SCRY_ELECTRON_SMOKE_PROVIDER,
     logging: process.env.ELECTRON_ENABLE_LOGGING,
+    inputs: process.env.SCRY_ELECTRON_SMOKE_INPUTS,
     argvLen: process.argv.length
   }
   process.env.SCRY_REMOTE_RELAY_ENABLED = '0'
   process.env.SCRY_ELECTRON_SMOKE_PROVIDER = '1'
+  process.env.SCRY_ELECTRON_SMOKE_INPUTS = inputsPath
   process.env.ELECTRON_ENABLE_LOGGING = '1'
   process.argv.push('--remote-debugging-port=0')
   return () => {
@@ -31,6 +33,7 @@ function withOrchOnEnv() {
     for (const [key, value] of [
       ['SCRY_REMOTE_RELAY_ENABLED', saved.relay],
       ['SCRY_ELECTRON_SMOKE_PROVIDER', saved.smoke],
+      ['SCRY_ELECTRON_SMOKE_INPUTS', saved.inputs],
       ['ELECTRON_ENABLE_LOGGING', saved.logging]
     ] as const) {
       if (value === undefined) delete process.env[key]
@@ -110,7 +113,9 @@ main().catch((err) => { console.error(err); process.exit(1) })
     })
     expect(existsSync(childOut)).toBe(true)
 
-    const restore = withOrchOnEnv()
+    const inputsPath = join(root, 'provider-inputs.jsonl')
+    const restore = withOrchOnEnv(inputsPath)
+    const inputs = () => readFileSync(inputsPath, 'utf8').trim().split('\n').map(row => JSON.parse(row) as { prompt: string; resume: string })
     let restarted: Awaited<ReturnType<typeof createDaemonHostProcess>> | undefined
     const child = fork(childOut, [userDataDir, daemonDir], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
     const exited = once(child, 'exit')
@@ -144,6 +149,7 @@ main().catch((err) => { console.error(err); process.exit(1) })
         headLifecycle = reply.subscribe?.snapshot.activeRuns.rows.find((row: { runId: string }) => row.runId === headRunId)?.lifecycle ?? headLifecycle
       }
       expect(headLifecycle).toBe('dispatched')
+      await vi.waitFor(() => expect(inputs().map(row => row.prompt)).toEqual(['llm performance smoke']), { timeout: 5_000 })
 
       const prompt = '排队后重启，这条只能跑一次'
       const queuedIntentId = randomUUID()
@@ -162,6 +168,7 @@ main().catch((err) => { console.error(err); process.exit(1) })
       })
       const queuedRow = queued.subscribe.snapshot.activeRuns.rows.find((row: { runId: string }) => row.runId === runId)
       expect(queuedRow?.lifecycle).toBe('queued')
+      expect(inputs().map(row => row.prompt)).toEqual(['llm performance smoke'])
 
       child.kill('SIGKILL')
       const [, signal] = await exited
@@ -196,9 +203,11 @@ main().catch((err) => { console.error(err); process.exit(1) })
       const mine = events.filter((event) => event.runId === runId)
       // Exactly one dispatch, so the restart did not double-run the entry.
       expect(mine.filter((event) => event.type === 'run.dispatched')).toHaveLength(1)
-      // The original request survived the restart: the Provider saw the queued prompt.
-      const intent = events.find((event) => event.type === 'run.intent_recorded' && event.runId === runId)
-      expect(JSON.stringify(intent?.payload ?? {})).toContain(prompt)
+      // Count executions independently of the dispatch journal, across both daemon processes.
+      expect(inputs().map(({ prompt, resume }) => ({ prompt, resume }))).toEqual([
+        { prompt: 'llm performance smoke', resume: nativeSid },
+        { prompt, resume: nativeSid }
+      ])
       const resolved = await call(restarted.channel.socketPath, ready.ca, ready.cert, ready.key, {
         op: 'resolveIntent', intentId: queuedIntentId
       })

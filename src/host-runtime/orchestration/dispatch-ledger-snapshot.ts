@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import type {
   LedgerSnapshot,
   LedgerSnapshotRun,
@@ -7,6 +6,7 @@ import type {
 } from '../../main/remote/session-ledger'
 import { h1DetailDigest } from './authority-dispatch'
 import type { EventSink } from './event-sink'
+import type { PreparedBody } from './types'
 
 const UUID_V4_LOWER = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -45,19 +45,18 @@ interface RawRunRow {
   cwd: string | null
   prompt_preview: string | null
   body: string | null
+  start_payload: string | null
 }
 
 function readRecordedIntentDetail(sink: EventSink, row: RawRunRow): string | undefined {
-  if (row.body) {
-    try {
-      const desc = JSON.parse(row.body) as { storage?: string; inline?: string; sha256?: string }
-      if (desc.storage === 'inline' && typeof desc.inline === 'string') return desc.inline
-      if (desc.storage === 'external' && typeof desc.sha256 === 'string' && sink.bodyStore.hasExternalBody(desc.sha256)) {
-        return readFileSync(sink.bodyStore.externalPath(desc.sha256), 'utf8')
-      }
-    } catch {
-      // Fall back to synthesized routing envelope below.
-    }
+  // The event stores only the descriptor. The pending start holds the full inline body.
+  try {
+    const payload = row.start_payload ? JSON.parse(row.start_payload) as { body?: PreparedBody } : undefined
+    const body = payload?.body ?? (row.body ? JSON.parse(row.body) as PreparedBody : undefined)
+    if (body) return sink.bodyStore.readBody(body).toString('utf8')
+  } catch {
+    // Missing or corrupt exact input is not an invitation to dispatch the preview.
+    return undefined
   }
   return JSON.stringify({
     ...(row.provider ? { providerId: row.provider } : {}),
@@ -106,7 +105,12 @@ export function buildDispatchLedgerSnapshot(sink: EventSink): LedgerSnapshot {
 
   const runRows = db
     .prepare(
-      'SELECT run_id, lifecycle, intent_seq, provider, profile, cwd, prompt_preview, body FROM orch_p_run ORDER BY intent_seq ASC'
+      `SELECT r.run_id, r.lifecycle, r.intent_seq, r.provider, r.profile, r.cwd, r.prompt_preview, r.body,
+              CASE WHEN r.lifecycle IN ('recorded', 'queued') THEN (
+                SELECT o.payload FROM orch_outbox o WHERE o.run_id = r.run_id AND o.kind = 'provider.run.start'
+                AND o.state IN ('pending', 'running') ORDER BY o.causation_seq LIMIT 1
+              ) END AS start_payload
+       FROM orch_p_run r ORDER BY r.intent_seq ASC`
     )
     .all() as RawRunRow[]
 

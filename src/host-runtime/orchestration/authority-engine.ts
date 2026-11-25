@@ -274,6 +274,12 @@ export class AuthorityEngine {
       return { ok: false, action: 'fail', reason: 'pending_expired' }
     }
 
+    if (input.intentBodyMissing && run.body) {
+      const reason = 'intent_body_unavailable'
+      this.recordTerminal({ runId: run.runId, step: 'failed', reason, delivery: 'not_sent', evidence: [`pre_dispatch_recheck:${reason}`] })
+      return { ok: false, action: 'fail', reason }
+    }
+
     const effectiveActor = run.ownerActor.startsWith('peer:') ? run.ownerActor : input.actor
     const preparedRealCwd = this.#preparedRealCwdByRun.get(input.runId) ?? tryRealpath(run.cwd)
     const recheck = runAuthorityPreDispatchRecheck({ ...input, actor: effectiveActor }, preparedRealCwd, run.cwd)

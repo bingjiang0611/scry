@@ -311,6 +311,7 @@ function buildAuthorityRuntime<
       let trustGateDetail: string | undefined
       const res = engine.beforeDispatch({
         runId: canonicalRunId,
+        intentBodyMissing: input.detail === undefined,
         cwd: routing.cwd,
         provider: routing.provider,
         profile: routing.profile,

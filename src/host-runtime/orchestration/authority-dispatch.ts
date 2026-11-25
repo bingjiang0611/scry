@@ -42,6 +42,7 @@ export interface AuthoritySubmitInput {
 
 export interface AuthorityBeforeDispatchInput {
   runId: string
+  intentBodyMissing?: boolean
   cwd?: string | null
   provider: string
   profile: string | null
