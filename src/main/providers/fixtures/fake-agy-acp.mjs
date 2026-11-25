@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -39,8 +39,14 @@ if (scenario.recordSpawns) {
   try { appendFileSync(join(scriptDir, 'spawns.log'), `${process.pid}\n`) } catch { /* ignore */ }
 }
 
+// A reused process keeps recording while a test reads the file: write a temp file and
+// rename it, so a reader never sees a half-written record.
 function saveRecord() {
-  try { writeFileSync(recordPath, JSON.stringify(recorded, null, 2)) } catch { /* ignore */ }
+  try {
+    const temp = `${recordPath}.${process.pid}.tmp`
+    writeFileSync(temp, JSON.stringify(recorded, null, 2))
+    renameSync(temp, recordPath)
+  } catch { /* ignore */ }
 }
 
 function send(obj) {
