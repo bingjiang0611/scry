@@ -203,6 +203,39 @@ describe('R9: checkpoints are bounded and never rewrite an unmanaged checkout', 
     } finally { handle.close() }
   })
 
+  it('refuses rollback when the index and working file contain different user edits', async () => {
+    const cwd = repo()
+    const handle = sink()
+    try {
+      settledRun(handle, 'run-1', cwd)
+      await recordRunCheckpoint(handle, git, { runId: 'run-1', cwd }, 100)
+      writeFileSync(join(cwd, 'a.txt'), 'staged version\n')
+      gitIn(cwd, ['add', 'a.txt'])
+      writeFileSync(join(cwd, 'a.txt'), 'working version\n')
+      expect(await applyRunRollback(handle, git, { runId: 'run-1', cwd, managed: true }, 200))
+        .toMatchObject({ status: 'unavailable' })
+      expect(gitIn(cwd, ['show', ':a.txt'])).toBe('staged version\n')
+      expect(readFileSync(join(cwd, 'a.txt'), 'utf8')).toBe('working version\n')
+      expect(handle.getRun('run-1')?.lifecycle).toBe('settled')
+    } finally { handle.close() }
+  })
+
+  it('refuses rollback when a target tracked path is now untracked', async () => {
+    const cwd = repo()
+    const handle = sink()
+    try {
+      settledRun(handle, 'run-1', cwd)
+      await recordRunCheckpoint(handle, git, { runId: 'run-1', cwd }, 100)
+      gitIn(cwd, ['rm', 'a.txt'])
+      gitIn(cwd, ['commit', '-qm', 'remove tracked file'])
+      writeFileSync(join(cwd, 'a.txt'), 'untracked user content\n')
+      expect(await applyRunRollback(handle, git, { runId: 'run-1', cwd, managed: true }, 200))
+        .toMatchObject({ status: 'unavailable' })
+      expect(readFileSync(join(cwd, 'a.txt'), 'utf8')).toBe('untracked user content\n')
+      expect(handle.getRun('run-1')?.lifecycle).toBe('settled')
+    } finally { handle.close() }
+  })
+
   it('refuses a rollback while another run is still working in that worktree', async () => {
     const cwd = repo()
     const handle = sink()

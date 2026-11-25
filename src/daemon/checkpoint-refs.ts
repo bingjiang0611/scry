@@ -13,7 +13,7 @@ export interface CheckpointGit {
   readRef(cwd: string, ref: string): Promise<string | undefined>
   deleteRef(cwd: string, ref: string): Promise<void>
   /** Restores worktree content from a tree. Destructive: callers gate this on a managed worktree. */
-  restoreTree(cwd: string, tree: string): Promise<void>
+  restoreTree(cwd: string, tree: string, before?: string): Promise<void>
 }
 
 export type CheckpointCapture =
@@ -64,7 +64,7 @@ export async function captureCheckpoint(
  */
 export async function rollbackCheckpoint(
   git: CheckpointGit,
-  input: { cwd: string; runId: string; managed: boolean }
+  input: { cwd: string; runId: string; managed: boolean; before?: string }
 ): Promise<CheckpointRollback> {
   if (!input.managed) return { status: 'unavailable', reason: 'checkpoint_unmanaged_worktree' }
   const ref = checkpointRef(input.runId)
@@ -72,7 +72,7 @@ export async function rollbackCheckpoint(
   const tree = await git.readRef(input.cwd, ref).catch(() => undefined)
   if (!tree) return { status: 'unavailable', reason: 'checkpoint_missing' }
   try {
-    await git.restoreTree(input.cwd, tree)
+    await git.restoreTree(input.cwd, tree, input.before)
   } catch {
     return { status: 'unavailable', reason: 'checkpoint_restore_failed' }
   }

@@ -25,7 +25,7 @@ export function createCheckpointGit(options: CheckpointGitOptions): CheckpointGi
         await run(cwd, ['read-tree', 'HEAD'], env)
         // R9: `add -u` stages tracked modifications only. `add -A` wrote every untracked file the user
         // happens to have in the checkout into the object database, on every settled run.
-        await run(cwd, ['add', '-u', '--', '.'], env)
+        await run(cwd, ['add', '-u'], env)
         return (await run(cwd, ['write-tree'], env)).trim()
       } finally {
         await rm(dir, { recursive: true, force: true })
@@ -44,10 +44,21 @@ export function createCheckpointGit(options: CheckpointGitOptions): CheckpointGi
     async deleteRef(cwd, ref) {
       await run(cwd, ['update-ref', '-d', ref])
     },
-    async restoreTree(cwd, tree) {
-      // `read-tree --reset -u` writes the tree into both the index and the worktree; a plain
-      // checkout of a tree path is not enough to remove files the tree does not contain.
-      await run(cwd, ['read-tree', '--reset', '-u', tree])
+    async restoreTree(cwd, tree, before) {
+      // Never reset the real index or overwrite files that changed after the safety copy.
+      const indexChanges = await run(cwd, ['diff', '--cached', '--name-only', '--no-renames', 'HEAD', '--'])
+      if (indexChanges) throw new Error('checkpoint_index_dirty')
+      const dir = await mkdtemp(join(tmpdir(), 'scry-rollback-'))
+      const env = { ...process.env, GIT_INDEX_FILE: join(dir, 'index') }
+      const baseline = before ?? 'HEAD'
+      try {
+        await run(cwd, ['read-tree', baseline], env)
+        await run(cwd, ['update-index', '--refresh'], env)
+        // A two-tree merge checks the on-disk files and refuses untracked obstructions.
+        await run(cwd, ['read-tree', '-m', '-u', baseline, tree], env)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
     }
   }
 }

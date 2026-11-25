@@ -80,7 +80,7 @@ export async function applyRunRollback(
   // cannot be written refuses the rollback: losing the user's current work is not an acceptable price.
   const safety = await captureCheckpoint(git, { cwd: input.cwd, runId: input.runId, safety: true })
   if (safety.status !== 'captured') return { status: 'unavailable', reason: 'checkpoint_safety_copy_failed' }
-  const restored = await rollbackCheckpoint(git, { cwd: input.cwd, runId: input.runId, managed: input.managed })
+  const restored = await rollbackCheckpoint(git, { ...input, before: safety.tree })
   if (restored.status !== 'restored') return restored
   const result = submit(sink, {
     type: 'run.rollback',
