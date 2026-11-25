@@ -1,26 +1,5 @@
 import { remoteOperationCounters, remoteRequestTrace } from './remote-request-timing'
 
-// Persistent inner-mTLS lanes for the desktop run channel.
-//
-// Every one-shot exchange pays a full TLS 1.3 handshake (and, over SSH, a fresh
-// unix-socket connect) before the request can even be written. A lane keeps one
-// authenticated tunnel open and sends further requests on it, one outstanding
-// request at a time - the host never pipelines, and it re-authorizes every
-// request against the verified peer certificate.
-//
-// Separate lanes keep slow work from blocking interactive work:
-//   control: submit, answers, stop, catalogs, run state (short)
-//   workbench: file writes, Git/PR mutations, PTY input (a push may take 30 s; a stop
-//            or an answer must not wait behind it)
-//   terminal: the daemon App's terminal input and output (a keystroke must not wait
-//            behind a history page)
-//   long:    the daemon App's rare calls that may outlast 30 s: MCP snapshot/test/re-auth
-//            (an OAuth sign-in, a first npx install) and the paginated billing sync
-//   watch:   one run's long-poll
-//   status:  the live-run long-poll
-//   events:  the App's event-feed long-poll (daemon mode only)
-//   bulk:    history pages, trace pages, attachments (large)
-//
 // Retry rules are explicit, not error-string guesses:
 //   - Opening a channel may retry: no request byte has been sent yet, so a stale
 //     tunnel or a closed host leg cannot have run anything.
