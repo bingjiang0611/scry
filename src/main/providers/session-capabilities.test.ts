@@ -31,3 +31,11 @@ it('C1: a Provider whose permission mode is a launch flag says so instead of cla
   const codex = adapters.find((adapter) => adapter.id === 'codex')
   expect(codex?.sessionCapabilities?.persistentProcess).toBe(true)
 })
+
+it('C2: native steer is declared only where a run really admits mid-turn input', async () => {
+  const { PROVIDER_SESSION_CAPABILITIES } = await import('./session-capabilities')
+  // The three that have a steer path today, and the three that do not. A Provider moving between these
+  // groups must change its run, not just this table.
+  expect(Object.fromEntries(Object.entries(PROVIDER_SESSION_CAPABILITIES).map(([id, value]) => [id, value.nativeSteer])))
+    .toEqual({ claude: false, qoder: true, codex: true, opencode: false, pi: true, antigravity: false })
+})
