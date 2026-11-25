@@ -23,7 +23,7 @@ export function registerQoderSessionEndSuite(): void {
         type: 'user', isMeta: true, promptId: 'prompt-1', requestSetId: 'request-1',
         message: { role: 'user', content: [{ type: 'text', text: 'Base directory for this skill: /tmp/commands' }] }
       },
-      { type: 'assistant', promptId: 'prompt-1', message: { content: [{ type: 'text', text: 'first answer' }] } }
+      { type: 'assistant', promptId: 'prompt-1', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'first answer' }] } }
     ].map((row) => JSON.stringify(row)).join('\n') + '\n')
     const firstStop = await handleRecorderHook({ ...base, event: 'Stop', payload: {
       ...native, parent_request_set_id: 'request-1', timestamp: '2026-07-19T12:00:01.000Z', hook_event_name: 'Stop', assistant_response: 'first answer'
@@ -42,7 +42,7 @@ export function registerQoderSessionEndSuite(): void {
     } })
     await writeFile(transcript, [
       { type: 'user', promptId: 'prompt-2', requestSetId: 'request-2', message: { role: 'user', content: 'next prompt' } },
-      { type: 'assistant', promptId: 'prompt-2', message: { content: [{ type: 'text', text: 'next answer' }] } }
+      { type: 'assistant', promptId: 'prompt-2', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'next answer' }] } }
     ].map((row) => JSON.stringify(row)).join('\n') + '\n', { flag: 'a' })
     const secondStop = await handleRecorderHook({ ...base, event: 'Stop', payload: {
       ...native, parent_request_set_id: 'request-2', timestamp: '2026-07-19T12:00:03.000Z', hook_event_name: 'Stop', assistant_response: 'next answer'

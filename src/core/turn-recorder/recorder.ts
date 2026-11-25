@@ -322,7 +322,16 @@ export async function recoverRecorder(
                 return { status: 'idle' as const }
               }
               if (attribution === 'unproven') {
-                return { status: 'pending' as const, reason: 'Qoder Stop awaits native turn identity' }
+                if (!wasAlreadyClosing || !await closingTurnStalled(openPath(item.sessionDir), expiryMs)) {
+                  return { status: 'pending' as const, reason: 'Qoder Stop awaits native turn identity' }
+                }
+                await logQoderStopHold(enablement.dataRoot, open, 'native_id_expired')
+                await revokeSeal(item.sessionDir, open, false)
+                forcedExpiry = true
+                return finalizeOpenTurn(enablement, open, {}, 'interrupted', {
+                  allowUnstableTranscript: true,
+                  forcedReason: `${CLOSING_TURN_EXPIRED_REASON}; Qoder Stop native turn identity was never confirmed`
+                })
               }
               matchedNativeStop = true
               if (read?.pendingBackgroundTasks?.length) {

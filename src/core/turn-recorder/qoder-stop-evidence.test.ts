@@ -1,16 +1,20 @@
-import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { appendFile, mkdtemp, readFile, readdir, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from './recorder'
-import { qoderRequestStopAttribution, rememberQoderRequest } from './qoder-stop-evidence'
+import { QODER_STOP_TRANSCRIPT_WAIT_MS, qoderRequestStopAttribution, rememberQoderRequest } from './qoder-stop-evidence'
 import { recorderOpenPath, recorderSessionRoot, recorderStatePath, recorderTurnRoot, type RecorderOpenTurnState, type RecorderSessionState } from './runtime-state'
 import { listRecords } from './store'
 
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+afterEach(async () => {
+  vi.useRealTimers()
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+})
 
-async function fixture() {
+async function fixture(diff = false) {
   const root = await mkdtemp(join(tmpdir(), 'scry-qoder-stop-'))
   roots.push(root)
   const transcript = join(root, 'synthetic.jsonl')
@@ -19,9 +23,16 @@ async function fixture() {
   const sessionRoot = recorderSessionRoot(dataRoot, 'qoder', sessionId)
   const now = Date.now()
   const at = (offset: number) => new Date(now + offset).toISOString()
+  if (diff) {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'ignore' })
+    git('init', '-q')
+    await writeFile(join(root, 'example.txt'), 'before\n')
+    git('add', 'example.txt')
+    git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'before')
+  }
   await writeFile(join(root, 'scry.config.json'), JSON.stringify({
     schemaVersion: 1, enabled: true, workspaceId: 'qoder-stop', dataDir: '.scry',
-    repositories: { mode: 'workspace-only' }, capture: { diff: false, toolOutput: 'summary' }
+    repositories: { mode: 'workspace-only' }, capture: { diff, toolOutput: diff ? 'full' : 'summary' }
   }))
   const row = (value: object) => appendFile(transcript, JSON.stringify({ sessionId, ...value }) + '\n')
   const user = (id: string, parentUuid: string | null, requestSetId?: string) => row({
@@ -52,15 +63,66 @@ async function fixture() {
     return !!open.deferredTerminalEventId && files.includes(`${open.deferredTerminalEventId}.json`)
   }
   const log = () => readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
-  return { start, stop, hook, row, user, reply, records, poll, state, history, heldEventExists, log }
+  const edit = () => writeFile(join(root, 'example.txt'), 'after\n')
+  const ageClosing = (ageMs: number) => {
+    const timestamp = new Date(Date.now() - ageMs)
+    return utimes(recorderOpenPath(sessionRoot), timestamp, timestamp)
+  }
+  return { start, stop, hook, row, user, reply, records, poll, state, history, heldEventExists, log, edit, ageClosing }
 }
 
-it('commits a tool-free Stop in the same hook even before the transcript exists', async () => {
-  const f = await fixture()
+it('commits a matched Stop with transcript and Git diff on the first poll after a one-second late transcript', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const stoppedAt = Date.now()
+  const f = await fixture(true)
   await f.start('short', 'request-short')
-  expect(await f.stop({ parent_request_set_id: 'request-short' })).toMatchObject({ status: 'committed' })
-  expect(await f.records()).toMatchObject([{ status: 'completed', termination: { value: { completedAtSource: 'recorder_observed_terminal' } } }])
+  await f.edit()
+  expect(await f.stop({ parent_request_set_id: 'request-short' })).toMatchObject({ status: 'pending' })
+  expect(await f.records()).toHaveLength(0)
+  vi.setSystemTime(stoppedAt + 1_000)
+  await f.user('short', null, 'request-short')
+  await f.reply('short')
+  expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0 })
+  expect(await f.records()).toMatchObject([{
+    status: 'completed', transcript: { status: 'available' },
+    assistant: { value: { text: 'same reply' } }, diff: { status: 'available' },
+    termination: { value: { completedAtSource: 'recorder_observed_terminal' } }
+  }])
   expect(await f.log()).toContain('qoder_stop_attribution attribution=matched')
+})
+
+it('waits for the final reply even when the current prompt already matches', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const stoppedAt = Date.now()
+  const f = await fixture(true)
+  await f.user('short', null, 'request-short')
+  await f.start('short', 'request-short')
+  await f.edit()
+  expect(await f.stop({ parent_request_set_id: 'request-short' })).toMatchObject({ status: 'pending' })
+  expect(await f.poll()).toMatchObject({ recovered: 0, pending: 1 })
+  vi.setSystemTime(stoppedAt + 1_000)
+  await f.reply('short')
+  expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0 })
+  expect(await f.records()).toMatchObject([{
+    assistant: { status: 'available', value: { text: 'same reply' } }, diff: { status: 'available' }
+  }])
+})
+
+it('degrades a matched Stop only after the ten-second transcript deadline', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const stoppedAt = Date.now()
+  const f = await fixture(true)
+  await f.start('short', 'request-short')
+  await f.edit()
+  expect(await f.stop({ parent_request_set_id: 'request-short' })).toMatchObject({ status: 'pending' })
+  vi.setSystemTime(stoppedAt + QODER_STOP_TRANSCRIPT_WAIT_MS - 1)
+  expect(await f.poll()).toMatchObject({ recovered: 0, pending: 1 })
+  vi.setSystemTime(stoppedAt + QODER_STOP_TRANSCRIPT_WAIT_MS)
+  expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0 })
+  expect(await f.records()).toMatchObject([{
+    status: 'completed', transcript: { status: 'unavailable' }, diff: { status: 'unavailable' }
+  }])
+  expect((await f.records())[0].diff.omissionReason).toContain('10-second wait expired')
 })
 
 it('rejects the interrupted request Stop even after the replacement has the same final reply and a complete parent chain', async () => {
@@ -105,17 +167,20 @@ it.each([
   expect(await f.log()).toMatch(/reason=stale_terminal outcome=activity attribution=unproven waitedMs=\d+/)
 })
 
-it('does not attribute or release a top-level hold on SubagentStop or a child-scoped Stop', async () => {
+it.each(['SubagentStop', 'Stop'])('treats child %s as activity without attributing or sealing the parent', async (event) => {
   const f = await fixture()
   await f.start('parent', 'request-parent')
   await f.stop()
-  const previous = await f.state()
-  const child = { parent_request_set_id: 'request-parent', agent_id: 'child', agent_type: 'worker' }
-  expect(await f.hook('SubagentStop', child)).toMatchObject({ status: 'recorded' })
-  expect(await f.stop(child)).toMatchObject({ status: 'recorded' })
-  expect(await f.state()).toEqual(previous)
+  expect(await f.state()).toHaveProperty('deferredTerminalEventId')
+  const child = { parent_request_set_id: 'request-parent', promptId: 'child-native', agent_id: 'child', agent_type: 'worker' }
+  expect(await f.hook(event, child)).toMatchObject({ status: 'recorded' })
+  const open = await f.state()
+  expect(open.status).toBe('open')
+  expect(open).not.toHaveProperty('deferredTerminalAt')
   expect(await f.records()).toHaveLength(0)
-  expect((await f.log()).match(/qoder_stop_attribution/g)).toHaveLength(1)
+  const log = await f.log()
+  expect(log.match(/qoder_stop_attribution/g)).toHaveLength(1)
+  expect(log).toContain('outcome=activity attribution=unproven')
 })
 
 it('keeps the background-task hold for a matched request', async () => {
@@ -165,6 +230,22 @@ it('revokes a persisted native-ID Stop if the next poll proves it belongs to a d
   expect(await f.state()).toMatchObject({ status: 'open' })
   expect(await f.state()).not.toHaveProperty('deferredTerminalEventId')
   expect(await f.log()).toContain('outcome=native_id_mismatch attribution=stale')
+})
+
+it('expires an unresolved native Stop at the closing expiry, without attributing its terminal event', async () => {
+  const f = await fixture()
+  await f.start('current', 'request-current')
+  expect(await f.stop({ promptId: 'other' })).toMatchObject({ status: 'pending' })
+  await f.ageClosing(181_000)
+  expect(await f.poll()).toMatchObject({ recovered: 0, pending: 1 })
+  await f.ageClosing(24 * 60 * 60 * 1_000 + 1_000)
+  expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0, expired: 1 })
+  const [record] = await f.records()
+  expect(record.status).toBe('interrupted')
+  expect(record.providerTurnId).toBeUndefined()
+  expect(record.diff.omissionReason).toContain('native turn identity was never confirmed')
+  await expect(f.state()).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await f.log()).toContain('outcome=native_id_expired attribution=unproven')
 })
 
 it('bounds history to 32 generations and treats a reused current ID as ambiguous', () => {

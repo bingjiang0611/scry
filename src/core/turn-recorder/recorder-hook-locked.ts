@@ -19,7 +19,7 @@ import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-h
 import { hostProcessChain } from './host-process.js'
 import { forgetSessionVisit } from './session-visit.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
-import { isTopLevelQoderStop, logQoderStopAttribution, logQoderStopHold, qoderNativeStopAttribution, qoderRequestStopAttribution, readQoderStopTranscript, type QoderStopAttribution } from './qoder-stop-evidence.js'
+import { isTopLevelQoderStop, logQoderStopAttribution, logQoderStopHold, qoderNativeStopAttribution, qoderRequestStopAttribution, readQoderStopTranscript, QODER_STOP_TRANSCRIPT_WAIT_MS, type QoderStopAttribution } from './qoder-stop-evidence.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -158,22 +158,21 @@ export async function applyHookLocked(
     }
     return storeOrphanEvent(enablement, root, input, terminal)
   }
-  if (input.provider === 'qoder' && (input.event === 'SubagentStop' ||
-    (input.event === 'Stop' && !isTopLevelQoderStop(input)))) {
-    await storeLifecycleEvent(enablement, open, input.event, input.payload)
-    return { status: 'recorded' as const, reason: 'non-top-level Qoder terminal' }
-  }
+  const qoderStop = isTopLevelQoderStop(input)
+  const qoderChildStop = input.provider === 'qoder' && (input.event === 'SubagentStop' ||
+    (input.event === 'Stop' && !qoderStop))
+  const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
+  const endEvent = (END_EVENTS.has(input.event) && !qoderChildStop) || sessionEndEvent
   if (open.managedByScry) {
-    if (!END_EVENTS.has(input.event) && !SESSION_END_EVENTS.has(input.event)) return { status: 'recorded' as const }
+    if (!endEvent) return { status: 'recorded' as const }
     open.status = 'closing'
     open.closingAt = timestampOf(input.payload)
     open.endReason ??= SESSION_END_EVENTS.has(input.event) ? 'session_end' : 'provider_terminal'
     await writeJsonAtomic(openPath(root), open)
     return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
   }
-  const qoderStop = isTopLevelQoderStop(input)
   if (
-    !qoderStop && incomingProviderTurnId &&
+    !qoderStop && !qoderChildStop && incomingProviderTurnId &&
     open.providerTurnId &&
     incomingProviderTurnId !== open.providerTurnId &&
     !isContinuationProviderTurn(open, incomingProviderTurnId)
@@ -187,8 +186,6 @@ export async function applyHookLocked(
     }
     return storeOrphanEvent(enablement, root, input, END_EVENTS.has(input.event) || SESSION_END_EVENTS.has(input.event))
   }
-  const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
-  const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
   let attribution: QoderStopAttribution | undefined
   let requestConfirmed = false
   if (qoderStop) {
@@ -239,7 +236,10 @@ export async function applyHookLocked(
   const needsAttribution = endEvent && !sessionEndEvent && !incomingProviderTurnId && !explicitTerminalAt &&
     open.staleTerminalProtection && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS
 
-  if (requestConfirmed) open.qoderRequestStopConfirmed = true
+  if (requestConfirmed) {
+    open.qoderRequestStopConfirmed = true
+    open.qoderStopTranscriptDeadlineMs ??= Date.now() + QODER_STOP_TRANSCRIPT_WAIT_MS
+  }
   if (endEvent && !sessionEndEvent) {
     const held = await holdStopForBackgroundWork({
       enablement, input, sessionId, open, terminalAt, attribution

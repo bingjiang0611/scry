@@ -7,6 +7,12 @@ import type { RecorderOpenTurnState, RecorderSessionState } from './runtime-stat
 
 export type QoderStopAttribution = 'matched' | 'stale' | 'unproven'
 const REQUEST_HISTORY = 32
+export const QODER_STOP_TRANSCRIPT_WAIT_MS = 10_000
+const COMPLETE_REPLY_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'complete', 'completed', 'stop'])
+
+export function qoderTranscriptReplyComplete(read: TranscriptRead): boolean {
+  return read.stable && !!read.stopReason && COMPLETE_REPLY_REASONS.has(read.stopReason)
+}
 
 function requestId(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 256 && value.trim() ? value : undefined
@@ -71,7 +77,7 @@ export async function logQoderStopAttribution(dataRoot: string, attribution: Qod
 
 export async function logQoderStopHold(
   dataRoot: string, open: RecorderOpenTurnState,
-  outcome: 'deferred' | 'identified_stop' | 'activity' | 'session_end' | 'superseded' | 'grace_elapsed' | 'native_id_matched' | 'native_id_mismatch',
+  outcome: 'deferred' | 'identified_stop' | 'activity' | 'session_end' | 'superseded' | 'grace_elapsed' | 'native_id_matched' | 'native_id_mismatch' | 'native_id_expired',
   attribution: QoderStopAttribution | undefined = open.deferredQoderStopAttribution
 ): Promise<void> {
   const reason = open.deferredTerminalReason

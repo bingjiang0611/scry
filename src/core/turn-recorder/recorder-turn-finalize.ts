@@ -19,7 +19,7 @@ import { unmatchedIdentityReason } from './recorder-transcript-background.js'
 import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
-import { rememberQoderRequest } from './qoder-stop-evidence.js'
+import { qoderTranscriptReplyComplete, rememberQoderRequest } from './qoder-stop-evidence.js'
 import { rm } from 'node:fs/promises'
 import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence, captureRecordMetadata } from './record-capture-metadata.js'
 
@@ -80,10 +80,25 @@ export async function finalizeOpenTurn(
         })
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
+  const matchedStop = open.provider === 'qoder' && open.qoderRequestStopConfirmed && !options.forcedReason
+  const lacksMatchedQoderTranscript = matchedStop && transcript.identityMatched !== true
+  const lacksFinalQoderReply = matchedStop && transcript.identityMatched === true && !qoderTranscriptReplyComplete(transcript)
+  const waitElapsed = Date.now() >= (open.qoderStopTranscriptDeadlineMs ?? 0)
+  if (lacksFinalQoderReply && !waitElapsed) {
+    return { status: 'pending', reason: 'Qoder matched Stop is waiting for its final transcript reply' }
+  }
+  if (lacksFinalQoderReply) {
+    transcript = {
+      ...transcript,
+      complete: false,
+      incompleteReasons: [...(transcript.incompleteReasons ?? []), 'Qoder matched Stop: final reply did not appear before the 10-second wait expired']
+    }
+  }
   const unmatchedReason = options.transcriptUnavailable ?? unmatchedIdentityReason(open, options.forcedReason) ??
-    (open.qoderRequestStopConfirmed ? 'Qoder Stop matched the open request; its transcript identity was unavailable at the boundary' : undefined)
+    (lacksMatchedQoderTranscript && waitElapsed
+      ? 'Qoder matched Stop: transcript identity did not appear before the 10-second wait expired' : undefined)
   let retainedWindow = false
-  if (!options.terminalOnlyTranscript && (transcript.identityMatched === false || options.transcriptUnavailable)) {
+  if (!options.terminalOnlyTranscript && (transcript.identityMatched === false || lacksMatchedQoderTranscript || options.transcriptUnavailable)) {
     if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
     if (open.qoderRequestStopConfirmed) transcript = unobservedTranscript

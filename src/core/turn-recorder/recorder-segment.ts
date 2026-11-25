@@ -97,7 +97,7 @@ export async function refreshSealWindow(root: string, open: OpenTurnState): Prom
   await writeJsonAtomic(openPath(root), open, { sync: false })
 }
 
-export async function revokeSeal(root: string, open: OpenTurnState): Promise<void> {
+export async function revokeSeal(root: string, open: OpenTurnState, persist = true): Promise<void> {
   if (open.deferredTerminalEventId) {
     await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
   }
@@ -114,12 +114,13 @@ export async function revokeSeal(root: string, open: OpenTurnState): Promise<voi
   delete open.deferredQoderStopAttribution
   delete open.deferredQoderNativeStopId
   delete open.qoderRequestStopConfirmed
+  delete open.qoderStopTranscriptDeadlineMs
   delete open.terminalDiffs
   for (const { capture } of open.captures) resumeAfterStorage(capture)
   delete open.frozenDiffs
   delete open.terminalIdentityConfirmedBySessionEnd
   if (open.provider !== 'qoder') delete open.staleTerminalProtection
-  await writeJsonAtomic(openPath(root), open, { sync: false })
+  if (persist) await writeJsonAtomic(openPath(root), open, { sync: false })
 }
 
 export function holdsStopForBackgroundWork(provider: ProviderId): boolean {

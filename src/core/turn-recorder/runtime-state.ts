@@ -102,6 +102,7 @@ export interface RecorderOpenTurnState {
   deferredQoderStopAttribution?: 'matched' | 'unproven'
   deferredQoderNativeStopId?: string
   qoderRequestStopConfirmed?: true
+  qoderStopTranscriptDeadlineMs?: number
   continuation?: RecorderContinuation
   frozenDiffs?: RecorderFrozenDiff[]
   terminalIdentityConfirmedBySessionEnd?: boolean
