@@ -43,7 +43,7 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
       return { x: Math.round(rect.x + x / box.width * rect.width), y: Math.round(rect.y + rect.height * 0.5) }
     }, { index, count })
     contents.sendInputEvent({ type: 'mouseMove', ...point })
-    // 隐藏窗口里的图表悬停检查不只依赖原生鼠标移动。
+    // 隐藏窗口没有合成帧，Chromium 只把按键和点击送进渲染进程，指针移动会被丢掉。
     // 点击路径仍走原生输入；这里按同一坐标补一个页内 pointermove，让图表收到指针位置。
     await read((point) => {
       const hit = document.elementFromPoint(point.x, point.y)
@@ -58,7 +58,7 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
     const plot = document.querySelector('.analytics-chart').getBoundingClientRect()
     return { text: node.textContent, contained: rect.left >= plot.left - 1 && rect.right <= plot.right + 1 }
   })
-  // 此检查用 zh-CN 短日期生成预期标签。
+  // 图表日期刻度跟随界面语言（zh-CN）。
   const day = value => new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(`${value}T12:00:00`))
   const data = await query(7)
   await contents.executeJavaScript('window.setCreditsFixture(' + JSON.stringify(data) + ')')
@@ -66,6 +66,7 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
   await click('.analytics-tabs [role="tab"]', '成本与用量')
   await until(`document.querySelector('.analytics-tile.is-hero .analytics-tile-value')?.textContent === '$1.41'`)
   check(await read(() => document.querySelector('.analytics-tile.is-hero .analytics-tile-value').textContent) === '$1.41', 'Credits conversion is missing from the hero tile')
+  // 没有活动的日子画 0，未知价格写「无价格」：两种缺失不混为一谈。
   await hoverDay(data.days.length - 3, data.days.length)
   let detail = await readout()
   check(detail?.text.startsWith(day(data.days.at(-3))), 'Pointer hover did not select the hovered day')
@@ -98,7 +99,7 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
   await read(() => document.querySelector('.analytics-chart svg')?.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true, pointerType: 'mouse' })))
   await frame()
   check(await readout() === null, 'Pointer leave did not dismiss the chart readout')
-  // 核对 Agent 表格的提示仍包含 Credits 和已知下界证据。
+  // 证据留在表格提示里，图上只给数值。
   const evidence = await read(() => [...document.querySelectorAll('.analytics-table.is-agents .is-strong')].map(node => node.title).join('; '))
   check(evidence.includes('Credits') && evidence.includes('已知下界'), 'Credit evidence left the table')
   await click('[aria-label="度量"] button', 'Token')

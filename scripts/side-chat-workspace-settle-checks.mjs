@@ -36,6 +36,7 @@ export async function exerciseCreateSettlement({ read, wait, must, click, state,
   must(!(await pending()).some((entry) => entry.kind === 'find'), 'a settled refusal was checked again instead of creating')
   await answer('preview', preview('scope-A'))
   await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'create')`, 'create after a refusal')
+  // The host's own reason reaches the parent that asked.
   await answer('create', JSON.stringify('来源快照范围已变化，请重新预览；本次未创建侧聊'), { failed: true })
   await wait(`window.__scryRaces.pending.some(entry => entry.kind === 'find')`, 'receipt lookup in the asking parent')
   await answer('find', "({ commandId: 'fixture', status: 'not-found' })")

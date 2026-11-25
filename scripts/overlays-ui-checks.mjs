@@ -76,9 +76,9 @@ export async function exerciseOverlays(contents) {
       await close(selector, trigger)
     }
   }
-  // A native animationend qualifies directly. The 130 ms fallback allows frame-timing
-  // variation and measures from animationstart to removal, not from the close action.
-  // The 296–360 ms software-compositing observation was for total close time.
+  // The exit needs 296-360ms of wall time under software compositing; the 130ms floor allows one
+  // composited frame of start/end timestamp noise observed on a fast host (118-160ms) without
+  // accepting an exit that was removed mid-animation.
   const animatedCloses = closeTimes.filter(result => result.nativeAnimationEnd || (result.msAfterStart ?? 0) >= 130)
   check(animatedCloses.length > 0, 'Modal exit ran no real compositor animation: ' + JSON.stringify(closeTimes))
   for (const path of ['escape', 'backdrop']) {

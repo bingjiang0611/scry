@@ -10,7 +10,7 @@ At `f1f268fb`, the third batch handled 64 of the 94 remaining wording tokens acr
 
 At `c104dd5b`, closed the remaining 30 wording decisions: 22 revised and eight retained for their local fixture or authority rationale. A separate ADR reconciliation closed 20 exact wording tokens (19 grouped review entries; the Qoder note contains two tokens). The combined changes cover 14 source files; exact edit replay, non-comment source, emit, directives, the ratchet, and 211 focused tests passed. No runtime or assertion changes were made. The 31 evidence follow-up tokens in this ledger are separate.
 
-The final byte check restored the `steer-ui-smoke.mjs` wording candidate and its neighboring line: the smoke serializes the whole function. The old text is kept as fixture bytes, not as proof of Provider receipt. This changes the final wording disposition to 129 revised or removed and nine kept.
+The final byte check restored the `steer-ui-smoke.mjs` wording candidate and its neighboring line: the smoke serializes the whole function. The old text is kept as fixture bytes, not as proof of Provider receipt. The indirect serializer check also restored the three overlay wording tokens. Those comments are fixture bytes, not animation measurements. The final wording disposition is 126 revised or removed and 12 kept.
 
 ## Candidate locations
 
@@ -29,7 +29,7 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `scripts/history-autoload-ui-smoke.mjs` | 41 | — | — | — |
 | `scripts/login-start-macos-acceptance.mjs` | — | — | 146 | 7, 106, 311 |
 | `scripts/orchestration-import-bench.mjs` | — | — | — | 2, 220 |
-| `scripts/overlays-ui-checks.mjs` | — | — | — | 79, 80, 81 |
+| `scripts/overlays-ui-checks.mjs` | 79, 80, 81 | — | — | — |
 | `scripts/owned-app-processes.test.mjs` | — | — | — | 45 |
 | `scripts/publish-cli-internal.test.mjs` | — | — | — | 74 |
 | `scripts/recorder-engine-bench-fixtures.mjs` | — | — | — | 2 |

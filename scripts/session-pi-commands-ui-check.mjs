@@ -57,6 +57,7 @@ export async function exercisePiCommands(contents) {
   await wait(`document.querySelector('${single} .question-option:nth-child(1) input').checked`)
   await click(`${single} .question-option:nth-child(2)`)
   await wait(`${selectedCount} === 2`)
+  // Toggling one choice must preserve the other; Space must work on the focused checkbox.
   await click(`${single} .question-option:nth-child(1)`)
   await wait(`${selectedCount} === 1 && document.querySelector('${single} .question-option:nth-child(2) input').checked`)
   contents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' })
