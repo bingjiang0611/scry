@@ -183,7 +183,10 @@ export class AuthorityEngine {
   }
 
   /** Async authoritative submit: writes and fsyncs >16 KiB body BEFORE EventSink commit (data §4.7). */
-  async submitAsync(input: AuthoritySubmitInput): Promise<AuthoritySubmitResult> {
+  async submitAsync(
+    input: AuthoritySubmitInput,
+    onCommitted?: (result: Extract<AuthoritySubmitResult, { kind: 'accepted' }>) => void
+  ): Promise<AuthoritySubmitResult> {
     const start = this.beginSubmit(input)
     if ('early' in start) return start.early
     let preparedBody: PreparedBody | undefined
@@ -196,7 +199,11 @@ export class AuthorityEngine {
         preparedBody = await this.sink.bodyStore.prepareBodyAsync(input.detail)
         bodyWriteMs = performance.now() - bodyStart
       }
-      return this.submitBuilt(input, start.actor, start.hookStarted, start.sessionKey, start.epochBeforePrepare, preparedBody, bodyWriteMs)
+      const result = this.submitBuilt(input, start.actor, start.hookStarted, start.sessionKey, start.epochBeforePrepare, preparedBody, bodyWriteMs)
+      // The outbox becomes visible at commit. Publish the transient dispatch index in
+      // the same stack, before another pump can observe that row.
+      if (result.kind === 'accepted') onCommitted?.(result)
+      return result
     } finally {
       unpinBody?.()
     }

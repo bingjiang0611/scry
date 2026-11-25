@@ -94,7 +94,7 @@ export interface OrchestrationAuthorityHooks {
     immediateDispatch?: OrchestrationImmediateDispatchChecks
     /** D2/D1: `queued` waits behind the live run instead of being rejected. */
     claimMode?: 'immediate' | 'queued'
-  }): Promise<{ runId: string; status: 'recorded' | 'duplicate'; seq: number }>
+  }, indexCommittedIntent: (ledgerRunId: string) => void): Promise<{ runId: string; status: 'recorded' | 'duplicate'; seq: number }>
   /** Authoritative sync submit (non-attachment path, durable >16 KiB body BEFORE commit). */
   submitSync(input: {
     peerCertSHA256: string

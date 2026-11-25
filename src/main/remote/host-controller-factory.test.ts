@@ -156,8 +156,21 @@ describe('createHostController (production persistence binding)', () => {
       prompt: 'legacy turn',
       conversation: { conversationId: 'conv-r5', runId: 'legacy-turn-7' }
     } as never)
+    let leasedTooEarly: unknown
+    const execute = binding.authority.sink.execute.bind(binding.authority.sink)
+    vi.spyOn(binding.authority.sink, 'execute').mockImplementation((command) => {
+      const result = execute(command)
+      if (command.type === 'run.submit') queueMicrotask(() => {
+        binding.controller.pump()
+        leasedTooEarly = binding.authority.sink.handle.db.prepare(
+          "SELECT last_error FROM orch_outbox WHERE run_id = 'legacy-turn-7' AND kind = 'provider.run.start'"
+        ).pluck().get()
+      })
+      return result
+    })
     const submit = await binding.controller.submitReceivedIntent(local, { intentId: randomUUID(), detail })
     await binding.controller.idle()
+    expect(leasedTooEarly).toBeNull()
 
     expect(started).toEqual(['legacy-turn-7'])
     expect(submit.runId).not.toBe('legacy-turn-7')

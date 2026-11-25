@@ -77,15 +77,15 @@ export async function submitReceivedIntent(
       detail,
       ...(input.claimMode ? { claimMode: input.claimMode } : {}),
       ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
+    }, (runId) => {
+      try {
+        deps.gateway.submitIntent(peer, { ...input, detail, runId })
+      } catch (error) {
+        try { deps.orchestration!.compensateSubmitFailure(runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
+        throw error
+      }
     })
-    if (auth.status === 'duplicate') return auth
-    try {
-      deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
-    } catch (error) {
-      try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
-      throw error
-    }
-    deps.dispatcher.pump()
+    if (auth.status === 'recorded') deps.dispatcher.pump()
     return auth
   }
   return recordIntent(deps, peer, { ...input, detail })

@@ -186,7 +186,6 @@ function buildAuthorityRuntime<
     }
   })
 
-  // Track mapping between the dispatcher run ID and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
   const pendingTranscripts = new Map<string, Promise<Evidence<string>>>()
   const transcriptWrites = createRunTranscriptWrites(sink, options.log)
@@ -215,7 +214,7 @@ function buildAuthorityRuntime<
     createLedgerStore: () => createAuthorityLedgerStore(sink),
     ledgerIdForRun: ledgerIdForCanonical,
 
-    submitAsync: async (input) => {
+    submitAsync: async (input, indexCommittedIntent) => {
       const immediateDispatch = input.immediateDispatch
         ? {
             ...input.immediateDispatch,
@@ -230,14 +229,16 @@ function buildAuthorityRuntime<
         detail: input.detail,
         ...(input.claimMode ? { claimMode: input.claimMode } : {}),
         ...(immediateDispatch ? { immediateDispatch } : {})
+      }, ({ runId }) => {
+        indexCommittedIntent(ledgerIdForSubmit(runId, false))
+        if (!immediateDispatch) {
+          const route = parseLedgerIntentRouting(runId, input.detail)
+          trustGate.prepare(runId, route.provider, route.cwd || sink.getRun(runId)?.cwd)
+        }
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      if (!immediateDispatch && res.kind !== 'duplicate') {
-        const routing = parseLedgerIntentRouting(res.runId, input.detail)
-        trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
-      }
-      const ledgerRunId = ledgerIdForSubmit(res.runId, res.kind === 'duplicate')
-      return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
+      const duplicate = res.kind === 'duplicate'
+      return { runId: ledgerIdForSubmit(res.runId, duplicate), status: duplicate ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
     submitSync: (input) => {
