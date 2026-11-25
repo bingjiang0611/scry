@@ -28,8 +28,19 @@ Recorder 合同在 `diff.value[].repositoryLocation` 增加可选对象。内部
 | `branchAfter` | 采集结束时的分支名；格式、`null` 和缺失语义与 `branch` 相同。即使与开头相同也可写。 | 255 UTF-8 字节 |
 | `commitBefore` | 采集开始时的完整提交号。不把基线树或事后重建的基线当成当时的 HEAD。 | 40 或 64 个小写十六进制字符 |
 | `commitAfter` | 采集结束时的完整提交号，即使与开始相同也可写。 | 40 或 64 个小写十六进制字符 |
+| `remoteStatus` | `observed`（有 `remote`）/ `absent`（config 读到了但没有 origin）/ `unsupported`（有 origin 但不是可识别的身份：本地路径、token-only URL、本解析器不支持的续行写法）/ `unavailable`（没读到）。0.2.88 起。 | 封闭枚举 |
+| `branchStatus` | `observed`（`branch` 是分支名）/ `detached`（HEAD 是提交，`branch` 为 `null`）/ `unavailable`（HEAD 没读到）。0.2.88 起。 | 封闭枚举 |
+| `commitStatus` | `observed`（有 `commitBefore`）/ `unavailable`（开始时的 HEAD 没读到）。0.2.88 起。 | 封闭枚举 |
 
 起始位置独立于 diff 基线：接续轮在该段采集开始时重新读 Git；`baseline_after_turn_start` 表示迟启采集，起始字段只代表采集开启时，不能还原原始提问时的位置。
+
+三个状态键是“事实”和“没取到”的分界：`absent`（没有配置远端）、`unsupported`（有远端但不是可识别身份，路径本身不记录）、`detached`（分离头指针所以没有分支名）都是关于这个仓库的事实，不算数据缺失；`unavailable` 才是没取到。没有这三个键的旧记录按“未观测”读：值的缺失可以解释为没取到，不能当成仓库没有远端或分离头指针。
+
+0.2.88 起，收尾只对**这一轮真正改动过**的仓库补读一次远端：专用池 8 并发，整轮共用一个 500 ms 截止时间（单仓库读上限 250 ms），所以最坏情况下 Stop 钩子最多多等 500 毫秒。开始采样已经确认 `absent`/`unsupported` 的仓库不再补读。`commitBefore`/`branch` 直接取开始时那次 `git status` 的结果，因此不再依赖那个 50 毫秒的启动采样。没有改动的仓库只保留状态，不花第二次读。
+
+状态描述的是这条记录最终带着的值：回填之后有值就是 `observed`（分支为 `null` 是 `detached`），没值才退回采样给的状态，都没有就是 `unavailable`。一条记录最多保留 32 个仓库的位置，有改动的仓库先占名额，剩下的按出现顺序给没改动的；没有改动且三个状态都是 `unavailable` 的条目不带位置。
+
+读取方对该对象的处理是宽容的：值不在已知集合里就投影掉，不让整条记录失效；写入侧 `commitRecord` 拒绝未定义取值。
 
 每条记录最多给 32 个不同的仓库根各附一次位置；重复快照和超过上限的仓库仍保留原 diff。读取不启进程、不等待额外 I/O；只读已知 Git 文件布局。支持 loose ref、`packed-refs` 和 worktree/gitdir 指针，不追踪 Git config include、不应用 URL 重写规则、不读取其他 ref 后端。超过读取预算、读失败或无法确认的字段留空。
 - 会话捕获记录里的 `source` 与 `client` 是两件事：`source` 是谁要求采集，`client` 是这轮发生在哪个客户端里（例如 `source=friday` + `client=3eye`）。`client` 缺失只表示没观测到，不能读成“不在任何客户端里”；它只能是 `[a-z0-9][a-z0-9-]{0,31}` 形式的标识，不是自由文案。

@@ -7,6 +7,7 @@ import type { RecorderFrozenDiff, RecorderOpenTurnState, RecorderSessionState } 
 import { beginGitTurnDiff, preserveAfterStorage } from './git-capture.js'
 import { TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 import { limitTurnDiffPatchBytes, finishGitTurnDiff } from './git.js'
+import { REPOSITORY_REMOTE_RETRY } from './git-repository-location.js'
 import { turnChangeHints } from './change-journal.js'
 import { persistTurnDiffContent } from './recorder-turn-state.js'
 import { writeJsonAtomic } from './io.js'
@@ -107,9 +108,13 @@ function liveTurnDiffs(
   mergedEvents: TraceEvent[],
   frozen: FrozenDiffCollector | undefined
 ): Promise<TurnDiffSnapshot[]> {
+  // One ceiling for the whole turn: the origin retry must not cost the host's Stop hook one budget
+  // per repository.
+  const locationRetryDeadline = Date.now() + REPOSITORY_REMOTE_RETRY.turnMs
   return Promise.all(open.captures.map(async ({ repository, capture }) => ({
     ...await finishGitTurnDiff(capture, undefined, {
       ...turnChangeHints(repository, mergedEvents),
+      locationRetryDeadline,
       patchExcludeBasenames: enablement.config.capture.patchExcludeBasenames,
       // Workspace config plus this capture's own claim: a workflow's material directory is
       // excluded for the session that declared it, not for every session in the workspace.

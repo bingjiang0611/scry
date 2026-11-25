@@ -4,6 +4,7 @@ import { it, expect } from 'vitest'
 import { handleRecorderHook, resetTranscriptSnapshotCache, recoverRecorder, transcriptSnapshotCacheStats, readTranscriptWindow } from '../recorder'
 import { listRecords, exportRecords, commitRecord } from '../store'
 import { readRecorderContent } from '../content-store'
+import { normalizeTurnRepositoryLocation } from '../../../shared/turn-repository-location'
 import { workspace, completeTurn, payload } from './fixture.test'
 
 export function registerSuite2(): void {
@@ -77,6 +78,40 @@ export function registerSuite2(): void {
     // Writing stays narrower than reading: the same record cannot be committed again from this build.
     await expect(commitRecord(dataRoot, { ...stored, recordId: 'a'.repeat(32) }))
       .rejects.toThrow('refusing to commit a record with codes this version must not write: some_future_code')
+  })
+
+  it('位置状态：读取容忍未知取值，写入拒绝未定义取值', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'status-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const stored = JSON.parse(await readFile(join(dataRoot, 'records', name), 'utf8'))
+    const entry = { version: 1, status: 'captured', files: [], repoRoot: '/tmp/fixture-repo', beforeAt: stored.startedAt, afterAt: stored.completedAt, captureMs: 1, cleanup: 'ok' }
+    const diff = { status: 'available', quality: 'exact', source: ['git'], value: [entry] }
+    // A newer recorder may name a status this build does not know. Like omissionCodes, it stays a
+    // readable record: the projection drops the value, and no other section is affected.
+    await writeFile(join(dataRoot, 'records', name), JSON.stringify({
+      ...stored,
+      diff: { ...diff, value: [{ ...entry, repositoryLocation: { remoteStatus: 'mirrored', branchStatus: 'observed', commitStatus: 'observed' } }] }
+    }))
+    const read = await listRecords(dataRoot)
+    expect(read).toHaveLength(1)
+    const location = read[0].diff.value?.[0].repositoryLocation
+    // Reading keeps the raw record; displaying it projects the known vocabulary and drops the rest.
+    expect(location).toEqual({ remoteStatus: 'mirrored', branchStatus: 'observed', commitStatus: 'observed' })
+    expect(normalizeTurnRepositoryLocation(location)).toEqual({ branchStatus: 'observed', commitStatus: 'observed' })
+    // Writing is narrower: this build only emits the defined values, and a typo must not survive.
+    await expect(commitRecord(dataRoot, {
+      ...stored,
+      recordId: 'f'.repeat(32),
+      diff: { ...diff, value: [{ ...entry, repositoryLocation: { remoteStatus: 'mirrored' } }] }
+    })).rejects.toThrow('refusing to commit a record with undefined repository location statuses: remoteStatus=mirrored')
+    const committed = await commitRecord(dataRoot, {
+      ...stored,
+      recordId: '9'.repeat(32),
+      diff: { ...diff, value: [{ ...entry, repositoryLocation: { remoteStatus: 'absent', branchStatus: 'detached', commitStatus: 'unavailable' } }] }
+    })
+    expect(committed.record.diff.value?.[0].repositoryLocation).toEqual({ remoteStatus: 'absent', branchStatus: 'detached', commitStatus: 'unavailable' })
   })
 
   it('已认识但本版还禁止写入的码会被提交拒绝，diff 码照常提交', async () => {
