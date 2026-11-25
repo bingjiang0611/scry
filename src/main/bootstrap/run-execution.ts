@@ -142,6 +142,7 @@ export async function startRun(
         handle,
         steering,
         userQuestionBroker,
+        ...(options.onBackgroundWake ? { onBackgroundWake: options.onBackgroundWake } : {}),
         publishSessionId,
         emit,
         runState,

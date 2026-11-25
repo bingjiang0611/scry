@@ -47,6 +47,7 @@ export interface RunProviderBootstrapDependencies {
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
   /** A2：本会话已接受的规则持久副本，重开 Provider 进程时重新带上。 */
   sessionPermissionRules?: SessionPermissionRuleAccess
+  onBackgroundWake?: (wake: { taskIds: string[]; reason: 'continuation' | 'terminal' | 'cleared'; sessionId: string; cwd: string | undefined }) => void
   // The submitter is the App, so questions are answered by the App's own broker.
   /** Whether this Provider's questions are answered in the App window (see run-startup). */
   askWindow: boolean
@@ -193,6 +194,7 @@ export function createRunProvider(deps: RunProviderBootstrapDependencies): () =>
       },
       onExternalSessionId: publishSessionId,
       ...(deps.sessionPermissionRules ? { sessionPermissionRules: deps.sessionPermissionRules } : {}),
+      ...(deps.onBackgroundWake ? { onBackgroundWake: deps.onBackgroundWake } : {}),
       requestUserInput: async (question, signal) => {
         // One decision, made where the run's venue is known: the window answers the
         // App's own run; a daemon has none, so its questions go through the ledger.

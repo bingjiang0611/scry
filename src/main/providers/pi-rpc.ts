@@ -332,6 +332,16 @@ export class RotomRpcPool {
     }
   }
 
+  /** A kept process that failed is not a session: drop it without waiting on a dead child. */
+  forget(sessionId: string): void {
+    for (const [key, entry] of this.idle) {
+      if (entry.sessionId !== sessionId) continue
+      this.idle.delete(key)
+      clearTimeout(entry.timer)
+      this.onReleased?.(entry.sessionId, 'evicted')
+    }
+  }
+
   async invalidate(context: ProviderContext): Promise<void> {
     const matches = [...this.idle.entries()].filter(([, entry]) =>
       entry.cwd === (context.cwd ?? '') &&

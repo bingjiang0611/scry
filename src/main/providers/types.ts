@@ -157,6 +157,16 @@ export interface ProviderRunRequest {
   recordNative?: (type: string, payload: unknown) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
+  /**
+   * C3: the answer's run ended while Provider-native background work continued. The host submits an
+   * `origin: 'agent'` wake through D1's queue, so the session reports that work as an agent turn.
+   */
+  onBackgroundWake?: (wake: {
+    taskIds: string[]
+    reason: 'continuation' | 'terminal' | 'cleared'
+    sessionId: string
+    cwd: string | undefined
+  }) => void
   /** A2：本会话已接受的规则持久副本，重开 Provider 进程时重新带上。 */
   sessionPermissionRules?: SessionPermissionRuleAccess
 }

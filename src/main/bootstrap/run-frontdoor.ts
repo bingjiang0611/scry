@@ -33,6 +33,11 @@ export interface AppRunStartOptions {
   providerPrompt?: string
   onTraceEvent?: (event: import('../../shared/trace').TraceEvent) => void
   onSession?: (externalSessionId: string) => void
+  /**
+   * C3: the answer is complete while Provider-native work continues. The host wakes the session with
+   * an agent-origin run; absent means the host cannot, and the run must hold its own turn instead.
+   */
+  onBackgroundWake?: (wake: { taskIds: string[]; reason: 'continuation' | 'terminal' | 'cleared'; sessionId: string; cwd: string | undefined }) => void
   ledgerRunId?: string
   managedConversation?: ManagedConversationStart
   /**

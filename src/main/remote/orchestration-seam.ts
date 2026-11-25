@@ -49,6 +49,11 @@ export interface OrchestrationAuthorityHooks {
    */
   recordSessionLineage?(input: SessionLineageRecord): { status: 'recorded' | 'unavailable'; reason?: string }
   /**
+   * C3: the answer's run ended while Provider-native background work continued. The host wakes the
+   * session with an `origin: 'agent'` run through D1's queue instead of holding the answered run open.
+   */
+  wakeBackground?(input: { runId: string; taskIds: string[]; reason: 'continuation' | 'terminal' | 'cleared' }): void
+  /**
    * C4: the note a restart owes this session's next turn. Reading it removes it, so one turn gets
    * told and later turns do not.
    */

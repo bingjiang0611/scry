@@ -73,3 +73,41 @@ export function submitAgentWake(sink: EventSink | undefined, input: AgentWakeInp
   if (result.kind === 'duplicate') return { status: 'duplicate', runId }
   return { status: 'recorded', runId }
 }
+
+/**
+ * C3: the wake a finished Provider-native task earns. The run that carried the answer has ended, so
+ * this reads the session the task was reported on rather than a live run, and the prompt says the
+ * result must be read before it is trusted.
+ */
+export function wakeBackgroundSession(
+  sink: EventSink | undefined,
+  input: { runId: string; taskIds: string[]; reason: 'continuation' | 'terminal' | 'cleared' },
+  pump?: () => void,
+  now = Date.now()
+): AgentWakeResult {
+  if (!sink) return { status: 'unavailable', reason: 'orchestration_unavailable' }
+  const row = sink.handle.db.prepare(
+    `SELECT r.session_key AS sessionKey, r.provider AS provider, r.profile AS profile, r.cwd AS cwd
+       FROM orch_p_run r WHERE r.run_id = ?`
+  ).get(input.runId) as { sessionKey: string | null; provider: string; profile: string | null; cwd: string | null } | undefined
+  if (!row?.sessionKey || !row.cwd) return { status: 'unavailable', reason: 'background_wake_without_session' }
+  const listed = input.taskIds.length > 0 ? input.taskIds.join('、') : '（编号未知）'
+  const how = input.reason === 'terminal'
+    ? '已返回结果'
+    : input.reason === 'cleared'
+      ? '不再由 Provider 报告，结果未知'
+      : '回到这一轮继续，结果未知'
+  const prompt = `（后台任务唤醒）之前留下的后台任务 ${listed} ${how}。先核验它的输出或文件，再接着做完；没有证据就当它没有完成，不要重试写入。`
+  const result = submitAgentWake(sink, {
+    // One wake per completion report: the same set of tasks wakes this session once.
+    taskId: `background:${[...input.taskIds].sort().join('+')}:${input.reason}`,
+    sessionKey: row.sessionKey,
+    provider: row.provider,
+    profile: row.profile,
+    cwd: row.cwd,
+    prompt,
+    promptPreview: prompt
+  }, now)
+  if (result.status === 'recorded') pump?.()
+  return result
+}

@@ -103,6 +103,10 @@ export async function createHostRuntime(inputs: HostRuntimeInputs): Promise<Remo
           ...(input.managedConversation ? { managedConversation: input.managedConversation } : {}),
           ...(input.onStarted ? { onStarted: input.onStarted } : {}),
           ...(input.onWorkspaceProgress ? { onWorkspaceProgress: input.onWorkspaceProgress } : {}),
+          // C3: detached work outlives the answered run, so the wake is submitted by the authority.
+          ...(inputs.orchestration?.wakeBackground
+            ? { onBackgroundWake: (wake: { taskIds: string[]; reason: 'continuation' | 'terminal' | 'cleared'; sessionId: string; cwd: string | undefined }) => inputs.orchestration!.wakeBackground!({ runId: input.runId, taskIds: wake.taskIds, reason: wake.reason }) }
+            : {}),
           onRegistered: (result) => input.onRegistered?.({ cwd: result.cwd ?? input.request.cwd! })
         })
         // A worktree start answers once registered; its terminal receipt follows.

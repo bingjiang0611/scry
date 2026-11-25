@@ -15,7 +15,7 @@ import { PiRunDiagnostics } from './pi-run-diagnostics'
 
 
 describe('Pi startup and probe lifecycle', () => {
-  it.each(['continue', 'interrupt', 'transport-exit'] as const)('keeps async child ownership through parent idle: %s', async (action) => {
+  it.each(['continue', 'interrupt', 'transport-exit'] as const)('settles the answer and leaves the child to the host: %s', async (action) => {
     await withProbeFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })
       const events: TraceEvent[] = []
@@ -28,21 +28,27 @@ describe('Pi startup and probe lifecycle', () => {
       })
       let checkpoint!: () => void
       const waiting = new Promise<void>(resolve => { checkpoint = resolve })
+      const wakes: string[] = []
       const handle = adapter.run({
         runId: 'background', prompt: 'background-child', cwd, agentProfileId: profile.id,
-        attachments: [], permissionMode: 'full_access', emit(event) {
+        attachments: [], permissionMode: 'full_access',
+        onBackgroundWake(wake) { wakes.push(wake.reason) },
+        emit(event) {
           events.push(event)
           if (event.text?.includes('child waiting checkpoint')) checkpoint()
         }
       })
+      // C3: the answer settles before the child does, so a stop only means something to a live run.
+      if (action === 'interrupt') handle.interrupt()
       try {
-        await Promise.race([waiting, handle.promise.then(() => { throw new Error('run ended before child checkpoint') })])
-        expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
-          providerId: 'pi', phase: 'waiting', taskStop: 'unavailable', tasks: [{ taskId: 'child-1', description: 'worker' }]
-        })
-        expect(events.some(event => event.stage === 'result')).toBe(false)
-        if (action === 'interrupt') handle.interrupt()
-        else {
+        if (action !== 'interrupt') {
+          await Promise.race([waiting, handle.promise.then(() => { throw new Error('run ended before child checkpoint') })])
+          expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
+            providerId: 'pi', phase: 'waiting', taskStop: 'unavailable', tasks: [{ taskId: 'child-1', description: 'worker' }]
+          })
+          expect(events.some(event => event.stage === 'result')).toBe(false)
+        }
+        if (action !== 'interrupt') {
           // A missing reader must fail the fixture, not block Vitest's event loop
           // indefinitely inside writeFileSync on a FIFO.
           const release = spawnSync('/bin/sh', ['-c', 'printf "%s\\n" "$1" > "$2"', 'release-child',
@@ -51,14 +57,15 @@ describe('Pi startup and probe lifecycle', () => {
           expect(release.status).toBe(0)
         }
         if (action === 'transport-exit') {
-          await expect(handle.promise).rejects.toThrow()
-          expect(events.filter(event => event.backgroundWork).at(-1)?.backgroundWork).toMatchObject({
-            phase: 'inactive', tasks: [{ taskId: 'child-1', status: 'unconfirmed' }]
-          })
-          expect(events.some(event => event.stage === 'result')).toBe(false)
+          // The child's process dies at the release, which races the answer's settlement. Both outcomes
+          // are truthful and neither may invent a result: it delivers the answer, or the run fails.
+          const outcome = await handle.promise.then((value) => value.status, () => 'failed')
+          expect(['completed', 'failed']).toContain(outcome)
+          expect(events.filter(event => event.stage === 'result').length).toBe(outcome === 'completed' ? 1 : 0)
         } else await expect(handle.promise).resolves.toMatchObject({ status: action === 'interrupt' ? 'interrupted' : 'completed' })
         if (action === 'continue') {
-          expect(events.some(event => event.text === 'Child reviewed; parent continued')).toBe(true)
+          // The child's result reaches the host as a wake, not as more output in the answered run.
+          await vi.waitFor(() => expect(wakes).toEqual(['terminal']), { timeout: 3_000 })
           expect(events.filter(event => event.stage === 'result')).toHaveLength(1)
         }
       } finally {

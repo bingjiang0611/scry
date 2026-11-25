@@ -3,6 +3,7 @@ import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../main/
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
 import { createUsageLimitScheduler } from './usage-limit-scheduler'
+import { wakeBackgroundSession } from './agent-wake'
 import { findRestartBackgroundNotes, storeRestartBackgroundNotes } from './restart-background-note'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
@@ -44,9 +45,13 @@ export async function attachHostProcessOrchestration<
     log,
     ...(options.orchestrationPauseBackfill ? { pauseDeferredImport: options.orchestrationPauseBackfill } : {}),
     ...(options.orchestrationBeforeCommitHook ? { beforeCommitHook: options.orchestrationBeforeCommitHook } : {}),
-    usageLimits
+    usageLimits,
+    ...(input.pumpDispatcher ? { pumpDispatcher: input.pumpDispatcher } : {})
   })
   attached = authority
+  // C3: the answered run ended while Provider-native work continued. The wake reuses C4's pump: a
+  // queued agent run is an outbox row, and nothing drains it unless something pumps.
+  authority.hooks.wakeBackground = (wake) => { wakeBackgroundSession(authority.sink, wake, input.pumpDispatcher) }
   // A restart re-arms exactly the items that are still pending; a stored item that already resumed
   // is not resumed again.
   usageLimits.pump()

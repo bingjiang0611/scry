@@ -14,6 +14,7 @@ import { PiQuestionnaire } from './pi-questionnaire'
 import { type JsonRecord } from './pi-shared'
 import { PI_BOOTSTRAP_MAX_BYTES, PI_HISTORY_EXTENSION_SHA256, PI_RPC_MAX_FRAME_BYTES, fileDigest, piContinuationKey, piRpcEnvironment, isRotomLauncher } from './pi-runtime'
 import { PiRpcProcess, PiRpcCommandError, PiRecorderError, RotomRpcPool, piEvent } from './pi-rpc'
+import { watchPiBackground } from './pi-background-wake'
 import type { PiRunState } from './pi-types'
 import { attachPiEventHandlers } from './pi-run-events'
 import { runPiAgentSuccess } from './pi-run-success'
@@ -114,6 +115,13 @@ export async function runPiAgent(
   let agentEnded = false
   /** The Provider reached native idle, so this run waits only for child evidence. */
   let nativeIdle = false
+  /** C3: the run settled at the answer; the kept process still reports a child. */
+  let backgroundPendingAtSettle = false
+  const backgroundWatch = watchPiBackground({
+    taskIds: () => background.pendingTaskIds,
+    onWake: (wake) => request.onBackgroundWake?.(wake),
+    onProcessDied: (sessionId) => rotomPool?.forget(sessionId)
+  })
   let steerCapabilityEmitted = false
   let steerPending = false
   let resolveAgentCycleEnd!: () => void
@@ -162,6 +170,9 @@ export async function runPiAgent(
     set settledResolve(value: typeof settledResolve) { settledResolve = value },
     get nativeIdle() { return nativeIdle },
     set nativeIdle(value: typeof nativeIdle) { nativeIdle = value },
+    get backgroundPendingAtSettle() { return backgroundPendingAtSettle },
+    set backgroundPendingAtSettle(value: typeof backgroundPendingAtSettle) { backgroundPendingAtSettle = value },
+    backgroundSettled: () => backgroundWatch.attach(rpc, state.sessionId, request.cwd),
     get agentStarted() { return agentStarted },
     set agentStarted(value: typeof agentStarted) { agentStarted = value },
     get steerCapabilityEmitted() { return steerCapabilityEmitted },
@@ -351,8 +362,17 @@ export async function runPiAgent(
     offFailure()
     emitBackground(background.end())
     abortController.abort()
-    if (retainRpc && state.sessionId && rotomPool) rotomPool.keep(profile, request.cwd, state.sessionId, rpc, env, continuationKey)
-    else await rpc.close()
+    // C3: an answer that settled while the Provider still reported a child keeps the process instead of
+    // holding the run open.
+    const watchBackground = backgroundPendingAtSettle && !state.stopped && rpc.reusable()
+    if ((retainRpc || watchBackground) && state.sessionId && rotomPool) {
+      rotomPool.keep(profile, request.cwd, state.sessionId, rpc, env, continuationKey)
+      if (watchBackground) backgroundWatch.attach(rpc, state.sessionId, request.cwd)
+    } else {
+      // Nothing keeps the process, so nothing can report the child: the host is not told of a wake.
+      backgroundWatch.stop()
+      await rpc.close()
+    }
     if (state.rpc === rpc) state.rpc = undefined
   }
 }
