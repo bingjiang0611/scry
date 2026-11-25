@@ -108,6 +108,12 @@ describe('LLM comparison rounds', () => {
     expect(JSON.stringify(rounds)).not.toContain('未知模型')
   })
 
+  it('treats the old multi-model marker as no model at all (Q11)', () => {
+    // 旧记录里核实到多个模型时会写「多模型」；它不是一个模型，读取时不能变成一行。
+    const multi = row(1000, { model: '多模型' })
+    expect(llmComparisonRounds([multi])).toEqual([])
+  })
+
   it('only shows provisional rounds once a model is observed, and persisted failure wins', () => {
     const sessions = summarizeRunningLlmSessions([
       { ...run('1000', { firstOutputWaitMs: 900 }), providerId: 'antigravity' },

@@ -170,14 +170,15 @@ function comparisonMetrics(speed?: number, firstTokenMs?: number, firstOutputWai
 }
 
 /**
- * 旧记录用占位字符串代替模型：`所选：<id>` 里其实是选中的模型，`未知模型` 不是模型。
- * 读取时迁移，不改写 usage.jsonl。
+ * 旧记录用占位字符串代替模型：`所选：<id>` 里其实是选中的模型；`未知模型` 和
+ * `多模型` 都不是模型（后者是核实到多个模型却没归因的旧写法）。读取时迁移，
+ * 不改写 usage.jsonl。
  */
 export function observedModelName(model: string | undefined | null): string | undefined {
   const trimmed = model?.trim()
-  if (!trimmed || trimmed === '未知模型') return undefined
+  if (!trimmed || trimmed === '未知模型' || trimmed === '多模型') return undefined
   const selected = trimmed.startsWith('所选：') ? trimmed.slice('所选：'.length).trim() : trimmed
-  return selected && selected !== '未知模型' ? selected : undefined
+  return selected && selected !== '未知模型' && selected !== '多模型' ? selected : undefined
 }
 
 /** Keep coverage even without timing. Stopped/failed rounds never contribute to metric distributions. */
