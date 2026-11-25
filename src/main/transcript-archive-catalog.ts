@@ -39,7 +39,6 @@ interface TraceArchiveCatalogIndexEntry {
 
 interface TraceArchiveCatalogIndex {
   version: 1
-  // Absent: the index covers every discoverable Provider. Present: only these Providers were scanned.
   providers?: ProviderId[]
   entries: TraceArchiveCatalogIndexEntry[]
 }
@@ -102,7 +101,6 @@ async function parseTraceArchiveCatalogIndexAsync(
     const scope = parsed.providers
     if (scope !== undefined) {
       if (!Array.isArray(scope) || !scope.every((id) => DISCOVERABLE_PROVIDER_IDS.has(id))) return null
-      // A scoped index only answers requests inside its scope.
       if (!providers || providers.some((id) => !scope.includes(id))) return null
     }
     const seen = new Set<string>()
@@ -208,28 +206,21 @@ export async function markTraceArchiveCatalogIndexDirtyAsync(userDataDir: string
   const marker = traceArchiveCatalogIndexDirtyPath(userDataDir)
   if (trustedOwnedFile(userDataDir, marker)) return
   try { await writeOwnedFileAtomicallyAsync(userDataDir, marker, 'dirty\n') } catch {
-    try { await unlink(traceArchiveCatalogIndexPath(userDataDir)) } catch { /* discovery will scan */ }
+    try { await unlink(traceArchiveCatalogIndexPath(userDataDir)) } catch {}
   }
 }
 
 export function markTraceArchiveCatalogIndexDirty(userDataDir: string): void {
   traceArchiveCatalogWriteGeneration++
   const marker = traceArchiveCatalogIndexDirtyPath(userDataDir)
-  // The catalog is only a recovery hint. Once dirty, leave it dirty until discovery rebuilds it;
-  // rewriting and revalidating the global catalog after every canonical turn made hot writes O(N).
   if (trustedOwnedFile(userDataDir, marker)) return
   try {
     writeOwnedFileAtomically(userDataDir, marker, 'dirty\n')
   } catch {
-    // If the marker cannot be committed, remove the index so discovery cannot trust stale metadata.
-    try { unlinkSync(traceArchiveCatalogIndexPath(userDataDir)) } catch { /* discovery will scan */ }
+    try { unlinkSync(traceArchiveCatalogIndexPath(userDataDir)) } catch {}
   }
 }
 
-/**
- * Recover Scry-owned session catalog metadata from canonical per-turn archives. Filesystem work
- * yields between files instead of blocking Electron main. `providers` limits the scan and the published index to those Providers.
- */
 export async function discoverTraceArchiveSessionsAsync(
   userDataDir: string,
   providers?: readonly ProviderId[]
@@ -238,8 +229,6 @@ export async function discoverTraceArchiveSessionsAsync(
   if (indexed) return indexSummaries(indexed)
   const generation = traceArchiveCatalogWriteGeneration
   const scanned = await scanTraceArchiveCatalogIndexAsync(userDataDir, DEFAULT_TRACE_DISCOVERY_BUDGET, providers)
-  // A write during the scan may belong to an already-enumerated directory. Keep its durable dirty
-  // marker and do not publish.
   if (scanned.complete && generation === traceArchiveCatalogWriteGeneration) {
     try {
       const content = JSON.stringify({
@@ -249,17 +238,12 @@ export async function discoverTraceArchiveSessionsAsync(
       } satisfies TraceArchiveCatalogIndex)
       if (Buffer.byteLength(content) > TRACE_INDEX_MAX_BYTES) throw new Error('trace archive index capacity exceeded')
       await writeOwnedFileAtomicallyAsync(userDataDir, traceArchiveCatalogIndexPath(userDataDir), content)
-      // Check the generation and clear the marker in one synchronous step. An async unlink could run
-      // after a newer write saw the existing marker and skipped writing its own.
       if (generation === traceArchiveCatalogWriteGeneration) {
         try { unlinkSync(traceArchiveCatalogIndexDirtyPath(userDataDir)) } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         }
       } else {
-        // A write landed while the index was being published, so the index may miss it. If that
-        // write also failed to commit its marker, it removed the index before our rename. Remove
-        // our copy too so discovery rescans instead of trusting stale metadata.
-        try { unlinkSync(traceArchiveCatalogIndexPath(userDataDir)) } catch { /* discovery will scan */ }
+        try { unlinkSync(traceArchiveCatalogIndexPath(userDataDir)) } catch {}
       }
     } catch (error) {
       console.warn('[scry] async trace archive index rebuild failed:', (error as Error).message)

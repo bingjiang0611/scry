@@ -258,7 +258,6 @@ describe('AskUserQuestionInline', () => {
     expect(html).toContain('用户取消')
     expect(html).toContain('question-result error')
     expect(html).toContain('<dd class="missing">未获得答案</dd>')
-    // 没有 duration 时不补时长。
     expect(html).not.toContain('等待 ')
     expect(html).not.toContain('question-result-wait')
   })

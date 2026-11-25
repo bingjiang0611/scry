@@ -47,8 +47,6 @@ interface ParsedPatchBody {
 }
 
 function patchDiffArgs(filterOverrides: string[], command: string[]): string[] {
-  // These are deliberately command-line settings rather than repository config. Patch framing
-  // is consumed below, so diff.* and color.* config must not be able to change its markers.
   return snapshotGitArgs(filterOverrides, [
     '--no-pager',
     '-c', 'core.quotePath=true',
@@ -65,8 +63,6 @@ function splitRawPatchOutput(bytes: Buffer): { records: RawPatchRecord[]; patchS
   const records: RawPatchRecord[] = []
   let offset = 0
   while (offset < bytes.length) {
-    // `--raw -z` emits a colon-prefixed metadata record followed by one NUL-terminated path.
-    // The additional NUL after the final path is Git's native boundary to the patch stream.
     if (bytes[offset] === 0 && records.length > 0) return { records, patchStart: offset + 1 }
     if (bytes[offset] !== 0x3a) return undefined
     const metadataEnd = bytes.indexOf(0, offset)
@@ -100,11 +96,6 @@ function nextPatchLine(bytes: Buffer, offset: number): { line: Buffer; next: num
   return { line: bytes.subarray(offset, end < 0 ? bytes.length : end), next }
 }
 
-/**
- * Split Git's patch stream without trusting its quoted headers. Raw -z records determine the
- * file/order mapping; this parser only uses hunk counts to avoid mistaking header-like hunk text
- * for the next `diff --git` delimiter.
- */
 function parsePatchBody(bytes: Buffer, start: number, allowEof: boolean): ParsedPatchBody | undefined {
   let cursor = start
   const first = nextPatchLine(bytes, cursor)
@@ -177,8 +168,6 @@ function parsePatchBody(bytes: Buffer, start: number, allowEof: boolean): Parsed
 function exactGlobPathspec(relPath: string): string {
   let pattern = ''
   for (const character of relPath) {
-    // Escaping even ordinary characters forces Git's full glob match rather than its
-    // directory-prefix shortcut. Thus deleted `a` cannot select new `a/private.env`.
     pattern += character === '/' ? character : `\\${character}`
   }
   return `:(top,glob)${pattern}`
@@ -191,8 +180,6 @@ function patchBatchFiles(
 ): { result: DiffFile[]; pending: Array<{ index: number; file: DiffFile; pathspec: string; pathBytes: Buffer }> } {
   const result = files.map((file) => {
     if (file.binary) return { ...file, patchStatus: 'binary' as const }
-    // A caller that already decided this body is not captured (config exclusion, untracked
-    // manifest limit) keeps that decision; capturing it here would silently undo the policy.
     if (file.patchStatus === 'unavailable') return file
     if (excludedBasenames.has(basename(file.path))) {
       return { ...file, patchStatus: 'unavailable' as const, patchReason: 'policy' as const }
@@ -249,8 +236,6 @@ export async function captureTurnPatches(
   let start = 0
   while (start < pending.length) {
     const batch = pending.slice(start, start + PATCH_BATCH_MAX_FILES)
-    // Keep both the number and encoded size bounded. A pathspec is passed as one argv item, so
-    // names containing whitespace/newlines/quotes/backslashes never undergo shell splitting.
     const currentBatch: typeof batch = []
     let argBytes = 0
     for (const item of batch) {
@@ -259,7 +244,6 @@ export async function captureTurnPatches(
       currentBatch.push(item)
       argBytes += itemBytes
     }
-    // A single path can exceed the byte budget; it still must be attempted rather than skipped.
     if (currentBatch.length === 0) currentBatch.push(batch[0])
     if (remainingBytes === 0) {
       for (const item of currentBatch) result[item.index] = {
@@ -322,7 +306,6 @@ export async function captureTurnPatches(
         budgetReached = prefix.truncated
       }
     } catch {}
-    // Preview baselines can outlive many operations; do not retain every unique batch file.
     await rm(patchPath, { force: true })
     const parsed = bytes ? splitRawPatchOutput(bytes) : undefined
     let bodyCursor = parsed?.patchStart ?? 0
@@ -362,7 +345,6 @@ export async function captureTurnPatches(
         patchReason: commandError === 'deadline' ? 'deadline' : budgetReached ? 'budget' : 'git_error'
       }
     }
-    // Process the not-yet-started suffix of this 128-file window as the next bounded batch.
     start += currentBatch.length
   }
 
@@ -415,9 +397,6 @@ export function limitTurnDiffPatchBytes(
   }))
 }
 
-// `git diff --numstat -z` 的输出：每条 `added\tdeleted\tpath\0`（二进制文件增删为 `-`）。
-// 必须用 -z，否则 Git 会按 core.quotePath 把中文路径转成 `\345\...` 这类 C-style/octal 字符串。
-// 路径相对 repo root → 拼成绝对路径，便于和工具足迹（绝对 file_path）对照。
 export function parseNameStatus(stdout: string, repoRoot: string): Map<string, DiffFileChange> {
   const fields = stdout.split('\0').filter(Boolean)
   const out = new Map<string, DiffFileChange>()
@@ -448,16 +427,8 @@ export function parseNumstat(stdout: string, repoRoot: string): DiffFile[] {
   return out
 }
 
-// Metadata record of `git diff --raw -z`: `:oldmode newmode oldsha newsha status`.
-// The status letter may carry a similarity suffix, but renames are disabled where this is used.
 const RAW_RECORD = /^:[0-7]{6} [0-7]{6} [0-9a-f]+ [0-9a-f]+ ([A-Z])[0-9]*$/
 
-/**
- * One `git diff --raw --numstat -z` call yields both sections: every raw metadata record (each
- * followed by the NUL-terminated path) comes first, then every `added\tdeleted\tpath` record.
- * Parsing them together is what lets the turn diff replace two Git processes with one; the result
- * is byte-for-byte the same file list the separate `--name-status` and `--numstat` calls produced.
- */
 export function parseRawNumstat(stdout: string, repoRoot: string): DiffFile[] {
   const records = stdout.split('\0')
   const changes = new Map<string, DiffFileChange>()
@@ -470,7 +441,6 @@ export function parseRawNumstat(stdout: string, repoRoot: string): DiffFile[] {
     const rel = records[++index]
     if (!rel) break
     const status = match[1]
-    // T (type change) intentionally maps to no `change`, matching the previous name-status parse.
     const change = status === 'A' ? 'added' : status === 'D' ? 'deleted' : status === 'M' ? 'modified' : undefined
     if (change) changes.set(join(repoRoot, rel), change)
   }

@@ -2,7 +2,6 @@ import SwiftUI
 import RemoteTransport
 
 extension ToolPanelView {
-  // MARK: - MCP
 
   @ViewBuilder func mcpBody(_ payload: G0Transport.ToolPanelPayload) -> some View {
     if let mcp = payload.mcp {

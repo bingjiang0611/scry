@@ -1,8 +1,5 @@
 import type { TraceEvent } from '../../shared/trace'
 
-// The measurement fixture, apart from the rest of the packaged smoke Provider so the
-// shape of a stream is one small file that both timing modes use.
-//
 // 20 deltas 150 ms apart: a stream whose steady state is observable, instead of one
 // burst that any path can only deliver as a single lump. Interval timings are then
 // comparable between the in-process pipeline and the daemon.

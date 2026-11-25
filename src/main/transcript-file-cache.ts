@@ -74,12 +74,6 @@ function append(checkpoint: Checkpoint, content: string): void {
   checkpoint.context = saved
 }
 
-/** A disposable parse cache, not evidence storage. Every read verifies exact
- * bytes, including the entire committed prefix: a short head/tail fingerprint
- * cannot prove a transcript wasn't rewritten while growing. This deliberately
- * saves JSON parsing rather than weakening integrity to save prefix I/O.
- * File size/mtime alone are never cache-hit authority.
- */
 export class TranscriptFileCache {
   private entries = new Map<string, Entry>()
   private pending = new Map<string, Promise<TranscriptFileResult>>()
@@ -98,8 +92,6 @@ export class TranscriptFileCache {
     }
     const result = await pending
     request.signal?.throwIfAborted()
-    // Main's enrichment and content externalization may mutate turns; never
-    // expose the checkpoint to those callers or to another coalesced reader.
     return { ...result, turns: structuredClone(result.turns) }
   }
 
@@ -151,7 +143,6 @@ export class TranscriptFileCache {
     const turns = preview.parser.turns
     const entry: Entry = { ...identity, hash, completeHash: digest(buffer.subarray(0, completeBytes)),
       completeBytes, checkpoint, turns, bytes: 0, expiresAt: Date.now() + TRANSCRIPT_CACHE_IDLE_MS }
-    // Serialized checkpoint size is a bounded accounting estimate, not exact heap.
     entry.bytes = serialize(entry).byteLength
     if (revision === this.revision) {
       this.remove(key)

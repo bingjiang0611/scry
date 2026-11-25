@@ -7,7 +7,6 @@ import { evaluateStatus, selectScenario, summarizeSwitches } from './session-con
 import { MEASURED_MAIN, minimalReport } from './session-concurrency-report-fixture.mjs'
 import { validateConcurrencyReport } from './session-concurrency-validate.mjs'
 
-// Lanes for the real P0 call chain: boundary snapshots, CDP counters, overlap, framing, UI gates.
 
 const snapshot = ({ user, system, monotonicMs, rss = 100, heapUsed = 50 }) => ({
   status: 'measured',
@@ -79,7 +78,6 @@ describe('observed concurrency', () => {
     expect(lane.note).toMatch(/neither number proves CPU-level parallelism/)
   })
 
-  // Negative control: four requests overlap while awaiting acceptance, but acceptance is serial.
   it('reports four overlapping requests accepted serially', () => {
     const lane = summarizeObservedConcurrency({ configured: 4, intervals: [
       interval('a', 0, 100, 50), interval('b', 10, 200, 150),
@@ -199,7 +197,6 @@ describe('diagnostic stream framing', () => {
     capture.stderr('oops\n')
     expect(capture.truncated()).toBe(true)
     expect(lines).toEqual(['hello world', 'oops'])
-    // The retained text stops at the cap but still reports that it was cut.
     expect(capture.finish().length).toBe(12)
   })
 })
@@ -297,14 +294,12 @@ describe('UI switch and Overview gating', () => {
 })
 
 describe('history switch gating', () => {
-  // Negative control: re-clicking the selected row is not a switch.
   it('counts an adjacent repeated target as incomplete', () => {
     const scenario = selectScenario('history-switch')
     const repeated = Array.from({ length: 4 }, () => ({ sessionId: 'conc-0-history', mode: 'native-click',
       overview: 'visible', switchMs: 8 }))
     const summary = summarizeSwitches(scenario, repeated)
     expect(summary).toMatchObject({ status: 'incomplete', nativeClick: 4, overviewVisible: 4, adjacentRepeats: 3 })
-    // The first click was a real switch; the three repeats are the blocked operations.
     expect(summary.blocked).toEqual(repeated.slice(1))
     expect(summary.blocked).toHaveLength(3)
     expect(summary.reason).toMatch(/repeated the selected target/)

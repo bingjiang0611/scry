@@ -41,7 +41,6 @@ describe('RunOutputWorkerStore', () => {
     const worker = new FakeWorker()
     const store = connect(worker)
     const counted = store.countSince('run', 4)
-    // The request names the count op, so no chunk bodies cross the boundary for a wake.
     expect(worker.messages[0]).toMatchObject({ op: 'countSince', value: { runId: 'run', cursor: 4 } })
     worker.reply(0, { count: 2, cursor: 6 })
     await expect(counted).resolves.toEqual({ count: 2, cursor: 6 })

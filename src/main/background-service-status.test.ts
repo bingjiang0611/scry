@@ -70,7 +70,6 @@ describe('background service status', () => {
     // A daemon from before build ids says only its version.
     expect(connectionFromMode({ status: 'version-mismatch', running: '0.2.237', expected: '0.2.237', expectedBuild: current }, '0.2.237'))
       .toEqual({ state: 'version-mismatch', running: '0.2.237 (构建号未知)', expected: '0.2.237 (0bf3e97)' })
-    // Control: different versions stay plain versions; the build adds nothing there.
     expect(connectionFromMode({ status: 'version-mismatch', running: '0.2.236', runningBuild: old, expected: '0.2.237', expectedBuild: current }, '0.2.237'))
       .toEqual({ state: 'version-mismatch', running: '0.2.236', expected: '0.2.237' })
   })

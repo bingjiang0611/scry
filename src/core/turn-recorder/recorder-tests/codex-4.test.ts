@@ -90,7 +90,6 @@ export function registerSuite12(): void {
             cache_write_input_tokens: 0,
             reasoning_output_tokens: 5
           },
-          // Codex writes both counters into every frame; equal values prove the session started at zero.
           last_token_usage: {
             input_tokens: 100,
             output_tokens: 20,
@@ -264,7 +263,6 @@ export function registerSuite12(): void {
 
     const [record] = await listRecords(join(root, '.scry'))
     if (accepted) {
-      // Canonical TurnCall expresses this relationship with parentId (not agentId).
       expect(record.tools.value).toEqual(expect.arrayContaining([
         expect.objectContaining({ name: 'Bash', id: 'native-child-call', parentId: parentCallId })
       ]))
@@ -313,7 +311,6 @@ export function registerSuite12(): void {
           cache_write_input_tokens: 0,
           reasoning_output_tokens: 0
         },
-        // Deliberately repeated/noisy; authoritative per-turn usage comes from cumulative deltas.
         last_token_usage: { input_tokens: input, output_tokens: output, cached_input_tokens: cache }
       }
     })

@@ -79,9 +79,8 @@ export async function runSmokePromptScenarios(ctx: SmokeScenarioContext): Promis
 
 export async function runSmokePostToolScenarios(ctx: Pick<SmokeScenarioContext, 'providerId' | 'request' | 'isStopped' | 'questionSignal'>): Promise<void> {
   const { providerId, request, isStopped, questionSignal } = ctx
-  // Side-chat execution fixtures. Each one performs a real, safe filesystem or
-  // interaction action in the temporary workspace, so acceptance can prove what the
-  // child actually did instead of asserting that a fake reply appeared.
+  // Side-chat fixtures exercise different paths: some write a file or wait for
+  // an interaction, while others only emit fixture text.
   const sideChat = /^side chat ([a-z-]+)(?: (.*))?$/s.exec(request.prompt)
   if (sideChat) {
     const [, action, argument = ''] = sideChat

@@ -163,7 +163,6 @@ extension RemoteRunStore {
     store.lifecycle = .submitting
     checks.append(("pending.resetRejected", !store.resetRun() && store.pendingSubmission?.intentId == "keep-this-intent"))
     checks.append(("pending.submitRejected", !store.submit(prompt: "next", providerId: "codex") && store.pendingSubmission?.intentId == "keep-this-intent"))
-    // Leaving an unsent message must not block a new task; it keeps sending from the outbox.
     store.outbox = [store.pendingSubmission!]
     checks.append(("pending.detachDoesNotBlock", store.detachFocusedRun() && !store.hasUnresolvedRun && store.pendingSubmission == nil))
     checks.append(("pending.detachKeepsOutbox", store.backgroundSends.map(\.intentId) == ["keep-this-intent"] &&

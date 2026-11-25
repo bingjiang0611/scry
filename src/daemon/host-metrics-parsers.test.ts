@@ -154,9 +154,7 @@ describe('process tree attribution', () => {
     const byId = Object.fromEntries(usage.map((entry) => [entry.providerId, entry]))
     expect(byId.claude).toMatchObject({ processes: 2, cpuPercent: 9, rssBytes: 12_000 * 1024 })
     expect(byId.codex).toMatchObject({ processes: 1, cpuPercent: 0.5 })
-    // 105 is a descendant but its executable names no Provider: 「其他」, not claude.
     expect(byId.other).toMatchObject({ processes: 1, cpuPercent: 0 })
-    // 200 is not below the daemon at all.
     expect(usage.reduce((sum, entry) => sum + entry.processes, 0)).toBe(4)
   })
 
@@ -167,7 +165,6 @@ describe('process tree attribution', () => {
   })
 
   it('ignores a recorded root whose PID was reused outside the tree', () => {
-    // W20-style attribution remembers pid 200, which now belongs to an unrelated process.
     const usage = attributeProcessTree(rows, 101, [{ providerId: 'codex', pid: 200 }])
     expect(usage.find((entry) => entry.providerId === 'codex')).toMatchObject({ processes: 1, cpuPercent: 0.5 })
     expect(usage.reduce((sum, entry) => sum + entry.processes, 0)).toBe(4)

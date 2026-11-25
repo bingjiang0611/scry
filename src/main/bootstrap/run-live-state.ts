@@ -169,7 +169,6 @@ export async function createLiveRunState(deps: {
     : undefined
   const ingestion = new LiveTraceIngestion({
     provider: providerId,
-    // 谁在看这个 run 由 publishTrace 决定：legacy 焦点通道 + 该 run 自己的 scoped 流。
     publish: (event) => publishTrace(event),
     persist: async (event) => {
       const [persisted] = await persistTraceToolEvents(storageUserDataDir(), catalogCwd, [event], ingestionRecorder)
@@ -336,8 +335,6 @@ export async function createLiveRunState(deps: {
         })
     }
   }
-  // 运行中预览：用本轮 capture 与会话基线做非消费式重算，让长轮次里 Files / 会话改动行数 / Diff
-  // 三处都有真实 Git 数据可看，并被明确标成临时快照。终态一发布即封口，预览不会覆盖或倒退终态。
   return {
     runId,
     diffContextKey,

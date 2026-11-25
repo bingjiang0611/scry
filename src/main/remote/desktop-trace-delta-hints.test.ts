@@ -185,7 +185,6 @@ describe('incremental hashing against projection stamps', () => {
     expect(second[16].outputContent?.storage).toBe('truncated')
     expect(second[16].output).toBeDefined()
     expect(itemsOf(target)[16].output).toBe(second[16].output)
-    // Spending the budget again takes it back.
     replaceTraceById(state.items, { ...state.items[0], output: body('b0-') })
     const third = trace.boundedLiveRun(state).items
     advance(target, third)
@@ -250,7 +249,6 @@ describe('incremental hashing against projection stamps', () => {
     expect(target.view!.cursor!.revision).toBe(before)
     // The private hint moved with the rebuilt projection, so the same projection costs nothing now.
     expect(advance(target, trace.boundedLiveRun(state).items).calls).toBe(0)
-    // And the next append is still seen, not skipped.
     appendCoalescedTrace(state.items, toolResult('t-1', 'ok'))
     const appended = advance(target, trace.boundedLiveRun(state).items)
     expect(appended.read.kind === 'delta' && appended.read.changes.map((change) => change.index)).toEqual([1])
@@ -344,7 +342,6 @@ describe('incremental hashing against projection stamps', () => {
       appendCoalescedTrace(state.items, toolResult(`t-${round}`, `body ${round}`))
       advance(target, trace.boundedLiveRun(state).items)
     }
-    // Older than the kept revision window: the peer must resync rather than receive a partial delta.
     expect(target.store.observe(RUN, trace.boundedLiveRun(state).items, oldestReal).reset).toBe(true)
     expect(target.oracle.observe(RUN, trace.boundedLiveRun(state).items, oldestOracle).reset).toBe(true)
     target.store.forget(RUN)

@@ -7,8 +7,6 @@ import { DAEMON_LOCK_NAME } from './ledger-lock'
 import { USERDATA_LOCK_NAME } from './userdata-lock'
 import { classifyDaemonStartupFailure, EXIT_DETERMINISTIC_STARTUP } from './startup-failure'
 
-// Real process identity, temporary directories only: the two "daemons" are this test
-// process, which is exactly a live holder that verifies.
 const dirs: string[] = []
 function tempDir(prefix: string): string {
   const dir = mkdtempSync(join(tmpdir(), prefix))
@@ -34,7 +32,6 @@ describe('daemon startup owns userData', () => {
     if (result.status !== 'started') throw new Error('expected started')
     expect(JSON.parse(readFileSync(join(userDataDir, USERDATA_LOCK_NAME), 'utf8'))).toMatchObject({ pid: process.pid, role: 'daemon' })
     await result.dispose()
-    // The host was built and torn down while this process owned userData.
     expect(seen).toEqual([true, true])
     expect(existsSync(join(userDataDir, USERDATA_LOCK_NAME))).toBe(false)
     expect(existsSync(join(stateDirectory, DAEMON_LOCK_NAME))).toBe(false)
@@ -54,11 +51,9 @@ describe('daemon startup owns userData', () => {
     })
     const error = await second.then(() => undefined, (reason: unknown) => reason)
     expect((error as Error | undefined)?.message).toBe('daemon_userdata_owned')
-    // The supervisor stops on this code instead of restarting into the same refusal.
     expect(classifyDaemonStartupFailure(error)).toEqual({ code: EXIT_DETERMINISTIC_STARTUP, reason: 'daemon_userdata_owned' })
     expect(hostBuilt).toBe(false)
     expect(readFileSync(join(userDataDir, USERDATA_LOCK_NAME), 'utf8')).toBe(before)
-    // Its own state-directory lock is given back, so it does not block a later daemon there.
     expect(existsSync(join(otherState, DAEMON_LOCK_NAME))).toBe(false)
     expect(lines.some((line) => line.startsWith(`daemon.userdata-owned holderPid=${process.pid} holderRole=daemon`))).toBe(true)
     if (first.status === 'started') await first.dispose()

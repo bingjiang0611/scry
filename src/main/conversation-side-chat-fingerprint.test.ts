@@ -37,7 +37,6 @@ const createRequest = (conversationId: string,
   expectedManifestFingerprint: preview.manifestFingerprint, commandId
 })
 
-/** One real parent turn through the real managed send path. */
 async function parentWithOneTurn(): Promise<{ current: SideChatFixture; conversationId: string; runId: string }> {
   const current = await sideChatFixture({ providerId: 'claude' })
   fixtures.push(current)
@@ -87,7 +86,6 @@ describe('side-chat source fingerprints', () => {
     expect(after.prefixFingerprint).not.toBe(before.prefixFingerprint)
     expect(after.manifestFingerprint).not.toBe(before.manifestFingerprint)
 
-    // The stale preview is refused before any child record exists.
     await expect(current.service.createSideChat(createRequest(conversationId, before, 'command-stale-status')))
       .rejects.toThrow('来源快照范围已变化')
     expect(await current.store.findSideChat('command-stale-status')).toBeUndefined()

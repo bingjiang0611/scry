@@ -3,11 +3,6 @@ import type { LoginStartPolicyEntry } from '../../shared/background-service'
 import { renderLaunchdPlist, renderSystemdUnit, type ServiceTemplateInput } from '../supervisor-templates'
 import { isLoginStartPolicyEnvKey } from './policy-env'
 
-// Strict parser for our rendered LaunchAgent plist and systemd --user unit (P5 §2.5).
-// Ownership requires not only matching executable/asar/userData/env values, but also a
-// byte-for-byte match when re-rendered with our template (W2 review S5): any extra key,
-// non-empty cleared var, ExecStartPre=, XML comment, or modified directive is rejected as
-// foreign rather than silently treated as ours.
 
 export type ParsedServiceFile =
   | {
@@ -125,7 +120,6 @@ function extractCommon(
 }
 
 export function parseLaunchdPlist(content: string, expectedLabel: string): ParsedServiceFile {
-  // Never match XML comments or hand-edited plists.
   if (content.includes('<!--')) return FOREIGN
   const labelMatch = content.match(/<key>Label<\/key>\s*<string>([^<]*)<\/string>/)
   if (!labelMatch) return FOREIGN

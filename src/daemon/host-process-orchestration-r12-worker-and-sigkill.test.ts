@@ -87,7 +87,6 @@ describe('W9 Round-4: worker-thread WAL checkpoint proof, durable SIGKILL replay
       const summary = await deferred.promise
       expect(summary.importedRuns).toBe(600)
       expect(samples.length).toBeGreaterThanOrEqual(1)
-      // Must execute exclusively in a worker thread, NEVER on the main thread's DB connection.
       expect(mainThreadCheckpointPragmas).toBe(0)
       for (const s of samples) {
         expect((s as WalCheckpointSample & { executor?: string }).executor).toBe('worker')
@@ -275,7 +274,6 @@ main().catch((err) => { console.error(err); process.exit(1) })
     expect(gate.prepareAndVerify('r2', 'codex', canonicalWs)).toEqual({ ok: true })
     expect(gate.rehashCount()).toBe(1)
 
-    // Change PATH so bare command resolves to binB -> must miss cache and rehash!
     currentPath = `${binB}:${process.env.PATH ?? ''}`
     expect(gate.prepareAndVerify('r3', 'codex', canonicalWs)).toEqual({ ok: true })
     expect(gate.rehashCount()).toBe(2)

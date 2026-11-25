@@ -109,7 +109,6 @@ describe('parallel workspace diff evidence', () => {
   it('records overlapping runs on the turn and session snapshots it actually publishes', async () => {
     const cwd = await initRepo()
     const current = await harness(cwd, 'run-main', true)
-    // 兄弟在本轮基线观测期间启动并写入自己的工作区改动。
     current.baselines.observeRunWorkspace('run-sibling', cwd)
     await writeFile(join(cwd, 'main.txt'), 'main\n')
     await writeFile(join(cwd, 'sibling.txt'), 'sibling\n')
@@ -132,7 +131,6 @@ describe('parallel workspace diff evidence', () => {
       workspaceOverlap: { runIds: ['run-sibling'] }
     })
 
-    // run 收口后不再声称仍在观测。
     current.baselines.releaseRunWorkspace('run-main')
     expect(current.baselines.workspaceOverlap('run-main')).toBeUndefined()
     // 终态 diff 是 done=true 之后才算完的：它必须仍被投递（legacy 焦点通道与 scoped 流各自一份）。

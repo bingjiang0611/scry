@@ -14,12 +14,10 @@ import { NO_TERMINAL_TURN, type TurnTerminal } from './conversation-turn-termina
  * terminal evidence refuses the snapshot, and a trailing one is a tail Scry drops.
  */
 
-/** One assistant record's visible blocks. */
 export interface AssistantPart {
   spools: TextSpool[]
 }
 
-/** The bodies of one turn, in the order they were read. */
 export interface TurnBodies {
   /** A raw transcript carries no Scry run id of its own. */
   runId: string

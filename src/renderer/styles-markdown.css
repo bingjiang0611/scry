@@ -70,7 +70,6 @@
   overflow: auto;
 }
 
-/* 模型输出 markdown 渲染 */
 .md {
   min-width: 0;
   white-space: normal;

@@ -40,7 +40,6 @@ describe('run stage timing', () => {
     recordRunStage('run-a', 'firstOutput')
     recordRunStage('run-b', 'providerStart')
     const marks = read(directory)
-    // Two stages for one run, then the other run: a repeat is a duplicate, not a sample.
     expect(marks.map((mark) => `${mark.runId}:${mark.stage}`)).toEqual(['run-a:providerStart', 'run-a:firstOutput', 'run-b:providerStart'])
     // The clock is epoch milliseconds in this process, so it can be subtracted from a
     // mark another process wrote about the same run.

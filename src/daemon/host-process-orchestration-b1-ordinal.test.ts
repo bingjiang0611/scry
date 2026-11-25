@@ -89,7 +89,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Seed an adopted conversation with 2 imported turns already in ConversationStore
     const seedStore = new ConversationStore(userDataDir)
     const adopted = await seedStore.create(canonicalWs, {
       target: { providerId: 'codex', continuationKey: 'codex:default' },
@@ -140,7 +139,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Create a source conversation with 2 real settled turns, then fork it via ConversationStore
     let forkedId = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -221,7 +219,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Record the first two turns before the first restart.
     let convId = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -249,7 +246,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       }
     })
 
-    // Start a new daemon and send turn 3.
     let turn3RunId = ''
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
@@ -279,7 +275,6 @@ describe('P4-1 B1: true turn ordinal from H3 conversation ledger across adopted,
       }
     })
 
-    // Restart again and send turn 4.
     await withSmokeEnv(async () => {
       const host = await createDaemonHostProcess({
         userDataDir,

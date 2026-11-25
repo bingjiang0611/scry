@@ -74,9 +74,6 @@ describe('recorder content store', () => {
 
   it('keeps a reference when the turn budget leaves no room for a small field', async () => {
     const dataRoot = await root()
-    // Zero turn budget: every body is dropped from the record, which is exactly the state whose
-    // reference must survive. A JSON body that cannot fit any valid form also spends no budget, so
-    // this is the only setting where the field after it is dropped for budget reasons.
     const persisted = await persistToolEventContent(events('small complete body'), {
       toolOutput: 'full-redacted', toolContentFieldBytes: 1024, toolContentTurnBytes: 0
     }, 'fixture', (content, encoding) => writeRecorderContent(dataRoot, content, encoding))
@@ -179,7 +176,6 @@ describe('recorder content store', () => {
 
     resetContentStoreStats()
     await writeRecorderContentBatch(dataRoot, contents, 'utf8')
-    // A stored payload is still read back and its directory synced, once for the whole batch.
     expect(contentStoreStats()).toEqual({ hashes: 1, verifies: 1, directorySyncs: 1 })
     expect(await readRecorderContent(dataRoot, refs[0])).toBe('repeated patch body')
   })

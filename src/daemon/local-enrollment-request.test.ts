@@ -5,10 +5,6 @@ import { join } from 'node:path'
 import { openLocalEnrollmentStore } from './local-enrollment'
 import { LOCAL_ENROLLMENT_REQUEST_NAME, LOCAL_ENROLLMENT_REQUEST_TTL_MS, requestLocalEnrollment } from './local-enrollment-request'
 
-// A6: the App lost its stored credential while the daemon still holds a live local grant
-// for it, so the daemon writes no secret and the App cannot enroll again. The confirmed
-// 「重新连接本机后台服务」 stops the daemon and leaves this one-time request; the daemon it
-// then starts writes a secret although a grant is live. Nothing else makes it do so.
 
 const directories: string[] = []
 function stateDirectory(): string {
@@ -21,7 +17,6 @@ afterEach(() => { for (const path of directories.splice(0)) rmSync(path, { recur
 describe('local enrollment request (A6: reconnect after the App lost its credential)', () => {
   it('makes the next daemon start write a secret despite a live grant, once', async () => {
     const directory = stateDirectory()
-    // Control: a live grant and no request means no secret, as before.
     const store = openLocalEnrollmentStore(directory, { clock: () => 5_000 })
     store.ensure(true)
     expect(store.present()).toBe(false)
@@ -31,7 +26,6 @@ describe('local enrollment request (A6: reconnect after the App lost its credent
     expect(statSync(request).mode & 0o777).toBe(0o600)
     store.ensure(true)
     expect(store.present()).toBe(true)
-    // Consumed by that start: the following one is back to the rule.
     expect(existsSync(request)).toBe(false)
     store.ensure(true)
     expect(store.present()).toBe(false)
@@ -60,7 +54,6 @@ describe('local enrollment request (A6: reconnect after the App lost its credent
       expect(store.present()).toBe(false)
       expect(existsSync(request)).toBe(false)
     }
-    // Control: the same request, fresh and well-formed, is honored.
     await requestLocalEnrollment(directory, now)
     store.ensure(true)
     expect(store.present()).toBe(true)

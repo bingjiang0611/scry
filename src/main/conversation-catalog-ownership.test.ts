@@ -30,11 +30,9 @@ describe('catalog ownership of conversation runs', () => {
 
     const catalog = await current.service.listCatalog(current.cwd)
     expect(catalog.ownedRunIds.has(`codex\0${current.cwd}\0${turn.runId}`)).toBe(true)
-    // The parent's settled run is owned too, and by its native alias as well.
     const parentTurn = (await current.store.read(parent.id))!.turns[0]
     expect(catalog.ownedRunIds.has(`codex\0${current.cwd}\0${parentTurn.runId}`)).toBe(true)
     expect(catalog.ownedNativeAliases.size).toBeGreaterThan(0)
-    // Another Provider or workspace with the same run id is not owned.
     expect(catalog.ownedRunIds.has(`claude\0${current.cwd}\0${turn.runId}`)).toBe(false)
     expect(catalog.ownedRunIds.has(`codex\0${current.root}\0${turn.runId}`)).toBe(false)
   })

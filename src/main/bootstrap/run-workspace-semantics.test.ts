@@ -71,8 +71,6 @@ describe('workspace rule per verified grant scope', () => {
   })
 
   it('keeps the App rule that a grant cannot send into an unknown project', () => {
-    // A local grant is the App, so a directory the App does not know is refused with
-    // the App's own rejection rather than silently projected by the remote resolver.
     expect(() => frontdoor({ grantScope: 'local', cwd: '/tmp/not-a-project' })).toThrow()
   })
 })

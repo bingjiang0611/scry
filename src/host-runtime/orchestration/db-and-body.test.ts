@@ -27,15 +27,13 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
       try {
         expect(handle.db.pragma('user_version', { simple: true })).toBe(ORCHESTRATION_SCHEMA_VERSION)
         expect(String(handle.db.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
-        expect(handle.db.pragma('synchronous', { simple: true })).toBe(2) // FULL
+        expect(handle.db.pragma('synchronous', { simple: true })).toBe(2)
         expect(String(handle.db.pragma('locking_mode', { simple: true })).toLowerCase()).toBe('exclusive')
         expect(handle.db.pragma('foreign_keys', { simple: true })).toBe(1)
         expect(handle.db.pragma('secure_delete', { simple: true })).toBe(1)
-        // Maintainer decision (2026-11-20): default fullfsync=ON + checkpoint_fullfsync=ON
         expect(handle.db.pragma('fullfsync', { simple: true })).toBe(1)
         expect(handle.db.pragma('checkpoint_fullfsync', { simple: true })).toBe(1)
 
-        // Verify all tables & multi-agent reservation columns exist
         const tables = (
           handle.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>
         ).map((r) => r.name)
@@ -59,7 +57,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         )
         expect(runCols).toContain('parent_run_id')
         expect(runCols).toContain('origin')
-        expect(runCols).not.toContain('waiting_on') // R6 deleted 2026-11-19
+        expect(runCols).not.toContain('waiting_on')
 
         const metaRows = handle.db.prepare('SELECT key, value FROM orch_meta').all() as Array<{
           key: string
@@ -72,7 +70,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         expect(meta.get('legacy_ledger_seq')).toBe('0')
         expect(meta.has('legacy_catalog_sha256')).toBe(true)
 
-        // Trigger WAL creation with a write and verify 0600 permissions (no -shm under EXCLUSIVE)
         handle.db.prepare("INSERT OR REPLACE INTO orch_meta (key, value) VALUES ('probe', '1')").run()
         handle.enforceModes()
 
@@ -85,7 +82,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         handle.close()
       }
 
-      // Direct check: enforceOrchestrationFileModes tightens both -wal and -shm when present with 0644
       const syntheticBase = join(userData, 'orchestration', 'mode-check.db')
       for (const path of [syntheticBase, `${syntheticBase}-wal`, `${syntheticBase}-shm`]) {
         writeFileSync(path, 'x', { mode: 0o644 })
@@ -132,7 +128,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
       const upgraded = openOrchestrationDatabase({ userDataDir: userData })
       try {
         expect(upgraded.db.pragma('user_version', { simple: true })).toBe(ORCHESTRATION_SCHEMA_VERSION)
-        // Old non-zero output_seq preserved; legacy V1 default 0 converted to honest NULL
         const oldRow = upgraded.db
           .prepare('SELECT output_seq, app_run_id FROM orch_p_run WHERE run_id = ?')
           .get('old-v1-run')
@@ -141,7 +136,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           .prepare('SELECT output_seq FROM orch_p_run WHERE run_id = ?')
           .get('old-v1-zero-run') as { output_seq: number | null }
         expect(zeroRow.output_seq).toBeNull()
-        // New row with NULL output_seq is now accepted cleanly
         expect(() =>
           upgraded.db
             .prepare(
@@ -217,7 +211,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
       expect(() => openOrchestrationDatabase({ userDataDir: userData })).toThrow(
         expect.objectContaining({ code: 'orchestration_db_corrupt' })
       )
-      // Must not overwrite/auto-rebuild the corrupt file
       expect(readFileSync(dbPath, 'utf8')).toBe('not a valid sqlite file at all')
     })
   })
@@ -227,7 +220,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
     const mem = new Database(':memory:')
     try {
       const dummyMigrations = Array.from({ length: 16 }, () => [] as readonly string[])
-      // Would fail on missing scry.db tables if repairMissingUsageLedger ran at v16
       expect(() => migrateOrchestrationDatabase(mem, dummyMigrations)).not.toThrow()
       expect(mem.pragma('user_version', { simple: true })).toBe(16)
     } finally {
@@ -251,7 +243,6 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
 
   it('refuses to open on a network filesystem with the required unavailable message', () => {
     withTempDir((userData) => {
-      // Real platform check (macOS df -T / Linux statfs) reports local tmpdir as non-network
       expect(detectNetworkFilesystem(userData)).toBe(false)
       expect(() =>
         openOrchestrationDatabase({
@@ -285,12 +276,10 @@ describe('P4-0 content-addressed body store', () => {
       expect(statSync(bodyPath).mode & 0o777).toBe(0o600)
       expect(store.readBody(ext1).toString('utf8')).toBe(overLimit)
 
-      // Deduplication: identical content reuses the same sha256 file
       const ext2 = store.prepareBody(overLimit)
       expect(ext2.sha256).toBe(ext1.sha256)
       expect(store.externalPath(ext2.sha256)).toBe(bodyPath)
 
-      // Corruption detection on read
       writeFileSync(bodyPath, 'corrupted')
       expect(() => store.readBody(ext1)).toThrow(expect.objectContaining({ code: 'orchestration_body_corrupt' }))
 

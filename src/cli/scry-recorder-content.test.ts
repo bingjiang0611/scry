@@ -24,7 +24,6 @@ describe('scry recorder content repair', () => {
     await handleRecorderHook({ ...base, event: 'PostToolUse:Bash', payload: event({ tool_name: 'Bash', tool_use_id: 'call', tool_response: 'REPAIRABLE-OUTPUT' }) })
     await handleRecorderHook({ ...base, event: 'Stop', payload: event({ assistant_response: 'done' }) })
     const [record] = await listRecords(dataRoot)
-    // 线上形态：记录还在本库，正文只在 App trace 库。把字节搬过去，再清空本库内容目录。
     const appData = await mkdtemp(join(tmpdir(), 'scry-cli-app-data-'))
     roots.push(appData)
     const appRoot = appTraceContentRoot(appData, root)
@@ -67,7 +66,6 @@ describe('scry recorder content repair', () => {
     const [record] = await listRecords(dataRoot)
     const output = record.tools.value![0].outputContent!.contentRef!
     await expect(readRecorderContent(dataRoot, output)).resolves.toContain('REPAIRABLE-OUTPUT')
-    // 已修复后重复执行是幂等的：全部命中本库，没有可复制的正文。
     const idempotent = captureStdout()
     await expect(runScryCli(['recorder', 'content', 'repair', '--workspace', root, '--app-data', appData])).resolves.toBe(0)
     expect(JSON.parse(idempotent.text())).toMatchObject({ present: refs, repairable: 0, missing: 0 })

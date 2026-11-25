@@ -87,8 +87,6 @@ enum ConversationMarkdownParser {
     var codeLines: [String] = []
     var codeFence: String?
     var codeLanguage: String?
-    // Running start offset for each source line, so every block can report where
-    // it begins without searching the text again.
     var lineStarts: [Int] = []
     var cursor = 0
     for line in lines { lineStarts.append(cursor); cursor += line.utf16.count + 1 }
@@ -345,7 +343,6 @@ enum ConversationMarkdownSplitter {
 
   static func cacheKey(turnID: String, index: Int) -> String { "\(turnID)#\(index)" }
 
-  /// Blocks already parsed from exactly this text.
   static func ready(turnID: String, candidate: ConversationMarkdownSplitCandidate) -> [ConversationMarkdownBlock]? {
     guard let blocks = ConversationMarkdownParser.blockCache.blocks(forKey: cacheKey(turnID: turnID, index: candidate.index),
                                                                    version: candidate.text),
@@ -383,7 +380,6 @@ struct ConversationSplitPlan: Sendable {
   let crlfFree: Bool
 }
 
-/// What one long-prose entry should render as right now.
 enum ConversationSplitRender {
   case single
   case blocks([ConversationMarkdownBlock])

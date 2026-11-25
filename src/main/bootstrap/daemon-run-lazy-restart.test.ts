@@ -2,10 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { createLazyDaemonRunSurface } from './daemon-run-lazy'
 import type { DaemonRunModeDeps, DaemonRunModeResult } from './daemon-run-mode'
 
-// B4-S S0-1: the «后台服务» actions replace the session's daemon decision only when the
-// user asked (restart, reconnect), and nothing launches a daemon while one is being
-// stopped, not even a retried read through the run mode's own reconnect.
-
 function baseDeps(launch: DaemonRunModeDeps['launch']): DaemonRunModeDeps {
   return {
     userDataDir: '/tmp/user', daemonStateDirectory: '/tmp/state', appVersion: '2.0.0',
@@ -29,7 +25,6 @@ describe('lazy daemon surface: restart and held launches', () => {
     expect(create).toHaveBeenCalledTimes(1)
     expect((await lazy.restart()).status).toBe('ready')
     expect(create).toHaveBeenCalledTimes(2)
-    // The mismatched client is closed, not left holding a socket.
     expect(dispose).toHaveBeenCalledTimes(1)
     expect((await lazy.ready()).status).toBe('ready')
     lazy.dispose()
@@ -48,7 +43,6 @@ describe('lazy daemon surface: restart and held launches', () => {
     lazy.onOutcome(() => { throw new Error('an observer failing must not break the run surface') })
     await lazy.ready()
     await lazy.ready()
-    // Remembered for the session: no second connect, no second notice.
     expect(seen).toEqual(['version-mismatch'])
     // A restart the user asked for reports through its own action, not here.
     expect((await lazy.restart()).status).toBe('version-mismatch')
@@ -70,7 +64,6 @@ describe('lazy daemon surface: restart and held launches', () => {
     await expect(seen!.launch!()).resolves.toEqual({ status: 'failed', reason: 'daemon_stopping' })
     const second = lazy.holdLaunches()
     release()
-    // Two holders: still held until both release.
     await expect(seen!.launch!()).resolves.toEqual({ status: 'failed', reason: 'daemon_stopping' })
     second()
     second()

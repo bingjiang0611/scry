@@ -73,7 +73,6 @@ describe('resource bars', () => {
     expect(meters.map((meter) => meter.label)).toEqual(['CPU', '内存', '交换区', '磁盘'])
     expect(meters[0]).toMatchObject({ percent: 34, valueText: '34%', tone: 'normal' })
     expect(meters[1]).toMatchObject({ percent: 57, valueText: '已用 9.1 GB / 16 GB' })
-    // 85% and above is the danger threshold, 70% warns.
     expect(meters[2]).toMatchObject({ percent: 50, valueText: '已用 2 GB / 4 GB', tone: 'normal' })
     expect(meters[3]).toMatchObject({ percent: 79, valueText: '剩余 212 GB', tone: 'warn' })
   })
@@ -109,7 +108,6 @@ describe('Scry usage', () => {
     const rows = providerUsageRows(snapshot)
     expect(rows).toHaveLength(2)
     expect(rows![0]).toMatchObject({ providerId: 'pi', processes: 2 })
-    // 合计含后台服务自己：Provider 1.5 GB + daemon 210 MB。
     expect(scryUsageTotals(snapshot)).toEqual({ processes: 3, cpuPercent: 14.8, rssBytes: 1.5 * GB + 210 * 1024 ** 2 })
     // 卡片上 Provider 与后台服务分两行写，Provider 行不能把 daemon 算进去。
     expect(providerUsageTotals(snapshot)).toEqual({ processes: 3, cpuPercent: 14, rssBytes: 1.5 * GB })

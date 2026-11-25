@@ -105,7 +105,6 @@ it('signals consumption once on actual websocket bytes without changing the payl
   }
 })
 
-// A relay fixture that records client text frames and can answer with text.
 async function heartbeatRelay(): Promise<{ port: number; texts: string[]; binary: Buffer[]; sendText: (text: string) => void; sendBinary: (bytes: Buffer) => void; close: () => Promise<void> }> {
   const server = createServer()
   let peer: Duplex | undefined
@@ -218,7 +217,6 @@ it('stops pinging a leg carrying a phone until the relay has proved it answers p
     const afterGlue = relay.texts.filter((text) => text === RELAY_HOST_PING).length
     await new Promise((resolve) => setTimeout(resolve, 120))
     expect(relay.texts.filter((text) => text === RELAY_HOST_PING).length).toBe(afterGlue)
-    // Once the relay answers, the glued leg is pinged again.
     relay.sendText(RELAY_HOST_PONG)
     await until(() => relay.texts.filter((text) => text === RELAY_HOST_PING).length > afterGlue)
   } finally {

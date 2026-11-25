@@ -55,7 +55,6 @@ function fakeClock() {
 
 const repos: string[] = []
 afterEach(async () => {
-  // 每个用例的临时仓库都在这里回收，绝不污染用户仓库。
   await Promise.all(repos.splice(0).map((root) => rm(root, { recursive: true, force: true }).catch(() => undefined)))
 })
 
@@ -91,7 +90,6 @@ describe('SessionDiffBaselineRegistry', () => {
     const first = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo' })
     expect(first.origin).toBe('session_start')
     registry.bind('claude\0/repo', 0, 'ses_abc')
-    // 拿到原生 session id 后的续接轮：同 revision + 同 session → 复用同一 capture。
     const second = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo', sessionId: 'ses_abc' })
     expect(second.capture).toBe(first.capture)
     expect(second.origin).toBe('session_start')
@@ -100,7 +98,6 @@ describe('SessionDiffBaselineRegistry', () => {
 
   it('恢复/选择会话后进程内无基线：当场重锚并标 origin=resumed', () => {
     const registry = new SessionDiffBaselineRegistry(async () => fakeCapture('c'), async () => undefined)
-    // 应用重启 / loadSession 后第一轮就带着 resume id 进来，且此前没有基线。
     const entry = registry.ensure({ key: 'claude\0/repo', revision: 0, cwd: '/repo', sessionId: 'ses_resumed' })
     expect(entry.origin).toBe('resumed')
   })
@@ -139,8 +136,8 @@ describe('SessionDiffBaselineRegistry', () => {
     const second = registry.ensure({ key: 'claude\0/repo', revision: 1, cwd: '/repo' })
     expect(second.capture).not.toBe(first.capture)
     await Promise.resolve()
-    expect(cancelled).toHaveLength(1) // 旧基线被取消回收
-    expect(registry.get('claude\0/repo', 0)).toBeUndefined() // 旧 revision 认不回来
+    expect(cancelled).toHaveLength(1)
+    expect(registry.get('claude\0/repo', 0)).toBeUndefined()
   })
 
   it('切到不同 session id 时重锚，不把别的会话净 diff 算到当前会话', () => {
@@ -238,7 +235,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     await previewer.notifyChange()
     await previewer.notifyChange()
     expect(events).toHaveLength(2)
-    expect(new Set(events.map((e) => e.id)).size).toBe(1) // 同一个 id
+    expect(new Set(events.map((e) => e.id)).size).toBe(1)
     expect(events[0].id).toBe('dp-run-1')
     expect(events[0].stage).toBe('turn_diff_preview')
   })
@@ -411,7 +408,7 @@ describe('RunDiffPreviewer 发布策略', () => {
     expect(clock.pending()).toBe(1)
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await Promise.all([first, ...rest])
-    expect(calls).toBe(2) // 首个 + 一次合并后的 trailing
+    expect(calls).toBe(2)
     expect(maxConcurrent).toBe(1)
   })
 
@@ -431,13 +428,13 @@ describe('RunDiffPreviewer 发布策略', () => {
     })
     const first = previewer.notifyChange()
     await Promise.resolve()
-    void previewer.notifyChange() // trailing 排上
-    previewer.sealAll() // 终态收口
+    void previewer.notifyChange()
+    previewer.sealAll()
     const idle = previewer.idle()
     gate.resolve(snap())
     await Promise.all([first, idle])
-    expect(calls).toBe(1) // trailing 不再执行
-    expect(events).toHaveLength(0) // 在途那次算完也丢弃
+    expect(calls).toBe(1)
+    expect(events).toHaveLength(0)
   })
 
   // 纯节流窗口的最后一次写：首轮预览已经算完，第二次 notify 落在窗口里且之后再没有第三次通知。
@@ -461,22 +458,22 @@ describe('RunDiffPreviewer 发布策略', () => {
       }
     })
 
-    await previewer.notifyChange() // t=0：首轮预览发布
+    await previewer.notifyChange()
     expect(calls).toBe(1)
 
     clock.set(1_000)
-    await previewer.notifyChange() // 纯节流窗口内的最后一次写
-    expect(calls).toBe(1) // 当场不采集（节流仍然有效）
-    expect(clock.pending()).toBe(1) // 但排了一次到期补发
+    await previewer.notifyChange()
+    expect(calls).toBe(1)
+    expect(clock.pending()).toBe(1)
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS) // 窗口到期，没有第三次 notify
     await previewer.idle()
 
     expect(calls).toBe(2)
     expect(events).toHaveLength(2)
-    expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/last.ts') // 最后一次写发出去了
+    expect(events.at(-1)!.snapshot.files[0].path).toBe('/repo/last.ts')
     expect(new Set(events.map((e) => e.id)).size).toBe(1) // 仍是固定 id 原地替换
-    expect(clock.pending()).toBe(0) // 到期即摘掉，不留悬挂 timer
+    expect(clock.pending()).toBe(0)
   })
 
   it('节流窗口内多次 notify 只合并成一次延迟刷新：不并发、不叠加 timer', async () => {
@@ -509,14 +506,14 @@ describe('RunDiffPreviewer 发布策略', () => {
     for (const at of [1_000, 2_000, 3_000, 4_000]) {
       clock.set(at)
       await previewer.notifyChange()
-      expect(clock.pending()).toBe(1) // 窗口内的每次 notify 都并进同一个延迟刷新
+      expect(clock.pending()).toBe(1)
     }
     expect(calls).toBe(1)
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await previewer.idle()
 
-    expect(calls).toBe(2) // 首轮 + 一次合并后的延迟刷新
+    expect(calls).toBe(2)
     expect(maxConcurrent).toBe(1)
   })
 
@@ -541,13 +538,13 @@ describe('RunDiffPreviewer 发布策略', () => {
     await previewer.notifyChange()
     expect(clock.pending()).toBe(1)
 
-    previewer.sealAll() // 终态收口
-    expect(clock.pending()).toBe(0) // 悬挂的延迟刷新当场取消
+    previewer.sealAll()
+    expect(clock.pending()).toBe(0)
     await previewer.idle() // 不死等 timer
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS * 4)
     await previewer.idle()
-    expect(calls).toBe(1) // 封口后一次都没再采集
+    expect(calls).toBe(1)
     expect(events).toHaveLength(1)
   })
 
@@ -568,17 +565,17 @@ describe('RunDiffPreviewer 发布策略', () => {
 
     await previewer.notifyChange()
     clock.set(1_000)
-    await previewer.notifyChange() // 排下延迟刷新
+    await previewer.notifyChange()
     expect(clock.pending()).toBe(1)
 
     clock.set(DIFF_PREVIEW_MIN_INTERVAL_MS) // 窗口自然到期，但 timer 还没被跑到
-    await previewer.notifyChange() // 这条 notify 自己就读了最新状态
+    await previewer.notifyChange()
     expect(calls).toBe(2)
     expect(clock.pending()).toBe(0) // 延迟刷新被新链取代
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS * 4)
     await previewer.idle()
-    expect(calls).toBe(2) // 没有多余采集
+    expect(calls).toBe(2)
   })
 })
 
@@ -589,7 +586,6 @@ describe('WriteCompletionTracker 写盘时序', () => {
     const tracker = new WriteCompletionTracker()
     expect(tracker.observe({ stage: 'tool:Write', toolUseId: 'w1', fileOp: 'write', filePath: '/repo/a.ts' })).toBe(false)
     expect(tracker.observe({ stage: 'tool_result', toolUseId: 'w1' })).toBe(true)
-    // 同一个 toolUseId 的结果只兑付一次。
     expect(tracker.observe({ stage: 'tool_result', toolUseId: 'w1' })).toBe(false)
   })
 
@@ -650,13 +646,12 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
 
     // 基线必须在本轮任何写入前就位（main 用 sessionBaselineReady 保证），否则会把本轮写入误折进基线。
     const baselineCapture = await baseline.capture
-    // 运行中：模型写了一个新文件（untracked）。
     await writeFile(join(root, 'feature.ts'), 'a\nb\n')
     await previewer.notifyChange()
 
     const preview = events.at(-1)?.snapshot
     expect(preview?.status).toBe('captured')
-    expect(fileNames(preview!)).toEqual(['feature.ts']) // untracked 纳入，预存脏改动 base.ts 排除
+    expect(fileNames(preview!)).toEqual(['feature.ts'])
     expect(preview!.files[0].added).toBe(2)
 
     // 终态：封口预览，用同一基线算净 diff。终态一发布，后续预览一律被丢弃。
@@ -691,7 +686,6 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       now: () => 0,
       minIntervalMs: 0
     })
-    // 先发布一版运行中预览。
     await previewer.notifyChange()
     expect(events.at(-1)?.snapshot && fileNames(events.at(-1)!.snapshot)).toEqual(['x.ts'])
 
@@ -700,7 +694,6 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     const terminal = await finishGitTurnDiff(turnCapture)
     expect(terminal.status).toBe('captured')
 
-    // capture 已被消费；即使 seal 之外也不该再产出预览。
     const before = events.length
     await previewer.notifyChange()
     expect(events.length).toBe(before)
@@ -735,13 +728,10 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       if (tracker.observe(event)) await previewer.notifyChange()
     }
 
-    // 1) start：文件还没写盘。
     await observe({ stage: 'tool:Write', toolUseId: 'w1', fileOp: 'write', filePath: join(root, 'feature.ts') })
     expect(events).toEqual([]) // 一条预览都不该发（旧实现会在这里发出空 files 的假预览）
 
-    // 2) 真正写盘。
     await writeFile(join(root, 'feature.ts'), 'a\nb\n')
-    // 3) tool_result 到达。
     await observe({ stage: 'tool_result', toolUseId: 'w1' })
 
     expect(events).toHaveLength(1)
@@ -784,7 +774,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
       minIntervalMs: DIFF_PREVIEW_MIN_INTERVAL_MS,
       preview: async (capture, deadlineMs, options) => {
         const call = ++calls
-        if (call === 1) await gate.promise // 挂住首个 preview
+        if (call === 1) await gate.promise
         const result = await previewGitTurnDiff(capture, deadlineMs, options)
         if (call === 1) firstCompleted.resolve()
         return result
@@ -805,7 +795,7 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     await Promise.all([first, second])
 
     expect(calls).toBe(2)
-    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts']) // 最后一次写没被吞
+    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts'])
     previewer.sealAll()
     registry.disposeAll()
   }, 35_000)
@@ -842,13 +832,13 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     clock.set(1_000)
     await writeFile(join(root, 'second.ts'), 'b\nc\n')
     await previewer.notifyChange()
-    expect(events).toHaveLength(1) // 当场被节流
+    expect(events).toHaveLength(1)
 
     clock.advance(DIFF_PREVIEW_MIN_INTERVAL_MS)
     await previewer.idle()
 
     expect(events).toHaveLength(2)
-    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts']) // 到期读的是最新 Git 状态
+    expect(fileNames(events.at(-1)!.snapshot)).toEqual(['first.ts', 'second.ts'])
     previewer.sealAll()
     registry.disposeAll()
   }, 35_000)
@@ -867,21 +857,17 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
     expect(entry.origin).toBe('resumed')
     const baselineCapture = await entry.capture
 
-    // 重锚之后才写的文件。
     await writeFile(join(root, 'after-resume.ts'), 'new\n')
     const settled = await snapshotSessionNetDiff(baselineCapture)
-    expect(fileNames(settled)).toEqual(['after-resume.ts']) // earlier.ts 不在净 diff 里
+    expect(fileNames(settled)).toEqual(['after-resume.ts'])
 
     await cancelGitTurnDiff(baselineCapture)
     registry.disposeAll()
   }, 35_000)
 })
 
-// 终态 enrichment 的 IPC 门控回归：index.ts 在 finalizeTurnDiff / finalizeSessionDiff 落
-// turn_diff / session_diff 之前就把 runState.done 翻成 true，那一刻 isFocused 已是 false。
-// 用 isFocused 门控发布 → 终态归档里有 captured diff，但当前 renderer 一条都收不到，
-// Diff / 纵览会一直空到下一次 reload。这里用真实 RunRegistry + RunDiffPreviewer + 两侧
-// trace 合并/派生代码复现 main→renderer 的完整发布路径。
+// 终态 diff 不能因 run 已完成而被运行中焦点门控挡住。这里使用真实 registry、
+// previewer 和 trace 派生，但发布由 fixture 捕获，不验证实际 IPC 投递或重载。
 describe('终态 diff enrichment 的 renderer 发布门控', () => {
   const snap = (added: number, path = '/repo/a.ts'): TurnDiffSnapshot => ({
     version: 1, status: 'captured', files: [{ path, added, deleted: 0 }],
@@ -923,7 +909,7 @@ describe('终态 diff enrichment 的 renderer 发布门控', () => {
     const w = wire('run-1')
     w.runs.register(w.state, { runId: 'run-1' })
 
-    await w.previewer.notifyChange() // 运行中：预览先到 UI
+    await w.previewer.notifyChange()
     expect(w.published.map((event) => event.stage)).toEqual(['turn_diff_preview', 'session_diff_preview'])
 
     w.state.done = true // Provider 终态先翻 done，随后才落终态 diff
@@ -1015,15 +1001,15 @@ describe('终态收口封口时序（finalize）', () => {
     await w.started()
     void w.previewer.notifyChange() // 在途期间又落盘一次 → trailing 待办
 
-    w.previewer.sealAll() // 终态第一次收口
+    w.previewer.sealAll()
     const idle = w.previewer.idle()
     w.gate.resolve()
     await Promise.all([inFlight, idle]) // 不死等：封口后链不再续 trailing
     w.publishTerminal(TURN_DIFF_STAGE)
     w.publishTerminal(SESSION_DIFF_STAGE)
 
-    expect(w.previewCalls()).toBe(1) // trailing 没有跨过终态边界
-    expect(w.stages).toEqual([TURN_DIFF_STAGE, SESSION_DIFF_STAGE]) // 终态之外一条预览都没有
+    expect(w.previewCalls()).toBe(1)
+    expect(w.stages).toEqual([TURN_DIFF_STAGE, SESSION_DIFF_STAGE])
   })
 
   it('根因对照：只 seal turn 时 session 链继续跑并发预览，终态边界形同虚设', async () => {
@@ -1052,9 +1038,9 @@ describe('终态收口封口时序（finalize）', () => {
     const idle = w.previewer.idle()
     w.gate.resolve()
     await Promise.all([inFlight, idle])
-    await w.previewer.notifyChange() // 取消之后迟到的写入
+    await w.previewer.notifyChange()
 
-    expect(w.previewCalls()).toBe(1) // 在途那次算完也被丢弃
+    expect(w.previewCalls()).toBe(1)
     expect(w.stages).toEqual([])
     expect(w.previewer.isSealed('turn')).toBe(true)
     expect(w.previewer.isSealed('session')).toBe(true)

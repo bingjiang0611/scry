@@ -39,9 +39,6 @@ it('daemon fast path starts only the existing dirname, cat and curl commands', a
   await mkdir(nested, { recursive: true })
   const settings = JSON.parse(await readFile(join(root, '.codex/hooks.json'), 'utf8'))
   const command = settings.hooks.Stop[0].hooks[0].command as string
-  // A unix socket path must fit sun_path (104 bytes on macOS, 108 on Linux). os.tmpdir() can be
-  // arbitrarily long (macOS /var/folders/..., a sandbox-set TMPDIR), so the socket gets its own
-  // short directory; a too-long path makes the hook skip the daemon and the test fail spuriously.
   const socketDir = await mkdtemp('/tmp/scry-init-sock-')
   roots.push(socketDir)
   const socket = join(socketDir, 'daemon.sock')

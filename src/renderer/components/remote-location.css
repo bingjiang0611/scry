@@ -1,4 +1,3 @@
-/* Execution location: composer picker, topbar pill, sidebar host tag, remote notices. */
 
 .execution-location {
   display: inline-flex;
@@ -22,12 +21,10 @@
 .host-dot[data-state='pairing'],
 .host-dot[data-state='unknown'] { background: var(--warn); }
 
-/* Picker button: machine / project in one control. */
 .composer-context .wdpick.location-picker { max-width: min(420px, 80%); }
 .location-button .location-machine-label { flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .location-button .location-sep { color: var(--dim3); }
 
-/* Two-column menu: machines left, the shown machine's projects right. */
 .menu.location-menu {
   display: grid;
   grid-template-columns: minmax(180px, 210px) minmax(260px, 340px);
@@ -63,7 +60,6 @@
 .location-action:disabled { opacity: .55; cursor: default; }
 .location-error { margin: 8px 8px; color: var(--bad); font-size: var(--text-sm); white-space: normal; overflow-wrap: anywhere; }
 
-/* Remote directory selection is a host-side grant, never a local folder dialog. */
 .remote-directory-modal { width: min(640px, 92vw); }
 .remote-directory-modal .modal-head { justify-content: space-between; }
 .remote-directory-body { display: grid; gap: 12px; }
@@ -79,13 +75,11 @@
 .remote-directory-list > p { padding: 8px; }
 .remote-directory-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* Location notice stays visible without a draft (offline host, missing Provider). */
 .composer-notice {
   margin: var(--space-1) var(--space-1) 0;
 }
 .composer-notice.is-info .notice-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Sidebar: remote project rows reuse local classes; only the host tag is new. */
 /* The project name keeps priority; the host tag shrinks first. */
 .sb-remote-proj .sb-proj-row .sb-proj-head { padding-right: 32px; } /* one action, not local's two */
 .sb-remote-proj .sb-proj-head .pname { flex: 0 1 auto; min-width: 0; }

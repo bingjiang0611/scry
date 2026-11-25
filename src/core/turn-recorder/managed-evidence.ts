@@ -40,11 +40,8 @@ export function isManagedProviderRuntimePair(provider: unknown, runtimeProvider:
 }
 
 export interface PrepareManagedTurnInput {
-  /** Main is replaying a validated, terminal canonical journal after its provisional lifecycle was lost. */
   allowCanonicalJournalRecovery?: boolean
-  /** Main proved the durable Qoder interruption trace contains only local launch/diff events. */
   allowObservedInterruption?: boolean
-  /** How the App established this turn's end. Omitted by pre-0.2.38 callers. */
   termination?: Evidence<TurnTermination>
   toolContentPolicy?: ToolContentPolicy
   workspace: string
@@ -74,7 +71,6 @@ export type ManagedTurnCancellationResult =
 
 export interface ManagedTurnHandoff {
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
-  /** 这一轮开始时冻结的工具内容策略：重试与提交都按它比较，工作区后来改配置不影响这一轮。 */
   toolContentPolicy?: ToolContentPolicy
   schemaVersion: 1
   phase: 'prepared' | 'archive_committed'
@@ -115,8 +111,6 @@ export function assertExactText(
   label: 'user' | 'assistant'
 ): void {
   const text = evidence.value?.text
-  // An attachment-only user turn has an exact empty textual component. Assistant output must
-  // remain non-empty, and an omitted user value must never be confused with an exact empty one.
   const emptyTextAllowed = label === 'user' && expected === ''
   if (
     evidence.status !== 'available' || evidence.quality !== 'exact' ||
@@ -157,8 +151,6 @@ export function assertProtectedToolEvidence(evidence: TurnEvidence, policy: Tool
   for (const call of [evidence.tools, evidence.skills, evidence.mcps].flatMap((section) => section.value ?? [])) {
     if (call.input !== undefined) throw new Error('full managed input requires bounded content envelopes')
     for (const field of [call.inputContent, call.outputContent]) {
-      // A body this recorder could not prove is already marked unavailable; the record states the
-      // omission instead of presenting a claim the evidence cannot support.
       if (isDegradedContent(field)) continue
       if (!isToolContent(field)) throw new Error('full managed evidence requires content provenance')
       if (field.content !== undefined) {
@@ -265,7 +257,6 @@ export function assertCommittedRecordMatchesHandoff(
   }
 }
 
-// 采集策略归一化放在 managed-capture：本文件只做断言与草稿组装，两个边界都保持可读。
 export {
   CONTENT_MISSING_REASON,
   applyCapturePolicy,

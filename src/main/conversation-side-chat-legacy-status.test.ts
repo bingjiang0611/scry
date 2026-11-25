@@ -100,7 +100,6 @@ describe('legacy archive turn status', () => {
     expect(archivedTurnStatus({ error: 'upstream failure' })).toBe('failed')
     expect(archivedTurnStatus({ resultIsError: true })).toBe('failed')
     expect(archivedTurnStatus({ resultSucceeded: true })).toBe('completed')
-    // No error and no result verdict proves no outcome: never success.
     expect(archivedTurnStatus({})).toBe('unavailable')
     expect(archivedTurnStatus({ error: '   ' })).toBe('unavailable')
   })
@@ -110,7 +109,6 @@ describe('legacy archive turn status', () => {
     for (const reason of ['input_context_overflow', 'output_token_limit', 'model_context_window_exceeded',
       'max_turns', 'budget_exceeded']) {
       expect(archivedTurnStatus({ resultSucceeded: true, terminationReason: reason })).toBe('failed')
-      // Termination alone is a failure verdict, not an unknown one.
       expect(archivedTurnStatus({ terminationReason: reason })).toBe('failed')
     }
     // The pre-`terminationReason` shape: only the Provider's raw stop reason was archived.
@@ -164,7 +162,6 @@ describe('legacy archive turn status', () => {
     expect(rebuiltInfo.readMode).toBe('stream_rebuild')
     expect((await statuses(rebuilt, rebuiltInfo)).map(turn => turn.status)).toEqual(['failed', 'completed', 'unavailable'])
 
-    // monolithic: the legacy single-file archive.
     const mono = await seedMonolithic([FAILED, SUCCEEDED, NO_EVIDENCE])
     const monoInfo = await traceArchiveCaptureInfo(args(mono))
     expect(monoInfo.readMode).toBe('monolithic')

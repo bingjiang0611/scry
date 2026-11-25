@@ -2,10 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gateDaemonChannel, installDaemonChannelForwarder } from '../daemon-channel-gate'
 import { installProjectDaemonWindow, installProviderContextWindowCwd } from './project-daemon'
 
-// Daemon mode: the folder and launcher pickers, the Pi failure dialog and the window's
-// workspace selection stay in this window. What the daemon is sent comes from the
-// picker, never from the renderer: a renderer that names a path itself must not get
-// that path remembered as a project (it is the daemon's authorization input).
 
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
@@ -36,7 +32,6 @@ describe('project and workspace selection in daemon mode', () => {
     dispose = chose.dispose
     await expect(chose.channel('agent:chooseFolder')({}, '/etc')).resolves.toBe('/picked/real')
     expect(chose.forwarder).toHaveBeenCalledWith({ op: 'workspaceSelection', method: 'chooseFolder', args: ['/picked/link'], read: false })
-    // The window selects what the daemon validated and remembered, not the picker's spelling.
     expect(chose.window.applyChosenFolder).toHaveBeenCalledWith('/picked/real')
     expect(chose.windowCwd()).toBe('/picked/real')
   })
@@ -103,8 +98,6 @@ describe('project and workspace selection in daemon mode', () => {
     expect(filled.forwarder).toHaveBeenLastCalledWith({ op: 'providerContext', method: 'invalidateProviderContext', args: [{ providerId: 'codex', cwd: '/w' }], read: false })
     await filled.channel('agent:invalidateProviderContext')({}, { providerId: 'codex', cwd: '/other' })
     expect(filled.forwarder).toHaveBeenLastCalledWith(expect.objectContaining({ args: [{ providerId: 'codex', cwd: '/other' }] }))
-    // A new session without a cwd resets the window's context in main too
-    // (resetProviderSession falls back to currentCwd); the daemon has no selection.
     await filled.channel('agent:newSession')({}, { providerId: 'codex' })
     expect(filled.forwarder).toHaveBeenLastCalledWith({ op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: '/w' }], read: false })
   })

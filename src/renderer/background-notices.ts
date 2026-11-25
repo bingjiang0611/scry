@@ -52,7 +52,6 @@ export function noticeKind(evidence: { active: boolean; blocked: boolean; outcom
   return outcome === 'failed' || outcome === 'cancelled' || outcome === 'interrupted' ? outcome : 'updated'
 }
 
-/** Keys present in `next` but not in `previous`. */
 export function addedKeys(previous: ReadonlySet<string>, next: ReadonlySet<string>): string[] {
   return [...next].filter((key) => !previous.has(key))
 }
@@ -99,7 +98,6 @@ export function pushNotices(current: readonly BackgroundNotice[], added: readonl
   return [...added].reverse().concat(current.filter((notice) => !keys.has(notice.key))).slice(0, MAX_VISIBLE_NOTICES)
 }
 
-/** What the notice tracker remembers between unread snapshots. */
 export interface NoticeTracker {
   /** The unread set last seen; null until the first snapshot, which is only a baseline. */
   baseline: ReadonlySet<string> | null

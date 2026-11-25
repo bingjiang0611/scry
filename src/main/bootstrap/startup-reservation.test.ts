@@ -48,7 +48,6 @@ describe('startup reservation between baseline and registration', () => {
   it('would lose that evidence without the shared admission key (negative control)', async () => {
     const runs = new RunRegistry<ActiveRun, RunControl>()
     const observed: string[][] = []
-    // 故意绕过 contextAdmission：同一 provider/profile/cwd 的两个启动交错执行。
     const startup = async (runId: string, sessionId: string) => {
       await tick()
       observed.push(runs.unsettledStates().map((run) => run.runId))

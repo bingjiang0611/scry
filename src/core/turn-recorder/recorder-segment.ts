@@ -19,11 +19,6 @@ import { snapshotSessionNetDiff } from './git.js'
 import { segmentFreeze } from './recorder-segment-diff.js'
 import { terminalSnapshot } from './git-capture.js'
 
-/**
- * Why a Stop was held instead of sealed. A held Stop is not published: it waits for the segment to
- * go quiet, because a Provider that keeps writing into the same turn would otherwise fragment a
- * single burst of Agent work into several records.
- */
 export type SealHoldReason = 'stale_terminal' | 'pending_background_tasks'
 
 export const CONTINUATION_ROLE_SOURCE = 'recorder_background_wake'
@@ -32,17 +27,11 @@ export const CONTINUATION_USER_REASON =
 export const CONTINUATION_NO_BASELINE_REASON =
   'the segment this continues published no end state for this repository, so its changes cannot be separated from this segment'
 
-/** Turn role for a segment opened by a background notification instead of a user prompt. */
 export function continuationRole(open: OpenTurnState): TurnRole | undefined {
   if (!open.continuation) return undefined
   return { role: 'continuation', source: CONTINUATION_ROLE_SOURCE, parentId: open.continuation.rootRecordId }
 }
 
-/**
- * Hold an end event instead of publishing it. The boundary is frozen here — the Provider terminal is
- * the end of that segment's Agent work even while the record waits — so a later seal cannot stretch
- * it. The baseline stays live: only a real user prompt consumes it.
- */
 export async function holdSeal(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   root: string,
@@ -57,9 +46,6 @@ export async function holdSeal(
   open.terminalAt = terminalAt
   open.terminalAtSource = 'recorder_observed_terminal'
   open.endReason ??= 'provider_terminal'
-  // Freeze at the Provider boundary without consuming the baseline: a newer prompt can still
-  // cancel this hold. Runtime promise queues stay on the temporary view, never in the JSON state.
-  // The same boundary is what the next segment diffs against, so its end tree and store are kept.
   const frozen = segmentFreeze({ enabled: enablement.config.capture.diff, open, gaveUp: false })
   open.terminalDiffs = await Promise.all(open.captures.map(async ({ repository, capture }) => {
     const started = Date.now()
@@ -72,7 +58,6 @@ export async function holdSeal(
       })
       return { repository, snapshot }
     } catch {
-      // A failed boundary capture cannot be replaced by a later worktree view.
       return {
         repository,
         snapshot: terminalSnapshot(capture, 'unavailable', 'git_error', [], terminalAt, Date.now() - started, 'failed')
@@ -84,10 +69,6 @@ export async function holdSeal(
     if (sealed.length) open.frozenDiffs = sealed
   }
   open.terminalFallbackStatus ??= terminalStatus(input.payload, 'completed')
-  // A hold for this turn's own background work is still this turn's Stop: if later activity
-  // cancels the hold, a superseding prompt must not report the turn as interrupted, and it still
-  // knows when the turn ended. An unidentified early terminal may belong to an earlier turn, so it
-  // proves nothing about this one.
   if (reason === 'pending_background_tasks') {
     open.stopObservedAt = terminalAt
     open.stopObservedAtSource = explicitTimestampOf(input.payload) ? 'provider_terminal_event' : 'recorder_observed_terminal'
@@ -101,29 +82,16 @@ export async function holdSeal(
     : { status: 'pending', reason: 'unidentified early terminal deferred for stale-event protection' }
 }
 
-/**
- * Activity inside a held segment keeps it open. The silence window measures quiet rather than the
- * first Stop, otherwise the hold would expire while the Provider is still writing to the turn.
- */
 export async function refreshSealWindow(root: string, open: OpenTurnState): Promise<void> {
   if (!open.deferredTerminalEventId) return
   open.deferredTerminalAt = new Date().toISOString()
   await writeJsonAtomic(openPath(root), open, { sync: false })
 }
 
-/** Whether this Provider can continue one turn after its Stop when a background task reports. */
 export function holdsStopForBackgroundWork(provider: ProviderId): boolean {
   return BACKGROUND_WAKE_PROVIDERS.has(provider)
 }
 
-/**
- * Open the segment a background notification continued. The wake is Agent work that happened after
- * the previous segment was sealed, so it gets a real record of its own, but it has no user prompt:
- * it carries the notification's own request identity and links back to the turn that asked.
- *
- * Content comes from the turn it continues, sliced past what that turn already published, so a
- * segment never republishes its predecessor's rows.
- */
 export async function beginContinuationTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
@@ -133,13 +101,10 @@ export async function beginContinuationTurn(
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await readJson<SessionState>(statePath(root))
   const previous = session?.lastSegment
-  // Without a measured predecessor there is nothing to link to and no boundary to slice at.
   if (!previous) return undefined
   const transcriptPath = transcriptPathOf(payload) ?? previous.transcriptPath
   const requestSetId = stringAt(payload, 'request_set_id', 'requestSetId')
   const providerTurnId = providerTurnIdOf(payload, provider)
-  // The wake belongs to the same capture as the turn it continues: a session-capture record keeps
-  // the same source, task and captureId, otherwise the segment would look like a stranger's work.
   const open = await beginOpenTurn(
     enablement, provider, sessionId, event, payload,
     false, false, input.uploadEnvironment, input.capture,
@@ -153,7 +118,6 @@ export async function beginContinuationTurn(
     },
     input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
   )
-  // A wake payload may omit the path; the continued turn's own transcript is the same file.
   if (transcriptPath && open.transcriptPath !== transcriptPath) {
     open.transcriptPath = transcriptPath
     await writeJsonAtomic(openPath(root), open, { sync: false })
@@ -162,12 +126,6 @@ export async function beginContinuationTurn(
   return open
 }
 
-/**
- * How a segment reads the transcript. A continuation sits inside the turn it continues, so it uses
- * that turn's native identity: its own request set never names a transcript turn, because the
- * notification row is folded into the continued turn. Publishing the continued turn's rows again
- * would count the same tool calls twice, so content is sliced past the sealed boundary.
- */
 export function segmentTranscriptView(open: OpenTurnState, transcript: TranscriptRead): {
   transcript: TranscriptRead
   ownsRows: boolean
@@ -185,9 +143,6 @@ export function segmentTranscriptView(open: OpenTurnState, transcript: Transcrip
   const published = open.continuation.publishedEvents
   const measurable = published != null && transcript.identityMatched !== false
   return {
-    // Only rows the transcript supplied can be sliced by count: derived events (credits, sidecars)
-    // are appended at the end of a growing list, so their position is not a boundary. They belong to
-    // the segment that first saw them.
     transcript: measurable
       ? { ...transcript, events: transcriptSourceEvents(transcript.events).slice(published) }
       : { ...transcript, complete: false },
@@ -196,16 +151,11 @@ export function segmentTranscriptView(open: OpenTurnState, transcript: Transcrip
   }
 }
 
-/**
- * 一条记录自己的起点：接续段从它自己的 wake 开始（前一段已经封箱，不能共用它的起点），
- * 其余轮次用 transcript 里的真实提问时间；没有提问时间时才退回开启采集的时间。
- */
 export function recordStartedAt(open: OpenTurnState, transcriptStartedAt?: string): string {
   if (open.continuation) return open.startedAt
   return transcriptStartedAt ?? open.startedAt
 }
 
-/** Label a continuation segment: no user prompt, no Git baseline, and content only after the seal. */
 export function applyContinuationEvidence(
   evidence: TurnEvidence,
   open: OpenTurnState,
@@ -214,8 +164,6 @@ export function applyContinuationEvidence(
 ): void {
   if (!open.continuation) return
   evidence.user = unavailable(CONTINUATION_USER_REASON)
-  // Every repository but one should have a frozen baseline. Name the exception instead of letting a
-  // generic "some snapshots were unavailable" hide which repository could not be separated.
   const missing = captureDiff
     ? open.captures.filter(({ capture }) => capture.status !== 'ready').map(({ repository }) => repository)
     : []
@@ -236,7 +184,6 @@ export function applyContinuationEvidence(
   }
 }
 
-/** The sealed boundary the next wake continues from, or undefined when it could not be measured. */
 export function sealedSegment(
   open: OpenTurnState,
   recordId: string,
@@ -254,11 +201,6 @@ export function sealedSegment(
   }
 }
 
-/**
- * A forced close whose identity never matched still holds body rows. Keep the window this turn
- * actually wrote — bounded by its own start row and the next user prompt — instead of publishing
- * hook-only evidence. No window is invented when the transcript cannot prove one.
- */
 export async function forcedIdentityWindow(
   open: OpenTurnState,
   runId: string,
@@ -270,11 +212,6 @@ export async function forcedIdentityWindow(
   return { transcript: retained ?? emptyTranscript(false), retained: !!retained }
 }
 
-/**
- * A forced or unmatched close keeps the body it has but cannot claim completeness. The diff is the
- * exception: spanning a window nobody bounded would attribute other turns' work to this one, so it
- * is reported as unavailable with the reason instead of published.
- */
 export function applyForcedEvidence(
   evidence: TurnEvidence,
   forcedReason: string | undefined,
@@ -299,11 +236,6 @@ export function applyForcedEvidence(
   }
 }
 
-/**
- * The transcript rows a segment can be sliced by. Ids the parser assigned (`transcript-…`) identify
- * rows; everything else is a projection the recorder derived from them, whose position moves as the
- * file grows.
- */
 export function transcriptSourceEvents(events: TraceEvent[]): TraceEvent[] {
   return events.filter((event) => event.id.startsWith('transcript-'))
 }

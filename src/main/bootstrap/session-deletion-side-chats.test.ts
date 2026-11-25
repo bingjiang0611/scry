@@ -71,7 +71,6 @@ describe('a Provider session takes its side chats along when it is deleted', () 
     expect(order).toEqual(['count:native-session,app-session,native-session'])
     expect(sideChatCascade.run).not.toHaveBeenCalled()
     expect(removed).not.toHaveBeenCalled()
-    // The refusal is said out loud instead of leaving a delete that silently did nothing.
     expect(showMessageBox).toHaveBeenCalledTimes(1)
   })
 

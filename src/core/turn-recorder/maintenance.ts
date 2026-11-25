@@ -18,7 +18,6 @@ export interface RecorderMaintenanceReport {
   retentionEligible: Array<{ sequence: number; completedAt: string }>
   orphanContent: Array<{ path: string; bytes: number }>
   staleTemps: Array<{ path: string; bytes: number }>
-  /** 记录目录里被跳过的文件（`.tmp`、读不出来的半成品）：维护不能因为它们而拒绝工作。 */
   skippedRecords: SkippedRecordFile[]
   compressedLogs: string[]
   reclaimedBytes: number
@@ -74,8 +73,6 @@ export async function maintainRecorderStore(
     withDirectoryLock(join(dataRoot, 'locks', 'commit.lock'), async () => {
     const blocked = await blockers(dataRoot, graceCutoff)
     const { records, skipped: skippedRecords } = await listRecordsReport(dataRoot)
-    // 读不出来的记录仍可能引用任何一份正文；不知道它引用了什么就不能回收，否则会把还在被引用的
-    // 字节删掉。非记录文件（`.tmp`）不参与判定：它们不是记录，本来也不引用内容。
     if (skippedRecords.some((item) => item.reason === 'unreadable_record')) blocked.add('unreadable_record')
     const blockedBy = [...blocked].sort()
     const referenced = new Set(records.flatMap(recordContentItems).map((item) => item.ref.sha256))

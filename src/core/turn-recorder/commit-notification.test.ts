@@ -23,8 +23,6 @@ it.each(['drain', 'redeliver'] as const)('%s binds schema v2 to exact file bytes
   const [name] = await readdir(join(dataRoot, 'records'))
   const path = join(dataRoot, 'records', name)
   const record = JSON.parse(await readFile(path, 'utf8'))
-  // Deliberately differ from the writer's JSON formatting. Hashing a parsed/re-serialized
-  // object or its legacy-normalized read view must not pass the content-handoff contract.
   const bytes = Buffer.from(JSON.stringify(record, null, 4) + '\n\n')
   await writeFile(path, bytes)
   const capture = join(root, 'notification.json')

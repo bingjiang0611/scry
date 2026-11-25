@@ -9,7 +9,6 @@
 //   2. changed to a config that cannot be executed safely (NODE_OPTIONS in the server env):
 //      the start is refused and the refusal names the cause, without Provider output;
 //   3. changed again to a different safe config: re-verified and allowed.
-// The switch-off control runs the same three; the daemon must behave identically.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { COMPLETE_PROMPT, openChecked, runScenario, startRun, waitLedger, waitRun } from '../kit.mjs'

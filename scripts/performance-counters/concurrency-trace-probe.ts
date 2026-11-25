@@ -201,7 +201,6 @@ export function registerProbeControl(): void {
     let phase: ProbePhase = 'writer'
     const probe = startProbe(() => phase)
     try {
-      // Real results unchanged, including the encoding argument.
       expect(esmCreateHash('sha256').update(text).digest('hex')).toBe(expectedText)
       expect(esmCreateHash('sha256').update(binary).digest('hex')).toBe(expectedBinary)
       expect(esmCreateHash('sha256').update(hexValue, 'hex').digest('hex')).toBe(expectedHex)
@@ -223,7 +222,6 @@ export function registerProbeControl(): void {
       expect(() => JSON.stringify(cyclic)).toThrow(TypeError)
       expect(JSON.stringify(payload)).toBe(expectedJson)
       expect(JSON.stringify(payload)).toBe(expectedJson)
-      // Repeated hashing grows the reader bucket by exactly the repeated work.
       esmCreateHash('sha256').update(text).digest('hex')
       esmCreateHash('sha256').update(text).digest('hex')
       const afterReader = probe.read()
@@ -245,12 +243,10 @@ export function registerProbeControl(): void {
       expect((invalidError as { code?: string } | null)?.code).toBe('ERR_INVALID_ARG_TYPE')
       const afterInvalid = probe.read().phases.other
       expect(afterInvalid.hashUpdateBytes).toBe(beforeInvalid.hashUpdateBytes)
-      // Only the hash creation above is a call; the rejected update added none.
       expect(afterInvalid.hashCalls).toBe(beforeInvalid.hashCalls + 1)
     } finally {
       probe.stop()
     }
-    // Restored: both bindings are the originals again, and a call afterwards moves no counter.
     expect({ hash: cryptoExports.createHash === pristineCreateHash, stringify: JSON.stringify === pristineStringify })
       .toEqual({ hash: true, stringify: true })
     const settled = probe.read()

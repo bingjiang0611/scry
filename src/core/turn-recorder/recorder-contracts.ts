@@ -15,29 +15,10 @@ export interface RecorderHookInput {
   env?: NodeJS.ProcessEnv
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   managed?: boolean
-  /** Persist an uncertain transport delivery for lifecycle-deduplicated recovery, without applying it. */
   queueOnly?: boolean
-  /**
-   * Session capture context, present only for `--capture-mode session` delivery. A workspace in
-   * `capture.sessions: opt-in` mode records nothing without it.
-   */
   capture?: import('./session-capture-contract.js').SessionCaptureContext
-  /**
-   * Skip commit-hook delivery so a long-lived caller can run it after answering the Provider.
-   * Recording is what the hook must wait for; waking an external uploader is not, and its budget
-   * is paid on every event. Only a caller that outlives the response may set this — a one-shot CLI
-   * process would drop the delivery entirely.
-   */
   deferDelivery?: boolean
-  /**
-   * Delivered in capture mode even when this delivery carries no context yet: the claim that
-   * publishes the capture state may still be ahead of this event in the same inbox.
-   */
   captureMode?: boolean
-  /**
-   * Pid of the process that delivered this event, when the transport knows it (the hook script
-   * passes its own `$$`). Recovery uses the chain around it to tell a live host from a dead one.
-   */
   ancestryFromPid?: number
 }
 
@@ -87,25 +68,11 @@ export interface TranscriptRead {
   }
   observed: boolean
   identityMatched?: boolean
-  /**
-   * Background tasks this window launched and has not seen report. A Stop while this is non-empty is
-   * not the end of the turn: the transcript will gain the wake's rows, and publishing now would split
-   * one burst of Agent work into two records.
-   */
   pendingBackgroundTasks?: string[]
   providerTurnId?: string
   complete?: boolean
-  /**
-   * Why a bounded read left this window incomplete, in the record's own words. Empty when the
-   * window is complete or when the cause has no specific description.
-   */
   incompleteReasons?: string[]
   terminalStatus?: AgentTurnRecord['status']
-  /**
-   * The last assistant message's `stop_reason`, verbatim. Providers that never record a terminal
-   * event (Qoder, Claude, OpenCode) still say why the model stopped replying, which is the only
-   * proof that the reply finished rather than that the host died mid-stream.
-   */
   stopReason?: string
   completedAt?: string
   startedAt?: string
@@ -145,14 +112,6 @@ export interface ModelIdentity {
   omissionReason?: string
 }
 
-/**
- * Decide what the record may claim about the model.
- *
- * The rules are deliberately narrow: a single complete provider observation is
- * fact, a billed usage model is fact with weaker provenance, and everything
- * else is an explicit gap. Reporting several ids in one turn is a conflict to
- * surface, not something to resolve by picking one.
- */
 export function resolveModelIdentity(
   modelEvents: TraceEvent[],
   models: Set<string>,
@@ -185,8 +144,6 @@ export function resolveModelIdentity(
     }
   }
   if (typeof usageModel === 'string' && usageModel.length > 0) {
-    // A usage counter names the model that was billed. That is an observation,
-    // but not the same provenance as a provider model event, so it is labelled.
     return { model: usageModel, status: 'observed', source: 'usage_event' }
   }
   return {
@@ -228,7 +185,6 @@ export function explicitTimestampOf(payload: Record<string, unknown>): string | 
   return value && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : undefined
 }
 
-/** Arrival time of the hook being applied; a queued hook replays with the time it actually arrived. */
 export const hookArrival = new AsyncLocalStorage<string>()
 
 export function observedNow(): string {
@@ -312,7 +268,6 @@ export interface CodexRolloutIdentity {
 
 export interface ParsedTranscriptTurn {
   providerTurnId?: string
-  /** Native Codex turn attribution; child rollouts use this to exclude inherited history. */
   parentTurnId?: string
   userText: string
   startedAt?: string
@@ -333,17 +288,11 @@ export interface NormalizedCodexCall {
 
 export const START_EVENTS = new Set(['UserPromptSubmit', 'chat.message', 'turn.started'])
 export const END_EVENTS = new Set(['Stop', 'session.idle', 'session.stop', 'turn/completed', 'turn.completed'])
-// These Provider Stop contracts expose the same-turn continuation flag; do not infer parity.
 export const STOP_HOOK_ACTIVE_PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder'])
 export const SESSION_END_EVENTS = new Set(['SessionEnd', 'session.end', 'session_end', 'session.exited', 'process.exit'])
 export const TERMINAL_CLOCK_SKEW_MS = 60_000
 export const STALE_TERMINAL_PROVIDERS = new Set<ProviderId>(['qoder', 'opencode'])
 
-/**
- * Providers that keep writing into one logical turn after its Stop when a background task reports.
- * The wake arrives as another prompt event, so a recorder that treats it as a new turn both
- * truncates the original turn and creates one whose identity the transcript never has.
- */
 export const BACKGROUND_WAKE_PROVIDERS = new Set<ProviderId>(['qoder'])
 export const STALE_TERMINAL_WINDOW_MS = 30_000
 export const DEFERRED_TERMINAL_GRACE_MS = 180_000
@@ -351,7 +300,6 @@ export const OPEN_TURN_EXPIRY_MS = 24 * 60 * 60 * 1_000
 
 export interface QueuedHook {
   schemaVersion: 1
-  /** Absent on entries written before the kind existed; both mean a Provider hook event. */
   kind?: 'hook'
   provider: ProviderId
   sessionId: string
@@ -359,40 +307,23 @@ export interface QueuedHook {
   payload: Record<string, unknown>
   managed?: boolean
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
-  /** 会话捕获上下文随条目持久化：重放出来的唤醒仍属于同一个 capture，不是陌生记录。 */
   capture?: import('./session-capture-contract.js').SessionCaptureContext
-  /**
-   * Delivered in `--capture-mode session`. The capture context is resolved from the session state at
-   * replay time, because the claim that publishes it may still be ahead of this event in the inbox.
-   */
   captureMode?: boolean
   arrivedAt: string
 }
 
-/**
- * A session-capture claim waiting for the recorder daemon.
- *
- * The host hook that proved the session may not spend its five seconds opening a turn, taking a Git
- * baseline and waiting for the transcript to settle, so it writes this entry and returns. The daemon
- * applies it in arrival order before the events it opened.
- */
 export interface QueuedCaptureCommand {
   schemaVersion: 1
   kind: 'capture'
   provider: ProviderId
   sessionId: string
   action: 'start' | 'stop'
-  /** The claim's own context, in the wire shape, validated again when the entry is replayed. */
   context: Record<string, unknown>
-  /** The Provider event the claim was proved on; the turn boundary is read from it. */
   payload: Record<string, unknown>
   event: string
   arrivedAt: string
-  /** CodeLens' request ledger id, echoed in diagnostics so an integrator can correlate. */
   requestId?: string
-  /** The claimant's pid: its chain reaches the host that must outlive this turn. */
   ancestryFromPid?: number
-  /** Host processes CodeLens already resolved, used when that pid is gone by replay time. */
   hostChain?: import('./host-process.js').HostProcess[]
 }
 
@@ -426,8 +357,6 @@ export function inferredSkillEvents(
   const candidates = stringsIn(input)
   const names = new Set<string>()
   for (const candidate of candidates) {
-    // 只有真正读取 skill 入口文件才算调用证据；仅 rg 某个 skill 目录或引用其 references
-    // 不能证明 agent 使用了该 skill，否则会把代码搜索误报成 Skill 调用。
     const pattern = /(?:^|[/\s"'`])(?:\.(?:claude|codex|agents)\/)?skills\/([^/\s"'`]+)\/SKILL\.md/g
     for (const match of candidate.matchAll(pattern)) if (match[1]) names.add(match[1])
   }

@@ -46,7 +46,6 @@ describe('工作区能力来自宿主的 catalog', () => {
       trashItem: false,
       notice: '此工作区不支持：在系统应用中打开、移入废纸篓'
     })
-    // Only the reported gap is named; the rest stays usable.
     expect(resolveWorkspaceOps({ openPath: true, trashItem: false }).notice).toBe('此工作区不支持：移入废纸篓')
   })
 

@@ -14,7 +14,6 @@ export const event = (runId: string, id: string, text = id, extra: Partial<Trace
   id, ts: '2026-01-01T00:00:00.000Z', runId, kind: 'model', stage: 'text', text, ...extra
 })
 
-/** 与 main 里 appendCoalescedTrace 一致的增量：同一条流上的 text_delta 会被拼到最后一格。 */
 export const delta = (runId: string, id: string, text: string): TraceEvent => ({
   id,
   ts: '2026-01-01T00:00:00.000Z',
@@ -48,7 +47,6 @@ export interface Fixture {
 
 export interface SessionFixture extends Fixture {
   session: RunTraceStreamSession
-  /** 模拟 React 提交：flush → 提交 → 归还额度/对齐确认。 */
   flushAndCommit: () => RunTraceStreamCommit[]
   terminal: Array<ActiveRun | null>
 }
@@ -113,7 +111,6 @@ export function sessionFixture(runId = 'run-main', subscriptionId = 'sub-main-1'
 
 export const tick = async (): Promise<void> => { await Promise.resolve(); await Promise.resolve() }
 
-/** 让 subscribe 停在半路：事件先到、回执后到是真实 IPC 顺序，不是假想。 */
 export function deferSubscribe(h: SessionFixture, value: RunTraceSubscribeResult): () => void {
   let release = (): void => undefined
   h.subscribeResult.value = new Promise<RunTraceSubscribeResult>((resolve) => {

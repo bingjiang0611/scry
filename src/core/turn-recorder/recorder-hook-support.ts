@@ -10,7 +10,6 @@ import { storeLifecycleEvent } from './recorder-turn-state.js'
 import { refreshSealWindow } from './recorder-segment.js'
 import { CODEX_SUBAGENT_MARKER, nestedRecord, promptOf, providerTurnIdOf, stringAt, type RecorderHookInput, type RecorderHookResult, transcriptPathOf, observedNow } from './recorder-contracts.js'
 
-/** A `<task-notification>` prompt is a continuation, not a user question, for every Provider. */
 export function isTaskNotificationPrompt(payload: Record<string, unknown>): boolean {
   const origin = nestedRecord(payload, 'origin')
   return stringAt(origin ?? {}, 'kind') === 'task-notification' ||
@@ -28,7 +27,6 @@ export async function recordTaskNotificationWake(
   if (open.managedByScry) return { status: 'recorded', reason: 'managed task continuation kept in canonical Scry turn' }
   await rememberContinuationProviderTurn(root, open, providerTurnId)
   await storeLifecycleEvent(enablement, open, input.event, input.payload)
-  // The wake proves the segment is still alive, so a held Stop waits for quiet again.
   await refreshSealWindow(root, open)
   return { status: 'recorded', reason: 'task notification continued the open turn' }
 }
@@ -59,13 +57,6 @@ export function isSynthetic(payload: Record<string, unknown>): boolean {
 const CODEX_TITLE_INSTRUCTION = 'Generate a concise, single-line task title of at most 36 characters'
 const CODEX_TITLE_PROMPT_SEPARATOR = '\n\nUser prompt:\n'
 
-/**
- * Codex asks the model for a short UI title in a throwaway session before the real turn.
- * That request carries the fixed title instruction plus the captured user prompt, so the
- * lifecycle hooks cannot reuse an origin marker. Require the instruction opening, the exact
- * blank-line separator and the instruction's closing sentence together: a real prompt that
- * merely shares the opening words, or mentions "User prompt:" inline, is never ignored.
- */
 export function isCodexInternalPrompt(payload: Record<string, unknown>): boolean {
   const prompt = stringAt(payload, 'prompt', 'user_prompt', 'userPrompt')
   if (!prompt) return false
@@ -76,11 +67,6 @@ export function isCodexInternalPrompt(payload: Record<string, unknown>): boolean
   return normalized.slice(0, separator).trimEnd().endsWith('Do not answer the request.')
 }
 
-/**
- * The title session has no evidence of its own, but its paired terminal still arrives. Remember
- * the ignored identity so the terminal is ignored too instead of becoming an orphan event that
- * raises `missingStartTerminals` and `lastError` in health.
- */
 export async function markCodexInternalTurn(
   dataRoot: string,
   provider: ProviderId,
@@ -108,12 +94,6 @@ function internalTurnPath(dataRoot: string, provider: ProviderId, sessionId: str
   return join(dataRoot, 'runtime', provider, 'internal-turns', `${safeKey(sessionId)}-${safeKey(turnId)}.json`)
 }
 
-/**
- * Codex guardian (auto-review) subagents reuse the parent session_id and carry no agent_id,
- * but their transcript_path is the child's own rollout, whose first `session_meta` row
- * declares `source.subagent`. A rollout named after the session itself is the main thread
- * and is never opened.
- */
 export async function codexSubagentTranscript(payload: Record<string, unknown>, sessionId: string): Promise<boolean> {
   const path = transcriptPathOf(payload)
   if (!path) return false
@@ -180,12 +160,6 @@ export async function isCommittedProviderTurn(
   )
 }
 
-/**
- * Qoder can deliver a Stop several seconds after its completed record and omit every native
- * identity. Text equality is not turn identity. The only no-open fast path is an unchanged,
- * authoritative transcript snapshot for the last record; otherwise the event stays an orphan.
- * Any open turn remains ambiguous and is handled by stale-terminal protection instead.
- */
 export async function isLateQoderTerminalDuplicate(
   dataRoot: string,
   root: string,
@@ -221,10 +195,8 @@ export async function storeOrphanEvent(
 ): Promise<{ status: 'orphan' }> {
   const id = stableHash({ event: input.event, payload: input.payload })
   const path = join(root, 'orphans', `${id}.json`)
-  // The session lock serializes delivery and inbox replay. Replays keep the first observation.
   if (await readJson(path)) return { status: 'orphan' }
   const capture = enablement.config.capture
-  // Opaque payloads mix prompts, assistant text and tools. Do not bypass disabled categories.
   const capturePayload = capture.prompt && capture.assistant && isFullToolContentPolicy(capture)
   const reason = missingStart ? 'missing_start' : 'no_matching_open_turn'
   const at = observedNow()

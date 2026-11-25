@@ -61,5 +61,4 @@ export abstract class DesktopRemoteClientTrace extends DesktopRemoteClientHistor
       ? this.readImages(connectionIdValue, value, runId, imageCount) : Promise.resolve(undefined)
   }
 
-  // Older hosts ignore byteChunks and keep their previous bounded response behavior.
 }

@@ -50,7 +50,6 @@ export async function verifySideChatPendingContent({ capture, check, clickAt, dr
     `an unresolved receipt must not offer a resend while it is open: ${json(content.buttons)}`)
   await capture('drafts-pending-content')
 
-  // The kept image opens the product's existing lightbox instead of a second viewer.
   await clickAt(`document.querySelector('[data-pending-content-image]')`)
   await wait(`document.querySelector('.image-lightbox') != null`)
   await settleModal('.image-lightbox')

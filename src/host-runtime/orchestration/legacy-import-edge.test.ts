@@ -32,15 +32,12 @@ describe('P4-1 S2 missing-body startup repair and ordinal-miss safety', () => {
       const detail = JSON.stringify({ providerId: 'codex', cwd: '/tmp/ws-s2', prompt: 'crash mid-run', blob: 'B'.repeat(24_000) })
       const t0 = 1_700_000_000_000
 
-      // H1 persisted intent_recorded durably before crash
       writeFileSync(
         join(ledgerDir, 'session-ledger.log'),
         `${JSON.stringify({ seq: 1, at: t0, runId: ledgerRunId, kind: 'intent_recorded', intentId, detail })}\n`,
         { mode: 0o600 }
       )
 
-      // Simulate shadow committing intent_recorded (deferred body in memory) and then process crashing
-      // WITHOUT calling flushPendingBodies() / close() (we close underlying sink directly to simulate SIGKILL)
       let expectedSha = ''
       const mirror1 = ShadowMirror.open({ userDataDir: userData })
       try {
@@ -50,11 +47,9 @@ describe('P4-1 S2 missing-body startup repair and ordinal-miss safety', () => {
         expectedSha = run!.body!.sha256
         expect(mirror1.sink!.bodyStore.hasExternalBody(expectedSha)).toBe(false)
       } finally {
-        // Close sqlite handle directly without flushing pending bodies -> simulates SIGKILL before terminal flush
         mirror1.sink!.close()
       }
 
-      // Restart 1: H1 ledger still present -> repairMissingShadowBodies restores 0600 file and zero missing
       const sink2 = EventSink.open({ userDataDir: userData })
       try {
         const plan = loadLegacyLedgerPlan(sink2, userData)
@@ -67,7 +62,6 @@ describe('P4-1 S2 missing-body startup repair and ordinal-miss safety', () => {
         sink2.close()
       }
 
-      // Restart 2: Delete both external body file and H1 ledger -> unrecoverable ref must be counted as deviation
       rmSync(join(userData, 'orchestration', 'bodies'), { recursive: true, force: true })
       rmSync(ledgerDir, { recursive: true, force: true })
       const mirror3 = ShadowMirror.open({ userDataDir: userData })

@@ -26,7 +26,6 @@ export async function runWorkbench({ driver }) {
   await wait(aligned, 'maximized remote overview reveals its user prompt')
   check(await read('document.activeElement === document.querySelector(".chat-transcript")'), 'Maximized remote navigation must focus the revealed timeline')
   await revealPanel()
-  // The existing hide action also clears maximized state.
   await wait('!document.querySelector(".app.right-panel-maximized")', 'remote columns restored before file checks')
   const addSurface = async (label) => {
     await click(remotePanel + ' button[aria-label="添加 Surface"]')

@@ -1,4 +1,3 @@
-/* skill 切段：按时间顺序展示，每段拆开普通工具 / 子 agent / 文件读写 / 错误 */
 .segment-list {
   display: grid;
   gap: 4px;

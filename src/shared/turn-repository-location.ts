@@ -18,7 +18,6 @@ export const REPOSITORY_COMMIT_STATUSES = ['observed', 'unavailable'] as const
 export type RepositoryCommitStatus = typeof REPOSITORY_COMMIT_STATUSES[number]
 
 export interface TurnRepositoryLocation {
-  /** Origin identity, without transport, credentials, query, fragment or a trailing .git. */
   remote?: string
   /**
    * `observed`: `remote` is present. `absent`: the config was read and names no origin.

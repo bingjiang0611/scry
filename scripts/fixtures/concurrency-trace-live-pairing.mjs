@@ -6,7 +6,6 @@
 // reply shapes read here are the ones runCommand really returns.
 import { join } from 'node:path'
 
-/** Identity of one peer: the id is an integer, the label and directory name are strings. */
 export function peerIdentity(index) {
   if (!Number.isInteger(index) || index < 0) throw new Error('peer index must be a non-negative integer')
   return { peerId: index, label: `peer-${index}`, directoryName: `peer-${index}` }

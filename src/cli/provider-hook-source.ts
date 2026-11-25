@@ -2,10 +2,6 @@ import { HOOK_ENV_KEYS } from '../core/turn-recorder/commit-environment.js'
 import { HOOK_EVENT_PATH, PROTOCOL_VERSION, RECORDER_VERSION_HEADER } from '../core/turn-recorder/daemon.js'
 import { RECORDER_VERSION } from '../core/turn-recorder/store.js'
 
-/**
- * 投递未成功的退出码。Provider 的 hook 仍然 exit 0（观测失败不能阻断 Agent）；只有 OpenCode 插件
- * 需要区分“真的送达”和“跳过了”，否则一次失败的 Stop 会被当成终态已交付。
- */
 export const HANDLER_ID = 'turn-recorder-v1'
 export const HOOK_UNDELIVERED_STATUS = 3
 

@@ -193,8 +193,6 @@ export function useAppView(context: AppViewContext) {
     setShowSkills(false)
     setShowMcp(false)
   }
-  // 原来这里打开设置里的「远程」标签页；P8 之后连接与设备都在侧栏「机器」页，
-  // 位置菜单的「管理远程访问」直接跳到那一页。
   const openRemoteAccessSettings = (): void => {
     closeOverlays()
     changeView('machines')

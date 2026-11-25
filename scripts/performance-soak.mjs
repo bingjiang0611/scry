@@ -50,7 +50,7 @@ async function waitForTarget(port, timeoutMs = 30_000) {
       const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json())
       const page = targets.find((target) => target.type === 'page' && target.webSocketDebuggerUrl)
       if (page) return page
-    } catch { /* Electron is still starting. */ }
+    } catch {}
     await new Promise((resolveWait) => setTimeout(resolveWait, 100))
   }
   throw new Error(`等待 Electron CDP target 超时\n${output.slice(-4_000)}`)

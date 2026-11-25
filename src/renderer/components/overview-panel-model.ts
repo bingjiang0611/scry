@@ -180,7 +180,6 @@ export function useOverviewPanelModel({
   const hasSkillSeg = segments.some((s) => s.skill !== '（无 skill）')
   const { structured } = useMemo(() => aggregateFiles(all), [all])
   const coverage = useMemo(() => fileWriteCoverage(all), [all])
-  // TOP TOOLS：tool + mcp 合并排名（前 6），配 mini-bar。
   const topTools = useMemo(() => {
     const rows = [
       ...calls.tools.map((t) => ({ name: t.name, count: t.count })),
@@ -197,7 +196,6 @@ export function useOverviewPanelModel({
       ? '等待 result'
       : `${billing.missingTokenResultCount > 0 ? '≥' : ''}${fmtTok(billing.totalTokens)}`
 
-  // verdict 状态（诚实）：高危→bad；运行中/有报错/可疑→warn；否则 ok。error 绝不显绿。
   const dangerHi = dangers.filter((e) => e.danger!.level === 'danger').length
   const toolErrorRows = useMemo(() => overviewToolErrors(all), [all])
   const toolErrors = toolErrorRows.length
@@ -205,7 +203,6 @@ export function useOverviewPanelModel({
   const turnError = failedTurns > 0
   const hasError = toolErrors > 0 || turnError
   let vstate: 'ok' | 'warn' | 'bad' = 'ok'
-  // 只在还活着的状态（运行中、高危、可疑）占一行；已完成且无风险时不写“轮次已结束”。
   let judge: string | null = null
   if (busy) {
     vstate = 'warn'

@@ -87,11 +87,6 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   /** C4: quotas and restart notes are recorded only when set. */ usageLimits?: UsageLimitScheduler
 }
 
-/**
- * Isolated daemon wiring for P4-2 authoritative orchestration.
- * Runs off-main-thread H1 import + single-tx startup recovery + two-ledger reconciliation
- * before opening the local channel.
- */
 export async function attachDaemonOrchestrationAuthority<
   State extends RunRegistryState,
   Control extends RunRegistryControl
@@ -145,7 +140,7 @@ export async function attachDaemonOrchestrationAuthority<
       getDeferredControl: () => ({ deferredStarted, cancelDeferred, setStarted: () => { deferredStarted = true } })
     })
   } catch (error) {
-    try { options.conversationStore().setBeforeTurnSettledObserver(undefined) } catch { /* ignore */ }
+    try { options.conversationStore().setBeforeTurnSettledObserver(undefined) } catch { }
     sink.close()
     throw error
   }

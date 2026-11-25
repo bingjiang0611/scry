@@ -88,7 +88,6 @@ describe('cumulative diff patch bodies move to the content store', () => {
       expect(file.patchContent!.contentRef!.storage).toBe('recorder-content-v1')
       expect(file.patchContent!.storage).toBe('complete')
     }
-    // The bytes really left the turn file and are readable from the store by reference.
     expect(JSON.stringify(slim.items[0]).length).toBeLessThan(before / 20)
     await hydrateNewestSessionSnapshots(userDataDir, cwd, [slim])
     expect(filesOf(slim).map((file) => file.patch)).toEqual(expected)
@@ -192,7 +191,6 @@ describe('archive write and page read keep the same visible snapshot', () => {
     const page = await readTraceArchivePageAsync(args, { limit: 40 })
     const newest = page.archive!.turns.at(-1)!.items.find((item) => item.stage === SESSION_DIFF_STAGE)!
     expect(newest.turnDiff!.files.every((file) => typeof file.patch === 'string' && file.patch!.includes('two-'))).toBe(true)
-    // The archive file on disk keeps references instead of a second copy of every patch body.
     const piDir = join(userDataDir, 'trace-archive-turns-v1', 'pi')
     const sessionDir = join(piDir, readdirSync(piDir)[0])
     const turnDir = join(sessionDir, readdirSync(sessionDir)[0])

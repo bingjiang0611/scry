@@ -13,7 +13,6 @@ interface HistoryAutoloadInput {
   onLoadOlder?: () => void
 }
 
-/** 取页前的定位锚：第一个可见轮次，以及它在内容坐标系里的位置。 */
 interface Anchor {
   node: Element
   contentTop: number
@@ -52,7 +51,6 @@ export function useHistoryAutoload({ scrollRef, turnsLength, hasOlder, loading, 
     const state = latest.current
     if (!el || !state.onLoadOlder) return false
     const viewportShort = isViewportShort(el.scrollHeight, el.clientHeight)
-    // 只有用户滚动到位、或内容不足一屏时才取页；否则交给滚动监听。
     if (reason === 'fill' && !viewportShort) return false
     if (!shouldLoadOlder({
       scrollTop: el.scrollTop,
@@ -85,7 +83,6 @@ export function useHistoryAutoload({ scrollRef, turnsLength, hasOlder, loading, 
     if (request('fill')) fillRetry.current = { ...fillRetry.current, pendingTurns: turnsLength }
   }, [turnsLength, hasOlder, loading])
 
-  // 上方插入内容后把阅读位置放回原位；只是末尾追加时位移为 0，不做任何调整。
   useLayoutEffectCompat(() => {
     const el = scrollRef.current
     const captured = anchor.current

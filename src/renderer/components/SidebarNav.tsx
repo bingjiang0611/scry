@@ -11,7 +11,6 @@ export interface SidebarNavProps {
   metaPromptsActive?: boolean
 }
 
-// 侧栏顶部的顶层入口。只在宿主订阅了对应动作时出现，当前页用 aria-current 标出。
 export function SidebarNav({
   onAnalytics, analyticsActive = false, onMachines, machinesActive = false,
   onSkills, onMcp, onMetaPrompts, metaPromptsActive = false

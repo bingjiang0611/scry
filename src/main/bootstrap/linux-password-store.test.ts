@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyLinuxPasswordStore, linuxPasswordStoreSwitch } from './linux-password-store'
 
-// B4-S F1, option A (maintainer, 2026-11-12). Electron 42 picks the `basic_text` safeStorage
-// backend when it does not recognise the desktop (Hyprland, or nothing set), even with an
-// unlocked keyring; daemon mode then refuses every run. The App asks for libsecret there
-// and nowhere else. A missing keyring still fails closed: this only names the backend.
 
 const choose = (env: NodeJS.ProcessEnv, options: { platform?: NodeJS.Platform; hasPasswordStoreSwitch?: boolean } = {}) =>
   linuxPasswordStoreSwitch({
@@ -43,7 +39,6 @@ describe('linuxPasswordStoreSwitch', () => {
   })
 
   it('leaves an unnamed XDG desktop alone when an older variable names one', () => {
-    // Chromium falls back to these when XDG_CURRENT_DESKTOP is missing.
     expect(choose({ DESKTOP_SESSION: 'plasma' })).toBeUndefined()
     expect(choose({ DESKTOP_SESSION: 'gnome' })).toBeUndefined()
     expect(choose({ KDE_FULL_SESSION: 'true' })).toBeUndefined()

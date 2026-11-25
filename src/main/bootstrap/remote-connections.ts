@@ -36,14 +36,12 @@ export function createRemoteConnections({ remoteAttention, publishSubscription }
   function requireDesktopSecureStorage(): typeof safeStorage {
     const unsafe = unsafeCredentialStorageReason({
       encryptionAvailable: safeStorage.isEncryptionAvailable(),
-      // 只在 Linux 上查询后端名称；其他平台没有这个概念。
       storageBackend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : undefined
     })
     if (unsafe) throw new Error(unsafe)
     return safeStorage
   }
   function requireDesktopRemoteClient(): DesktopRemoteClient {
-    // Existing credentials and every persisted write still require secure storage.
     desktopRemoteClient ??= new DesktopRemoteClient({
       directory: join(app.getPath('userData'), 'desktop-connections'),
       encrypt: (value) => requireDesktopSecureStorage().encryptString(value),

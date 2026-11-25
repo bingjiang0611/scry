@@ -18,7 +18,6 @@ export interface InboxEntry {
   failurePath: string
 }
 
-/** Unlike readJson, only absence is optional here. Corrupt/unreadable evidence must survive. */
 export async function readInboxJson<T>(path: string): Promise<T | null> {
   let content: string
   try {
@@ -61,8 +60,6 @@ export async function readInboxFailure(entry: InboxEntry): Promise<InboxFailure 
 export async function quarantineInboxEntry(
   entry: InboxEntry, attempts: number, error: unknown
 ): Promise<void> {
-  // Persist the attempt before moving. If rename fails/crashes, the source and its counter remain
-  // discoverable on the next pass. Never rewrite or truncate the original event bytes.
   await writeJsonAtomic(entry.failurePath, {
     attempts,
     lastError: error instanceof Error ? error.message : String(error),
@@ -80,27 +77,18 @@ export async function recorderHasRetryableInbox(root: string): Promise<boolean> 
     try {
       if (((await readInboxFailure(entry))?.attempts ?? 0) < INBOX_MAX_ATTEMPTS) return true
     } catch {
-      // Replay also skips unreadable sidecars. Keep their pending evidence, but do not
-      // keep an idle daemon alive for work it cannot retry without manual repair.
       continue
     }
   }
   return false
 }
 
-/**
- * Whether this session's inbox holds a session-capture claim the daemon has not applied yet.
- *
- * A capture event may arrive before that claim is applied, so the session state it would be
- * validated against does not exist yet; this is what tells the two apart from "no capture here".
- */
 export async function recorderInboxHasCaptureCommand(root: string): Promise<boolean> {
   for (const entry of await recorderInboxEntries(root, false)) {
     try {
       const queued = await readInboxJson<{ kind?: unknown }>(entry.path)
       if (queued?.kind === 'capture') return true
     } catch {
-      // Unreadable evidence is not a claim; replay decides what to do with it.
       continue
     }
   }

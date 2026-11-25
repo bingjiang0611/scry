@@ -68,7 +68,6 @@ function Fixture() {
           id="drain"
           type="button"
           onClick={() => {
-            // 与 RemoteChat 的出队 effect 同一调用：跳过正在编辑的那条。
             setClaimed(queueStore.claim(queueKey, editingId ?? undefined)?.text ?? '')
           }}
         >

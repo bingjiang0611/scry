@@ -17,9 +17,6 @@ import { verifyRevocation } from './desktop-remote-host-smoke/revocation.mjs'
 // This is deliberately a host smoke, not a provider smoke. The only Provider
 // process it can reach is the packaged Codex fixture selected by the production
 // main process when SCRY_ELECTRON_SMOKE_PROVIDER=1.
-//
-// Each phase lives in ./desktop-remote-host-smoke/ and receives only the state it
-// needs; this file owns the isolated app launch, phase order and the report.
 const devApp = process.argv[2] === '--dev'
 const appPath = resolve(devApp
   ? 'node_modules/electron/dist/Electron.app'

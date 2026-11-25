@@ -1,6 +1,5 @@
 import type { Conversation, ConversationBinding, ConversationTarget } from '../shared/conversation'
 
-/** Single main-process owner. No Provider calls, workspace writes or automatic retry occur here. */
 export type NativeSessionScope = Pick<ConversationTarget, 'providerId' | 'agentProfileId'> & {
   cwd: string
   nativeSessionId?: string

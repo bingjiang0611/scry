@@ -105,7 +105,6 @@ describe('deleting a conversation takes its side chats along', () => {
     const sent = await child(source, 'cascade-child-sent')
     await sendTurn(current, sent.id, 'cascade-child-turn', 'child question')
     const empty = await child(source, 'cascade-child-empty')
-    // An unrelated conversation with its own side chat must not be touched.
     const other = await archivedParent()
     const foreign = await child({ kind: 'conversation', conversationId: other.id }, 'cascade-foreign')
     await archive(parent.id)
@@ -124,7 +123,6 @@ describe('deleting a conversation takes its side chats along', () => {
     expect(cleaned.some(entry => entry.conversationId === sent.id)).toBe(true)
     expect(cleaned.some(entry => entry.conversationId === parent.id)).toBe(true)
     expect(result.deleted.some(store => store.startsWith(`side chat ${sent.id.slice(0, 8)}: `))).toBe(true)
-    // Nothing of them is listed or readable any more.
     expect((await current.service.listSideChats({ source })).total).toBe(0)
     await expect(current.service.readSideChatSnapshot(sent.id)).rejects.toThrow()
     expect(await status(other.id)).toBeNull()
@@ -200,7 +198,6 @@ describe('deleting a conversation takes its side chats along', () => {
     // Both keep a retry handle: nothing claims a deletion that did not complete.
     expect(await status(parent.id)).toBe('pending')
     expect(await status(stuck.id)).toBe('pending')
-    // The next preview plans what is left, and the retry completes both.
     failing.clear()
     const again = await invoke<ConversationDeletionPreview>('conversation:previewDeletion', parent.id)
     expect(again.sideChats?.map(item => item.conversationId)).toEqual([stuck.id])
@@ -224,7 +221,6 @@ describe('deleting a Provider session takes its side chats along', () => {
     const theirs = await child(nativeParent(current, 'native-theirs'), 'native-cascade-theirs')
     const scope = { providerId: 'codex' as const, cwd: current.cwd, nativeSessionIds: ['app-alias', 'native-mine'] }
     expect(await sideChatCascade.count(scope)).toBe(1)
-    // Another profile, workspace or session is another source.
     expect(await sideChatCascade.count({ ...scope, agentProfileId: 'work' })).toBe(0)
     expect(await sideChatCascade.count({ ...scope, cwd: current.root })).toBe(0)
     expect(await status(mine.id)).toBeNull()

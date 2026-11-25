@@ -9,7 +9,6 @@ export interface ScFile {
 
 export interface ScRemote {
   name: string
-  /** Effective, credential-free push destination. Multiple destinations are not writable. */
   pushUrls: string[]
   fetchUrls: string[]
 }
@@ -28,7 +27,6 @@ export interface ScRepository {
   behind: number | null
   files: ScFile[]
   remotes: ScRemote[]
-  /** Repository-wide blockers (conflict, unfinished operation, active Agent, unknown result). */
   writeBlocker: string | null
   actionBlockers: Partial<Record<ScGitAction, string>>
 }
@@ -50,7 +48,6 @@ export interface ScExpected extends ScRef {
   expectedRevision: string
 }
 export interface ScPrRef extends ScRef {
-  /** GitHub identity, not a Git transport credential. */
   repository: string
   number: number
 }
@@ -110,7 +107,6 @@ export interface ScOperation {
   startedAt: number
   acknowledged?: boolean
   message: string
-  /** Only authoritative evidence, never an inferred success from dispatch. */
   evidence?: { sha?: string; url?: string; number?: number; reviewId?: number }
 }
 
@@ -183,7 +179,6 @@ export interface SourceControlApi {
   operations: (request: ScRef) => Promise<ScOperation[]>
   reconcile: (request: ScRef & { operationId: string }) => Promise<ScOperation>
   acknowledge: (request: ScRef & { operationId: string }) => Promise<ScOperation>
-  /** Cancels a running push/fetch; false when there was nothing to cancel. */
   cancel: (request: ScRef & { operationId: string }) => Promise<boolean>
   pullRequests: (request: ScRef & { repository: string }) => Promise<ScRead<ScPrList>>
   pullRequest: (request: ScPrRef) => Promise<ScRead<ScPr>>
@@ -194,7 +189,6 @@ export interface SourceControlApi {
 }
 
 export function scCanMerge(pr: ScPr): boolean {
-  // GitHub is still authoritative at dispatch. Empty or partial checks are not a green light.
   return (
     pr.state === 'open' &&
     !pr.draft &&

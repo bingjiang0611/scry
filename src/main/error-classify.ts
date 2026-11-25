@@ -1,5 +1,4 @@
 // A1：把 SDK / claude 的错误信息归类，给用户可见的恢复提示（借鉴 CodePilot error-classifier 的分类思路，按观测关键路径裁剪）。
-// 纯函数，便于单测。
 
 import type { ProviderId } from '../shared/provider'
 import { classifyRunTermination, runTerminationHint } from '../shared/runtime'

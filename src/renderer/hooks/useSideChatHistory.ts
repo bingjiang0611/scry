@@ -41,7 +41,6 @@ export function useSideChatHistory({
   selectRef.current = select
 
   useEffect(() => {
-    // Another parent has another history. Nothing of the previous one stays on screen.
     request.current += 1
     setWindow(EMPTY_HISTORY_WINDOW)
     setOpen(false)

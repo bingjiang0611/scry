@@ -66,7 +66,6 @@ export function appendCodexPatchResult(
       stage: 'file_op',
       filePath: path,
       fileOp: 'edit',
-      // patch_apply_end 是本事件的权威结果：Provider 用 success:false 声明应用失败。
       isError: payload.success === false
     })
   }
@@ -81,7 +80,6 @@ export function callInput(payload: Record<string, unknown>): Record<string, unkn
     const parsed = JSON.parse(raw) as unknown
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
   } catch {
-    // Custom Codex tools may persist their JavaScript source verbatim.
   }
   return { raw }
 }
@@ -117,14 +115,12 @@ export function literalArgument(value: string): Record<string, unknown> {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>
     if (typeof parsed === 'string') return { raw: parsed }
   } catch {
-    // JavaScript variables/expressions are still useful as bounded evidence, but are not evaluated.
   }
   return { raw: value }
 }
 
 type BashLiteral = string | number | boolean | null
 
-/** Parse the whole flat argument or none of it: a trailing spread could override cmd. */
 function staticBashArgument(raw: string): Record<string, BashLiteral> | undefined {
   if (!raw.startsWith('{') || !raw.endsWith('}')) return
   const body = raw.slice(1, -1).trim()
@@ -134,7 +130,6 @@ function staticBashArgument(raw: string): Record<string, BashLiteral> | undefine
     const match = field.exec(body)
     if (!match || match[1] === '__proto__' || Object.hasOwn(result, match[1])) return
     const token = match[2]
-    // Convert quote delimiters only; let JSON.parse reject unsupported escapes.
     const json = token.startsWith("'")
       ? '"' + token.slice(1, -1).replace(/\\.|"/g, part => part === "\\'" ? "'" : part === '"' ? '\\"' : part) + '"'
       : token
@@ -150,7 +145,6 @@ function staticBashArgument(raw: string): Record<string, BashLiteral> | undefine
 }
 
 export function isCodexSpawnTool(name: string): boolean {
-  // Only the native namespace is an alias; MCP and unknown namespaces retain their identity.
   return name === 'spawn_agent' || name === 'multi_agent_v1__spawn_agent' || name === 'collaboration__spawn_agent'
 }
 
@@ -215,7 +209,6 @@ export function staticCommandMaps(source: string): Map<number, NormalizedCodexCa
         arrays.set(match[1], values.map((value) => value[0] as string))
       }
     } catch {
-      // Only literal string arrays are safe to expand without evaluating JavaScript.
     }
   }
 
@@ -235,7 +228,6 @@ export function staticCommandMaps(source: string): Map<number, NormalizedCodexCa
         try {
           common[key] = JSON.parse(value) as string
         } catch {
-          // Ignore malformed optional metadata; the command remains authoritative.
         }
       }
     }
@@ -283,8 +275,6 @@ export function normalizedCodexCalls(payload: Record<string, unknown>): Normaliz
   const input = callInput(payload)
   if (name === 'exec' && typeof input.raw === 'string') {
     const calls = nestedCodexCalls(input.raw)
-    // An opaque native exec call is still evidence. Preserve its original program,
-    // without inventing nested calls or evaluating arbitrary JavaScript.
     return calls.length ? calls : [{ tool: 'exec', input }]
   }
   const namespace = stringAt(payload, 'namespace')
@@ -385,7 +375,6 @@ export function runningCellId(output: string | undefined): string | undefined {
 
 export function skillInjection(text: string | undefined): string | undefined {
   if (!text) return undefined
-  // Stop at the first closing tag, then reject any text outside that block.
   const match = /^\s*<skill>\s*<name>([A-Za-z0-9_-]+(?::[A-Za-z0-9_-]+)?)<\/name>[\s\S]*?<\/skill>\s*/i.exec(text)
   return match && match[0].length === text.length ? match[1] : undefined
 }
@@ -405,7 +394,6 @@ export function explicitSkillEvent(name: string, runId: string, at: string): Tra
 
 export function codexHookEvent(payload: Record<string, unknown>, runId: string, at: string): TraceEvent | null {
   const type = stringAt(payload, 'type')
-  // Codex 的 hook 生命周期事件名是 hook_started / hook_completed；hook_response 等是 Claude / Qoder 侧的叫法。
   if (!type || !/^hook_(?:started|progress|response|completed|success|cancelled|additional_context)$/.test(type)) return null
   const completedStatus = stringAt(payload, 'status')
   const outcome = stringAt(payload, 'outcome')

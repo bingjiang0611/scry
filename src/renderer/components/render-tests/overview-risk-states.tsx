@@ -45,13 +45,12 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     const detailsHtml = renderToStaticMarkup(<TurnToolErrorDetails errors={errors} onOpen={() => {}} />)
 
     expect(html).toContain('overview-verdict warn')
-    // 顶部不再重复“轮次已结束 · N 处工具报错”，但本轮清单仍保留错误证据。
     expect(html).not.toContain('轮次已结束')
     expect(html).not.toContain('overview-verdict-line')
     expect(html).toContain('class="turn-call-group error"')
     expect(html).toContain('aria-label="本轮工具报错详情"')
     expect(html).not.toContain('overview-tool-errors')
-    expect(html).not.toContain('overview-verdict ok') // 失败会话顶绿色健康判决 = 假状态
+    expect(html).not.toContain('overview-verdict ok')
     expect(errors).toMatchObject([{
       tool: 'act_ui',
       input: { action: 'click', role: 'button' },
@@ -95,14 +94,14 @@ describe('OverviewPanel verdict 诚实态：error 不显绿 / danger→bad / bus
     expect(html).toContain('overview-verdict-line')
     expect(html).toContain('1 处高危操作')
     expect(html).toContain('rm -rf 强删')
-    expect(html).not.toContain('审计·未拦截') // 四栏副文案已移除
+    expect(html).not.toContain('审计·未拦截')
     expect(html).toContain('观测标记（不阻塞、默认放行）')
     expect(html).not.toContain('class="overview-metric overview-metric-action bad"')
     expect(html).not.toContain('<span>危险</span>')
     expect(html).toContain('class="panel-section danger-audit-section"')
     expect(html).toContain('class="callrow danger-audit-row"')
     expect(html).toContain('aria-label="跳到左侧对话中的这次 Bash 调用：rm -rf 强删"')
-    expect(html).not.toContain('blocked') // 不冒充蓝本 demo 的"已阻断"语义
+    expect(html).not.toContain('blocked')
   })
 
   it('移除冗余 topbar 状态行后，判决卡仍使用真实会话 verdict', () => {

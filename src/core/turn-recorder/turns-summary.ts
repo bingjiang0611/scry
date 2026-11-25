@@ -384,8 +384,6 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
     }
     files.push({ call, file: call.file })
   }
-  // Preserve object identity and initialize every selected record. Call-backed files
-  // take precedence; Providers without them retain their legacy file evidence.
   for (const record of selected) {
     if (!filesByRecord.has(record)) {
       filesByRecord.set(record, availableArray(record.files) ? record.files.value.map((file) => ({ file })) : [])
@@ -413,7 +411,6 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
 
   for (const record of selected) {
     for (const entry of filesByRecord.get(record)!) {
-      // 被拒、失败或结果未知的访问不是已发生的读写：只有成功（含旧记录未标状态）才算足迹。
       if (entry.file.status && entry.file.status !== 'succeeded') continue
       rowOf(entry.file.path)[entry.file.operation]++
     }
@@ -452,7 +449,6 @@ function summarizeFiles(selected: AgentTurnRecord[], timeline: ReturnType<typeof
     }
   }
 
-  // Some Providers expose file evidence without a matching call. Preserve it as completed evidence.
   for (const record of selected) {
     if (filesByRecord.get(record)!.some((entry) => entry.call)) continue
     if (!availableArray(record.files)) continue
@@ -739,13 +735,6 @@ function summarizeInterventions(selected: AgentTurnRecord[]) {
   }
 }
 
-/**
- * Coverage of the explicit identity statuses that 0.2.42 made first-class: model observation,
- * structural turn role, and task association. This is the surface a consumer needs to avoid
- * treating an unobserved model as "no model", an unobserved role as a main-agent turn, or an
- * explicitly unbound turn as a task turn. `legacy_unset` counts records written before the
- * status field existed — absence is legacy, never an observed fact.
- */
 export function summarizeIdentity(
   selected: Array<Pick<AgentTurnRecord, 'provider' | 'turnRoleStatus' | 'turnRole' | 'taskLinkStatus'>>
 ) {
@@ -772,8 +761,6 @@ export function summarizeIdentity(
   return {
     model: { statusCounts: modelStatus, sourceCounts: modelSource, coverage: observedCoverage(modelStatus.observed ?? 0) },
     role: { statusCounts: roleStatus, roleCounts: roleKinds, coverage: observedCoverage(roleStatus.observed ?? 0) },
-    // `bound` is the observed-fact analogue for a task link; `unbound`/`conflict` are explicit
-    // decisions, not missing evidence, and a consumer must not fold them into a task denominator.
     taskLink: { statusCounts: taskLinkStatus, coverage: observedCoverage(taskLinkStatus.bound ?? 0) }
   }
 }
@@ -895,8 +882,6 @@ export function summarizeTurnRecords(
       cumulativeMs: sumKnown(selected.map((record) => record.durationMs)),
       knownTurns: selected.filter((record) => finite(record.durationMs)).length,
       totalTurns: selected.length,
-      // A turn without a trusted end contributes a lower bound, so the cumulative wall is one too.
-      // Legacy records carry no termination evidence and cannot be classified either way.
       exactEndTurns: selected.filter((record) => record.termination?.status === 'available').length,
       boundedEndTurns: selected.filter((record) => record.termination?.status === 'partial').length,
       unknownEndEvidenceTurns: selected.filter((record) => !record.termination).length

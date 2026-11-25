@@ -4,15 +4,6 @@ import { recorderSessionRoot as sessionRoot, type RecorderOpenTurnState as OpenT
 import { beginContinuationTurn, holdSeal, holdsStopForBackgroundWork } from './recorder-segment.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 
-/**
- * The two places where a Provider's own wake decides a record boundary.
- *
- * Neither is a terminal question. A Stop only proves the Agent stopped talking for now, and a wake
- * only proves that same turn resumed. Deciding either at the event itself would split one burst of
- * work across records, or hold it open forever. So a Stop waits for the segment to go quiet (the
- * existing deferred-terminal silence window), and a wake continues the sealed turn instead of
- * inventing a prompt nobody sent.
- */
 export async function holdStopForBackgroundWork(args: {
   enablement: Extract<RecorderEnablement, { enabled: true }>
   input: RecorderHookInput
@@ -32,10 +23,6 @@ export async function holdStopForBackgroundWork(args: {
   return holdSeal(enablement, root, open, input, 'pending_background_tasks', args.terminalAt)
 }
 
-/**
- * A wake with no open turn is the next segment of the turn it continues, so it is only ignorable
- * when no measured segment exists to link back to.
- */
 export async function openContinuationSegment(args: {
   enablement: Extract<RecorderEnablement, { enabled: true }>
   input: RecorderHookInput

@@ -19,7 +19,6 @@ async function dataRoot(): Promise<string> {
 
 const empty = () => ({ status: 'available' as const, quality: 'exact' as const, source: ['fixture'], value: [] })
 
-/** A record that passes the strict commit validator; the fields the summary reads vary per call. */
 function draft(sequence: number, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schemaVersion: 1, recordKind: 'agent_turn', recordId: `${sequence}`.padStart(2, '0').repeat(16), recorderVersion: '0.2.85',
@@ -60,7 +59,6 @@ describe('record summaries are the same answer as a full parse', () => {
     const root = await dataRoot()
     await seed(root, 5)
     expect(await listRecordSummaries(root)).toEqual(await fromFullParse(root))
-    // A cold read leaves a cache behind, so this is a one-time cost per store.
     expect(JSON.parse(await readFile(recordSummaryPath(root), 'utf8')).schemaVersion).toBe(1)
   })
 
@@ -152,9 +150,6 @@ describe('the cache is thrown away whenever it cannot be trusted', () => {
     await listRecordSummaries(root)
     const [first] = await readdir(join(root, 'records'))
     await writeFile(join(root, 'records', first!), '{"schemaVersion":1}')
-    // Same file names, different bytes: no writer does this (commits only append, archive only moves
-    // files out, content-repair never touches stored records). If one ever does, it must delete the
-    // cache; this assertion is here so that requirement cannot be forgotten silently.
     await expect(listRecordSummaries(root)).resolves.toHaveLength(2)
     await expect(listRecords(root)).rejects.toThrow()
   })

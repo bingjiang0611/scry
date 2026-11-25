@@ -90,7 +90,6 @@ describe('authoritative status parsing and fencing', () => {
         providerSessions: []
       })
 
-      // Trip the storage fence via a commit failure.
       tripCommit = true
       await call(host.channel.socketPath, ca, device.certPEM, device.keyPEM, {
         op: 'submit',

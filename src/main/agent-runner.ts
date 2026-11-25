@@ -1,5 +1,3 @@
-// 模式 A：用 Claude Agent SDK 驱动 claude，把 message stream 归一化成 TraceEvent 流式 emit。
-// 支持多轮对话（resume）+ 工作目录（cwd）+ 中断（interrupt）+ subagent 内部明细（tail transcript 一层）。
 
 import { HISTORY_READER_SERVER, HISTORY_READER_TOOL, type HistoryReaderConnection } from './conversation-history-reader'
 import { query, type HookInput, type PermissionUpdate } from '@anthropic-ai/claude-agent-sdk'
@@ -277,8 +275,6 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       }
     }
   }
-  // C4：Skill 软屏蔽 —— 只影响 app 驱动的会话，不动用户终端的 claude
-  // C4：skill 软屏蔽 → 改用 SDK 的 skills allowlist（硬过滤：未列入的隐藏+拒调用）。
   // 软指令实测压不住「列出全部 skill」，故弃用 appendSystemPrompt 改 allowlist。
   if (opts.skills?.length) options.skills = opts.skills
 
@@ -307,7 +303,6 @@ export function runAgent(prompt: string, runId: string, emit: EmitFn, opts: RunO
       const fn = (q as { interrupt?: () => unknown }).interrupt
       if (typeof fn === 'function') Promise.resolve(fn.call(q)).catch(() => {})
     } catch {
-      /* ignore */
     }
   }
 

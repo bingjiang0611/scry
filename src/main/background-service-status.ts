@@ -32,7 +32,6 @@ export interface BackgroundServiceStatusDeps {
   loginStart?: () => Promise<LoginStartStatus>
   /** Effective remote policy derived from this App's environment (P5 §2.2). */
   expectedRemoteConfig?: () => BackgroundServiceRemoteConfig
-  /** Latest service-launch fallback warning, if any (P5 §2.4). */
   serviceLaunchFallback?: () => BackgroundServiceRuntimeNotice['serviceLaunchFallback']
   /** When true (SCRY_EXPERIMENTAL_HOST_CLI=1), expose CLI approval state in status (P5-5b). */
   hostCliExperimental?: boolean
@@ -42,7 +41,6 @@ export interface BackgroundServiceStatusDeps {
   now?: () => number
 }
 
-/** The lazy run surface's one outcome, in the words the section uses. */
 export function connectionFromMode(result: DaemonRunModeResult, appVersion: string): BackgroundServiceConnection {
   switch (result.status) {
     case 'ready':

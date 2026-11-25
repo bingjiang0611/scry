@@ -28,7 +28,6 @@ describe('时间线分页：一行元信息说明窗口，滚到顶自动续读'
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain('加载中…')
     expect(html).toMatch(/<button[^>]*disabled[^>]*>加载中…<\/button>/)
-    // 加载行会占位并推动正文，锚点补偿也因此无法精确；状态只留在头部一行。
     expect(html).not.toContain('history-window-loading')
     expect(html).not.toContain('正在加载更早轮次')
   })

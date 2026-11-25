@@ -1,5 +1,3 @@
-// What the renderer can reach through `window.scry`, and whether the S0-1 actions that
-// another lane is building (restart the background service, quit Scry and the service)
 // exist yet. Detection is by name over the preload surface; an explicit `--restart-api` /
 // `--quit-api` path overrides it. Nothing is called just because its name looked right
 // unless exactly one candidate matches.

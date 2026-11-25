@@ -60,7 +60,6 @@ function prepareWork(work) {
   return paths
 }
 
-/** Pure identity comparison: bundle, manifest and launcher-helper bytes must be the same before and after. */
 export function identityIssues(before, after) {
   const issues = []
   if (before.bundleSha256 !== after.bundleSha256) issues.push('the artifact bundle changed during the run')
@@ -118,7 +117,6 @@ const waitOutcome = (outcome) => (outcome.settled ? Promise.resolve(outcome.sett
 
 const launcherIdentity = () => selectedIdentity(PROJECT_ROOT, LAUNCHER_SOURCES).files
 
-/** One cell: verify the artifact, run one sample, stop the tree once, report everything observed. */
 export async function runCell({ artifactDir, work, negativeControl = null, electron } = {}) {
   if (negativeControl !== null && negativeControl !== 'corrupt-body') throw new Error(`unknown negative control ${JSON.stringify(negativeControl)}`)
   const artifact = verifyArtifact({ artifactDir })

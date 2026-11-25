@@ -60,7 +60,6 @@ afterEach(async (context) => {
   if (context.task.result?.state === 'fail' && running.size) {
     console.error('Publisher state at failure', [...running].map(({ child, phase, killRequested }) => ({ pid: child.pid, phase, killRequested, exitCode: child.exitCode, signalCode: child.signalCode })))
   }
-  // Vitest's timeout does not cancel the test promise. Reap only our registered children.
   await Promise.all([...running].map(stopPublisher))
 })
 afterAll(async () => { await rm(root, { recursive: true, force: true }) })

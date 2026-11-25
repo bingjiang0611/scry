@@ -10,7 +10,6 @@ import type { AppView, RemoteTarget } from '../app-types'
 import type { RightSurfaceAction } from '../right-surface'
 
 // 远程主机的选择、右侧面板身份与重连队列都是独立于本机会话的一组状态；
-// 单独成 hook 后 app-interaction 只保留编排，不再堆远端细节。
 export function useRemoteWorkbench({ view, surfacePane }: {
   view: AppView
   surfacePane: ResizablePaneState

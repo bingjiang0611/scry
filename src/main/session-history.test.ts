@@ -814,8 +814,6 @@ describe('session history merge', () => {
 })
 
 
-// 契约范围：sessionHistoryPage 只对「已经在内存里的权威轮次序列」做确定性切片。
-// 它收窄的是 IPC 载荷与 renderer 挂载量，不减少 main 侧的解析开销或常驻内存。
 describe('session history pagination contract (delivery slice only, not source-level paging)', () => {
   const history = (count: number): LoadedSessionTurn[] =>
     Array.from({ length: count }, (_unused, index) => ({
@@ -833,7 +831,6 @@ describe('session history pagination contract (delivery slice only, not source-l
     expect(page.totalTurns).toBe(500)
     expect(page.hasOlder).toBe(true)
     expect(page.completeness).toBe('partial')
-    // 最近优先且页内保持时间升序。
     expect(page.turns[0].runId).toBe('run-460')
     expect(page.turns.at(-1)?.runId).toBe('run-499')
   })

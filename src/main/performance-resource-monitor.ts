@@ -66,10 +66,7 @@ export function buildPerformanceResourceSample(args: {
     processes: args.processes.map((metric) => ({
       pid: metric.pid,
       type: metric.type,
-      // Electron getAppMetrics divides platform-independent CPU usage by the logical CPU count.
-      // Restore one-core percent (which can exceed 100) rather than reporting whole-machine percent.
       cpuPercentOfOneCore: Math.max(0, finite(metric.cpu?.percentCPUUsage)) * args.cpuCount,
-      // Electron exposes these memory values in KiB.
       workingSetBytes: mibToBytes(metric.memory?.workingSetSize),
       peakWorkingSetBytes: mibToBytes(metric.memory?.peakWorkingSetSize),
       privateBytes: mibToBytes(metric.memory?.privateBytes)
@@ -82,10 +79,6 @@ export interface PerformanceResourceMonitor {
   stop(): void
 }
 
-/**
- * Diagnostic-only, content-free resource sampling. Nothing is scheduled unless SCRY_PERF_LOG=1.
- * The histogram is reset every window, keeping overhead and output bounded during long soaks.
- */
 export function startPerformanceResourceMonitor(options: {
   enabled?: boolean
   intervalMs?: number

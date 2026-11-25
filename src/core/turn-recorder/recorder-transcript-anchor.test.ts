@@ -23,7 +23,6 @@ async function transcriptPath(): Promise<string> {
 
 const hashOf = (text: string): string => createHash('sha256').update(text).digest('hex')
 
-/** A Claude-shaped JSONL log: one user line per turn, then filler assistant/progress lines. */
 function turn(prompt: string, lines: number, from = 0): string {
   const user = JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })
   const body = Array.from({ length: lines }, (_, index) => JSON.stringify({
@@ -34,7 +33,6 @@ function turn(prompt: string, lines: number, from = 0): string {
   return [user, ...body].join('\n') + '\n'
 }
 
-/** Event ids carry a random UUID; compare everything that must be reproducible. */
 function shape(read: { events: Array<{ kind: string; stage?: string; ts: string }> }): string[] {
   return read.events.map((event) => `${event.kind}|${event.stage ?? ''}|${event.ts}`)
 }
@@ -62,7 +60,6 @@ describe('transcript anchor reuse', () => {
     const warm = await stableTranscript(path, 'anchor:2', 'claude', hash)
     const warmScan = transcriptReadStats().anchorBytesScanned
 
-    // The first call walks back over the whole window; the warm call only reads what was appended.
     expect(firstScan).toBeGreaterThan(20_000)
     expect(warmScan).toBeLessThan(firstScan / 4)
     expect(shape(warm)).toEqual(shape(await coldRead(path, hash, 'anchor:3')))
@@ -75,12 +72,10 @@ describe('transcript anchor reuse', () => {
     await writeFile(path, turn(prompt, 40) + turn('middle prompt', 40, 200))
     await stableTranscript(path, 'anchor:repeat-1', 'claude', hash)
 
-    // The user retries: the same prompt text appears a second time, later in the log.
     await writeFile(path, turn(prompt, 40) + turn('middle prompt', 40, 200) + turn(prompt, 6, 900))
     const warm = await stableTranscript(path, 'anchor:repeat-2', 'claude', hash)
     const cold = await coldRead(path, hash, 'anchor:repeat-3')
     expect(shape(warm)).toEqual(shape(cold))
-    // Only the later turn's six events, not the first turn's forty plus the middle turn's.
     expect(warm.events.length).toBeLessThan(20)
   })
 
@@ -119,7 +114,6 @@ describe('transcript anchor reuse', () => {
     await writeFile(path, turn(prompt, 30) + turn('later prompt', 30, 200))
     await stableTranscript(path, 'anchor:shift-1', 'claude', hash)
 
-    // Rewrite the head so the cached offset points at a different line.
     await writeFile(path, turn('other prompt', 30) + turn(prompt, 30, 400) + turn('later prompt', 10, 700))
     resetTranscriptReadStats()
     const reread = await stableTranscript(path, 'anchor:shift-2', 'claude', hash)
@@ -220,7 +214,6 @@ describe('transcript anchor reuse', () => {
     await writeFile(path, turn('anonymous prompt', 20))
     resetTranscriptReadStats()
     await stableTranscript(path, 'anchor:no-identity', 'claude')
-    // Without an identity the window starts at 0 and no anchor line is read.
     expect(transcriptReadStats().bytesRead).toBeGreaterThan(0)
     expect(transcriptReadStats().anchorBytesScanned).toBe(0)
   })

@@ -123,7 +123,6 @@ describe('historical authority promotion and status parsing', () => {
     const canonicalWs = realpathSync(ws)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // 1. Seed 20 runs (80 events) and import into shadow DB (orchestration_on_active is NOT set).
     const runs20 = seedH1Runs(ledgerDir, 20, canonicalWs)
     const sink = EventSink.open({ userDataDir, fullfsync: false, checkpointIntervalMs: 0 })
     importLegacyStateIncrementally({ sink, userDataDir, reconcileOpenRuns: false, shadowOnly: true })
@@ -131,7 +130,6 @@ describe('historical authority promotion and status parsing', () => {
     expect(Number(sink.getMeta('legacy_ledger_seq'))).toBe(80)
     sink.close()
 
-    // 2. Truncate H1 back to only the first 5 runs (20 events < DB's 80!).
     const logPath = join(ledgerDir, 'session-ledger.log')
     const first20Lines = readFileSync(logPath, 'utf8').trim().split('\n').slice(0, 20)
     writeFileSync(logPath, `${first20Lines.join('\n')}\n`, { mode: 0o600 })
@@ -182,7 +180,6 @@ describe('historical authority promotion and status parsing', () => {
       writeIndeterminate: true
     })
 
-    // Malformed known mode='on' still fails validation.
     const parsedBadOn = parseSelfReport({
       ...base,
       orchestration: { mode: 'on', writeIndeterminate: 'yes' }

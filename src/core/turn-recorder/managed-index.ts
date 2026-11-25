@@ -9,10 +9,6 @@ export async function recordById(dataRoot: string, recordId: string): Promise<Ag
   return await findRecordById(dataRoot, recordId)
 }
 
-/**
- * 本 session 已提交 providerTurnId → recordId 的派生缓存（可从 records 完整重建，不是事实源）。
- * `stamp` 是建缓存时看到的存储指纹：只有指纹仍然一致才允许用它作否定判断。
- */
 interface ManagedProviderTurnIndex {
   schemaVersion: 1
   stamp: { count: number; maxSequence: number }
@@ -37,10 +33,6 @@ async function readProviderTurnIndex(
   return { stamp, index: fresh ? cached : null }
 }
 
-/**
- * 全量扫描后重建缓存。`stamp` 必须是扫描前取的：扫描期间落地的新记录会让
- * 下一次指纹对不上，从而再重建一次——宁可多扫一次，不能把没看见的记录当成不存在。
- */
 async function rebuildProviderTurnIndex(
   root: string,
   stamp: { count: number; maxSequence: number },
@@ -60,7 +52,6 @@ async function rebuildProviderTurnIndex(
   )
 }
 
-/** 提交成功后增量推进缓存，否则每轮提交都会让下一轮退回全量扫描。 */
 export async function advanceProviderTurnIndex(
   dataRoot: string,
   root: string,
@@ -92,7 +83,6 @@ export async function recordByProviderTurnId(
   const { stamp, index } = await readProviderTurnIndex(dataRoot, root)
   if (index) {
     const recordId = index.providerTurnRecordIds[providerTurnId]
-    // 缓存与 records 同鲜且不含该 providerTurnId → 可信的否定结论。
     if (!recordId) return undefined
     const record = await findRecordById(dataRoot, recordId)
     if (
@@ -101,7 +91,6 @@ export async function recordByProviderTurnId(
       record.sessionId === sessionId &&
       record.providerTurnId === providerTurnId
     ) return record
-    // 缓存指向的记录已不自洽 → 落回权威全量扫描，不猜。
   }
   const records = await listRecords(dataRoot)
   const matches = records.filter(

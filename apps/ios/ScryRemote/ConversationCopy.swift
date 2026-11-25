@@ -1,6 +1,5 @@
 import Foundation
 
-// Conversation presentation only. Host evidence is displayed verbatim.
 enum ConversationCopy {
   static func context(project: String?, provider: String?) -> String {
     [project, provider].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")

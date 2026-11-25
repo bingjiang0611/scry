@@ -1,8 +1,6 @@
 import { useEffect } from 'react'
 import { useResizablePane } from './useResizablePane'
 
-// The App shell's two resizable panes and their bounds, kept together so the shell
-// props and the panes cannot disagree about the limits.
 export const APP_PANE_LIMITS = { sidebarMin: 190, sidebarMax: 260, panelMin: 360, panelMax: 960 } as const
 
 export function useAppPanes() {
@@ -25,7 +23,6 @@ export function useAppPanes() {
   return { sidebarPane, surfacePane }
 }
 
-/** Keep the daemon's detail subscription on the session the chat view shows (P4-4). */
 export function useSessionDetailWatch(detailKey: string | undefined): void {
   useEffect(() => {
     if (!detailKey) return

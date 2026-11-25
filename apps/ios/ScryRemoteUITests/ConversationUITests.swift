@@ -129,7 +129,6 @@ final class ConversationUITests: XCTestCase {
 
   func testToolAndReasoningDisclosure() {
     launch("transcript")
-    // R3 retains each tool's disclosure inside a new contiguous-call group.
     let groups = app.buttons.matching(identifier: "tool-group-toggle")
     XCTAssertTrue(groups.firstMatch.waitForExistence(timeout: 5))
     XCTAssertGreaterThan(groups.count, 0)

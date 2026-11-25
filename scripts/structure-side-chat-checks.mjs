@@ -23,7 +23,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount, ...point })
   }
-  /** The history item is the second side-chat menu entry; its position is what a user hits. */
   const clickHistoryItem = async () => {
     const point = await evaluate(`(() => {
       const item = document.querySelectorAll('.surface-menu [role="menuitem"]')[1]
@@ -32,7 +31,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     })()`)
     await mouseClick(1, point)
   }
-  /** Wait for the chooser notice to say one specific thing; report what it did say. */
   const waitNotice = async (fragment, before) => {
     const current = () => evaluate(`document.querySelector('[data-side-chat-creation-notice]')?.textContent ?? ''`)
     const deadline = Date.now() + 15000
@@ -114,7 +112,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
   check(await evaluate(`document.querySelector('${mainComposer}')?.value.endsWith('main draft kept') === true`),
     'Reopening a child overwrote the main draft')
 
-  // Switching tabs is a tab action: focus stays on the tab and no metadata is rewritten.
   const beforeSwitch = counts()
   await click(`${currentSurface} [data-surface-tab="side-chat"] button[role="tab"]`)
   await idle()
@@ -131,7 +128,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     .every((channel) => (idleDelta[channel] ?? 0) === 0),
   `An idle App kept reading side-chat metadata: ${JSON.stringify(idleDelta)}`)
 
-  // A rapid double click must not race two children into existence.
   await openChooser()
   const cardPoint = await pointFor(`${currentSurface} [data-surface-chooser] [data-side-chat-entry]`)
   const beforeDouble = counts()
@@ -146,7 +142,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
     'A double click created two children')
   await capture('side-chat-double-click')
 
-  // A second parent keeps its own tab layout: the open child above is not shown there.
   const keptChild = await evaluate(`document.querySelector('${currentSurface} [data-side-chat-tab-id]').dataset.sideChatTabId`)
   check(typeof keptChild === 'string' && keptChild.length > 0, 'The double click did not open its own child')
   await click('.sb-new')
@@ -186,8 +181,6 @@ export async function exerciseSideChatApp({ cdp, evaluate, capture, check, click
   // is read back first, rows the host can prove (here: never created) are settled, the
   // create goes through once, and nothing unresolved is left behind.
   // The other parent is well-formed but absent, so the host can answer `not-found` for
-  // it; a malformed source id is refused before any lookup, which proves nothing and
-  // rightly keeps the row (findCreatedSideChat: an unreadable lookup stays unknown).
   const otherScopeRow = (index) => ({
     commandId: `structure-ledger-row-${index}`, scopeKey: 'other-scope',
     source: { kind: 'conversation', conversationId: '5b1f7a3e-0c2d-4e8f-9a1b-2c3d4e5f6a7b' },

@@ -52,15 +52,9 @@ export function attachmentsAfterSuccessfulSubmit(current: ComposerDraftAttachmen
   return current.filter(attachment => !submittedIds.has(attachment.id))
 }
 
-/**
- * Identity of one dispatch whose receipt is not settled yet. The submitted text and
- * images move here so a lost reply stays recoverable without a second copy, and the
- * editable next draft stays separate. Credentials are never part of it.
- */
 export interface ComposerPendingSubmission {
   commandId: string
   conversationId: string
-  /** Exact original prompt; the pending entry is the only durable copy. */
   prompt: string
   attachments: ComposerDraftAttachment[]
   target: { providerId: string; agentProfileId?: string
@@ -68,15 +62,7 @@ export interface ComposerPendingSubmission {
   selectedItems: ConversationItemRef[]
   expectedRevision: number
   expectedContinuationKey: string
-  /**
-   * `unknown` until the start reply is acknowledged, then `dispatched`. Either way the
-   * authoritative page decides the outcome; a crash before the ack is still unknown.
-   */
   phase: 'unknown' | 'dispatched'
-  /**
-   * A host-confirmed refusal that proves nothing was dispatched. It is the only durable
-   * evidence that may unlock an explicit resend; a missing page record is not.
-   */
   notSent?: { reason: string }
   submittedAt: number
 }
@@ -110,23 +96,11 @@ interface StoredDraft {
 }
 
 const STORAGE_KEY = 'scry.composer-drafts.v1'
-/**
- * Bounded draft capacity. `MAX_DRAFTS` caps every stored entry; `MAX_PENDING_DRAFTS`
- * reserves room for unresolved submissions, which are never evicted to make space for
- * an ordinary draft or for yet another unresolved one. Adding a receipt beyond that cap
- * is refused explicitly before the send, so a restart can never silently drop one.
- */
 export const MAX_DRAFTS = 32
 export const MAX_PENDING_DRAFTS = 8
 
-/**
- * Host reasons are free text and can quote a long Provider message. The receipt keeps the
- * beginning so a restart still explains the refusal without growing the draft record.
- */
 export const NOT_SENT_REASON_LIMIT = 2000
 
-// Input subscribers update independently of App. Sending/migration always reads the same
-// synchronous snapshot; there is no debounced copy that can lose the last keystroke.
 export function createComposerDraftStore(initial: ReadonlyMap<string, ComposerDraft>) {
   let drafts = initial
   let flush: (() => boolean) | undefined
@@ -145,16 +119,9 @@ export function createComposerDraftStore(initial: ReadonlyMap<string, ComposerDr
         return
       }
       drafts = next
-      // One owner for preview lifetime: a draft that changed or disappeared (eviction,
-      // cleared submission, submitted images) releases only the blob URLs nothing in the
-      // new map still references.
       for (const draft of unreferencedReplacedDrafts(previous, next)) releaseDraftPreviews(draft, next)
       for (const listener of listeners) listener()
     },
-    /**
-     * Durable write of the current snapshot, owned by the persistence effect.
-     * `undefined` means no owner is attached, so durability cannot be claimed.
-     */
     flushDrafts: (): boolean | undefined => flush?.(),
     attachPersistence: (next: (() => boolean) | undefined) => { flush = next }
   }
@@ -163,16 +130,12 @@ export function createComposerDraftStore(initial: ReadonlyMap<string, ComposerDr
 export type ComposerDraftStore = ReturnType<typeof createComposerDraftStore>
 export const COMPOSER_DRAFT_SAVE_INTERVAL_MS = 250
 
-// Coalesce text + base64 serialization, with a bounded interval even during continuous typing.
-// The owner must flush on pagehide/unmount. An unclean process crash can lose this interval.
 export function persistComposerDraftStore(
   store: ComposerDraftStore,
   save: (drafts: ReadonlyMap<string, ComposerDraft>) => boolean | void
 ) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let dirty = false
-  // Returns whether the durable copy now matches the live snapshot. A failed write keeps
-  // the dirty bit so the next owner-triggered flush retries instead of pretending success.
   const flush = (): boolean => {
     clearTimeout(timer)
     timer = undefined
@@ -231,7 +194,6 @@ function validPendingTarget(value: unknown): value is ComposerPendingSubmission[
       (model.providerId === undefined || (typeof model.providerId === 'string' && model.providerId.length <= 240))))
 }
 
-/** An unresolved command must round-trip exactly; anything malformed is dropped, not guessed. */
 function validPending(value: unknown): value is StoredPending {
   if (!value || typeof value !== 'object') return false
   const pending = value as Partial<StoredPending>
@@ -314,15 +276,9 @@ export function readComposerDrafts(storage: Pick<Storage, 'getItem'>): ReadonlyM
     const drafts = new Map<string, ComposerDraft>()
     const rows = parsed.filter((row): row is [string, StoredDraft] =>
       Array.isArray(row) && row.length === 2 && typeof row[0] === 'string' && Boolean(row[1]) && typeof row[1] === 'object')
-    // An unresolved command outlives the ordinary recency cap: dropping it would erase
-    // the only copy of an unconfirmed submission. Both buckets stay bounded, so a
-    // corrupt file cannot turn into an unbounded in-memory map.
     const pendingRows = rows.filter(([, value]) => value && typeof value === 'object' && validPending(value.pending))
     const retained = new Set(pendingRows.slice(-MAX_PENDING_DRAFTS))
     const remaining = Math.max(MAX_DRAFTS - retained.size, 0)
-    // Ordinary candidates are filtered before the slice: slicing the mixed list would
-    // spend the ordinary budget on pending rows already retained above and silently
-    // drop valid ordinary drafts that are still inside the total bound.
     const ordinaryRows = rows.filter((row) => !retained.has(row) && !pendingRows.includes(row))
     for (const row of ordinaryRows.slice(-remaining)) retained.add(row)
     for (const row of rows) {
@@ -354,12 +310,10 @@ export function writeComposerDrafts(
       attachments: draft.attachments.map(({ id: _id, previewUrl: _previewUrl, ...attachment }) => attachment),
       ...(draft.pending ? { pending: storedPending(draft.pending) } : {})
     }])
-    // Let storage enforce its actual quota rather than silently truncating live drafts.
     if (rows.length === 0) storage.removeItem(STORAGE_KEY)
     else storage.setItem(STORAGE_KEY, JSON.stringify(rows))
     return true
   } catch {
-    // Draft persistence is additive; quota/storage failures keep the live draft.
     return false
   }
 }
@@ -376,7 +330,6 @@ function referencedPreviewUrls(drafts: ReadonlyMap<string, ComposerDraft>): Set<
   return referenced
 }
 
-/** Drafts whose entry object was replaced or removed between two snapshots. */
 function unreferencedReplacedDrafts(
   previous: ReadonlyMap<string, ComposerDraft>,
   next: ReadonlyMap<string, ComposerDraft>
@@ -389,7 +342,6 @@ function unreferencedReplacedDrafts(
   return replaced
 }
 
-/** Revokes only this draft's blob URLs that `live` no longer references. */
 function releaseDraftPreviews(draft: ComposerDraft, live: ReadonlyMap<string, ComposerDraft>): void {
   if (typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return
   const referenced = referencedPreviewUrls(live)
@@ -408,14 +360,10 @@ export function updateComposerDraft(
   const next = new Map(drafts)
   next.delete(key)
   if (nextDraft.input || nextDraft.attachments.length > 0 || nextDraft.pending) next.set(key, nextDraft)
-  // The invariant before accepting one more unresolved command: never above the pending
-  // reserve. Refusing leaves every existing draft and receipt exactly as it was.
   let pendingCount = 0
   for (const draft of next.values()) if (draft.pending) pendingCount += 1
   if (pendingCount > MAX_PENDING_DRAFTS) return { drafts, evicted: [], refused: 'pending-capacity' }
   const evicted: ComposerDraft[] = []
-  // Eviction only touches drafts without an unresolved command: dropping one would
-  // delete the only evidence that could still be checked or explicitly resent.
   for (const candidate of [...next.keys()]) {
     if (next.size <= MAX_DRAFTS) break
     if (candidate === key || next.get(candidate)?.pending) continue

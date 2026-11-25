@@ -86,7 +86,6 @@ describe('RunStopLifecycle', () => {
       'force_kill_requested',
       'provider_unsettled'
     ])
-    // 未确认终止不是终态：providerSettled 必须仍然是 false，绝不冒充 settled。
     expect(published.at(-1)?.providerSettled).toBe(false)
     expect(clock.pending()).toBe(0)
   })

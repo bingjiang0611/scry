@@ -2,8 +2,6 @@ import { createInterface } from 'node:readline/promises'
 import { ensureShellEnv } from '../main/shell'
 import { runHostCli } from './host-cli'
 
-// Bundled entry (`out/main/host-cli.js`) launched by `<resources>/bin/scry-host`
-// with `ELECTRON_RUN_AS_NODE=1`. No Electron imports.
 
 ensureShellEnv()
 

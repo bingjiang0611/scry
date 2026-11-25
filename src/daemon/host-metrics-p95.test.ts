@@ -1,7 +1,7 @@
 // P8 §4 的性能门限：单次采样 p95 < 50 ms（macOS 实测）。
 //
 // 这条用例不在默认 suite 里跑：它要真实调用 ps / sysctl / statfs，还要等缓存
-// 过期才会重新采样。用 `npm run bench:host-metrics` 显式跑，结果写进证据目录。
+// 过期才会重新采样。用 `npm run bench:host-metrics -- <output.json>` 显式跑，结果写入指定文件。
 // 采样代码本身没有为测量让步：每次都用 createHostMetricsSources 的真实来源。
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'

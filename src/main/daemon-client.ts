@@ -249,11 +249,9 @@ export class DaemonClient {
     return await this.#probe(grant)
   }
 
-  /** One request on a lane, exactly like the phone's run channel. */
   request(lane: DesktopLaneName, request: unknown, options: { replayable: boolean; signal?: AbortSignal } = { replayable: false }): Promise<unknown> {
     const grant = this.#grant
     if (!grant) return Promise.reject(new DaemonClientError('daemon_not_running'))
-    // Only the authenticated local history path can return a full IPC page.
     const isHistory = isLocalFullRead(request)
     return this.#lanes.request(isHistory ? 'localHistory' : lane, grant.deviceId, {
       endpoint: {

@@ -192,11 +192,9 @@ async function finalizeSettledRun(deps: RunSettlementDeps): Promise<void> {
     deps.firstTextPerf.finish(undefined, interrupted ? 'cancelled' : 'unavailable')
     lifecycle.runStopLifecycle.settle(deps.runId)
     lifecycle.userQuestionBroker.cancelRun(deps.runId)
-    // 收口：先终态 flush + terminal，再离开登记，这样终态 diff 与 resync 仍可读。
     lifecycle.clearDiffPreviewDemand()
     lifecycle.runTraces.settle(deps.runId)
     lifecycle.runs.remove(deps.runId)
-    // Finalization is closed: the run owns nothing from here on.
     runState.localFinalizing = false
     lifecycle.forgetBoundedRun(deps.runId)
     lifecycle.releaseSessionBaseline?.()

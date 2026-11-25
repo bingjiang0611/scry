@@ -4,8 +4,6 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readRunCursor, waitForRun } from './harness.mjs'
 
-// A committed Provider failure must stay a failure, and the recorder artifacts it
-// leaves behind must stay bounded.
 export async function verifyFailureAndRecords({ transport, submit, invitation, identity, deviceCertPEM, normalSession, workspace }) {
   // A real adapter rejection after publishing its native session exercises the
   // production runtime rejection/recording/finally branches, not input rejection.

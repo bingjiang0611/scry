@@ -1,5 +1,3 @@
-// Drives one real App instance for a B4-V scenario: launch on a fixture, reach the
-// renderer over CDP, call the shipped preload API, and end the instance the way a user
 // would (graceful quit) or the way a crash would (SIGKILL). Ending an App never touches
 // the fixture's daemon tree: the supervisor and the daemon are detached on purpose and
 // must outlive the window.

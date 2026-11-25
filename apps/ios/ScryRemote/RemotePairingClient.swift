@@ -1,20 +1,12 @@
 import Foundation
 import RemoteTransport
 
-// Device-side pairing orchestration over the PROVEN relay transport
-// (ScryG0Transport). It generates/restores the device keypair (private key lives
+// Device-side pairing over RemoteTransport. It generates or restores the device keypair (private key lives
 // only in Keychain, insert-only), presents its self-signed bootstrap cert so the
 // host derives the possession-proving key fingerprint from the TLS peer cert,
 // pins the host anchor from the pairing code, and drives prove -> (Mac user
 // confirms) -> status poll -> granted. It NEVER fabricates a paired state: a pending
 // receipt carries no certificate; only a host-issued grant does.
-//
-// Honesty on the outer hop: a publicly deployed relay is wss:// and the device
-// must pin the relay CA (or a public root). The pairing code does not yet carry
-// that, so today the client dials the relay without an outer-CA (the local smoke
-// relay is ws://); the inner TLS 1.3 mTLS to the host is the real security root
-// regardless. Wiring the outer relay CA is a deployment follow-up, not new
-// crypto. Full on-device pairing still needs a reachable relay + running host.
 enum PairingProgress: Equatable {
   case awaitingConfirmation(publicKeySHA256: String)
   case paired(deviceId: String, certificatePEM: String)
@@ -26,7 +18,6 @@ struct RemotePairingClient {
   let keychain: RemoteKeychain
   init(keychain: RemoteKeychain = RemoteKeychain()) { self.keychain = keychain }
 
-  // Restore the one device key, or create it exactly once (insert-only).
   func ensureDeviceMaterial() throws -> G0EnrollmentMaterial {
     if let existing = try keychain.load(.deviceKey) {
       return try G0EnrollmentMaterial.restore(privateKeyPEM: existing)

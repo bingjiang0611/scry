@@ -1,4 +1,3 @@
-/** A local catalog label, never a replacement for Provider transcript content. */
 export const SESSION_TITLE_MAX_LENGTH = 120
 
 export function normalizeSessionTitle(value: unknown): string {

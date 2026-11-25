@@ -81,7 +81,6 @@ export const SIDE_CHAT_COPY = {
   createRecovered: '已找回这次创建的侧边会话。',
   previewBlocked: (reason: string): string => `创建后首次发送会被拒绝：${reason}`,
   creationScopeChanged: '主会话已切换，本次创建结果没有写入当前布局；它仍属于原来的主会话。',
-  // 页签与状态
   tabStatusAttention: '需处理',
   tabStatusRunning: '运行中',
   tabStatusPermission: '需权限',
@@ -89,7 +88,6 @@ export const SIDE_CHAT_COPY = {
   tabLoading: '正在读取侧边会话…',
   historyLoading: '正在读取侧边会话历史…',
   tabDeleted: '这个侧边会话已被删除，页签已关闭。',
-  // 快照与工作区
   snapshotBoundary: (ordinal: number): string => `主会话快照 · 截至第 ${ordinal} 轮`,
   snapshotExcludedRunning: '不含正在生成的最后一轮',
   snapshotCoverageInline: (inline: number, retrievable: number, total: number): string =>

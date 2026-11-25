@@ -101,7 +101,6 @@ describe('side-chat snapshot boundary and handoff budget', () => {
     expect(stored.sideChat?.snapshot.format === 4 ? stored.sideChat.snapshot.messageCount : 0).toBe(6)
     const refs = await sideChatSnapshotRefs(current.userData, stored)
     expect(await current.service.readItem(child.id, refs.at(-1)!)).toBe(`answer: ${body} 3`)
-    // An explicit boundary still means exactly that boundary.
     const explicit = await current.service.previewSideChat(source, { terminalThroughOrdinal: 1 })
     expect(explicit.throughOrdinal).toBe(1)
     // 9 MiB of visible text is streamed twice (preview, then the seal) plus the read-back;
@@ -117,7 +116,6 @@ describe('side-chat snapshot boundary and handoff budget', () => {
     const child = await current.service.createSideChat(request(source, preview))
     const stored = (await current.store.read(child.id))!
     if (stored.sideChat?.snapshot.format !== 4) throw new Error('creation must seal a format 4 snapshot')
-    // Preview and the sealed record agree on the same counts and body bytes.
     expect(stored.sideChat.snapshot.messageCount).toBe(preview.messageCount)
     expect(stored.sideChat.snapshot.bodyBytes).toBe(preview.bodyBytes)
     expect(preview.coverage.snapshotByteLimit).toBe(4 * 1024 * 1024)

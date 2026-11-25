@@ -24,7 +24,6 @@ export function CountProgress({ label, done, total, failed = 0 }: { label: strin
   const started = useRef(Date.now())
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    // One coarse tick refreshes the estimate between reports; stopped when done.
     if (done >= total) return
     const timer = setInterval(() => setNow(Date.now()), 1_000)
     return () => clearInterval(timer)

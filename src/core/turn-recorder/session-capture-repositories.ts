@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises'
 import { readJson, writeJsonAtomic } from './io.js'
 import { beginGitTurnDiff } from './git-capture.js'
 import { recorderOpenPath, recorderStatePath, type RecorderOpenTurnState, type RecorderSessionState } from './runtime-state.js'
@@ -5,13 +6,8 @@ import { segmentCaptureDir } from './recorder-segment-diff.js'
 import type { RecorderEnablement } from './config.js'
 import { TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 
-/** A turn cannot baseline an unbounded set of repositories; discovery from tools stays bounded. */
 export const CAPTURE_REPOSITORY_LIMIT = 32
 
-/**
- * Remember repositories this session touched so later turns baseline them at turn start. Returns
- * only the newly added roots: an already known repository keeps the baseline it already has.
- */
 export async function updateCaptureRepositories(
   root: string,
   roots: string[]
@@ -27,21 +23,28 @@ export async function updateCaptureRepositories(
   return merged.slice(known.length)
 }
 
-/**
- * Baseline a repository the moment the turn is about to change it. The PreToolUse that names the
- * file arrives before the write, so this baseline is the pre-edit state, not an approximation.
- */
 export async function attachCaptureBaseline(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   open: RecorderOpenTurnState,
   repositories: string[],
   sessionRoot: string
 ): Promise<void> {
-  const known = new Set(open.captures.map((item) => item.repository))
-  // Beside the turn, not inside it: sealing removes the turn directory, and a background wake may
-  // continue this turn with this capture's end state as its baseline.
+  const known = new Set(open.captures.map(item => item.repository))
+  let newRepositories = repositories.filter(repository => !known.has(repository))
+  if (enablement.config.capture.sessions === 'opt-in' && newRepositories.length) {
+    // Keep tool-path spelling in session state, but don't take another baseline for a repo
+    // mounted under an alias. Mounted captures already carry the canonical Git root.
+    const canonical = new Set(open.captures.map(item => item.capture.repoRoot ?? item.repository))
+    const identities = await Promise.all(newRepositories.map(path => realpath(path).catch(() => path)))
+    newRepositories = newRepositories.filter((_, index) => {
+      const identity = identities[index]
+      if (canonical.has(identity)) return false
+      canonical.add(identity)
+      return true
+    })
+  }
   const captureDir = segmentCaptureDir(sessionRoot, open.generation)
-  const additions = await Promise.all(repositories.filter((repository) => !known.has(repository)).map(async (repository) => ({
+  const additions = await Promise.all(newRepositories.map(async (repository) => ({
     repository,
     capture: await beginGitTurnDiff(repository, TURN_DIFF_BEGIN_DEADLINE_MS, captureDir, [enablement.dataRoot])
   })))

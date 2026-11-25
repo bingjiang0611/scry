@@ -20,7 +20,7 @@ export function currentModelPrices(db: Database.Database, nowMs = Date.now()): M
   return rows.filter((row) => row.currency.toUpperCase() === 'USD')
 }
 
-/** 幂等写入：id 由来源与模型决定，同名价格只更新，不重复插入。 */
+/** 按调用方提供的价格 id 写入；相同 id 替换已有记录。 */
 export function writePrices(connection: Database.Database, rows: readonly ModelPrice[]): number {
   if (rows.length === 0) return 0
   const insert = connection.prepare(`INSERT OR REPLACE INTO model_price_versions (${MODEL_PRICE_VERSION_COLS.join(', ')})
@@ -50,7 +50,7 @@ export function changedPrices(existing: readonly ModelPrice[], incoming: readonl
   })
 }
 
-/** 目录读取是只读操作；记录价格失败只影响估算，不能让读取失败。 */
+/** 不修改源目录；写入本地价格表失败不影响目录读取。 */
 export function rememberCatalogPrices(prices: readonly ModelPrice[] | undefined): void {
   if (!prices?.length) return
   try {
@@ -61,7 +61,7 @@ export function rememberCatalogPrices(prices: readonly ModelPrice[] | undefined)
   }
 }
 
-/** 启动时把本机 Pi 目录里的单价只读地记进价格表；历史轮次不必先跑一轮才有金额。 */
+/** 启动时载入 Pi 目录单价；符合估算条件且能匹配价格的历史轮次无需等待新轮次。 */
 export function rememberPiCatalogPrices(homeDir: string): void {
   rememberCatalogPrices(readPiCatalogPrices(homeDir))
 }

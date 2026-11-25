@@ -177,7 +177,6 @@
   --shadow-pop: 0 20px 56px rgba(35, 44, 57, 0.18);
 }
 
-/* 蓝本全局：mono 数字/ID/路径 + 1px hairline 网格底纹 + icon 基类 */
 .ico {
   display: inline-block;
   width: 14px;

@@ -25,7 +25,6 @@ export function formatApprovedVia(approvedVia: RemoteDevice['approvedVia']): str
   return '未记录'
 }
 
-/** Strip C0, DEL, and C1 control characters before printing untrusted labels to a terminal. */
 export function sanitizeTerminalText(raw: string): string {
   return raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').replace(/\s+/g, ' ').trim()
 }

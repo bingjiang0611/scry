@@ -78,7 +78,6 @@ export function createRunDiffPreviewer(deps: RunDiffPreviewDependencies): RunDif
         turnDiff: snapshot
       }
       upsertTraceById(runState.items, event)
-      // 运行中预览也是这一轮的证据：仍在看的 scoped 视图必须在收口前收到它。
       publishTrace(event)
     },
     onError: (scope, error) => console.warn('[scry] diff preview failed:', runId, scope, error)

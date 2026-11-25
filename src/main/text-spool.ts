@@ -79,7 +79,6 @@ export class TextSpool {
     await this.write(file, chunk, bytes)
   }
 
-  /** Resident bytes allowed for this spool: its own bound, plus the shared allowance. */
   private capacity(): number {
     return this.budget === undefined ? this.memoryBytes : Math.min(this.memoryBytes, this.budget.available + this.charged)
   }
@@ -149,7 +148,6 @@ export class TextSpool {
     await rm(file.directory, { recursive: true, force: true })
   }
 
-  /** Writes at the tracked offset; a short write resumes where it stopped. */
   private async write(file: { handle: FileHandle }, chunk: string, bytes: number): Promise<void> {
     let written = 0
     while (written < bytes) {

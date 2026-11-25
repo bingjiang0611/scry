@@ -1,7 +1,5 @@
 import Foundation
 
-// Copy touched by the R2 home/composer redesign. Shared legacy copy stays in
-// ConnectionCopy.swift; keeping this extension separate avoids growing that file.
 extension ConnectionCopy {
   // Port of src/renderer/format.ts relTime. Static copy, not a ticking Date Text.
   static func relTime(_ milliseconds: Double, now: Double = Date().timeIntervalSince1970 * 1_000) -> String {
@@ -21,8 +19,6 @@ extension ConnectionCopy {
   static let newSessionHint = "描述任务，Mac 上的 Agent 会在所选项目里执行"
   static let homeNeedsReply = "需要回复"
   static let sectionRunning = "进行中"
-  // Only the host's persisted last-turn outcome fills this section, so it is
-  // absent — never empty-but-claimed — on a host that cannot prove an ending.
   static let sectionCompleted = "已完成"
   static let homeWaiting = "待回答"
   static let activityEmpty = "暂无需要处理的任务"

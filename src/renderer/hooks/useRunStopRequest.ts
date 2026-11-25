@@ -7,7 +7,6 @@ export function useRunStopRequest(currentRunId: string | null) {
   const stopRun = useCallback(async (): Promise<void> => {
     if (!currentRunId) return
     const runId = currentRunId
-    // Feedback from the press, not from main's first stop phase.
     setStopRequest({ runId, status: 'sending' })
     try {
       await window.scry.stop(runId)

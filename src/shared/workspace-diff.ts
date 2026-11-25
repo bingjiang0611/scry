@@ -7,7 +7,6 @@ export interface BranchDiffComparison {
   headRef: string | null
 }
 
-/** Both totals and patch bodies are projected from these same immutable Git trees. */
 export type WorkspaceDiffSnapshotResult =
   | {
       status: 'captured'

@@ -26,7 +26,6 @@ async function withAntigravityModel(userDataDir: string, entry: HistoryEntry): P
     const model = await observeAntigravityTranscriptModel({ sessionId, startedAt: turn.startedAt, result, outputTokens })
     return model ? { ...sample, model, modelSource: 'antigravity_transcript' } : sample
   } catch {
-    // An absent, oversized or unreadable sidecar cannot change the recorded performance sample.
     return sample
   }
 }
@@ -63,7 +62,6 @@ function isSample(value: unknown): value is LlmPerformanceHistoryRow {
       .every(key => sample[key] === undefined || number(key))
 }
 
-/** Bounded IPC payload and streaming scan; no new store or deletion ownership model. */
 async function scanLlmPerformanceHistory(userDataDir: string, file: string, now: number): Promise<LlmPerformanceHistory> {
   const history: LlmPerformanceHistory = { rows: [], invalidLines: 0, truncated: false }
   const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity })
@@ -74,7 +72,6 @@ async function scanLlmPerformanceHistory(userDataDir: string, file: string, now:
     try { parsed = JSON.parse(line) } catch { history.invalidLines++; continue }
     if (!parsed || typeof parsed !== 'object') { history.invalidLines++; continue }
     const { performanceSample: value, cwd, externalSessionId } = parsed as Record<string, unknown>
-    // Old usage rows have no measurement; never invent zero speed for them.
     if (value === undefined) continue
     if (!isSample(value)) { history.invalidLines++; continue }
     if (Date.parse(value.ts) < now - 30 * 86400_000) continue
@@ -104,7 +101,6 @@ async function scanLlmPerformanceHistory(userDataDir: string, file: string, now:
 
 let historyCache: { file: string; signature: string; expiresAt: number; value: Promise<LlmPerformanceHistory> } | undefined
 
-/** File identity invalidates both appends and atomic session deletions; concurrent readers share scans. */
 export async function readLlmPerformanceHistory(userDataDir: string, now = Date.now()): Promise<LlmPerformanceHistory> {
   const file = usageJsonlPath(userDataDir)
   let info: Awaited<ReturnType<typeof stat>>

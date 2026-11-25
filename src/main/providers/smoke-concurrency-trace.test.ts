@@ -73,7 +73,6 @@ describe('smoke concurrency trace fixture', () => {
 
     const { question, events: atQuestion } = await asked.promise
 
-    // Everything the fixture promises is on the trace before the user is asked anything.
     expect(askedPrompts).toHaveLength(1)
     expect(atQuestion).toHaveLength(SEED_COUNT + 1)
     const seeds = atQuestion.slice(0, SEED_COUNT)
@@ -104,7 +103,6 @@ describe('smoke concurrency trace fixture', () => {
     ])
     expect(broker.list(RUN_ID).map((item) => item.questionId)).toEqual([QUESTION_ID])
 
-    // A pending question must not settle the run.
     let settled = false
     const settlement = handle.promise.then(
       (result) => { settled = true; return result },
@@ -131,7 +129,6 @@ describe('smoke concurrency trace fixture', () => {
       { kind: 'closed', intervention: { resolution: 'answered', response: { behavior: 'answered' } } }
     ])
 
-    // The answered run continues into the shared tool and result tail instead of returning early.
     const tail = emitted.slice(SEED_COUNT + 1)
     expect(tail.map((event) => `${event.kind}:${event.stage}`)).toEqual(['tool:tool_use', 'tool:tool_result', 'harness:result'])
     expect(tail[2]).toMatchObject({ id: `${RUN_ID}:result`, text: 'smoke fixture completed' })

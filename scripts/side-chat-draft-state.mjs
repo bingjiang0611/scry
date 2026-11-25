@@ -25,7 +25,6 @@ export const pasteImage = (evaluate, check, name) => evaluate(`(async () => {
   check(result.prevented === true, `pasting an image must be handled by the composer: ${json(result)}`)
 })
 
-/** The child composer's own editable state, one surface at a time. */
 export const readComposer = (evaluate) => evaluate(`(() => {
   const surface = document.querySelector('${CHILD_PANEL} .side-chat-surface')
   const chips = [...document.querySelectorAll('${CHILD_PANEL} .draft-attachment')]

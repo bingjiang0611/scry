@@ -159,7 +159,6 @@ extension RemoteRunStore {
           resultSummary: nil, externalSessionId: "codex-pinned-1")]
       }
     }
-    // Screenshot fixtures for history failure states; no relay or host grant.
     if ProcessInfo.processInfo.arguments.contains("-uiMockHistoryFailure"), let identity = activeSessionIdentity {
       prompt = nil; output = []; runId = nil; resultSummary = nil
       liveRunsStatus = .observed
@@ -237,8 +236,6 @@ extension RemoteRunStore {
       let fixture = #"{"runId":"fixture-run","questionId":"fixture-question","questionKind":"input","questions":[{"header":"录屏验证 · 模拟请求","question":"输入一段多行说明","options":[],"multiSelect":false,"inputMode":"multiline"}]}"#
       pendingQuestions = [try! JSONDecoder().decode(G0Transport.RunQuestionRequest.self, from: Data(fixture.utf8))]
     }
-    // Status-strip fixtures: this device's run in progress or failed, and a run
-    // the Mac started in the same session. Nothing is sent; mockMode never delivers.
     if ProcessInfo.processInfo.arguments.contains("-uiMockRunning") || ProcessInfo.processInfo.arguments.contains("-uiMockFailed") {
       let failed = ProcessInfo.processInfo.arguments.contains("-uiMockFailed")
       prompt = "有办法不会收吗 不然每次回来看代码都要重新等待 jdtls 加载"

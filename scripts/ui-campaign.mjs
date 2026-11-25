@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process'
 
 const DEADLINE_MS = 30_000
 
-// One bounded campaign: a single hidden Electron process that must finish inside DEADLINE_MS.
 // A zero exit code alone is not proof of success — the merged result line is required — and a
 // campaign that hit the deadline stays failed even if the child later exits cleanly, because the
 // work it was killed in the middle of was never reported. timedOut/lastFixture are kept so a
@@ -29,7 +28,6 @@ export function runUiCampaign({ electron, script, argv = [], env }) {
       try {
         resolve(JSON.parse(result))
       } catch (error) {
-        // An unparseable result is a failed campaign, never a silent success.
         reject(error)
       }
     })

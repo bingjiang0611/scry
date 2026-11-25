@@ -1,7 +1,6 @@
 import type { SubscribeView } from '../../shared/orchestration-subscribe'
 import type { OrchestrationEventRow } from './types'
 
-// Which orchestration events a subscribe view receives (`P4-orchestration-protocol.md` §5.2).
 const SESSION_VIEW_EVENTS = new Set([
   'session.created',
   'session.renamed',

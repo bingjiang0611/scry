@@ -42,7 +42,6 @@ describe('Pi recorder integration installer', () => {
     const target = join(root, '.pi', 'agent', 'extensions', 'scry-recorder.ts')
     await writeFile(source, 'export default function () {}\n')
     await mkdir(join(root, '.pi', 'agent', 'extensions'), { recursive: true })
-    // 旧版本把发布方的 npm scope 写进标记；升级后必须仍被当成受管文件。
     await writeFile(target, `// managed-by: @example-scope/scry-turn-recorder pi integration\nexport { default } from ${JSON.stringify(source)}\n`)
     await writeFile(join(root, '.pi', 'agent', 'settings.json'), JSON.stringify({ extensions: [target] }))
 

@@ -36,14 +36,12 @@ async function fixture() {
     cwd: root, host: 'codex', transcript_path: transcriptPath, openedAt: timestamp,
     source: 'fixture', task: null
   }
-  // Nothing in this test may start a recorder peer; the enqueue is what is under test.
   vi.spyOn(daemon, 'startRecorderDaemon').mockResolvedValue({
     started: false, status: { running: false, protocol: daemon.PROTOCOL_VERSION, socketPath: join(root, 'unused.sock') }
   })
   return { root, transcriptPath, context, timestamp, dataRoot: join(root, '.scry') }
 }
 
-/** Run the real CLI in this process with `payload` on stdin. */
 async function cli(payload: string, argv: string[]): Promise<{ code: number; output: string }> {
   const stdin = Object.getOwnPropertyDescriptor(process, 'stdin')
   let output = ''
@@ -85,19 +83,15 @@ it('defers a claim to the inbox and answers queued instead of waiting for the re
   expect(ack.inbox.failedDirectory).toBe(join(sessionRoot, 'inbox-failed'))
   expect(ack.inbox.statePath).toBe(captureStatePath(f.dataRoot, 'codex', 'session'))
   const entries = await readdir(ack.inbox.directory)
-  // The claim, then the event it was proved on: one invocation, one arrival order.
   expect(entries).toEqual([ack.inbox.entry, ack.inbox.eventEntry])
   expect(JSON.parse(await readFile(join(ack.inbox.directory, entries[0]), 'utf8'))).toMatchObject({
     kind: 'capture', action: 'start', requestId: 'request-1', event: 'PostToolUse'
   })
-  // Nothing was opened: only the daemon may do that, and it has not run.
   await expect(readFile(ack.inbox.statePath, 'utf8')).rejects.toThrow()
   expect(await listRecords(f.dataRoot)).toHaveLength(0)
 })
 
 it('writes the event that proved a deferred claim right behind the claim', async () => {
-  // One invocation, two entries: a second recorder start would spend the host's remaining budget,
-  // and the event would be the one the host kills.
   const f = await fixture()
   const payload = { session_id: 'session', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } }
   const result = await cli(JSON.stringify({ capture: f.context, payload }), [
@@ -114,7 +108,6 @@ it('writes the event that proved a deferred claim right behind the claim', async
     schemaVersion: 1, provider: 'codex', sessionId: 'session', event: 'PostToolUse',
     captureMode: true, payload
   })
-  // Nothing was opened: only the daemon may do that, and it has not run.
   expect(await listRecords(f.dataRoot)).toHaveLength(0)
 })
 
@@ -143,7 +136,6 @@ it('queues an event of a session whose claim is still queued, and refuses one wi
   const claim = JSON.parse(await readFile(join(recorderSessionRoot(f.dataRoot, 'codex', 'session'), 'inbox', entries[0]), 'utf8'))
   expect(claim.kind).toBe('capture')
 
-  // The daemon applies both, in that order.
   await recoverRecorder(f.root)
   expect(JSON.parse(await readFile(captureStatePath(f.dataRoot, 'codex', 'session'), 'utf8')).captureId).toBe('capture')
 })

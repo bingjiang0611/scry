@@ -17,15 +17,11 @@ export interface DaemonHostProcessOptions {
   gatewayLabel?: string
   createOutputStore?: RemoteHostServiceDependencies['createOutputStore']
   log?: (line: string) => void
-  /** Tests: a fake PTY, recordings in this process, a fixed shell environment, a short reclaim. */
   terminal?: Pick<DaemonTerminalServiceDeps, 'pty' | 'inlineRecording' | 'environment' | 'reclaimAfterMs' | 'checkEveryMs'>
-  /** Tests: inject a commit fault into the authoritative sink. */
   orchestrationBeforeCommitHook?: () => void
   /** Tests: pause deferred legacy backfill until resolved to verify live/backfill interleaving. */
   orchestrationPauseBackfill?: Promise<void>
-  /** Tests: override graceful providerRegistry.dispose() timeout (default 5,000 ms). */
   providerDisposeTimeoutMs?: number
-  /** Tests: override per-call timeout for App-forwarded execution-target calls (default 35,000 ms). */
   executionTargetCallTimeoutMs?: number
 }
 

@@ -204,7 +204,6 @@ export function assertUserSettingsWithinRequestedMode(
       `已拒绝启动 Antigravity：用户配置 ${check.settingsPath} 中的整体权限设置（${check.elevatedBy ?? check.broadLabel}）高于当前所选或远程上限档位 "${requested}"。请调整该文件或切换到匹配的权限档位后重试。`
     )
   }
-  // S8: take the higher of requested mode and broad setting; D11: annotate specific user allow rules.
   const baseMode = check.broadRank > requestedRank ? check.broadLabel : requested
   const effectivePermissionMode = check.allowRules.length > 0 ? `${baseMode} + 用户规则` : baseMode
   const userAllowNotice = formatUserAllowNotice(check.allowRules)

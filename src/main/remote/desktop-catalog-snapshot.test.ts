@@ -23,10 +23,8 @@ describe('one catalog snapshot per round trip', () => {
     await withPairedHost(async ({ lanes, endpoint }) => {
       const first = await requestOn(lanes, 'bulk', 'c1', { endpoint, request: { op: 'catalogSnapshot' }, replayable: true }) as { catalogSnapshot: Snapshot }
       const second = await requestOn(lanes, 'bulk', 'c1', { endpoint, request: { op: 'catalogSnapshot', revision: first.catalogSnapshot.revision }, replayable: true }) as { catalogSnapshot: unknown }
-      // The payload is not re-sent: the reply is the flag and the revision only.
       expect(second.catalogSnapshot).toEqual({ unchanged: true, revision: first.catalogSnapshot.revision })
       const stale = await requestOn(lanes, 'bulk', 'c1', { endpoint, request: { op: 'catalogSnapshot', revision: 'deadbeef' }, replayable: true }) as { catalogSnapshot: Snapshot }
-      // A revision the host does not recognize is answered in full, never guessed.
       expect(stale.catalogSnapshot).toMatchObject({ revision: first.catalogSnapshot.revision })
       expect(stale.catalogSnapshot).toHaveProperty('projects')
     })

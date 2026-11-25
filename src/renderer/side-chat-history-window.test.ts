@@ -9,10 +9,6 @@ const row = (index: number): ConversationSummary => ({
   id: `child-${index}`, cwd: '/repo', title: `child ${index}`, turnCount: 0, revision: index + 1
 })
 
-/**
- * A host with 205 children and the same cursor contract as `listSideChats`: a cursor
- * names the first row of the page it returns, and the first page has no cursor.
- */
 const TOTAL = 205
 const PAGE = 40
 function host(cursor?: string, total = TOTAL): SideChatList {
@@ -38,11 +34,9 @@ describe('bounded side-chat history window', () => {
       window = historyWindowLoaded(window, next, host(next.cursor))
       sizes.push(window.page.length)
     }
-    // Every child stayed reachable, and the oldest one is in the last page.
     expect(window.page.at(-1)?.id).toBe(`child-${TOTAL - 1}`)
     expect(window.page.length).toBe(TOTAL % PAGE)
     expect(window.back.length).toBe(Math.floor(TOTAL / PAGE))
-    // Nothing grew: one page of rows at a time.
     expect(Math.max(...sizes)).toBeLessThanOrEqual(PAGE)
     expect(window.page.length).toBeLessThanOrEqual(PAGE)
     expect(historyRowRange(window)).toEqual({ first: 201, last: 205 })

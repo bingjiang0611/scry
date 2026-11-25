@@ -96,7 +96,6 @@ it('defers a quiet session it already judged unresolved, and looks again once th
   expect(await pass(root)).toBe(0)
   await expect(deferQuietSession(dataRoot, 'qoder', sessionDir)).resolves.toBe(true)
 
-  // The wait is bounded: an hour later the same pass reads the transcript again.
   await expect(deferQuietSession(dataRoot, 'qoder', sessionDir, Date.now() + SESSION_REVISIT_MS + MINUTE)).resolves.toBe(false)
 })
 
@@ -105,8 +104,6 @@ it('never defers a session whose own files say something moved', async () => {
   const { sessionDir } = await quietSession(root, 's-moving', { backdate: true })
   expect(await pass(root)).toBeGreaterThan(0)
 
-  // Rewriting the open state is what any new event does first; the size and mtime change even when
-  // the bytes do not.
   await writeFile(join(sessionDir, 'open.json'), await readFile(join(sessionDir, 'open.json'), 'utf8'))
   expect(await pass(root)).toBeGreaterThan(0)
 })
@@ -169,11 +166,6 @@ it('always visits a session an operator names, and leaves its turn and marker un
   expect(transcriptReadStats().bytesRead).toBeGreaterThan(0)
 })
 
-/**
- * Managed turns are recovered by their own pass, and that pass only runs because the session loop
- * reported seeing one. A deferred managed session would silently stop managed recovery, so it must
- * keep full frequency - even though its own files are as quiet as any other stale session.
- */
 it('never defers a managed session: its recovery pass only runs because the loop saw one', async () => {
   const root = await managedWorkspace()
   await handleRecorderHook({
@@ -191,18 +183,11 @@ it('never defers a managed session: its recovery pass only runs because the loop
     ...turns.map((name) => join(sessionDir, 'turns', name))
   ], 120 * MINUTE)
 
-  // The managed pass reports the turn as pending, and only runs at all when the session loop saw a
-  // managed turn. Every pass has to keep saying so - its own files say nothing new.
   await expect(recoverRecorder(root, {}, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ pending: 1 })
   await expect(recoverRecorder(root, {}, undefined, undefined, INCREMENTAL)).resolves.toMatchObject({ pending: 1 })
   await expect(deferQuietSession(dataRoot, 'codex', sessionDir)).resolves.toBe(false)
 })
 
-/**
- * A recorded host is the one way a turn's verdict can change while every file stays byte-identical:
- * recovery closes it when the recorded process is gone, and a dead process moves no mtime. So these
- * sessions keep full frequency - the fix is structural, not tuned to today's callers.
- */
 it('never defers a session whose open turn recorded its host: a dead host closes it on the next pass', async () => {
   const root = await workspace()
   const { dataRoot, sessionDir } = await quietSession(root, 's-host', { backdate: true })

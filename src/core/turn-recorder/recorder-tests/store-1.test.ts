@@ -20,7 +20,6 @@ export function registerSuite13(): void {
     const before = Date.now()
     const queued = await handleRecorderHook({ provider: 'pi', event: 'UserPromptSubmit', workspace: root, payload: prompt })
     expect(queued).toMatchObject({ status: 'pending', reason: 'session busy; event queued for replay' })
-    // The hook must queue well inside the Provider's 10s hook timeout, not wait out the session lock.
     expect(Date.now() - before).toBeLessThan(HOOK_LOCK_WAIT_MS + 2_000)
     expect(HOOK_LOCK_WAIT_MS + 2_000).toBeLessThan(SESSION_LOCK_WAIT_MS)
     expect(await listRecords(dataRoot)).toHaveLength(0)
@@ -30,8 +29,6 @@ export function registerSuite13(): void {
     expect(stop.status).toBe('committed')
     const [record] = await listRecords(dataRoot)
     expect(record.user.value).toMatchObject({ text: 'queued while busy' })
-    // The replayed start keeps the time the hook arrived: not when it was replayed, and not
-    // when the lock wait expired HOOK_LOCK_WAIT_MS later and the hook was queued.
     expect(Date.parse(record.startedAt)).toBeGreaterThanOrEqual(before)
     expect(Date.parse(record.startedAt)).toBeLessThan(before + 1_000)
     expect(await readHealth(dataRoot)).toMatchObject({ droppedEvents: 0 })
@@ -104,7 +101,6 @@ export function registerSuite13(): void {
 
     await expect(drainCommitNotifications(join(root, '.scry'), base))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
-    // VE2 stores per-sequence failures separately; visited progress is not an ACK.
     expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({ ackedThrough: 0, processedThrough: 1, queueVersion: 2 })
     const pending = await commitNotificationStatus(join(root, '.scry'), base)
     expect(pending).toMatchObject({ failure: { sequence: 1, attempts: 1, nextRetryAt: expect.any(String) } })
@@ -151,7 +147,6 @@ export function registerSuite13(): void {
       .resolves.toMatchObject({ ackedThrough: 0, notifyBacklog: 1, failure: { sequence: 1, attempts: 1, ...expected } })
     const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
     const diagnostics = log.trim().split('\n').map(line => JSON.parse(line.split('; diagnostic=')[1]))
-    // The cold-start path must not create a second failure during backoff.
     expect(diagnostics).toHaveLength(1)
     for (const diagnostic of diagnostics) {
       expect(diagnostic).toMatchObject({ acknowledged: false, recorderPid: process.pid, ...expected })
@@ -164,7 +159,6 @@ export function registerSuite13(): void {
     const root = await workspace()
     await completeTurn(root, 'diagnostic-timeout')
     const hook = await commitHook(root)
-    // Deliberately block this owned callback to exercise the unchanged 10-second production deadline.
     await writeFile(hook.path, '#!/bin/sh\ncat >/dev/null\nexec sleep 60\n')
     const dataRoot = join(root, '.scry')
     await expect(drainCommitNotifications(dataRoot, {

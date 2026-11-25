@@ -140,7 +140,6 @@ export class SourceControlService {
       await this.store.ready
       const directory = this.options.authorizeDirectory(cwd)
       const identity = await this.git.identity(directory)
-      // A nested project grant does not authorize its parent Git repository.
       this.options.authorizeDirectory(identity.root)
       this.identities.set(identity.id, identity)
       const snapshot = await this.git.status(identity)

@@ -26,11 +26,6 @@ export interface AuthorityStartupResult {
   resolveImportComplete: (() => void) | undefined
 }
 
-/**
- * Runs P4-2 startup legacy import (only when transitioning from `off`/fresh DB, never reading a
- * degraded H1 downstream mirror once `on` mode is already active), installs Decision G observer,
- * and executes single-tx startup recovery + two-ledger reconciliation BEFORE `openLocalChannel`.
- */
 export async function runAuthorityStartupSequence(options: {
   sink: EventSink
   userDataDir: string
@@ -58,7 +53,6 @@ export async function runAuthorityStartupSequence(options: {
     try {
       plan = await loadLegacyLedgerPlanAsync(sink, userDataDir)
     } catch (error) {
-      // If DB already has authoritative events and H1 is corrupt, fall back to DB authority.
       const hasExistingEvents =
         (sink.handle.db.prepare('SELECT COUNT(*) AS c FROM orch_event').get() as { c: number }).c > 0
       if (!hasExistingEvents) throw error
@@ -79,7 +73,6 @@ export async function runAuthorityStartupSequence(options: {
             }
           }
         } catch {
-          // Corrupt ownership is surfaced by reconcileTwoLedgersOnStartup below.
         }
         importLegacyStateIncrementally({
           sink,
@@ -113,7 +106,6 @@ export async function runAuthorityStartupSequence(options: {
     if (!deferredPlan) sink.setMeta(LEGACY_H1_IMPORT_COMPLETE, '1')
   }
 
-  // Decision G: install before-turn-settled observer BEFORE reconcileTwoLedgersOnStartup.
   conversationStore().setBeforeTurnSettledObserver((info) => {
     if (sink.isWriteIndeterminate()) return
     const at = Date.now()
@@ -147,7 +139,6 @@ export async function runAuthorityStartupSequence(options: {
     if (lineageInput) recordSessionLineage(sink, lineageInput, at)
   })
 
-  // core §2.4 + §2.6 + §2.8: recover orchestration.db & two-ledger boundary BEFORE openLocalChannel.
   const recovery = recoverOrchestrationOnStartup({
     sink,
     leaseOwner,

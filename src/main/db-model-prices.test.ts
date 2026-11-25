@@ -6,7 +6,7 @@ const nodeSqlite = (await import('node:sqlite').catch(() => null)) as typeof imp
 const sqliteIt = nodeSqlite ? it : it.skip
 
 // 生产用 better-sqlite3（Electron ABI，Node 版 vitest 加载不了）；这里用 node:sqlite 跑同一条 SQL，
-// 补上 better-sqlite3 的 transaction()，语义与生产一致。
+// 并用 BEGIN IMMEDIATE、提交和回滚模拟本测试用到的 transaction()。
 class TestDatabase {
   private readonly db = new nodeSqlite!.DatabaseSync(':memory:')
   prepare(sql: string): ReturnType<typeof this.db.prepare> { return this.db.prepare(sql) }
@@ -34,7 +34,7 @@ const version = (id: string, input: number): ModelPrice => ({
   effectiveFrom: 1_700_000_000_000, effectiveTo: null, source: 'pi_model_catalog'
 })
 
-// Q6：Codex app-server 不给金额；金额按同一份价格来源（Pi 模型目录的单价）折算。
+// Q6：验证 Pi 模型目录单价的转换、存储和变更检测。
 describe('模型目录价格', () => {
   it('只保留有输入与输出单价的模型，并记下每个百万 Token 的美元单价', () => {
     const rows = catalogPriceRows([

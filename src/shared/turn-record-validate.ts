@@ -127,7 +127,6 @@ function isTurnDanger(value: unknown): value is TurnDanger {
     isOptionalString(raw.tool) && isOptionalString(raw.toolUseId)
 }
 
-/** Roles are bounded identifiers, never free-form prose lifted from a prompt. */
 function isTurnRole(value: unknown): value is TurnRole {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const raw = value as Record<string, unknown>

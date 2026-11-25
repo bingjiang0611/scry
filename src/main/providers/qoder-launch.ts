@@ -36,8 +36,6 @@ export function livePrompt(
         type: 'user',
         message: { role: 'user', content: [{ type: 'text', text }] },
         parent_tool_use_id: null,
-        // Scry-owned identity for the one submitted user message: the native
-        // transcript must persist this same UUID for an input receipt.
         uuid: userMessageUuid
       } as SDKUserMessage
       await wait
@@ -66,7 +64,6 @@ export class QoderStderrTail {
     this.#truncated = true
   }
 
-  /** The error the run fails with, followed by the CLI's own last words when it said any. */
   attach(error: unknown): unknown {
     // A cut buffer starts mid-line, possibly mid-secret: drop that line before masking.
     const kept = this.#truncated ? this.#text.slice(this.#text.indexOf('\n') + 1) : this.#text
@@ -155,9 +152,7 @@ export function qoderOptions(
 ): Record<string, unknown> {
   const executable = qoderExecutable()
   if (!executable) throw new Error('Qoder CLI 未找到')
-  // Corporate EDR blocks the qodercli symlink entry from reading ~/.qoder/.auth/user.
-  // Resolving the same signed CLI to its JavaScript bundle lets the SDK launch it
-  // through Node, preserving the original config/auth/session paths.
+  // Prefer the resolved executable path; fall back to the detected path.
   const runtimeEnv = runtimeCliEnv(
     undefined,
     managedRecorder ? { managedRecorder: true, providerId: 'qoder' } : { providerId: 'qoder' }
@@ -169,7 +164,6 @@ export function qoderOptions(
     : {
         permissionMode: permissionMode === 'auto_review'
           ? 'auto'
-          // Qoder SDK 与 Claude 同源，acceptEdits 是原生档位。
           : permissionMode === 'auto_accept_edits' ? 'acceptEdits' : 'default'
       }
   return {

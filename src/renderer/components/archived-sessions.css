@@ -8,7 +8,6 @@
   overflow: visible;
 }
 
-/* Provider 筛选：自定义菜单取代原生 select，保留品牌图标与当前项对勾。 */
 .arch-provider-filter {
   position: relative;
 }
@@ -38,7 +37,6 @@
   z-index: var(--layer-dropdown);
 }
 
-/* A failed unarchive / delete stays on its row, across both columns, with a retry. */
 .arch-row-error {
   grid-column: 1 / -1;
   display: flex;

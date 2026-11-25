@@ -3,8 +3,6 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { detail, tlsRequest, waitForRun } from './harness.mjs'
 
-// Run lifecycle over the device channel: submit, dedupe, watch, trace, history,
-// session actions and resume. Returns the helpers the later phases reuse.
 export async function verifyRuns({ transport, evaluate, invitation, identity, deviceCertPEM, canonicalWorkspace, info, logId, temp }) {
   const context = { cwd: canonicalWorkspace, providerId: 'codex' }
   const submit = async (intentId, prompt, extra = {}) => tlsRequest(transport, invitation.runPort, invitation.anchorPEM, deviceCertPEM, identity.keyPEM, {

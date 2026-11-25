@@ -171,8 +171,6 @@ it('keeps the real stalled-closing omission without turning the depth boundary i
   expect(records[0].diff.omissionReason).not.toContain('maxDepth=2')
 }, 15_000)
 
-// VD1 option A is the user-approved specification revision: a depth boundary is
-// metadata, not proof of missing diff evidence. Real Git/transcript gaps still degrade.
 it('persists discovery coverage without degrading the captured diff merely for its depth boundary', async () => {
   const root = await workspace()
   const { open, record } = await recordTurn(root)

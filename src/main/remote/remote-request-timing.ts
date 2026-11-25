@@ -25,7 +25,6 @@ export function remoteOperationLabel(request: unknown): string {
   return typeof op === 'string' && measuredOperations.has(op) ? op : 'other'
 }
 
-/** Counters for one measured remote request; keys stay inside the label allowlist. */
 export function remoteOperationCounters(request: unknown): Readonly<Record<string, number>> {
   return { [`op.${remoteOperationLabel(request)}`]: 1 }
 }

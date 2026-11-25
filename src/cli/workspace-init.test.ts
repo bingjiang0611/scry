@@ -90,11 +90,9 @@ describe('scry init', () => {
         const source = JSON.stringify(settings.hooks[event])
         expect(source.match(new RegExp(`${provider} ${event}`, 'g'))).toHaveLength(1)
       }
-      // Qoder 1.1.81 exposes a verified project hook; Codex remains unsupported here.
       const sessionEnd = settings.hooks.SessionEnd
       if (provider === 'claude' || provider === 'qoder') {
         expect(JSON.stringify(sessionEnd).match(new RegExp(`${provider} SessionEnd`, 'g'))).toHaveLength(1)
-        // Session end must persist and enqueue only, so it keeps a much tighter budget than Stop.
         expect(sessionEnd[0].hooks[0].timeout).toBe(3)
         expect(settings.hooks.Stop[0].hooks[0].timeout).toBe(15)
       } else {
@@ -111,12 +109,9 @@ describe('scry init', () => {
     expect(await readFile(join(root, '.git/info/exclude'), 'utf8')).toContain('.scry/')
     execFileSync('sh', ['-n', join(root, '.scry/provider-hook.sh')])
     const hookScript = await readFile(join(root, '.scry/provider-hook.sh'), 'utf8')
-    // 快路径必须先把 stdin 读进变量，否则回退时无法重发，事件会丢。
     expect(hookScript.indexOf('payload="$(cat)"')).toBeLessThan(hookScript.indexOf('curl'))
-    // 只有 HTTP 200 才算成功；其余一律回退到 CLI。
     expect(hookScript).toContain('[ "$code" = "200" ] && exit 0')
     expect(hookScript).toContain('printf \'%s\' "$payload" | "$scry_bin" recorder hook')
-    // managed 模式不走 socket 快路径。
     expect(hookScript.indexOf('--managed')).toBeLessThan(hookScript.indexOf('payload="$(cat)"'))
   }, 60_000)
 
@@ -196,7 +191,6 @@ describe('scry init', () => {
     await hooks.event({ event: { type: 'session.status', properties: { sessionID: 'unmatched', status: { type: 'retry', attempt: 1, message: 'retry', next: 100 } } } })
     await idle('unmatched')
     expect.soft(stops()).toHaveLength(5)
-    // Keep suppression bounded: an evicted identity is unknown, not silently discarded.
     for (let i = 0; i < 128; i++) await idle(`other-${i}`)
     const before = stops().length
     await idle('known')

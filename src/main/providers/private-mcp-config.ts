@@ -9,7 +9,7 @@ const DIRECTORY_NAME = /^scry-mcp-config-(\d+)-[A-Za-z0-9]{6}$/
 export interface PrivateMcpConfig {
   /** Passed to the SDK's `extraArgs`; the CLI reads the servers from this path. */
   extraArgs: { 'mcp-config': string }
-  /** Idempotent. A leftover from a crash is removed by the next startup sweep. */
+  /** Idempotent. Startup cleanup of crash leftovers is best effort. */
   dispose(): void
 }
 
@@ -36,7 +36,7 @@ export function writePrivateMcpConfig(
 export interface PrivateMcpEnvFiles {
   /** One file per input, in the same order. */
   paths: string[]
-  /** Idempotent. A leftover from a crash is removed by the next startup sweep. */
+  /** Idempotent. Startup cleanup of crash leftovers is best effort. */
   dispose(): void
 }
 
@@ -86,9 +86,8 @@ function processAlive(pid: number): boolean {
 }
 
 /**
- * Crash recovery: remove directories whose owning process is gone. A live owner,
- * including another Scry instance or a reused pid, keeps its directory; only this
- * user's real directories are touched, never a symlink.
+ * Best-effort crash recovery for private MCP config directories. Skips live PIDs
+ * (including reused PIDs) and symlinks, and checks ownership when a UID is available.
  */
 export async function sweepStalePrivateMcpConfigs(
   root = tmpdir(),
@@ -108,7 +107,7 @@ export async function sweepStalePrivateMcpConfigs(
       await rm(path, { recursive: true, force: true })
       removed++
     } catch {
-      // Another sweeper or the owner removed it first.
+      // Cleanup is best effort; the directory may already be gone.
     }
   }
   return removed

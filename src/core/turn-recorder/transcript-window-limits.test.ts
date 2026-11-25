@@ -58,7 +58,6 @@ describe('bounded transcript windows', () => {
     const incompleteLine = '{"type":"tool"}\n'
     const path = await sparseTranscript(root, 'huge.jsonl', size, [
       { at: 0, text: head },
-      // Place a newline just inside the cap so the following bytes can be retained.
       { at: size - TRANSCRIPT_WINDOW_LIMIT_BYTES, text: incompleteLine },
       { at: size - tail.length, text: tail }
     ])
@@ -164,8 +163,6 @@ describe('anchor scans are bounded', () => {
     resetTranscriptAnchorCache()
     resetTranscriptReadStats()
 
-    // The turn opened at the end of the file, so its anchor cannot be further back than the lookback
-    // — that bound is what keeps a pass cheap on a session that has grown for days.
     await stableTranscript(path, 'run', 'codex', undefined, 'wanted-turn', size, undefined, 'session', root)
 
     expect(transcriptReadStats().anchorBytesScanned).toBeLessThanOrEqual(TRANSCRIPT_ANCHOR_LOOKBACK_BYTES + (1024 * 1024))
@@ -212,7 +209,6 @@ describe('anchor scans are bounded', () => {
   it('does not grow one oversized line across chunks', async () => {
     const root = await workdir()
     const size = 40 * 1024 * 1024
-    // One line longer than the line bound, with no newline of its own until its end.
     const giant = `{"type":"big","text":"${'x'.repeat(TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES + 1024)}"}\n`
     const path = await sparseTranscript(root, 'giant-line.jsonl', size, [
       { at: size - giant.length, text: giant },
@@ -238,7 +234,6 @@ describe('a scan that reaches the first byte stops', () => {
     ].map(row => JSON.stringify(row)).join('\n') + '\n')
     resetTranscriptAnchorCache()
     const read = await stableTranscript(path, 'run', 'codex', undefined, 'missing-turn', undefined, undefined, 'session', root)
-    // No matching turn id: the scan walks to byte 0 and answers with the window it settled on.
     expect(read.source?.startOffset).toBe(0)
   })
 })
@@ -266,7 +261,6 @@ describe('a repeated Codex pass reuses its anchor', () => {
     resetTranscriptSnapshotCache()
     const second = await stableTranscript(path, 'run', 'codex', undefined, 'turn-1', 0, undefined, 'session', root)
 
-    // Re-proof is one 8 KiB read plus the appended-bytes walk, not the whole backwards scan.
     expect(transcriptReadStats().anchorBytesScanned).toBeLessThan(16 * 1024)
     expect(second.observed).toBe(first.observed)
     expect(second.events.length).toBe(first.events.length)

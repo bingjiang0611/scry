@@ -98,8 +98,6 @@ export function RightSurfaceTabStrip({
             aria-selected={selected}
             aria-controls={`${rootId}-${key}-panel`}
             tabIndex={selected || (!activeKey && keys[0] === key) ? 0 : -1}
-            // The full title stays available through the accessible name and tooltip;
-            // only the visual label is truncated.
             title={label}
             onClick={() => onActivate(tab)}
             onKeyDown={(event) => move(event, key)}

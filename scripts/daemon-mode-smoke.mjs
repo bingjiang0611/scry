@@ -16,17 +16,7 @@
 // renderer (window.scry), so the path exercised is exactly the shipped one: renderer ->
 // typed preload -> main IPC -> daemon surface -> unix socket -> daemon -> Provider.
 //
-// Checks, each printed as `true`/`false` with the evidence that decided it:
-//   send -> streaming text -> settled
-//   question -> answer -> second question -> answer -> settled
-//   stop -> cancelled
-//   SIGKILL the daemon -> the App brings up a new one and a new run settles
-//   first-text and streaming-update latency, in the same instance, for S1
-//   daemon + supervisor: executable image, entry and environment match the target
-//   a terminal through the daemon records into userData/terminal-recordings (worker path)
-//   the streamed run's output is in the run output worker's files
-//   packaged only: the private CLI the daemon resolves is inside the resources and runs
-//   the daemon this run started is stopped afterwards (it outlives the App by design)
+//   stop accepted -> run settles
 //
 // No screenshot and no DOM clicking: the runner asserts run evidence, not pixels. A
 // failure exits non-zero with the step name; nothing is reported as passed unrun.
@@ -51,8 +41,7 @@ if (!options.ok) {
 const temp = realpathSync(mkdtempSync('/tmp/scry-daemon-m3-'))
 const userDataDir = join(temp, 'userData')
 const home = join(temp, 'home')
-// Inside the fixture HOME: the App only accepts a working directory it can prove is
-// the user's own, so a directory outside it is refused before any run starts.
+// Put the workspace under the fixture HOME and seed it in the isolated project list below.
 const workspace = join(home, 'workspace')
 mkdirSync(userDataDir, { recursive: true })
 mkdirSync(home, { recursive: true })
@@ -99,8 +88,6 @@ try {
   const port = await freePort()
   child = launch({
     spawn, executable: target.executable, devApp: !target.packaged, root, port, userDataDir, home, appendLog,
-    // The daemon switch, plus the daemon-side smoke fixture gate (the App-side one needs
-    // a debug port, which a Node daemon does not have). The inherited host gate must be
     // off: an App that is itself the lease owner makes the daemon refuse to start
     // (`remote_lease_owner_alive`), which is correct and not what this run tests.
     env: {
@@ -113,8 +100,6 @@ try {
   const evaluate = createEvaluate(cdp)
   await until('renderer-ready', evaluate, 'Boolean(window.scry && window.scry.start)', (ready) => ready === true)
 
-  // The switch must actually be on: with it off the daemon never listens, so this both
-  // proves the mode and gives the daemon's own state directory for the SIGKILL step.
   const daemonState = join(userDataDir, 'daemon')
   // The first call may arrive while the daemon is still starting; the App reports that
   // and asks again (see the lazy surface's unavailable rule), so waiting here is the
@@ -123,7 +108,6 @@ try {
     'window.scry.activeRuns().then(runs => runs.length >= 0).catch(() => false)',
     (value) => value === true, 60_000)
   results.steps.daemonAnswered = { ok: existsSync(join(daemonState, 'daemon.lock')) }
-  // Which binary and entry the daemon and its supervisor really run.
   const processes = daemonProcessEvidence(daemonState, target)
   results.steps.daemonProcesses = processes
 
@@ -132,7 +116,6 @@ try {
   if (!history.ok || history.firstBytes <= 4 * 1024 * 1024) fail('piHistory', JSON.stringify(history))
   results.steps.piHistory = history
 
-  // 1. send -> streaming text -> settled
   const started = await evaluate(`window.scry.start({ prompt: 'native composer complete daemon mode fixture', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
   if (!started || typeof started.runId !== 'string') fail('start', JSON.stringify(started))
   results.steps.start = { ok: true, runId: started.runId }
@@ -169,12 +152,11 @@ try {
   const streamGaps = stream.slice(1).map((event, index) => event.t - stream[index].t).sort((a, b) => a - b)
   const medianGap = streamGaps.length === 0 ? 0 : streamGaps[Math.floor(streamGaps.length / 2)]
   results.steps.streaming = {
-    // The fixture writes 20 chunks 150 ms apart. Fewer arrivals than that means the
-    // message reached the window as fewer, larger pieces.
+    // The fixture aims for 20 chunks at 150 ms intervals. The smoke allows fewer
+    // arrivals and checks their median spacing; it does not diagnose missing arrivals.
     ok: stream.length >= 8 && medianGap >= 80 && medianGap <= 250,
     arrivals: stream.length, medianGap, viewText: streamSettled.text
   }
-  // 2. question -> answer (twice) -> settled
   // Questions arrive on their own channel, exactly as the chat view receives them; the
   // script answers with the id it was shown, like a user clicking a choice.
   await evaluate(`(() => {
@@ -204,7 +186,6 @@ try {
     (value) => value && value.done === true)
   results.steps.questionSettled = { ok: true, runId: questionSettled.runId }
 
-  // 3. stop
   const stopping = await evaluate(`window.scry.start({ prompt: 'native composer stop-immediate daemon mode stop', providerId: 'codex', cwd: ${JSON.stringify(workspace)} })`)
   if (!stopping || typeof stopping.runId !== 'string') fail('stop-start', JSON.stringify(stopping))
   await until('stop-visible', evaluate,
@@ -232,10 +213,8 @@ try {
     outputHasMarker: finished.outputHasMarker, recording: finished.recording, files
   }
 
-  // The private CLI the packaged daemon resolved from the resources it was given.
   if (target.packaged) results.steps.privateCli = privateCliEvidence(target, processes.daemonResources, { env: { ...process.env, HOME: home } })
 
-  // 4. SIGKILL the daemon: the App must bring up a new one and a new run must settle.
   const lock = readLockRecord(join(daemonState, 'daemon.lock'))
   const holder = daemonProcessEvidence(daemonState, target)
   if (!holder.ok || holder.daemon.pid !== lock?.pid) fail('daemon-lock', JSON.stringify(holder))

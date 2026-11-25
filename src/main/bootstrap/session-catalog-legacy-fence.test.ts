@@ -60,7 +60,6 @@ function activeRun(current: Fixture, runId: string, sessionId: string, options: 
   })
 }
 
-/** 侧聊/子对话：真实持久化，带自己的原生绑定。 */
 async function childConversation(current: Fixture, runId: string, nativeSessionId: string): Promise<string> {
   const conversation = await current.store.create(current.cwd)
   await current.store.begin(conversation.id, {

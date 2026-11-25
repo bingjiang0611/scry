@@ -197,7 +197,6 @@ struct SessionTranscriptView: View {
   }
 
   private var headerSubtitle: String {
-    // Identity only; every run state is in the status strip.
     ConversationCopy.context(project: projectName(session?.cwd), provider: providerName)
   }
 
@@ -293,8 +292,6 @@ struct SessionTranscriptView: View {
     return cwd.split(separator: "/").last.map(String.init) ?? cwd
   }
 
-  // A run in this session that this store is not driving. It streams until the
-  // session record holds the turn (detachedLive), then history replaces it.
   private func detachedTurn(_ live: G0Transport.LiveRun) -> some View {
     let turn = ConversationTurn(prompt: live.prompt.isEmpty ? nil : live.prompt, runId: live.runId,
       running: live.state == "running", usagePending: true,

@@ -14,12 +14,6 @@ import {
 import { detectWorkspaceProviders, providerHookInstalled, type InitProvider } from './workspace-init.js'
 import { readHookSkips, readUserHookSkips, type HookSkipSummary, type UserHookSkipEvidence } from '../core/turn-recorder/hook-diagnostics.js'
 
-/**
- * Sanitised diagnostics for maintainer support. It carries versions, detection results, config
- * fingerprints, counters and redacted log lines — never record bodies, file path lists or
- * environment values. Absolute paths are rewritten to <workspace>/<home> so a bundle can be
- * pasted into a ticket without leaking a project layout.
- */
 const LOG_TAIL_LINES = 40
 
 export interface SupportBundle {

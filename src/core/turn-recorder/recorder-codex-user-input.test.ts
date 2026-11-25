@@ -8,7 +8,6 @@ import { listRecords } from './store'
 import { payload, workspace } from './recorder-tests/fixture.test'
 
 const openPage = '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'
-// Sanitized native packets from the supplied Nov 10 (912–916) / Nov 3 (229–231) rollouts.
 const selectedPage = '<external_codex_apps_selected_page_part_1_of_1>Companion Page snapshot part 1 of 1:\n{"page_id":null,"document_view":null}</external_codex_apps_selected_page_part_1_of_1>'
 const nonEmptyPage = '<external_codex_apps_open_page>{"page_id":"<PAGE_ID>"}</external_codex_apps_open_page>'
 const typedPrompt = '<TYPED_PROMPT>'

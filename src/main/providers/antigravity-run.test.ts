@@ -169,13 +169,11 @@ describe('A4: Antigravity 一轮状态机、事件、审批/提问、用量与�
     expect(rec.permissionReplies[0].result).toEqual({ outcome: { outcome: 'selected', optionId: 'allow_b' } })
     expect(rec.permissionReplies[1].result).toEqual({ outcome: { outcome: 'selected', optionId: 'opt_dev' } })
 
-    // Deduplicated logical tool calls: tc-early emitted once, sub-1 emitted once.
+    // The repeated tc-early call produces one use event and one result.
     expect(events.filter((e) => e.stage === 'tool_use' && e.toolUseId === 'tc-early')).toHaveLength(1)
     expect(events.filter((e) => e.stage === 'tool_result' && e.toolUseId === 'tc-early')).toHaveLength(1)
-    // invoke_subagent marks usage coverage partial.
     const resEvent = events.find((e) => e.stage === 'result')!
     expect((resEvent.runtimeMetadata as Record<string, unknown>)?.usageCoverage).toBe('partial')
-    // Native stream preserves raw unknown_update without maskSecrets.
     expect(nativeLines.join('\n')).toContain('raw-unmasked-AIzaSy12345678901234567890')
   })
 

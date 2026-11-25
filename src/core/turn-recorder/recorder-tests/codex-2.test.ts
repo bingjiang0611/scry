@@ -148,11 +148,9 @@ export function registerSuite10(): void {
     const lines = [
       { timestamp: '2026-07-19T12:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'repeat-turn' } },
       { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'count tokens' } },
-      // 同一帧被连续广播三次：只能计一次。
       frame('2026-07-19T12:00:00.100Z', 100, 10),
       frame('2026-07-19T12:00:00.200Z', 100, 10),
       frame('2026-07-19T12:00:00.300Z', 100, 10),
-      // 真实的第二次请求：必须累加。
       frame('2026-07-19T12:00:00.400Z', 50, 5),
       { timestamp: '2026-07-19T12:00:01.000Z', type: 'event_msg', payload: { type: 'task_complete', turn_id: 'repeat-turn', last_agent_message: 'done' } }
     ]

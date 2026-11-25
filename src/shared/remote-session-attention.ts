@@ -33,8 +33,6 @@ export function reconcileRemoteSessionAttention(
     const previousSession = prior.get(key)
     const previousTerminal = previousSession ? terminalFingerprint(previousSession) : null
     const currentTerminal = !session.isActive ? terminalFingerprint(session) : null
-    // First discovery is an explicit baseline. Later catalogs announce a new
-    // terminal fingerprint, including active -> completed with the same run id.
     const newResult = previous !== undefined && currentTerminal !== null && currentTerminal !== previousTerminal
     if (unread.has(key) || newResult) next.add(key)
   }

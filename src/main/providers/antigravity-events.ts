@@ -24,7 +24,7 @@ export const MAX_PRE_TOOL_USE_MATCHER_LENGTH = 128
 const MAX_PRE_TOOL_USE_ALTERNATIVES = 16
 const UNSAFE_MATCHER_META = /[()[\]{}+?^$\\]/
 
-/** Linear-time two-pointer wildcard match (`*` matches 0+ chars, case-insensitive) — immune to ReDoS. */
+/** Case-insensitive wildcard match where `*` matches zero or more characters. */
 function wildcardMatchCaseInsensitive(pattern: string, text: string): boolean {
   const p = pattern.toLowerCase()
   const t = text.toLowerCase()

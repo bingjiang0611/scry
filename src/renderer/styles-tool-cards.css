@@ -1,4 +1,3 @@
-/* ============ 蓝本 tool-card（PR#2 P1 chat 重排） ============ */
 .tool-card {
   display: block;
   margin: 8px 0;
@@ -121,7 +120,6 @@
 .tool-row .op.r { color: var(--read); }
 .tool-row .op.w { color: var(--write); }
 .tool-row .op.e { color: var(--edit); }
-/* 蓝本：工具卡内联展开详情（选中/点开时显 old/new string 或 input + output） */
 .tool-detail {
   margin-top: 8px;
   padding: 8px;

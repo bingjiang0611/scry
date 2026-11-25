@@ -1,6 +1,7 @@
 import { lstat, opendir, readFile, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { gitCommand, TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
+import { discoverRepositoryMounts } from './repository-mounts.js'
 
 export interface RecorderConfig {
   schemaVersion: 1
@@ -14,18 +15,11 @@ export interface RecorderConfig {
     exclude?: string[]
   }
   storage?: {
-    /** Soft quota: maintenance reports pressure but never deletes referenced evidence. */
     maxBytes?: number
     retentionDays?: number
     orphanGraceHours: number
   }
   capture: {
-    /**
-     * `opt-in` records nothing from ordinary Provider hooks; only an explicitly opened session
-     * (`recorder hook --capture-mode session` with a claimed capture) is recorded. Absent means the
-     * legacy behavior (record every hook this workspace receives). Older readers ignore the key,
-     * which is why the session guard, not this field, is what keeps un-opened sessions silent.
-     */
     sessions?: 'opt-in'
     prompt: boolean
     assistant: boolean
@@ -35,7 +29,6 @@ export interface RecorderConfig {
     diff: boolean
     hooks: boolean
     patchExcludeBasenames?: string[]
-    /** 接入方声明的仓库相对路径：这些路径不计入本轮 diff。 */
     diffExclude?: string[]
   }
 }
@@ -127,17 +120,11 @@ export function parseRecorderConfig(raw: unknown): RecorderConfig {
   }
 }
 
-/**
- * Capture defaults to on with raw tool bodies; explicit none/summary modes remain supported.
- * A disabled section is recorded as `disabled` with a reason, so the record itself explains what
- * was captured — no separate policy field is needed to reconstruct that later.
- */
 function resolveCapture(
   raw: Record<string, unknown>,
   patchExcludeBasenames: string[],
   diffExclude: string[]
 ): RecorderConfig['capture'] {
-  // Existing workspaces used full-redacted; it now selects full raw capture, not redaction.
   const toolOutput = raw.toolOutput === undefined || raw.toolOutput === 'full-redacted' ? 'full' : raw.toolOutput
   if (toolOutput !== 'none' && toolOutput !== 'summary' && toolOutput !== 'full') {
     throw new Error('capture.toolOutput must be none, summary or full')
@@ -220,11 +207,6 @@ export async function resolveRecorderLocation(workspace: string): Promise<Record
   }
 }
 
-/**
- * `ordinaryHook` marks a Provider hook that carries no session-capture context. An opt-in workspace
- * records only sessions that claimed themselves, so such an event is not recorded — it is not a
- * configuration error either, and diagnostics still see the workspace as enabled.
- */
 export async function resolveRecorderEnablement(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -244,18 +226,10 @@ async function isGitRepository(path: string): Promise<boolean> {
   return exists(join(path, '.git'))
 }
 
-/**
- * Excluded directory names under the capture scope; start-hook and finalize worktree discovery share one rule.
- *
- * Scope is the only rule shared here. `repositories.mode` governs which repositories the start hook
- * baselines; finalize additionally covers worktrees created during the turn, so `workspace-only`
- * turns can still report one new-worktree snapshot even though start capture never listed it.
- */
 export function captureExcludedNames(config: RecorderConfig): Set<string> {
   return new Set(['.git', '.scry', 'node_modules', 'target', 'dist', 'build', ...(config.repositories.exclude ?? [])])
 }
 
-/** A path is in capture scope only when it is canonically inside the workspace and outside excluded directories. */
 export function withinCaptureScope(canonical: string, workspaceRoot: string, excluded: Set<string>): boolean {
   const fromRoot = relative(workspaceRoot, canonical)
   if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return false
@@ -298,7 +272,6 @@ async function linkedWorktreeRepositories(
 export interface RepositoryDiscovery {
   repositories: string[]
   maxDepth: number
-  /** Directories not entered because of the configured depth, not a count of missing repos. */
   depthLimitedDirectories: number
   worktreeDiscovery?: {
     probedRepositories: number
@@ -309,7 +282,6 @@ export interface RepositoryDiscovery {
   nextDepth?: { repositories: string[]; incomplete: boolean }
 }
 
-// Covers the measured 20-repository workspace without unbounded process fan-out.
 export const WORKTREE_DISCOVERY_MAX_REPOSITORIES = 32
 export const WORKTREE_DISCOVERY_MAX_RESULTS = 128
 export const WORKTREE_DISCOVERY_MAX_CONCURRENCY = 4
@@ -326,7 +298,8 @@ export function repositoryDiscoveryStats(): { worktreeCommands: number } {
 export async function discoverRepositories(
   root: string,
   config: RecorderConfig,
-  probeNextDepth = false
+  probeNextDepth = false,
+  explicitCapture = false
 ): Promise<RepositoryDiscovery> {
   const repositories = new Set<string>()
   const maxDepth = config.repositories.maxDepth ?? 2
@@ -337,10 +310,11 @@ export async function discoverRepositories(
   const excluded = captureExcludedNames(config)
   let depthLimitedDirectories = 0
   const frontier: string[] = []
+  const mountLinks: string[] = []
+  const mountRoot = explicitCapture && config.capture.sessions === 'opt-in' ? join(root, 'repos') : undefined
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > maxDepth) {
       depthLimitedDirectories++
-      // Only doctor retains a bounded frontier. Start hooks do no additional filesystem work.
       if (probeNextDepth && frontier.length < 32) frontier.push(dir)
       return
     }
@@ -349,6 +323,10 @@ export async function discoverRepositories(
       entries = await readdir(dir, { withFileTypes: true })
     } catch {
       return
+    }
+    if (dir === mountRoot) {
+      mountLinks.push(...entries.filter(entry => entry.isSymbolicLink() && !excluded.has(entry.name))
+        .map(entry => entry.name).sort().slice(0, WORKTREE_DISCOVERY_MAX_REPOSITORIES).map(name => join(dir, name)))
     }
     await Promise.all(entries.map(async (entry) => {
       if (!entry.isDirectory() || entry.isSymbolicLink() || excluded.has(entry.name)) return
@@ -361,15 +339,7 @@ export async function discoverRepositories(
     }))
   }
   await walk(root, 1)
-  // A linked worktree is a real repository even when its `.git` file sits below the
-  // configured traversal depth. Ask Git only for worktrees owned by repositories we
-  // already discovered; canonical containment and excludes keep this bounded expansion
-  // inside the authorized workspace. Batches cap child Git concurrency on the start path.
   const workspaceRoot = await realpath(root).catch(() => resolve(root))
-  // Keep the first requested spelling for an already discovered repository. Git reports
-  // canonical worktree paths, while a workspace can be entered through a portable alias
-  // such as /var -> /private/var; those paths must share one repository identity without
-  // rewriting the user's requested roots.
   const repositoryByIdentity = new Map<string, string>()
   for (const repository of repositories) {
     const identity = await realpath(repository).catch(() => resolve(repository))
@@ -392,6 +362,13 @@ export async function discoverRepositories(
     repositoryByIdentity.set(identity, candidate)
     discoveredWorktrees++
   }
+  // Mount verification shares the existing discovery deadline and Git slots. Do not use
+  // external mounts as worktree discovery owners or recurse through their contents.
+  for (const mount of await discoverRepositoryMounts({
+    links: mountLinks, workspaceRoot, excluded, known: repositoryByIdentity,
+    slots: WORKTREE_DISCOVERY_MAX_REPOSITORIES - probed.length,
+    concurrency: WORKTREE_DISCOVERY_MAX_CONCURRENCY, deadline
+  })) repositoryByIdentity.set(mount, mount)
   const worktreeTruncated = skippedRepositories > 0 || linked.some(result => result.truncated)
   const result: RepositoryDiscovery = {
     repositories: [...repositoryByIdentity.values()].sort(), maxDepth, depthLimitedDirectories,
@@ -405,8 +382,6 @@ export async function discoverRepositories(
   if (probeNextDepth) {
     const nextDepth = { repositories: [] as string[], incomplete: frontier.length < depthLimitedDirectories }
     let examinedEntries = 0
-    // This is a diagnostic sample, never an extension of the capture scope. At most 32
-    // frontier directories / 128 entries are examined; unreadable or capped probes stay partial.
     probe: for (const dir of frontier) {
       try {
         for await (const entry of await opendir(dir)) {

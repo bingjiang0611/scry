@@ -83,7 +83,6 @@ describe('daemon execution target routing via App bridge', () => {
     const appPoll = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
     const appReply = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
     try {
-      // App starts polling for work; phone discovery arrives and gets forwarded.
       const work1Promise = appPoll.request({ op: 'executionTargetWork', waitMs: 5_000 })
       const discoveryPromise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, { op: 'executionTargets' })
 
@@ -107,7 +106,6 @@ describe('daemon execution target routing via App bridge', () => {
         }
       })
 
-      // Forward a mobileRequest (projects) and ensure target stamp cannot be spoofed by App.
       const work2Promise = appPoll.request({ op: 'executionTargetWork', waitMs: 5_000 })
       const reqPromise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, {
         op: 'target',
@@ -128,7 +126,6 @@ describe('daemon execution target routing via App bridge', () => {
         executionTarget: { id: TARGET.id, binding: TARGET.binding }
       })
 
-      // Forward mobileSubmit & mobileIntentStatus.
       const intentId = '123e4567-e89b-42d3-a456-426614174000'
       const work3Promise = appPoll.request({ op: 'executionTargetWork', waitMs: 5_000 })
       const submitPromise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, {
@@ -216,7 +213,6 @@ describe('daemon execution target routing via App bridge', () => {
       })
       expect(cliRes).toEqual({ error: 'execution_target_bridge_unauthorized' })
 
-      // A non-App local client must not be able to rename itself to 'Scry App' via deviceLabel.
       const spoofAttempt = await call(host.channel.socketPath, host.service.caCertificatePEM, cli.certPEM, cli.keyPEM, {
         op: 'projects', deviceLabel: 'Scry App 0.2.250'
       })
@@ -226,7 +222,6 @@ describe('daemon execution target routing via App bridge', () => {
       })
       expect(cliPollAfter).toEqual({ error: 'execution_target_bridge_unauthorized' })
 
-      // Network phone gets unsupported_op on network endpoint.
       const phoneNet = await callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, {
         op: 'executionTargetWork', waitMs: 0
       })
@@ -251,13 +246,11 @@ describe('daemon execution target routing via App bridge', () => {
       const work = await workPromise
       expect(work.calls).toHaveLength(1)
 
-      // Destroy the App socket mid-call without replying: call must fail immediately, not after 10 s.
       const started = Date.now()
       appPoll.destroy()
       await expect(reqPromise).resolves.toEqual({ error: 'execution_target_gateway_offline' })
       expect(Date.now() - started).toBeLessThan(2_000)
 
-      // Reconnect App and verify phone revocation mid-call still rejects with device_not_authorized.
       const appPoll2 = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
       const appReply2 = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
       try {
@@ -300,10 +293,8 @@ describe('daemon execution target routing via App bridge', () => {
       })
       const work1 = await work1Promise
       expect(work1.calls).toHaveLength(1)
-      // Do not reply -> times out cleanly.
       await expect(req1Promise).resolves.toEqual({ error: 'execution_target_timeout' })
 
-      // Oversized result within wire cap is rejected by bridge immediately (not waiting for timeout).
       const work2Promise = appPoll.request({ op: 'executionTargetWork', waitMs: 5_000 })
       const req2Promise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, {
         op: 'target',
@@ -334,10 +325,7 @@ describe('daemon execution target routing via App bridge', () => {
     const appPoll1 = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
     const appReply = await openKeepAliveSocket(host.channel.socketPath, host.service.caCertificatePEM, app.certPEM, app.keyPEM)
     try {
-      // 1. Only targetWork socket closes while control socket (appReply) stays open:
-      // dead poll must NOT steal the next call; replacement poll receives it immediately.
       const deadWork = appPoll1.request({ op: 'executionTargetWork', waitMs: 5_000 }).catch(() => 'closed')
-      // Give the server a tick to register poll #1 before tearing down only appPoll1.
       await new Promise((r) => setTimeout(r, 30))
       appPoll1.destroy()
       await deadWork
@@ -362,7 +350,6 @@ describe('daemon execution target routing via App bridge', () => {
           executionTarget: { id: TARGET.id, binding: TARGET.binding }
         })
 
-        // 2. App disconnects completely mid-discovery -> discovery returns gateway-only targets: [] without error.
         const discWorkPromise = appPoll2.request({ op: 'executionTargetWork', waitMs: 5_000 })
         const discPromise = callTcp(port, host.service.caCertificatePEM, phone.certPEM, phone.keyPEM, { op: 'executionTargets' })
         const discWork = await discWorkPromise

@@ -48,18 +48,10 @@ import { rememberPiCatalogPrices } from '../main/db-model-prices'
 
 export type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 
-/**
- * Build the same run and host assemblies in a plain Node process. Native UI
- * capabilities are deliberately absent: tool panels return unavailable envelopes,
- * outbound desktop execution is omitted, and shell/session mutation calls fail with
- * named capability errors rather than pretending they succeeded.
- */
 export async function createDaemonHostProcess(options: DaemonHostProcessOptions): Promise<DaemonHostProcess> {
   const log = options.log ?? ((line: string) => { process.stdout.write(`${line}\n`) })
   configureRecorderCliRuntime({ resourcesPath: options.resourcesPath, requirePrivateCli: options.isPackaged })
   configureStorage({ userDataDir: options.userDataDir, appPath: options.appPath })
-  // Same file the App writes: the two clocks are aligned by performance.timeOrigin,
-  // so one run's stages can be read back across both processes.
   configureRunStageTiming(options.userDataDir)
   initDb()
 
@@ -85,7 +77,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
   })
-  // 历史轮次的金额在启动时就用本机 Pi 目录的单价补上，不要求先跑一轮。
+  // 启动时缓存本机 Pi 目录中可用的单价，供读取历史轮次时估算费用，无需先跑一轮。
   rememberPiCatalogPrices(workspace.homeDir)
   const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink, log)
   const terminal = createDaemonTerminalService({
@@ -113,8 +105,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     authority: () => userDataAuthority
   })
 
-  // The conversation service records its sends as ledger intents (P3-conversation-send.md);
-  // the host service exists only later, so the submit resolves it per call.
   const conversationSend = createDaemonConversationSend({
     submit: (peer, input) => {
       if (!remoteHostService) throw new Error('daemon_host_not_ready')
@@ -130,12 +120,10 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     publishDataUpdated: publishData,
     unsettledRuns: () => pipeline.runs.unsettledStates(),
     getProviderRegistry: () => providers.providerRegistry,
-    // Built below, once the history cache it invalidates exists; resolved per call.
     forkManagedConversation: (input) => {
       if (!forkOperations) throw new Error('daemon_capability_unavailable:fork-session')
       return forkOperations.forkManagedConversation(input)
     },
-    // Only the conversation service starts runs from the catalog, always with a launch.
     startAppRun: (request, startOptions) => startOptions?.managedConversation
       ? conversationSend.startAppRun(request, { managedConversation: startOptions.managedConversation })
       : Promise.reject(new Error('daemon_catalog_start_requires_conversation')),
@@ -280,8 +268,6 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     shellEnvironment: warmShellEnv,
     ...bridgedWorkbenchShellInputs(targetBridge.shellOps),
     historyHandlers: createRemoteHistoryHandlers(runtime, options.userDataDir),
-    // Omit every source. HostController returns explicit unavailable envelopes with
-    // reasons for analytics, LLM performance and MCP trust.
     toolPanels: undefined,
     managedLaunches: conversationSend.launches,
     onRunActivity: (runId) => publishHint({ kind: 'run', runId }),
@@ -322,16 +308,11 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     }),
     createOutputStore: options.createOutputStore ?? ((directory) => RunOutputWorkerStore.create(
       directory,
-      // This expression stays in the daemon entry (out/main/daemon.js), while the
-      // worker is another top-level main entry beside it. Supplying it avoids the
-      // worker module's default URL, which resolves from its shared chunks file.
       new URL('./run-output-file-worker.js', import.meta.url)
     ))
   })
   remoteHostService = service
   await service.start()
-  // The App's own endpoint: same controller and TLS materials, marked as the local
-  // transport so a locally enrolled grant cannot be replayed over the network.
   const identity = buildIdentity(options.appVersion)
   authority.startImport()
   void authority.importComplete.then(() => {
@@ -365,18 +346,14 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       disposed = true
       isShuttingDown = true
       startupManagedRecovery = Promise.resolve()
-      // A parked App long poll answers now instead of holding the channel open.
       authority.subscribeHub.close()
       targetBridge.close()
-      // Shells end with the daemon too; their recordings are finished on the way.
       await terminal.dispose()
       await adminSocket?.close()
       await enrollSocket.close()
       await channel.close()
       await localHost.close()
       await service.dispose()
-      // Close shadow first so pending bodies flush and the EXCLUSIVE SQLite lock releases
-      // immediately even if a pooled provider process is slow to exit; bound provider dispose.
       await authority.close()
       await providers.providerSessions.closeAll()
       await disposeProviderRegistryBounded(providers.providerRegistry, options.providerDisposeTimeoutMs ?? 5_000, log)

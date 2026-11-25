@@ -6,12 +6,10 @@ import NIOTLS
 // `keepAlive` marker and are written immediately; the host runs them
 // concurrently and each reply echoes its id, so a long-poll no longer holds the
 // lane and one tunnel replaces the separate control/watch/status tunnels.
-//
 // Failure semantics match LaneHandler: a request whose bytes were written is
 // `lost` when the tunnel fails (the host may have acted on it); one still
 // queued before the inner handshake is `notSent`. Cancelling one request only
 // forgets it; the tunnel and the other requests continue.
-//
 // All mutable state is confined to the channel's event loop, except the id
 // counter and the activity clock, which are lock-protected.
 final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @unchecked Sendable {
@@ -102,7 +100,6 @@ final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @uncheck
       ready.succeed(())
       return
     }
-    // A relay leg that died silently never answers the ClientHello.
     handshakeDeadline = context.eventLoop.scheduleTask(in: handshakeTimeout) { [self] in
       fail(RelayTransportError.timedOut(stage: "lane-handshake"))
       channel.close(promise: nil)
@@ -188,7 +185,6 @@ final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @uncheck
     let error = RelayTransportError.timedOut(stage: entry.fatalOnTimeout ? "mux-probe" : "mux-response")
     entry.result.fail(LaneFailure.lost(error))
     if entry.fatalOnTimeout {
-      // Not even a ping came back: the tunnel is dead, not merely busy.
       fail(error)
       channel.close(promise: nil)
       return
@@ -217,7 +213,6 @@ final class MuxHandler: ChannelInboundHandler, RemovableChannelHandler, @uncheck
       }
       guard let current = pending[id] else { continue }
       if let onItem = current.onItem, Self.isStreamItem(line, id: id), line.count <= current.limit {
-        // The id stays open; its deadline was re-armed by this read.
         onItem(line)
         continue
       }

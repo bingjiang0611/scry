@@ -161,10 +161,6 @@ export function deleteSessionInDb(
   return { existed, redactedEvents }
 }
 
-/**
- * data §4.8: prune events older than `olderThanAt` while retaining the latest event per stream
- * and updating `pruned_through` in the same transaction. Receipts are NEVER pruned.
- */
 export function pruneEventsInDb(
   db: Database.Database,
   olderThanAt: number,
@@ -196,7 +192,6 @@ export function pruneEventsInDb(
   return { deletedEvents, prunedThrough }
 }
 
-/** Verifies that replaying all events from empty equals online projections (plan §10). */
 export function verifyReplayConsistencyInDb(
   db: Database.Database,
   events: OrchestrationEventRow[]
@@ -222,10 +217,6 @@ export function verifyReplayConsistencyInDb(
   }
 }
 
-/**
- * core §2.5 + R5: tightening-only stop bypasses the storage fence without touching SQLite
- * and cascades along in-memory `RunRegistryState.parentRunId` edges.
- */
 export function stopRunBypassingFenceInRegistry<
   State extends RunRegistryState,
   Control extends RunRegistryControl

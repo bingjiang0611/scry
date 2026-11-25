@@ -12,11 +12,6 @@ interface CachedConversationTurns {
 
 export type TurnOrdinalResolver = (sessionKey: string, runId: string) => number | undefined
 
-/**
- * Resolves the authoritative H3 turn ordinal for `(conversationId, runId)` directly from
- * `<userDataDir>/conversations/<conversationId>.json` (cached by mtime + size).
- * Never synthesizes ordinals from shadow's `MAX(ordinal)+1`.
- */
 export function createConversationOrdinalResolver(userDataDir: string): TurnOrdinalResolver {
   const conversationsDir = join(userDataDir, 'conversations')
   const cache = new Map<string, CachedConversationTurns>()

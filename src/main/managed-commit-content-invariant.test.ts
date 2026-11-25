@@ -83,7 +83,6 @@ describe('managed commit content invariant', () => {
     expect(output.contentRef).toBeUndefined()
     expect(record.tools.omissionReason).toContain(CONTENT_MISSING_REASON)
 
-    // 同一份旧 handoff 再走一次恢复：命中 duplicate，而不是因为“表示不同”抛错。
     const retry = await commitHandoff(mode.enablement, root, mangled)
     expect(retry).toMatchObject({ status: 'duplicate', recordId: committed.recordId })
   })

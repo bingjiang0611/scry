@@ -115,7 +115,6 @@ export function summarizeSwitches(scenario, switches) {
     || item.mode !== 'native-click' || item.overview !== 'visible')
   const nativeClick = switches.filter(item => item.mode === 'native-click').length
   const overviewVisible = switches.filter(item => item.overview === 'visible').length
-  // Re-clicking the already selected row is not a switch: adjacent targets must differ.
   const adjacentRepeats = switches.filter((item, index) => index > 0 && item.sessionId === switches[index - 1].sessionId).length
   return {
     status: switches.length === scenario.switches && nativeClick === scenario.switches

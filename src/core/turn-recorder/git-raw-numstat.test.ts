@@ -6,9 +6,6 @@ import { promisify } from 'node:util'
 import { afterAll, expect, it } from 'vitest'
 import { parseNameStatus, parseNumstat, parseRawNumstat } from './git-patches.js'
 
-// `git diff --raw --numstat -z` is one process with two output sections. The combined parser must
-// return exactly what the previous `--name-status` + `--numstat` pair returned, including for
-// hostile path names, binaries, mode and type changes and gitlinks.
 
 const exec = promisify(execFile)
 const env = {
@@ -51,7 +48,6 @@ it('parses the raw section of the combined -z output', () => {
     { path: join(repoRoot, 'mod.txt'), added: 1, deleted: 0, change: 'modified' },
     { path: join(repoRoot, 'sp ace\nnewline.txt'), added: 1, deleted: 0, change: 'added' },
     { path: join(repoRoot, 'gone.txt'), added: 0, deleted: 1, change: 'deleted' },
-    // A type change keeps the previous mapping: no `change` field.
     { path: join(repoRoot, 'flip'), added: 0, deleted: 0 },
     { path: join(repoRoot, 'vendor/sub'), added: 1, deleted: 0, change: 'modified' },
     { path: join(repoRoot, 'bin.dat'), added: 0, deleted: 0, binary: true, change: 'modified' }
@@ -106,6 +102,5 @@ it('combined parse matches the separate name-status and numstat calls on a real 
   expect(actual.filter((file) => file.change === 'added').length).toBe(1)
   expect(actual.filter((file) => file.change === 'deleted').length).toBe(1)
   expect(actual.filter((file) => file.binary === true).length).toBe(1)
-  // File -> symlink is a type change, so it carries no `change` field in either parser.
   expect(actual.find((file) => file.path === join(root, 'flip'))?.change).toBeUndefined()
 }, 60_000)

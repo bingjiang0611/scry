@@ -69,7 +69,6 @@ extension G0Transport {
           try channel.pipeline.syncOperations.addHandler(ProbeHandler(request: request, result: result))
         }.get()
       } catch {
-        // Handler install failed before ProbeHandler could complete the promise.
         result.fail(error)
         throw error
       }

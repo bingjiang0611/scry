@@ -64,7 +64,6 @@ const runtime = () => createTraceRuntime({
   mainEventId: (prefix, runId) => `${prefix}:${runId}:${++seq}`
 })
 const run = (): ActiveRun => ({ runId: RUN, providerId: 'claude', userText: 'task', items: [], done: false })
-// Lightweight events that the append helper pushes without scanning the list.
 const note = (index: number): TraceEvent => ({ id: `n-${index}`, ts: 'T', runId: RUN, kind: 'harness', stage: 'note' })
 
 describe('revision store bounds on stamped arrays', () => {
@@ -87,7 +86,6 @@ describe('revision store bounds on stamped arrays', () => {
     const oracleEvicted = oracle.observe(RUN, second, { revision: oracleSnapshot.revision, count: MAX_TRACKED_CHANGES })
     expect(evicted.reset).toBe(true)
     expect(oracleEvicted.reset).toBe(true)
-    // Only index 0 moved: the two projections are byte-identical everywhere else.
     expect(second[0].stage).toBe('note-updated')
     expect(first[0].stage).toBe('note')
     expect(JSON.stringify(second.slice(1))).toBe(JSON.stringify(first.slice(1)))

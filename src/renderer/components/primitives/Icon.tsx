@@ -1,4 +1,3 @@
-// 蓝本图标集（lucide 风格，1.6px stroke、viewBox 24、currentColor）。集中一处，全局复用。
 // path 来自高保真蓝本的 <svg class="ico">，照搬不改；新增图标也从蓝本取。
 import type { ReactNode } from 'react'
 

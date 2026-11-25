@@ -1,4 +1,3 @@
-// Agent 运行控件选择器（审批方式等）。
 import { useEffect, useId, useRef } from 'react'
 import { usePickerOpen, type PickerOpenProps, type RunControlSelectOption } from './picker-state'
 export { ModelEffortPicker } from './ModelEffortPicker'

@@ -75,7 +75,6 @@ async function fixture() {
   return { root, dataRoot, sessionRoot, inbox, failed, queue }
 }
 
-// Use production recover/locking/storage, faulting only the specific file operation under test.
 describe('recorder inbox failure isolation', () => {
   it('preserves a failed apply verbatim and still applies the next arrival', async () => {
     const f = await fixture()
@@ -113,7 +112,6 @@ describe('recorder inbox failure isolation', () => {
     expect(await readFile(join(f.failed, first.name), 'utf8')).toBe(first.source)
     expect((await readHealth(f.dataRoot)).droppedEvents).toBe(1)
     expect((await recorderPendingHealth(f.dataRoot)).pendingCount).toBe(1)
-    // Exhausted evidence remains visible but must not keep an otherwise idle daemon alive forever.
     expect(await recorderHasOpenTurn(f.dataRoot)).toBe(false)
   })
 
@@ -148,7 +146,6 @@ describe('recorder inbox failure isolation', () => {
       checks: expect.arrayContaining([expect.objectContaining({ id: 'turns.pending', status: 'warn' })])
     })
 
-    // Skipping one unreadable sidecar must not hide a later, actually retryable event.
     await f.queue(2, 'retryable arrival')
     expect(await recorderHasOpenTurn(f.dataRoot)).toBe(true)
     faults.readPath = ''

@@ -8,11 +8,6 @@ import { compactModelTiming, turnTimeline, summarizeTurnRecords, summarizeIdenti
 import { readRecorderContentPage } from '../core/turn-recorder/content-store.js'
 
 
-/**
- * `.scry/records` 里还会躺着中断写盘留下的 `.tmp`。按目录枚举记录的命令必须说清楚自己跳过了什么：
- * 悄悄少一条记录和“压根没有这条记录”看起来一样。名字合规但读不出来的文件不在这里处理——那种
- * 情况严格读取会直接失败，因为损坏的证据不能被当成“不存在”。
- */
 async function reportSkippedNames(dataRoot: string): Promise<void> {
   const skipped: SkippedRecordFile[] = await skippedRecordFiles(dataRoot)
   if (skipped.length === 0) return
@@ -48,9 +43,7 @@ export async function recordsCommand(args: ParsedArgs): Promise<number> {
   if (!before) throw new Error('--before is required, e.g. --before 30d')
   const cutoff = cutoffFrom(before)
   await reportSkippedNames(enablement.dataRoot)
-  // 严格读取：一条读不出来的记录就足够让归档停下，移动周边记录只会让缺口无法解释。
   const records = await listRecords(enablement.dataRoot)
-  // Only a contiguous prefix may go: an interior hole cannot be explained by an archive floor.
   const candidates: typeof records = []
   for (const record of records) {
     if (record.completedAt >= cutoff) break
@@ -213,14 +206,7 @@ export async function turnsCommand(args: ParsedArgs): Promise<number> {
     const result = await verifyStore(dataRoot, ({ provider, turnRoleStatus, turnRole, taskLinkStatus }) => {
       identities.push({ provider, turnRoleStatus, turnRole, taskLinkStatus })
     })
-    // Integrity (sequence/dedup/readability) alone decides `ok` and the exit code — that contract
-    // is frozen for team CI. Identity coverage and unsettled open turns are advisory: `turns verify`
-    // used to answer only "are the record files internally consistent?", which stays silent about
-    // records that are intact yet carry unobserved model/role/task identity, and about a turn that
-    // was interrupted before it sealed. Those are surfaced without changing the pass/fail contract.
     const health = await readHealth(dataRoot).catch(() => null)
-    // A failed record read makes identity coverage unknown, not a partial success. Sequence
-    // errors alone do not: readable records still carry identity evidence, as before.
     const identity = identities.length > 0 && identities.length === result.records
       ? summarizeIdentity(identities)
       : null
@@ -234,7 +220,6 @@ export async function turnsCommand(args: ParsedArgs): Promise<number> {
       advisories.push(`turns without a record yet: ${health.openTurns} open, ${health.pendingCount} awaiting finalization` +
         (health.staleOpenTurns > 0 ? `; ${health.staleOpenTurns} open turn(s) silent past the stale window` : ''))
     }
-    // `maxSequence` is internal allocation evidence for doctor; keep this frozen CLI shape unchanged.
     const { maxSequence: _maxSequence, ...visible } = result
     print({
       ...visible,

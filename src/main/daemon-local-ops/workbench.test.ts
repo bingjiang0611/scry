@@ -7,9 +7,6 @@ import { laneForRequest, laneOutcomeUnknown, replayableRequest } from '../remote
 import { DESKTOP_WORKBENCH_READ_METHODS } from '../../shared/desktop-workbench'
 import { WORKBENCH_FORWARDS, installWorkbenchWindowCwd } from './workbench'
 
-// The App's workbench channels in daemon mode: each builds the `desktopWorkbench` request
-// paired devices already send, bound to what main's in-process handler was bound to, and
-// maps the reply back to what that handler returned.
 
 const rows = (JSON.parse(readFileSync(join(process.cwd(), 'scripts', 'daemon-ipc-routing-workbench.json'), 'utf8')) as {
   channels: Array<{ channel: string; route: string; op: string; surface: string; method: string }>
@@ -90,7 +87,6 @@ describe('workbench forwards', () => {
     expect(entry.result!({ workbench: OPERATION }, [{ repositoryId: REPO }])).toEqual(OPERATION)
     expect(() => entry.result!({ workbench: { id: 'op-1' } }, [{ repositoryId: REPO }])).toThrow('invalid_desktop_workbench_response')
     expect(() => entry.result!({}, [{ repositoryId: REPO }])).toThrow('invalid_desktop_workbench_response')
-    // main's save handlers resolve with nothing; the wire carries that as null.
     expect(WORKBENCH_FORWARDS['sourceControl:saveDraft']!.result!({ workbench: null }, [{ repositoryId: REPO }])).toBeUndefined()
     expect(WORKBENCH_FORWARDS['sourceControl:loadDraft']!.result!({ workbench: null }, [{ repositoryId: REPO }])).toBeNull()
     const entries = { entries: [{ name: 'a.txt', path: 'a.txt', kind: 'file', mtimeMs: 1 }], truncated: false }

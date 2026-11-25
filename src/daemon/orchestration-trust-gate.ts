@@ -6,7 +6,6 @@ import { providerMcpConfigPaths } from '../main/mcp-config'
 import { buildMcpExecutionSnapshot, type McpExecutionSnapshot } from '../main/mcp-execution-trust'
 import type { ProviderId } from '../shared/provider'
 
-// Aligns with `run-admission.ts:199` (pi skips repo MCP execution authorization).
 const TRUST_GATE_PROVIDERS = new Set<ProviderId>(['claude', 'codex', 'qoder', 'opencode', 'antigravity'])
 const MAX_PREPARED_ENTRIES = 4_096
 const MAX_CONTEXT_CACHE = 256
@@ -16,9 +15,7 @@ interface CachedTrustSnapshot {
   cwd: string
   fingerprint: string
   errors: string[]
-  /** Set only when a target used bare PATH lookup; absolute commands do not invalidate on PATH warm-up. */
   pathUsed: string | null
-  /** Candidate config paths & resolved executables + dual link/target stat stamps. */
   stamps: Map<string, string>
 }
 
@@ -30,11 +27,6 @@ interface PreparedTrustEntry {
   stamps: Map<string, string>
 }
 
-/**
- * Records BOTH symlink metadata (`lstatSync`) AND resolved target metadata (`realpathSync` + `statSync`)
- * so modifying a symlink target in place OR retargeting/breaking a symlink always invalidates the cache
- * (W9 Round-3 Must-Fix 3).
- */
 export function fileStatStamp(filePath: string): string {
   try {
     const link = lstatSync(filePath)
@@ -111,15 +103,6 @@ function canonicalizeCwd(cwd: string): string {
   }
 }
 
-/**
- * Aligns P4-2 `beforeDispatch` MCP trust gate with `run-admission.ts` / `bootstrap/trust.ts`:
- * - Skips `pi` (`run-admission.ts:199`) and uses `shellEnv()` (`bootstrap/trust.ts:203`).
- * - Caches verified MCP snapshots ACROSS runs keyed by `(providerId, canonicalCwd, settingSources, PATH)`
- *   validated by dual `lstatSync` + `statSync`/`realpathSync` stamps on every candidate config file and
- *   executable binary (W9 Round-3 Must-Fixes 2 & 3). Unchanged configs/executables skip redundant SHA-256
- *   hashing (~0.2 ms instead of ~92 ms for a 125 MB binary); any config, symlink, target, or executable
- *   change immediately misses the cache, re-hashes, and fails closed.
- */
 export class AuthorityMcpTrustGate {
   readonly #contextCache = new Map<string, CachedTrustSnapshot>()
   readonly #prepared = new Map<string, PreparedTrustEntry>()
@@ -130,11 +113,9 @@ export class AuthorityMcpTrustGate {
   constructor(options?: { buildSnapshot?: typeof buildMcpExecutionSnapshot; getEnv?: () => NodeJS.ProcessEnv }) {
     this.#buildSnapshot = options?.buildSnapshot ?? buildMcpExecutionSnapshot
     this.#getEnv = options?.getEnv ?? shellEnv
-    // Eagerly warm login-shell PATH so PATH-resolved MCP commands don't miss cache on run #2.
     if (!options?.getEnv) void warmShellEnv()
   }
 
-  /** Test/diagnostic counter: how many times full SHA-256 snapshot hashing actually ran. */
   rehashCount(): number {
     return this.#rehashCount
   }

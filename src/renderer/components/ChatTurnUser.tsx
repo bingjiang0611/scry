@@ -1,4 +1,3 @@
-// 对话流里「一轮」的渲染（蓝本 chat.html）：用户气泡 / who(头像+runid) / 思考 / 工具卡 / 本轮文件 / turn-footer。
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
@@ -163,7 +162,6 @@ function UserMessageImpl({
     )
   }
 
-  // 普通用户输入 / 命令 → 蓝色右对齐气泡（命令走气泡内 .slash chip）
   const lines = body ? body.split('\n') : []
   const long = lines.length > 12 || body.length > 800
   const shown = long && !expanded ? lines.slice(0, 10).join('\n') : body

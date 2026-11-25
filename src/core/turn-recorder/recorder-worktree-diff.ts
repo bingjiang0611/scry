@@ -10,12 +10,6 @@ import {
   type RecorderOpenTurnState as OpenTurnState
 } from './runtime-state.js'
 
-/**
- * 本轮新建 worktree 的 diff。发现只读文件系统（`.git/worktrees/*`、reflog、index 是否存在），
- * 基线只来自创建记录的提交；没有可信基线时只报 unavailable + 原因，不生成 diff。
- *
- * 只由收尾调用：hook 热路径不新增任何调用。
- */
 export async function newWorktreeTurnDiffs(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   open: OpenTurnState,

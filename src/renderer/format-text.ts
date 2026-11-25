@@ -1,4 +1,3 @@
-// 渲染层纯文本：路径/数字/时间/标签的显示格式，以及用户消息原文解析（斜杠命令与 skill 注入标签）。
 export function basename(p: string): string {
   return p.split('/').filter(Boolean).pop() ?? p
 }

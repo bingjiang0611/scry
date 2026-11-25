@@ -35,12 +35,6 @@ function usageTrace(payload: Record<string, unknown>, runId: string, at: string)
   }
 }
 
-/**
- * `context_usage: { context_tokens, context_window, model, provider? }` is the integration's
- * reading of the host's own context meter at turn end. Context occupancy only means something
- * against a named model's window, so all three required fields must be present and valid;
- * anything less is dropped rather than paired with a guessed window.
- */
 function contextUsageInput(payload: Record<string, unknown>): Partial<TraceEvent> {
   if (subagentScopedPayload(payload)) return {}
   const context = nestedRecord(payload, 'context_usage')
@@ -65,7 +59,6 @@ function contextUsageInput(payload: Record<string, unknown>): Partial<TraceEvent
 }
 
 
-/** Recorder-owned marker set only after reading the host's own rollout metadata; never trusted from input. */
 function hookDeliveryEvent(args: {
   event: string
   payload: Record<string, unknown>
@@ -113,7 +106,6 @@ function limitationMetadata(limitations: CaptureLimitation[]): { scryCaptureLimi
   return limitations.length > 0 ? { scryCaptureLimitations: limitations } : undefined
 }
 
-/** Exported for contract tests: payload -> trace events must stay a pure mapping. */
 export function lifecycleTraceEvents(args: {
   provider: ProviderId
   event: string
@@ -234,9 +226,6 @@ export function lifecycleTraceEvents(args: {
     })
   }
   if (!subagentScopedPayload(args.payload) && 'turn_role' in args.payload) {
-    // Same contract shape as `task_context`: an explicit, bounded, host-supplied
-    // structure or nothing. There is deliberately no text heuristic here — a
-    // fixed approval-history prefix is a diagnostic, not an identity.
     const role = nestedRecord(args.payload, 'turn_role')
     const bounded = (value: unknown, max: number) =>
       typeof value === 'string' && new RegExp(`^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,${max}}$`).test(value)
@@ -268,7 +257,6 @@ export function lifecycleTraceEvents(args: {
       } : { invalid: true }
     })
   }
-  // Pi 与 OpenCode 的插件把 Provider 终态错误放在终态事件载荷里；其他 Provider 的错误来自 transcript。
   const providerError = (args.provider === 'pi' || args.provider === 'opencode') && END_EVENTS.has(args.event)
     ? stringAt(args.payload, 'error')
     : undefined

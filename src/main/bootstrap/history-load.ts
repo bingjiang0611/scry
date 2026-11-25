@@ -44,8 +44,6 @@ export interface LoadSessionDependencies {
   homeDir: string
   userDataDir: string
   isShuttingDown: () => boolean
-  // The window's session selection: applied in process, or reported with the page when
-  // the daemon loads it for an App that applies it itself (`reportSelection`).
   applySelection: (selection: SessionSelection) => void
   reportSelection?: boolean
   pageWithHookCommands: (page: SessionHistoryPage, hookConfig: ReturnType<typeof loadClaudeHookConfig> | null) => SessionHistoryPage
@@ -113,8 +111,6 @@ export function registerLoadSessionHandler(deps: LoadSessionDependencies): void 
         userDataDir, cwd, sessionId: payload.externalSessionId, providerId: payload.providerId,
         agentProfileId: payload.agentProfileId, request, transcriptPath: fp, runs: matchingRuns, signal
       })
-      // Split the read from the per-turn content persistence: both used to land in one `archive`
-      // checkpoint, so a slow load could not say whether the archive read or its writes cost the time.
       perf.mark('archive_read', {
         archiveTurns: archived?.turns.length ?? 0,
         archiveTurnFilesRead: archivePage?.turnFilesRead ?? archived?.turns.length ?? 0

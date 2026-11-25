@@ -5,13 +5,7 @@ import { recoverRecorder } from '../recorder'
 import { recorderOpenPath, recorderSessionRoot } from '../runtime-state'
 import { applySessionCaptureHook } from '../session-capture'
 
-/**
- * The transcript rows and hook payloads of a Qoder turn that keeps working after its Stop: the native
- * transcript folds the wake into the interrupted turn while the next `UserPromptSubmit` arrives with
- * its own request id and a `<task-notification>` prompt.
- */
 export const session = 'qoder-continuation'
-/** The silence window a held Stop waits out before recovery publishes it. */
 export const silence = 181_000
 
 export const user = (promptId: string, content: string, extra: Record<string, unknown> = {}) => JSON.stringify({
@@ -41,17 +35,11 @@ export const start = (transcript: string, requestSetId: string, prompt: string, 
   session_id: session, cwd: '/tmp', transcript_path: transcript,
   request_set_id: requestSetId, prompt, timestamp, hook_event_name: 'UserPromptSubmit'
 })
-// Real Qoder Stop hooks carry no timestamp of their own, only the request they terminate.
 export const stop = (transcript: string) => ({
   session_id: session, cwd: '/tmp', transcript_path: transcript,
   stop_hook_active: false, hook_event_name: 'Stop'
 })
 
-/**
- * A captured session delivers its events through the capture path, not as ordinary Provider hooks:
- * everything it does is inside the claim, so a test must not depend on whether ordinary hooks are
- * enabled for that workspace.
- */
 export const captureHook = async (root: string, event: string, payload: Record<string, unknown>) =>
   applySessionCaptureHook({
     workspace: root, provider: 'qoder', event, sessionId: session, dataDir: join(root, '.scry'), payload
@@ -60,7 +48,6 @@ export const captureHook = async (root: string, event: string, payload: Record<s
 const openStatePath = (root: string) =>
   recorderOpenPath(recorderSessionRoot(join(root, '.scry'), 'qoder', session))
 
-/** Recovery only seals a held Stop once the silence window has passed. */
 export const sealQuietSegment = async (root: string): Promise<void> => {
   const path = openStatePath(root)
   const state = JSON.parse(await readFile(path, 'utf8')) as { deferredTerminalAt?: string }

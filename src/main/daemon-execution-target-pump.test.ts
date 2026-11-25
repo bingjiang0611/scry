@@ -106,7 +106,6 @@ describe('DaemonExecutionTargetPump', () => {
     const pump = new DaemonExecutionTargetPump({ source, client: () => client, waitMs: 1_000 })
     pump.start()
     await firstStartedPromise
-    // c2 (executionTargets) must complete while c1 (watch) is still blocked!
     await vi.waitFor(() => expect(results.some((r) => r.callId === 'c2')).toBe(true))
     releaseFirst?.()
     await allResults

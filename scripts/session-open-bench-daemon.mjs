@@ -1,6 +1,5 @@
 // Daemon lifecycle for `session-open-bench.mjs --daemon`. Loaded only in daemon mode, so
 // the default (gated) bench never imports the B4-V helpers it relies on.
-//
 // The App launches the supervisor detached, and the supervisor launches the daemon; both
 // outlive the App by design. This bench caused them, so it stops them itself, by the
 // identity their state directory records (daemon.lock pid + start time) and by the
@@ -80,7 +79,6 @@ export async function stopBenchDaemon(userData, tree) {
   return evidence
 }
 
-/** Read-only failure evidence: the daemon's processes and the end of its log. */
 export function daemonFailureEvidence(userData) {
   try {
     const fixture = fixtureFor(userData)

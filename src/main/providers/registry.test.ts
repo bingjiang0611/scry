@@ -222,7 +222,6 @@ describe('ProviderRegistry', () => {
       capabilities: { skills: 'none', mcp: 'none', commands: 'none', account: 'none' },
       health: expect.objectContaining({ state: 'unavailable', lastError: expect.stringContaining('codex home 不可读') })
     })
-    // 影子快照不得被读成「用户主动禁用」
     expect(descriptors.find((entry) => entry.id === 'codex')?.disabledReason).toBeUndefined()
   })
 
@@ -257,7 +256,6 @@ describe('ProviderRegistry', () => {
     const [descriptor] = await registry.describe()
     expect(seen).toEqual([['codex', 'codex-cli 0.160.1']])
     expect(descriptor.compatibility).toMatchObject({ status: 'supported', observedVersion: '0.160.1' })
-    // 默认不配置时不凭空附加字段
     expect((await new ProviderRegistry([versioned]).describe())[0].compatibility).toBeUndefined()
   })
 })

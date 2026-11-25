@@ -49,7 +49,6 @@ describe('renderer Steer queue contract', () => {
 
     expect(moved.queue.map((item) => item.text)).toEqual(['second', 'first edited'])
     expect(moved.next?.messageId).toBe(moved.queue[1].messageId)
-    // 新 id 是必要的：旧 id 上的 rejected 证据不能审到一条新消息上。
     expect(moved.next?.messageId).not.toBe(queue[0].messageId)
     expect(moved.next?.steer).toBeUndefined()
     expect(moved.next?.attachments.map((attachment) => attachment.name)).toEqual(['a.png'])
@@ -74,7 +73,6 @@ describe('renderer Steer queue contract', () => {
     expect(nextDrainableQueuedPrompt(queue, 'b')?.messageId).toBe('a')
     expect(nextDrainableQueuedPrompt(queue, null)?.messageId).toBe('a')
     expect(nextDrainableQueuedPrompt([], null)).toBeNull()
-    // 只剩编辑中的那条时宁可不出队，也不提前发未完成的编辑。
     expect(nextDrainableQueuedPrompt([prompt('a')], 'a')).toBeNull()
   })
 
@@ -111,7 +109,6 @@ describe('renderer Steer queue contract', () => {
     expect(canDismissUnknownSteer(unknown.steer, evidence.get('m'))).toBe(true)
     expect(isSteerRemovalBlocked(unknown.steer, evidence.get('m'))).toBe(false)
     expect(isSteerDrainBlocked(unknown.steer)).toBe(true)
-    // Stop and session cleanup must not silently dismiss uncertainty.
     expect(retainProtectedSteerPrompts([unknown], evidence, new Set())).toEqual([unknown])
     expect(removeQueuedPromptByMessageId([unknown, prompt('next')], 'm')).toEqual([prompt('next')])
     expect(evidence.get('m')?.status).toBe('unknown')
