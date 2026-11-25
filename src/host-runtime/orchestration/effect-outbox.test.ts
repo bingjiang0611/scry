@@ -199,3 +199,22 @@ it('R6: reclaims a claimed effect whose lease expired and leaves a live lease al
       .toEqual({ last_error: 'lease_expired' })
   })
 })
+
+// R7: a session's run start could be parked (deferred, or leased by a worker that vanished) while a stop
+// for the *live* run waited behind it in the same queue. The stop must not queue behind a start.
+it('R7: a stop effect is claimable while the same session\'s start is still pending', () => {
+  withSink((sink) => {
+    const db = sink.handle.db
+    enqueue(sink, 'start-a', { sessionKey: 'sess-a', causationSeq: 1 })
+    db.prepare(
+      `INSERT INTO orch_outbox (effect_id, kind, policy, run_id, causation_seq, payload, state, session_key, available_at)
+       VALUES ('stop-a', 'provider.run.stop', 'process_bound', NULL, 2, '{}', 'pending', 'sess-a', ?)`
+    ).run(null)
+    // The start is parked out of reach; the stop must still be claimable.
+    db.prepare("UPDATE orch_outbox SET available_at = ? WHERE effect_id = 'start-a'").run(10_000)
+    const claimed = claimNextEffect({ db, owner: 'worker', now: 1 }).effect
+    expect(claimed?.effectId).toBe('stop-a')
+    // The start itself is still parked, and no other start of that session may overtake it.
+    expect(claimNextEffect({ db, owner: 'worker', now: 2 }).effect).toBeUndefined()
+  })
+})

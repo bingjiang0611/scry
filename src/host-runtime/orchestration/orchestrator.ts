@@ -317,8 +317,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             runId: p.runId,
             questionId: p.questionId,
             answerId: p.answerId,
-            ...(p.shadowOnly ? { shadowOnly: true } : {}),
-            ...(p.answerPayload ? { answerPayload: p.answerPayload } : {})
+            // R7: the daemon reads this payload to deliver the answer; it is never optional.
+            answerPayload: p.answerPayload,
+            ...(p.shadowOnly ? { shadowOnly: true } : {})
           },
           state: p.shadowOnly ? 'done' : 'pending',
           leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : null,

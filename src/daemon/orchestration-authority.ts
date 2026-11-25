@@ -349,7 +349,8 @@ function buildAuthorityRuntime<
         runId: resolvePersistedCanonical(input.runId),
         questionId: input.questionId,
         answerId: input.answerId,
-        answerSha256: input.answerSha256
+        answerSha256: input.answerSha256,
+        answerPayload: input.response
       })
       if (res.kind === 'rejected') {
         throw new RemoteInteractionError(res.reason)

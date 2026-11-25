@@ -113,10 +113,9 @@ export function claimNextEffect(input: {
            FROM orch_outbox o
            WHERE o.state = 'pending'
              AND (o.available_at IS NULL OR o.available_at <= :now)
-             AND (:kind IS NULL OR o.kind = :kind)
-             AND (:session IS NULL OR COALESCE(o.session_key,
-                   (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id)) = :session)
-             AND NOT EXISTS (
+             -- R7: only a run start needs same-session FIFO. A stop or an answer acts on a run that is
+             -- already live; waiting behind a parked start means a stuck session cannot be stopped.
+             AND (o.kind != 'provider.run.start' OR NOT EXISTS (
                SELECT 1 FROM orch_outbox earlier
                WHERE earlier.effect_id != o.effect_id
                  AND earlier.state IN ('pending', 'running')
@@ -125,7 +124,10 @@ export function claimNextEffect(input: {
                  AND COALESCE(earlier.session_key,
                        (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = earlier.run_id))
                      IS COALESCE(o.session_key, (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id))
-             )
+             ))
+             AND (:kind IS NULL OR o.kind = :kind)
+             AND (:session IS NULL OR COALESCE(o.session_key,
+                   (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id)) = :session)
            ORDER BY o.causation_seq ASC, o.effect_id ASC
            LIMIT 1
          )

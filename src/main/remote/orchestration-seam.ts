@@ -1,3 +1,4 @@
+import type { AgentQuestionResponse } from '../../shared/runtime'
 import type { LedgerStore, RunLifecycle } from './session-ledger'
 
 /**
@@ -139,6 +140,8 @@ export interface OrchestrationAuthorityHooks {
     questionId: string
     answerId: string
     answerSha256: string
+    /** R7: the answer the Provider must receive; the queued effect delivers exactly this. */
+    response: AgentQuestionResponse
   }): void
   /** Tightening-only stop: always stops live runs even during storage fence (core §2.5). */
   onRunStop(input: {

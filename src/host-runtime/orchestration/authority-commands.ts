@@ -100,7 +100,8 @@ export function answerQuestionWithSink(options: {
     questionId: string
     answerId: string
     answerSha256: string
-    answerPayload?: Record<string, unknown>
+    /** R7: the answer itself. Every caller must supply it or the queued effect has nothing to deliver. */
+    answerPayload: Record<string, unknown>
   }
 }) {
   const { sink, actor, clock, input } = options
@@ -110,7 +111,7 @@ export function answerQuestionWithSink(options: {
     answerId: input.answerId,
     answerSha256: input.answerSha256,
     answeredBy: actor.startsWith('peer:') ? actor : 'unavailable',
-    ...(input.answerPayload ? { answerPayload: input.answerPayload } : {})
+    answerPayload: input.answerPayload
   }
   return sink.execute({
     type: 'question.answer',

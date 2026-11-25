@@ -351,7 +351,7 @@ export class AuthorityEngine {
     questionId: string
     answerId: string
     answerSha256: string
-    answerPayload?: Record<string, unknown>
+    answerPayload: Record<string, unknown>
   }) {
     return answerQuestionWithSink({
       sink: this.sink,

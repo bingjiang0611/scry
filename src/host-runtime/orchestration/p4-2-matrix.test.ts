@@ -155,7 +155,8 @@ describe('P4-2 plan §10 test matrix: idempotency, pruning, out-of-order, eviden
           runId: s1.runId,
           questionId: 'q-ooo',
           answerId: 'ans-late',
-          answerSha256: 'b'.repeat(64)
+          answerSha256: 'b'.repeat(64),
+          answerPayload: { questionId: 'q-ooo', behavior: 'cancelled' }
         })
         expect(lateAnswer).toMatchObject({ kind: 'rejected', reason: 'illegal_transition', sticky: true })
 
