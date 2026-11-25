@@ -127,7 +127,8 @@ export function RoundScatter({ samples, model, metric, from, to, hours, color }:
         setActive((index) => event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1
           : Math.max(0, Math.min(points.length - 1, (index ?? 0) + (event.key === 'ArrowLeft' ? -1 : 1))))
       }}>
-      <text className="analytics-axis-unit" x={0} y={10}>{unit}</text>
+      {/* 单位写在绘图区内侧，避免和左上角第一个刻度标签叠在一起。 */}
+      <text className="analytics-axis-unit" x={L + 4} y={T + 10} textAnchor="start">{unit}</text>
       <g className="analytics-axis">{[0, max / 2, max].map((value) => <g key={value}>
         <line x1={L} x2={width - R} y1={y(value)} y2={y(value)} />
         <text x={L - 8} y={y(value) + 4} textAnchor="end">{Number.isInteger(value) ? value : value.toFixed(1)}</text>

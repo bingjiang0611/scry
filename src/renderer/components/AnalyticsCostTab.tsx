@@ -65,7 +65,8 @@ function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; m
           setActive((index) => event.key === 'Home' ? 0 : event.key === 'End' ? days.length - 1
             : Math.max(0, Math.min(days.length - 1, (index ?? 0) + (event.key === 'ArrowLeft' ? -1 : 1))))
         }}>
-        <text className="analytics-axis-unit" x={0} y={10}>{metric === 'cost' ? 'USD' : 'Token'}</text>
+        {/* 单位写在绘图区内侧，避免和左上角第一个刻度标签叠在一起。 */}
+        <text className="analytics-axis-unit" x={L + 4} y={T + 10} textAnchor="start">{metric === 'cost' ? 'USD' : 'Token'}</text>
         <g className="analytics-axis">
           {[0, max / 2, max].map((value) => <g key={value}>
             <line x1={L} x2={W - R} y1={y(value)} y2={y(value)} />

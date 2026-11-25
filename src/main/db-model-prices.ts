@@ -38,12 +38,24 @@ export function writePrices(connection: Database.Database, rows: readonly ModelP
   return rows.length
 }
 
+/** 只有单价真的变了才写；打开模型选择器会反复带同一份目录进来。 */
+export function changedPrices(existing: readonly ModelPrice[], incoming: readonly ModelPrice[]): ModelPrice[] {
+  const byId = new Map(existing.map((row) => [row.id, row]))
+  return incoming.filter((row) => {
+    const previous = byId.get(row.id)
+    return !previous || previous.currency !== row.currency ||
+      previous.inputPerMillion !== row.inputPerMillion || previous.outputPerMillion !== row.outputPerMillion ||
+      previous.cacheReadPerMillion !== row.cacheReadPerMillion || previous.cacheWritePerMillion !== row.cacheWritePerMillion ||
+      previous.reasoningPerMillion !== row.reasoningPerMillion
+  })
+}
+
 /** 目录读取是只读操作；记录价格失败只影响估算，不能让读取失败。 */
 export function rememberCatalogPrices(prices: readonly ModelPrice[] | undefined): void {
   if (!prices?.length) return
   try {
     if (!db) return
-    if (writePrices(db, prices) > 0) invalidateQueryCaches()
+    if (writePrices(db, changedPrices(currentModelPrices(db), prices)) > 0) invalidateQueryCaches()
   } catch (error) {
     console.warn('[scry] 模型目录价格未记录:', (error as Error)?.message)
   }
