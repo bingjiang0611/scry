@@ -1,13 +1,5 @@
-/* --------------------------------------------------------------------------
-   Blueprint convergence
-   The evidence prototype is deliberately dense: transcript 820px, dossier
-   360–400px, fixed graph lanes, and a narrow segment inspector. These scoped
-   rules replace the older dashboard/card proportions without changing data.
-   -------------------------------------------------------------------------- */
 
-/* Chat · stable transcript rhythm ------------------------------------------------ */
 
-/* transcript、零 turn 欢迎区、composer 共用同一条正文列：列宽与两侧 gutter 只在这里定义。 */
 .chat-body,
 .runtime-composer {
   --evidence-column: 880px;
@@ -166,7 +158,6 @@
   font-size: var(--text-sm);
 }
 
-/* 方案 C：整轮左轨 + 思考主线 + 工具组脚注（对话视图内的密度收敛） */
 .chat-body .turn-flow > .model-text { margin: 0; }
 .chat-body .tool-group-body {
   padding: 0 8px;
@@ -224,7 +215,6 @@
 .runtime-composer .send { width: 38px; height: 38px; min-height: 38px; border-radius: 50%; corner-shape: round; }
 .runtime-composer .send .ico { width: 15px; height: 15px; }
 .runtime-composer .stop { height: 36px; min-height: 36px; padding-inline: 8px; border-radius: var(--r-lg); font-size: var(--text-xs); }
-/* 运行状态条跟随本皮肤的紧凑刻度：停止键收成小药丸，和右侧圆形发送键呼应 */
 .runtime-composer .run-status { padding: 0 2px 8px; }
 .runtime-composer .run-status-stop { height: 28px; min-height: 28px; padding-inline: 12px; border-radius: var(--r-md); font-size: var(--text-xs); }
 .runtime-composer .run-status-stop .ico { width: 11px; height: 11px; }

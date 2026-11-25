@@ -141,7 +141,6 @@ describe('DesktopHostListeners', () => {
         minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
       })
       await once(socket, 'secureConnect')
-      // A device declares the run-channel version; the host refuses without it.
       socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, op: 'projects' }) + '\n')
       let response = ''
       for await (const chunk of socket) {

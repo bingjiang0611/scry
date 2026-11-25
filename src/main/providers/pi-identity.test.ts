@@ -87,7 +87,6 @@ describe('Pi RPC Provider', () => {
       chmodSync(join(cwd, 'synthetic-key.sh'), 0o755)
       writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!./synthetic-key.sh' } }))
       expect(await piContinuationKey(profile, cwd, env)).toBe(literal)
-      // A cwd that does not exist cannot start the helper, so no identity is issued.
       await expect(piContinuationKey(profile, join(cwd, 'missing-cwd'), env))
         .rejects.toThrow('helper 未成功返回')
       // settings.json is repo-controllable: its helper is hashed as written and never executed.
@@ -103,7 +102,6 @@ describe('Pi RPC Provider', () => {
       writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: '!./big.sh' } }))
       await expect(piContinuationKey(profile, cwd, env)).rejects.toThrow('输出超过可验证上限')
       writeFileSync(auth, JSON.stringify({ custom: { type: 'api_key', key: 'synthetic-a' } }))
-      // models.json helpers are resolved too: a rotated model key changes the identity.
       const models = join(cwd, '.pi', 'agent', 'models.json')
       writeFileSync(models, JSON.stringify({ providers: { switch: { apiKey: '!printf model-key-a' } } }))
       const pinned = await piContinuationKey(profile, cwd, env)

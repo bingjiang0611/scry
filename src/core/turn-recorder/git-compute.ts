@@ -56,8 +56,6 @@ async function untrackedPaths(
   env: NodeJS.ProcessEnv,
   deadline: number
 ): Promise<Set<string>> {
-  // Untracked means "not in the repository's own index". The capture's index is a temporary
-  // snapshot that already staged these files, so this query must use the real one.
   const realEnv = { ...env }
   if (capture.indexPath) realEnv.GIT_INDEX_FILE = capture.indexPath
   else delete realEnv.GIT_INDEX_FILE
@@ -68,20 +66,10 @@ async function untrackedPaths(
     )
     return new Set(out.split('\0').filter(Boolean).map((path) => resolve(capture.repoRoot!, path)))
   } catch {
-    // An unqueryable index keeps the previous behaviour (every added file keeps its patch); the
-    // diff stays truthful because nothing was omitted.
     return new Set()
   }
 }
 
-/**
- * Prove with one status read that a clean baseline's repository did not change.
- *
- * Returns the collection evidence when the repository is provably untouched, and undefined when the
- * full pipeline has to run: a changed path, a moved HEAD, a tool event that named a path inside this
- * repository, or a check that could not finish. Anything unproven takes the expensive path, so a skip
- * never hides a change.
- */
 async function unchangedSinceCleanBaseline(
   capture: GitTurnDiffCapture,
   options: GitTurnDiffFinishOptions,
@@ -90,8 +78,6 @@ async function unchangedSinceCleanBaseline(
   if (options.forceFull === true) return undefined
   if (process.env.SCRY_TURN_DIFF_STRATEGY?.trim().toLowerCase() === 'full') return undefined
   if (!capture.baselineClean || !capture.repoRoot || !capture.head) return undefined
-  // This turn's own tool events named a path here: the diff is needed whatever a status read says,
-  // and asking would only add another Git process.
   if (targetedPathspec(capture, options.structuredPaths ?? []).length > 0) return undefined
   const started = Date.now()
   try {
@@ -100,13 +86,10 @@ async function unchangedSinceCleanBaseline(
         ...(capture.pathspec ?? [capture.scope ?? '.'])]),
       { cwd: capture.repoRoot, deadline }
     )
-    // The header carries HEAD; every other record names a changed path or an untracked entry.
     const records = stdout.split('\0').filter(Boolean)
     const head = records.find((record) => record.startsWith('# branch.oid '))?.slice('# branch.oid '.length).trim()
     if (!head || head !== capture.head) return undefined
     if (records.some((record) => !record.startsWith('# '))) return undefined
-    // `status` deliberately skips assume-unchanged entries, and a modification behind that flag is
-    // still this turn's change. Only the full pipeline clears the shield; here it just means "ask again".
     if (await anyAssumeUnchanged(capture, deadline)) return undefined
     return { strategy: 'unchanged', evidence: 'git_status', candidatePathCount: 0, discoveryMs: Date.now() - started }
   } catch {
@@ -114,14 +97,12 @@ async function unchangedSinceCleanBaseline(
   }
 }
 
-/** True when the index hides paths from `status`; any doubt is reported as true. */
 async function anyAssumeUnchanged(capture: GitTurnDiffCapture, deadline: number): Promise<boolean> {
   try {
     const stdout = await gitCommand(
       snapshotGitArgs([], ['ls-files', '-v', '-z', '--', ...(capture.pathspec ?? [capture.scope ?? '.'])]),
       { cwd: capture.repoRoot!, deadline }
     )
-    // Lowercase tags mark assume-unchanged entries; a normal cached file is reported as `H`.
     return stdout.split('\0').some((record) => /^[a-z] /.test(record))
   } catch {
     return true
@@ -153,16 +134,9 @@ export async function computeGitTurnDiff(
   const located = (snapshot: TurnDiffSnapshot, before = capture.repositoryStart): TurnDiffSnapshot =>
     withRepositoryLocation(snapshot, before, readEnd(), start)
   if (!sharedAfter && capture.status === 'ready' && capture.beforeTree && capture.tempDir && capture.objectDir) {
-    // A clean baseline is the start commit, so deciding "this repository did not change" costs one
-    // status read instead of the whole discovery/targeted/fallback pipeline. Anything unproven takes
-    // that pipeline, so the skip can only ever save work, never hide a change.
     const unchanged = await unchangedSinceCleanBaseline(capture, options, started + deadlineMs)
     if (unchanged) {
       if (onAfter) {
-        // A segment a later background wake can continue still needs its end state, and that state is
-        // the start commit: hand over the tree reference the repository already holds instead of
-        // writing a snapshot of a worktree that did not change. The published index path is never read
-        // for a commit baseline, so it stays the empty path the full pipeline would have filled.
         onAfter({
           tree: capture.beforeTree,
           repositoryEnd: readEnd(),
@@ -226,7 +200,6 @@ export async function computeGitTurnDiff(
         capture.alternateObjectDirs
       ].flatMap(value => value?.split(delimiter) ?? []).filter(value => value && value !== capture.objectDir))].join(delimiter)
     } else {
-      // 配置可能在本轮中变化；finish 前重扫，避免新加入的 clean/process filter 执行副作用命令。
       filterOverrides = await loadSnapshotOverrides(capture.repoRoot, capture.tempDir, deadline)
       capture.filterOverrides = filterOverrides
       const afterIndex = join(capture.tempDir, 'after.index')
@@ -242,9 +215,6 @@ export async function computeGitTurnDiff(
       let candidates = [...(options.structuredPaths ?? [])]
       let targetPathspec: string[] = []
       let discoveryIndex: string | undefined
-      // Only a discovery index seeded from an index that already equalled beforeTree may be
-      // published as the after index. The `read-tree --reset` seed also handles sparse checkout,
-      // where the skip-worktree marks are rebuilt by read-tree; that case keeps the read-tree build.
       let discoveryBaseIsBeforeTree = false
       const hasStructuredEvidence = targetedPathspec(capture, options.structuredPaths ?? []).length > 0
 
@@ -259,9 +229,6 @@ export async function computeGitTurnDiff(
           const discoveryEnv: NodeJS.ProcessEnv = { ...env, GIT_INDEX_FILE: discoveryIndex }
           await rm(discoveryIndex, { force: true })
           await rm(`${discoveryIndex}.lock`, { force: true })
-          // 启动快照自带的 index（worktree 脏时由 writeSnapshotTree 写出，或启动后没被改写的
-          // 真实 index）内容已经等于 beforeTree，且 stat cache 有效。直接沿用它就省掉一次
-          // read-tree --reset；只有无法证明时才重建，保持原来的语义。
           const reusableBase = capture.beforeIndex ?? await unchangedIndexPath(capture)
           let copiedBase = false
           if (reusableBase) {
@@ -279,8 +246,6 @@ export async function computeGitTurnDiff(
               deadline: discoveryDeadline
             })
           }
-          // 在 beforeTree 上保留可复用的 stat cache；really-refresh 同时清掉
-          // assume-unchanged 对候选发现的遮蔽，不必像 git add -A 那样重写整个 scope。
           await gitCommand(snapshotGitArgs(filterOverrides, ['update-index', '--really-refresh']), {
             cwd: capture.repoRoot,
             env: discoveryEnv,
@@ -309,9 +274,6 @@ export async function computeGitTurnDiff(
         const targetedStarted = Date.now()
         try {
           if (targetPathspec.length === 0) {
-            // Successful discovery already reset/refreshed this index against beforeTree.
-            // With no candidates, rebuilding that same tree cannot add evidence. Retain
-            // the discovery index so a paired session still gets an owned after-view.
             afterTree = capture.beforeTree
             env.GIT_INDEX_FILE = discoveryIndex!
           } else {
@@ -325,8 +287,6 @@ export async function computeGitTurnDiff(
               deadline: preFallbackDeadline,
               filterOverrides,
               targetIndex: afterIndex,
-              // Do not mutate discovery.index in place: a shared preview/terminal pair may still
-              // need it, and the zero-candidate branch above publishes it as the after view.
               ...(discoveryBaseIsBeforeTree && discoveryIndex ? { sourceIndex: discoveryIndex } : {})
             })
           }
@@ -388,9 +348,6 @@ export async function computeGitTurnDiff(
       ))
     }
 
-    // One tree comparison yields both the change kinds and the line counts: `--raw` and
-    // `--numstat` are independent output sections of the same diff, so a second Git process
-    // cannot produce anything the first one did not already decide.
     const numstat = await gitCommand(
       snapshotGitArgs(filterOverrides, [
         'diff',
@@ -411,8 +368,6 @@ export async function computeGitTurnDiff(
     if (options.workspaceSnapshot && files.length > WORKSPACE_FILE_LIMIT) {
       throw new WorkspaceReadUnavailable('workspace_limit')
     }
-    // Untracked status is only queried when this turn added files: a turn that only edits tracked
-    // files pays nothing, and the query is one bounded read-only Git call.
     const untracked = files.some((file) => file.change === 'added') && !options.workspaceSnapshot
       ? await untrackedPaths(capture, filterOverrides, fullPathspec, env, deadline)
       : undefined
@@ -424,7 +379,6 @@ export async function computeGitTurnDiff(
       untrackedLimit: options.untrackedPatchLimit
     })
     files = policy.files
-    // 只记命中的声明路径和文件数：被排除的文件不进 files，正文既不读取也不收录。
     exclusion = policy.excluded.files > 0 ? policy.excluded : undefined
     files = await captureTurnPatches(
       capture,
@@ -435,8 +389,6 @@ export async function computeGitTurnDiff(
       deadline,
       options.completePatches === true,
       options.workspaceSnapshot ? WORKSPACE_PATCH_BYTES : undefined,
-      // Review context comes from the same immutable tree pair, within the existing byte cap.
-      // Recorder history keeps its original three-line capture contract.
       options.workspaceSnapshot ? 20 : 3
     )
   } catch (error) {

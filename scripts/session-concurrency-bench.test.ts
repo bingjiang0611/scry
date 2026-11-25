@@ -140,7 +140,6 @@ describe('report status', () => {
         fixtureSha256: '1'.repeat(64), platform: 'darwin', arch: 'arm64', osRelease: '23.0.0', cpuModel: 'apple',
         cpuCount: 10, totalMemoryBytes: 1, node: 'v22.0.0', electron: '32.0.0', appVersion: '0.1.0' },
       runs, failures: [],
-      // Boundary lanes come from the harness; this factory supplies a plausible measured set.
       mainCpu: { status: 'measured', source: 'fixture bootstrap Node IPC boundary snapshots',
         attribution: 'main process CPU including the in-process offline smoke Provider; not an isolated Provider CPU and not a peak',
         window: { startedAtEpochMs: 1_700_000_000_000, endedAtEpochMs: 1_700_000_001_000, wallMs: 1000 },

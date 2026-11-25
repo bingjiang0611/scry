@@ -331,8 +331,6 @@ describe('runtime frontdoor mapping', () => {
   })
 
   it('preserves Base64 alphabet, padding and whitespace validation under byte mutations', () => {
-    // Independent grammar oracle uses tiny inputs only; quantified regexps are
-    // unsuitable for the large-image production path.
     const reference = (value: string): number | null => {
       const compact = value.replace(/\s+/g, '')
       if (!compact || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) return null

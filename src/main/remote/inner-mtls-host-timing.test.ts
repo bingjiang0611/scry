@@ -83,7 +83,6 @@ describe('inner-mTLS host request segmentation', () => {
       for (const request of [{ op: 'projects' }, { op: 'providers' }]) {
         socket.write(JSON.stringify({ protocol: REMOTE_PROTOCOL_VERSION, ...request as object, keepAlive: true }) + '\n')
         while (!buffer.includes('\n')) buffer += ((await once(socket, 'data'))[0] as Buffer).toString('utf8')
-        // Clients detect a reusable lane by this exact prefix.
         expect(buffer.startsWith('{"keepAlive":true,')).toBe(true)
         buffer = ''
       }

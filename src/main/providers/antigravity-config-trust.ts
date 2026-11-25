@@ -164,7 +164,6 @@ export function inspectAntigravityWorkspaceConfig(cwd: string): AntigravityWorks
     const canonicalRoot = realpathSync.native(resolve(rawRoot))
     if (!isInsideRoot(canonicalBoundaryRoot, canonicalRoot)) continue
 
-    // Workspace settings.json candidates: forbid permission keys (toolPermission / permissions).
     for (const settingsPath of [
       join(canonicalRoot, '.gemini', 'settings.json'),
       join(canonicalRoot, '.gemini', 'antigravity-cli', 'settings.json')
@@ -196,7 +195,6 @@ export function inspectAntigravityWorkspaceConfig(cwd: string): AntigravityWorks
         collected.set(digest.path, digest)
       }
 
-      // Inline plugins: {alias}/plugins/<name>/
       const pluginsDir = join(aliasDir, 'plugins')
       if (existsSync(pluginsDir)) {
         const pluginsStat = lstatSync(pluginsDir)
@@ -214,7 +212,6 @@ export function inspectAntigravityWorkspaceConfig(cwd: string): AntigravityWorks
         }
       }
 
-      // Referenced plugins: {alias}/plugins.json
       const pluginsJsonPath = join(aliasDir, 'plugins.json')
       if (existsSync(pluginsJsonPath)) {
         const { digest, parsed } = inspectJsonConfigFile(pluginsJsonPath, canonicalBoundaryRoot)

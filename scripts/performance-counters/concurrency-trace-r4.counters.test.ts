@@ -14,7 +14,6 @@ const R4_CONFIG = { limit: 4, readers: 1, items: 1000 } as const
 const R4_WORKLOAD = 'trace-r4-cell;tasks=16;limit=4;readers=1;items=1000;waves=4;stages=7;polls=112;oracles=112'
 const R4_SOURCE = 'real runConcurrencyTraceTrial(limit 4, readers 1, items 1000) unchanged; counts node:crypto createHash calls, bytes accepted by Hash.update and JSON.stringify UTF-8 output bytes per phase; native digest internals, subprocesses, other hash APIs and byte copies are not counted, so this is not a CPU total and no millisecond result is read from the instrumented cell'
 
-// Read at every counter increment: the wrappers below only move this value around a real call.
 const phases = vi.hoisted(() => ({ current: 'other' as ProbePhase }))
 
 // Call-through on the real write stage. The fixture keeps its implementation, its error handling and its own

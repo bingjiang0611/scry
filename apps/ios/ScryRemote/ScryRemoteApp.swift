@@ -62,8 +62,6 @@ struct RootView: View {
       PairView()
     } else {
       switch model.route {
-      // One page: launch lands on a new session with the list in a collapsed
-      // drawer; `.newSession` only adds the keyboard focus.
       case .home, .newSession: WorkspaceShell(focusComposer: model.route == .newSession)
       case .chat: ChatView()
       case .pair: PairView()
@@ -255,7 +253,6 @@ struct RootView: View {
     }
   }
 
-  // Waiting runs other than the one the current transcript already presents.
   private var waitingElsewhere: [G0Transport.LiveRun] {
     let shown = model.route == .transcript ? model.openedSession : nil
     return run.waitingLiveRuns.filter { live in

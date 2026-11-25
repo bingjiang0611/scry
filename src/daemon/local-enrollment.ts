@@ -6,18 +6,6 @@ import { join } from 'node:path'
 import type { BuildIdentity } from '../shared/build-identity'
 import { takeLocalEnrollmentRequest } from './local-enrollment-request'
 
-// Bootstrapping the App's own device grant. The App has no certificate yet, so it
-// cannot use inner mTLS; enrollment runs over a second unix socket in the same 0700
-// state directory. Trust is exactly three things, and nothing more:
-//
-//   1. the socket is 0600 inside a 0700 directory, so only this uid can connect;
-//   2. the caller presents the enrollment secret, readable only from a 0600 file in
-//      the daemon's state directory, so only this uid could have read it;
-//   3. the caller signs the CSR with the private key it will later present in mTLS,
-//      so the certificate it receives is bound to a key it actually holds.
-//
-// All three on one machine is the proof; there is no second human confirmation step.
-// The secret is single-use and is not kept alive while a valid local grant exists.
 export const LOCAL_ENROLLMENT_NAME = 'local-enrollment.json'
 export const LOCAL_ENROLL_SOCKET_NAME = 'enroll.sock'
 const MAX_SOCKET_PATH = 100
@@ -25,22 +13,11 @@ const MAX_REQUEST_BYTES = 20_480
 
 export interface LocalEnrollmentStore {
   readonly secretPath: string
-  /**
-   * Create a secret when no local grant is live, otherwise delete any stale one. The one
-   * exception is a request left by the App's confirmed reconnect (local-enrollment-request.ts).
-   */
   ensure(hasValidLocalGrant: boolean): void
-  /** True exactly once per secret; deletes the file. */
   consume(secret: unknown): boolean
   present(): boolean
 }
 
-/**
- * The secret never expires by time: a daemon started at login may wait hours for the
- * App. It rotates on use, and on every daemon start while no local grant exists.
- * A missing or malformed file simply means "no enrollment is pending", which fails
- * closed for the caller; a file readable by anyone else is a hard error.
- */
 export function openLocalEnrollmentStore(directory: string, options: { clock?: () => number } = {}): LocalEnrollmentStore {
   mkdirSync(directory, { recursive: true, mode: 0o700 })
   chmodSync(directory, 0o700)
@@ -81,7 +58,6 @@ export function openLocalEnrollmentStore(directory: string, options: { clock?: (
       const presented = Buffer.from(secret)
       const expected = Buffer.from(pending.secret)
       if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) return false
-      // Consume before issuance so the same secret can never produce a second grant.
       rmSync(secretPath, { force: true })
       return true
     },
@@ -98,14 +74,9 @@ export interface LocalEnrollSocket {
 
 export interface LocalEnrollSocketOptions {
   directory: string
-  /** Returns a certificate envelope, or throws a machine code already bounded. */
   enroll(request: unknown): Promise<unknown>
 }
 
-/**
- * One request per connection, one reply, then close. No framing beyond a single
- * newline-terminated JSON object: this socket exists only to bootstrap one grant.
- */
 export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): Promise<LocalEnrollSocket> {
   mkdirSync(options.directory, { recursive: true, mode: 0o700 })
   chmodSync(options.directory, 0o700)
@@ -129,14 +100,12 @@ export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): 
       try { parsed = JSON.parse(buffer.subarray(0, end).toString('utf8')) } catch { parsed = undefined }
       void options.enroll(parsed)
         .then((reply) => { socket.end(`${JSON.stringify(reply)}\n`) })
-        // Only the machine code leaves this socket: no paths, no stack, no CSR echo.
         .catch((error: unknown) => {
           const code = error instanceof Error && /^[a-z0-9_:]+$/.test(error.message) ? error.message : 'local_enrollment_failed'
           socket.end(`${JSON.stringify({ error: code })}\n`)
         })
     })
   })
-  // Tracked from the first connection, so close() can end every one of them.
   const tracked = trackConnections(server)
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
@@ -151,7 +120,6 @@ export async function openLocalEnrollSocket(options: LocalEnrollSocketOptions): 
   return {
     socketPath,
     close: async () => {
-      // Stop accepting and free the path first; then end what is still connected.
       const closing = tracked.close()
       rmSync(socketPath, { force: true })
       await closing
@@ -181,7 +149,6 @@ export function localEnrollHandlers(store: LocalEnrollmentStore, authority: {
       certificateSHA256: grant.certificateSHA256,
       caCertificatePEM,
       daemonVersion: daemon.version,
-      // Same rule as daemonInfo: the App compares the build too (A5).
       ...(daemon.build ? { daemonBuild: daemon.build } : {}),
       deviceId: grant.deviceId,
       expiresAt: grant.expiresAt

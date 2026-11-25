@@ -30,13 +30,13 @@ function Fixture() {
   </div>
 }
 
-// 默认给空桥；需要看真实性能数据时用 window.setPerformanceFixture 注入。
+// 性能数据默认为空；用 window.setPerformanceFixture 注入测试数据。
 let performance: PerformanceFixture = {
   history: { rows: [], invalidLines: 0, truncated: false },
   summary: { observedAt: new Date().toISOString(), sessions: [] }
 }
 const dataListeners = new Set<() => void>()
-// 注入后要像真实数据更新那样通知页面重新读取，否则页面永远停在首屏的空结果。
+// 注入后通知订阅者重新读取性能历史。
 Object.defineProperty(window, 'setPerformanceFixture', { value: (next: PerformanceFixture) => {
   performance = next
   for (const listener of dataListeners) listener()

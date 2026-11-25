@@ -3,7 +3,6 @@ import { WorkspaceReadUnavailable } from './git-workspace-limits.js'
 import type { GitTurnDiffCapture } from './git-capture.js'
 import type { BranchDiffComparison } from '../../shared/workspace-diff.js'
 
-/** Resolve only local refs; this preview never fetches or executes repository code. */
 export async function resolveBranchDiffBase(capture: GitTurnDiffCapture, deadline: number): Promise<BranchDiffComparison> {
   const head = capture.head!
   const branch = capture.branch ?? null
@@ -32,8 +31,6 @@ export async function resolveBranchDiffBase(capture: GitTurnDiffCapture, deadlin
     if (name !== branch) candidates.push(`refs/heads/${name}`)
   }
   const baseRef = candidates.find(ref => refs.has(ref))
-  // Like T3, a repository without a comparison branch uses the observed HEAD.
-  // Expose that absence instead of labelling this as a comparison against main.
   if (!baseRef) return { baseRef: null, baseCommit: head, headRef: branch }
   const baseCommit = (await gitCommand(snapshotGitArgs([], [
     'merge-base', '--end-of-options', refs.get(baseRef)!.oid, head

@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import type { Conversation } from '../shared/conversation'
 import { MAX_CONVERSATION_BYTES, conversationIdPattern, decodeConversation, requireValue } from './conversation-schema'
 
-/** Where one conversation's published ledger lives under userData. */
 export function conversationLedgerPath(directory: string, id: string): string {
   requireValue(conversationIdPattern.test(id), '对话 ID 无效')
   return join(directory, `${id}.json`)

@@ -10,7 +10,6 @@ import { emitLargeTrace, emitLongStream, emitPacedStream, isLargeTracePrompt, is
 import { runSmokePostToolScenarios, runSmokePromptScenarios } from './smoke-scenarios'
 import { handleRecorderHook } from '../../core/turn-recorder/recorder'
 
-/** Providers the packaged fixture can impersonate. Order is irrelevant; the gate is not. */
 export type SmokeFixtureProviderId = 'claude' | 'codex' | 'qoder' | 'opencode' | 'pi'
 
 /** Packaged smoke-only adapter. Enabled only by the explicit test process environment. */
@@ -68,8 +67,8 @@ export function createSmokeProviderAdapter(providerId: SmokeFixtureProviderId = 
           kind: 'harness', stage: 'runtime:steer_capability', steerCapability: { status: 'available', attachments: false } })
         if (request.trackInputReceipt) {
           history.attempting(outgoingPrompt)
-          // One native-acceptance source per Provider, all of them real receipt kinds: the
-          // fixture never claims acceptance for a Provider whose own evidence differs.
+          // Model acceptance with provider-specific receipt kinds. These receipts
+          // come from the fixture, not from a native Provider run.
           if (providerId === 'codex' && request.prompt !== 'conversation unknown input') history.accepted(sessionId, 'codex_turn_start_response', `${request.runId}:provider-turn`)
           if (providerId === 'pi') history.accepted(sessionId, 'pi_persisted_session_entry', `${request.runId}:provider-turn`)
           if (providerId === 'qoder') history.accepted(sessionId, 'qoder_transcript_user_uuid', `${request.runId}:provider-turn`)

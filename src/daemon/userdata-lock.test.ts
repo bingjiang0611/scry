@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { acquireUserDataLock, USERDATA_LOCK_NAME } from './userdata-lock'
 import type { ProcessSnapshot } from '../main/process-diagnostics'
 
-// Every test runs against its own temporary userData; nothing here touches a real one.
 const dirs: string[] = []
 function tempUserData(): string {
   const dir = mkdtempSync(join(tmpdir(), 'scry-userdata-lock-'))
@@ -35,7 +34,6 @@ describe('userData owner lock', () => {
     })
     expect(outcome.status).toBe('acquired')
     expect(statSync(lockPath(userDataDir)).mode & 0o777).toBe(0o600)
-    // userData belongs to Electron; the lock must not rewrite its permissions.
     expect(statSync(userDataDir).mode & 0o777).toBe(0o755)
     expect(readLock(userDataDir)).toMatchObject({ pid: 4001, startedAt: 'Mon Jan  1 00:00:00 2026', role: 'daemon', startedBy: 'app' })
   })
@@ -71,7 +69,6 @@ describe('userData owner lock', () => {
     const next = await acquireUserDataLock({
       userDataDir, role: 'daemon', startedBy: 'this-boot', pid: 5004,
       lister: snapshot([
-        // Same pid, later start time: the daemon that wrote the lock is gone.
         [5003, 'Tue Feb  2 00:00:09 2026', 'S', '/usr/bin/vim'],
         [5004, 'Tue Feb  2 00:00:10 2026']
       ])
@@ -111,7 +108,6 @@ describe('userData owner lock', () => {
 
   it('keeps its takeover mutex apart from the daemon lock in the same directory', async () => {
     const userDataDir = tempUserData()
-    // A takeover in progress for daemon.lock must not block or be mistaken for this lock's.
     writeFileSync(join(userDataDir, 'daemon.lock.takeover'), '')
     await acquireUserDataLock({ userDataDir, role: 'daemon', startedBy: 'crashed', pid: 4001, lister: snapshot([[4001, 'Mon Jan  1 00:00:00 2026']]) })
     const next = await acquireUserDataLock({

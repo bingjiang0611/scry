@@ -7,8 +7,6 @@ if (!port) throw new Error('transcript_parser_worker_invalid_startup')
 const cache = new TranscriptFileCache()
 let queue = Promise.resolve()
 
-// Serial requests keep checkpoints atomic. The parent owns cancellation and
-// the worker's five-minute idle lifetime; no provider or filesystem writes run here.
 port.on('message', (request: TranscriptWorkerRequest) => {
   queue = queue.then(async () => {
     try {

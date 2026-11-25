@@ -3,8 +3,6 @@ import RemoteTransport
 
 // One projection for local and forwarded rows: all navigation keeps the row's
 // immutable scope, including when two hosts expose identical session ids.
-// This is the session list that left-drawer opens: the former home screen minus
-// its composer, which now lives on the new-session page behind the drawer.
 struct SidebarDrawer: View {
   let onCollapse: () -> Void
   let onNewSession: (ExecutionTargetScope, String?) -> Void
@@ -156,8 +154,6 @@ struct SidebarDrawer: View {
     .padding(.horizontal, 12).padding(.top, 4)
   }
 
-  // Freshness stays where the list is: the provenance line moved here from the
-  // list footer, so it appears once, next to the settings entry.
   private var footer: some View {
     HStack(spacing: 4) {
       Text(ConnectionCopy.panelProvenance(targets.filterLabel,

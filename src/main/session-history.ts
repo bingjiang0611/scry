@@ -19,8 +19,6 @@ export async function readSessionHistoryAfterCompletedRuns<T>(
   signal: AbortSignal,
   read: () => Promise<T>
 ): Promise<T> {
-  // UI completion can precede the durable archive. Active runs are restored from
-  // live memory, but completed runs must finish publishing before taking a snapshot.
   await waitForCompletedRuns(runs.filter((run) => run.done))
   signal.throwIfAborted()
   return read()
@@ -28,24 +26,13 @@ export async function readSessionHistoryAfterCompletedRuns<T>(
 
 const ATTACHMENT_MARKER = 'Scry pasted image attachments:'
 
-/** Pi enrichment is turn-local; Qoder still reconciles Provider-owned full history. */
 export function sessionArchiveIsPageable(providerId: SessionProviderId, transcriptPath: string | null): boolean {
   return !transcriptPath && providerId !== 'qoder'
 }
 
-/**
- * 默认交付最近 40 轮；更早证据仍可按页取回。
- * Archive-only paths (including Pi) read only requested turn files. Claude transcript
- * and Qoder reconciliation still require full-source parsing before this projection.
- */
 export const DEFAULT_SESSION_HISTORY_PAGE_SIZE = 40
 export const MAX_SESSION_HISTORY_PAGE_SIZE = 200
 
-/**
- * A page with no older turns already contains the complete archive snapshot.
- * Reuse it for native-history reconciliation instead of rereading the same archive;
- * partial pages still require the authoritative full read.
- */
 export async function readCompleteArchiveForNativeReconciliation(
   page: Pick<TraceArchivePage, 'archive' | 'hasOlder'> | null,
   readFullArchive: () => Promise<TraceArchive | null>
@@ -54,9 +41,7 @@ export async function readCompleteArchiveForNativeReconciliation(
 }
 
 export interface SessionHistoryPageRequest {
-  /** Presence selects strict archive Profile evidence; absent preserves the unscoped display contract. */
   agentProfileId?: string | null
-  /** 只取序号小于 before 的更早轮次；缺省从最新一轮往回取。 */
   before?: number
   limit?: number
 }
@@ -66,11 +51,6 @@ function boundedPageSize(limit: number | undefined): number {
   return Math.min(MAX_SESSION_HISTORY_PAGE_SIZE, Math.max(1, Math.floor(limit)))
 }
 
-/**
- * 最近优先的确定性分页：输入已经是按时间升序的权威轮次序列，页内保持同一顺序。
- * 相邻页严格相邻（offset + turns.length === 上一页 offset），让 renderer 能校验拼接。
- * 这里只做切片：调用方必须已经持有完整的权威轮次序列，本函数不做任何源级别的按需读取。
- */
 export function sessionHistoryPage(
   turns: readonly LoadedSessionTurn[],
   request: SessionHistoryPageRequest = {}
@@ -178,8 +158,6 @@ export function restoreTraceArchiveTurn(
   const hydrated = options.hydrateAttachments === false
     ? { attachments: [] as AgentInputAttachment[], warnings: [] as string[] }
     : hydrateArchiveAttachments(turn, context, budget)
-  // done only means the run settled. An interrupted archive can have no model
-  // result or error (for example, a stop during startup), so retain its outcome.
   const errorHint = turn.status === 'interrupted'
     ? ['本轮已中断，不代表任务完成。', turn.errorHint].filter(Boolean).join('\n')
     : turn.errorHint
@@ -205,7 +183,6 @@ function canonicalUserText(text: string): string {
 }
 
 export interface MergeSessionTurnsOptions {
-  /** Defer file reads/base64 hydration until after the visible history page is selected. */
   hydrateAttachments?: boolean
 }
 
@@ -263,7 +240,6 @@ export function mergeSessionTurns(
   return merged
 }
 
-/** Hydrate only the page that will cross IPC instead of every turn kept in the main cache. */
 export function hydrateSessionHistoryPage(
   page: SessionHistoryPage,
   transcriptTurns: readonly TranscriptTurn[],

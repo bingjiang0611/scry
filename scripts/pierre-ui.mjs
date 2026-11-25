@@ -1,5 +1,4 @@
 // Expressions for the open shadow roots used by @pierre/diffs and @pierre/trees.
-// Callers still pass the resulting strings to the existing renderer evaluator.
 export function pierreDiffEval(expression) {
   return `(() => {
     const roots = [...document.querySelectorAll('.pierre-code-view diffs-container')]

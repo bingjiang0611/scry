@@ -8,9 +8,6 @@ import type { AppRunStartOptions } from '../main/bootstrap/run-frontdoor'
 import type { AgentStartRequest, AgentStartResult } from '../shared/runtime'
 import type { RemoteRunCompletion } from '../main/remote/remote-run-binding'
 
-// M2-4: the run pipeline's assembly entry. Everything below is a plain value or a
-// function that main (or the daemon) supplies, so this module never needs the
-// electron runtime; the view is the renderer sink and nothing else.
 export interface RunPipelineInputs {
   renderer: RunRendererSink
   rendererCanReceive: () => boolean
@@ -53,11 +50,6 @@ export interface RunPipelineInputs {
   observeNativeTranscript?: Parameters<typeof startRun>[2]['observeNativeTranscript']
   /** D5: checkpoint capture for a settled run; absent means this host keeps no checkpoints. */
   captureCheckpoint?: Parameters<typeof startRun>[2]['captureCheckpoint']
-  /**
-   * Who executes runs. `'daemon'` means another process owns every run: this assembly
-   * still serves the registry and trace views those channels read, but it must never
-   * reach a Provider, so `startAppRun` refuses by name instead of executing in-process.
-   */
   execution?: 'in-process' | 'daemon'
 }
 
@@ -71,8 +63,6 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
     recordingRecoveryHint, sessionBaselineKey, requestRunStop, bumpSessionRevision, remoteRunIds,
     remoteRunLedgerIds, mirrorSessionTranscript
   } = inputs
-  // `startWorkspaceRun` is injected so a test can drive the pipeline without the
-  // real front door; the recursion below stays on this module's own function.
   const workspaceStart = inputs.startWorkspaceRun
   const run = inputs.startRun
 
@@ -88,9 +78,6 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
   function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions & { origin?: 'local' }): Promise<AgentStartResult>
   function startAppRun(payload: AgentStartRequest, options?: AppRunStartOptions): Promise<AgentStartResult | RemoteRunCompletion | RemoteWorkspaceRunStart>
   async function startAppRun(payload: AgentStartRequest, options: AppRunStartOptions = {}): Promise<AgentStartResult | RemoteRunCompletion | RemoteWorkspaceRunStart> {
-    // DAEMON_OWNS_RUNS: with the daemon switch on, a run started in this process would
-    // be invisible to the daemon's ledger and the App's own view. Refusing by name is
-    // the only honest answer; the caller's channel routes to the daemon instead.
     if (inputs.execution === 'daemon') throw new Error('daemon_mode_owns_runs')
     if (payload?.workspace !== undefined) {
       const workspaceOptions: AppRunStartOptions = options.origin === 'remote' || options.onWorkspaceProgress
@@ -98,7 +85,7 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
         : {
           ...options,
           onWorkspaceProgress: (progress) => {
-            try { renderer.send('workspaceSelection:progress', progress) } catch { /* window may have closed */ }
+            try { renderer.send('workspaceSelection:progress', progress) } catch { }
           }
         }
       return workspaceStart(payload, workspaceOptions, {
@@ -124,7 +111,5 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
       observeNativeTranscript: inputs.observeNativeTranscript
     })
   }
-    // traceRuntime already exposes runs, the stop lifecycle, the question broker and
-    // the trace output; only the assembly's own pieces are added on top.
     return { ...traceRuntime, startAppRun, llmNetworkConfiguration }
 }

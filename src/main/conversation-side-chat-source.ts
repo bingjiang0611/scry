@@ -86,7 +86,6 @@ export function fingerprints(source: SideChatSource, through: { ordinal: number;
   }
 }
 
-/** One message of a source whose text is already in memory, typed as a stream. */
 function memoryMessage(text: string, contentHash: string, role: 'user' | 'assistant'): StreamedMessage {
   return { role, contentHash, bytes: Buffer.byteLength(text, 'utf8'), text: (async function* () { yield text })() }
 }
@@ -148,7 +147,6 @@ async function captureConversationPrefix(
   const items: CaptureItem[] = []
   // A conversation source names the child after the source conversation, not its text.
   const untitled = new TitleTap()
-  // Streamed one turn at a time: a long prefix costs the sealed manifest, not memory.
   for await (const entry of capturedConversationMessages(deps.store.userData, conversation, prefix)) {
     items.push(await consume(sink, entry.message, entry.meta, untitled))
   }
@@ -181,7 +179,6 @@ async function assertSourceNotOwnedBySideChat(
   if (owning) throw new Error(`该原生会话属于侧聊 ${owning.id}；不支持嵌套侧聊`)
 }
 
-/** Feeds the terminal archive prefix straight from the bounded projection. */
 async function captureArchivePrefix(
   deps: SideChatServiceDeps,
   source: Extract<SideChatSource, { kind: 'native-session' }>,
@@ -218,8 +215,6 @@ async function captureArchivePrefix(
         ...(turn.providerTurnId === undefined ? {} : { providerTurnId: turn.providerTurnId })
       }, title))
     }
-    // A terminal turn ends the prefix whatever its outcome. A failed or interrupted
-    // turn is a stable boundary too; its captured status says it did not succeed.
     through = { ordinal, runId: turn.runId }
   }
   return { items, ...(title.value === undefined ? {} : { title: title.value }), ...(through === undefined ? {} : { through }) }

@@ -8,8 +8,8 @@ import { withProbeFixture } from './pi-rpc.fixture'
 import { ProviderRegistry } from './registry'
 
 const samples: PerformanceSample[] = []
-// A started probe reports its own spawn and exit; a reused probe process reports only the reads it
-// performed on an already-running child, so no spawn/exit stage belongs to that later operation.
+// The cold probe records the spawn. The reused probe records responses from the
+// existing child without a spawn checkpoint. Exit is checked separately on disposal.
 const coldProbeStages = ['environment_ready', 'spawned', 'first_response', 'responses_received']
 const reusedProbeStages = ['environment_ready', 'first_response', 'responses_received']
 
@@ -71,7 +71,6 @@ describe('content-free catalog performance', () => {
       const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))
       expect(() => process.kill(pid, 0)).not.toThrow()
       assertPrivate([profile.id, profile.executable, cwd, 'fixture-menu'])
-      // The parked process answers the next catalog read without a second spawn.
       await registry.listCommands(context)
       expect(starts()).toHaveLength(1)
       expect(samples.filter(s => s.name === 'pi.catalog.probe')).toHaveLength(2)
@@ -108,7 +107,6 @@ describe('content-free catalog performance', () => {
       const probe = samples.find(s => s.name === 'pi.catalog.probe')!
       expect(probe.outcome).toBe('error')
       expect(probe.checkpoints.map(p => p.stage)).toContain('first_response')
-      // A failed read is never parked: the child is closed before the probe settles.
       expect(probe.checkpoints.at(-1)?.stage).toBe('closed')
       expect(samples.find(s => s.name === 'provider.catalog.run_controls')?.outcome).toBe('unavailable')
       const pid = Number(readFileSync(join(cwd, 'pid'), 'utf8'))

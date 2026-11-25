@@ -8,27 +8,15 @@ import type { LocalOpHandler } from '../main/remote/host-local-ops'
 import type { TerminalOutputBridge } from '../main/terminal-output'
 import type { DesktopTerminalEvent, DesktopTerminalEvents } from '../shared/desktop-workbench'
 
-// The App's terminals in daemon mode (P3-terminal.md): one manager and one output bridge,
-// as main keeps them, with recordings in userData/terminal-recordings where main keeps
-// them. Output the bridge sends goes into a bounded queue and one coalesced notice; the
-// App reads the queue by cursor and hands it to its window. Shells never outlive the App:
-// it shuts them down when it quits, and they are reclaimed once the event feed has gone
-// unread for longer than any live App leaves it.
 
 const PAGE_BYTES = 512 * 1024
-// A crashed App's last event poll stays parked here until its own wait ends (at most
-// APP_EVENTS_MAX_WAIT_MS), and only then does idle time start. So the end-to-end bound
-// after a crash is that wait + RECLAIM_AFTER_MS + CHECK_EVERY_MS; keep it within 90 s
-// (measured 117.8 s with 90 s idle and 15 s checks: be81d57 verification, A6).
 export const RECLAIM_AFTER_MS = 60_000
 export const CHECK_EVERY_MS = 5_000
 
 export interface DaemonTerminalServiceDeps extends Pick<TerminalRuntimeDependencies, 'userDataDir' | 'recordingWorkerUrl' | 'pty' | 'inlineRecording' | 'environment'> {
   homeDir: string
   resolveKnownProjectDirectory(cwd: string): string
-  /** Output is waiting: one notice on the App event feed. */
   notify(): void
-  /** How long the App's event feed has gone unread (monotonic). */
   idleMs(): number
   reclaimAfterMs?: number
   checkEveryMs?: number
@@ -42,7 +30,6 @@ export interface DaemonTerminalFeed {
 }
 
 export function createDaemonTerminalService(deps: DaemonTerminalServiceDeps) {
-  // The window's workspace, for this call only: the App names it on every terminal call.
   const workspace = new AsyncLocalStorage<{ cwd: string | undefined }>()
   const streamId = randomUUID()
   const queue: Array<{ cursor: number; event: DesktopTerminalEvent }> = []
@@ -69,7 +56,6 @@ export function createDaemonTerminalService(deps: DaemonTerminalServiceDeps) {
     ...(deps.environment ? { environment: deps.environment } : {})
   })
   let runtime = build()
-  // Reclaiming replaces the runtime, so the handlers reach the current one per call.
   const output: Pick<TerminalOutputBridge, 'started' | 'attach' | 'detach' | 'owns' | 'ready' | 'ack' | 'terminalClosed'> = {
     started: (id) => runtime.terminalOutput.started(id),
     attach: (id) => runtime.terminalOutput.attach(id),
@@ -83,7 +69,6 @@ export function createDaemonTerminalService(deps: DaemonTerminalServiceDeps) {
     getTerminalManager: () => runtime.getTerminalManager(),
     terminalOutput: output,
     isShuttingDown: () => disposed,
-    // The App checks its own window before it sends; this side has none to check.
     rendererCanReceive: () => !disposed,
     assertCaller: () => undefined,
     getCurrentCwd: () => workspace.getStore()?.cwd
@@ -92,7 +77,6 @@ export function createDaemonTerminalService(deps: DaemonTerminalServiceDeps) {
   const resolveWorkspace = (value: unknown): string | undefined => {
     if (value === null || value === undefined) return undefined
     if (typeof value !== 'string' || value.length === 0) throw new Error('终端工作区无效')
-    // Fail closed: a directory this daemon does not know is refused, never used.
     return deps.resolveKnownProjectDirectory(value)
   }
   const localOps: Record<string, LocalOpHandler> = Object.fromEntries(Object.entries(table).map(([channel, handler]) => {
@@ -126,7 +110,6 @@ export function createDaemonTerminalService(deps: DaemonTerminalServiceDeps) {
   const feed: DaemonTerminalFeed = {
     read(token) {
       const [stream, position] = token?.split(':') ?? []
-      // Another stream (a restarted daemon) or no cursor: start from what is still queued.
       const cursor = stream === streamId ? Math.min(Math.max(Number(position) || 0, 0), sequence) : 0
       while (queue.length > 0 && queue[0]!.cursor <= cursor) queue.shift()
       const page: DesktopTerminalEvents = { cursor: `${streamId}:${cursor}`, events: [] }

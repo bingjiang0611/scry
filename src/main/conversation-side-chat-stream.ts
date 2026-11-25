@@ -19,7 +19,6 @@ import type { ArchiveBodyFacts, ArchiveEntry } from './trace-archive-projection'
 export interface StreamedMessage {
   role: 'user' | 'assistant'
   steerMessageId?: string
-  /** Exact text as bounded chunks; never a joined string. */
   text: AsyncIterable<string>
   contentHash: string
   bytes: number
@@ -43,7 +42,6 @@ export interface StreamedTurn {
   messages: StreamedMessage[]
 }
 
-/** A stored visible body: exact byte size, streamed content, lazy digest. */
 interface Body {
   bytes: number
   read(): AsyncGenerator<string>
@@ -128,7 +126,6 @@ function eventBody(userData: string, cwd: string, part: Extract<Part, { kind: 'e
   return spoolBody(part.spool)
 }
 
-/** Concat of several bodies, in order, without joining any of them. */
 function joinBodies(bodies: readonly Body[]): Body {
   return {
     bytes: bodies.reduce((sum, body) => sum + body.bytes, 0),
@@ -417,7 +414,6 @@ export async function* streamTurns(
       await event.spool.push(entry.chunk)
     }
   } finally {
-    // Whatever was still being built when the pass ended; already-discarded spools are no-ops.
     await discardSpools(inputSpools(parts, userSpool))
     await registry.discardAll()
   }

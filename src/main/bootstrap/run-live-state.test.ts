@@ -53,7 +53,6 @@ let userDataDir: string
 beforeEach(async () => {
   userDataDir = await mkdtemp(join(tmpdir(), 'scry-live-binding-'))
   receipts.getPath.mockReturnValue(userDataDir)
-  // Storage is injected now: the pipeline reads the root here, not from Electron.
   configureStorage({ userDataDir, appPath: userDataDir })
   receipts.appendUsage.mockClear()
 })

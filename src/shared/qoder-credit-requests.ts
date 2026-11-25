@@ -12,7 +12,6 @@ export interface CreditTurn {
   cwd?: string
   providerTurnId?: string
   forkTurnId?: string
-  /** Hook request-set identity; never used as a provider prompt ID. */
   requestSetId?: string
 }
 
@@ -30,13 +29,11 @@ function identityPair(row: Record<string, unknown>, snake: string, camel: string
   }
 }
 
-/** Use native user identity and parent links, never prompt text or a timestamp guess.
- * Session totals, original_credits and fork copies are not additional charges. */
 export function qoderCreditRequests(text: string, turns: CreditTurn[]): { requests: CreditRequest[]; matched: Set<string> } {
   const rows: Record<string, unknown>[] = []
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
-    try { rows.push(record(JSON.parse(line))) } catch { /* A torn tail cannot supply evidence. */ }
+    try { rows.push(record(JSON.parse(line))) } catch {}
   }
   const nodes = new Map<string, Record<string, unknown>>()
   const aliases = new Map<string, string | null>()
@@ -99,7 +96,6 @@ export function qoderCreditRequests(text: string, turns: CreditTurn[]): { reques
       if (!node || (isTranscriptUserPrompt(node) && node.isMeta !== true && node.isSynthetic !== true)) break
       parent = string(node.parentUuid)
     }
-    // Bound ancestry work for long transcripts instead of walking the whole turn per block.
     for (const id of visited) owners.set(id, result)
     return result
   }
@@ -113,7 +109,6 @@ export function qoderCreditRequests(text: string, turns: CreditTurn[]): { reques
     const usage = record(message.usage)
     const messageId = string(message.id)
     const requestId = string(usage.request_id) ?? (messageId ? messageRequests.get(messageId) ?? undefined : undefined)
-    // Missing stable request identity must not turn block-level usage into multiple charges.
     const id = requestId ? `request:${requestId}` : messageId ? `message:${messageId}` : `unknown:${row.uuid}`
     const ambiguousAlias = !string(usage.request_id) && messageId && messageRequests.get(messageId) === null
     const credits = ambiguousAlias || (!requestId && !messageId) ? null

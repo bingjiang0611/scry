@@ -20,7 +20,6 @@ export { projectCwdFromRequest }
 type WithProviderOperation = <T>(providerId: ProviderId, operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
 
 
-/** Pin, rename and remove one project of the sidebar list. */
 export function projectStoreChannelHandlers(deps: {
   projectStore: () => { setPinned: (cwd: string, pinned: boolean) => boolean; rename: (cwd: string, name: string) => boolean; remove: (cwd: string) => void }
   recentStore: () => { remove: (cwd: string) => void }
@@ -62,7 +61,6 @@ export function recentFolderChannelHandlers(deps: { recentStore: () => { remove:
  * fails, as it did in main. A context without a cwd means the current workspace.
  */
 export function providerContextChannelHandlers(deps: {
-  // get() refuses an unknown Provider before anything is queued.
   providerRegistry: Pick<ProviderRegistry, 'invalidateContext'> & { get: (providerId: ProviderId) => unknown }
   withProviderOperation: WithProviderOperation
   invalidateDiscovery: (providerId: ProviderId) => void

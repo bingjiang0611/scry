@@ -11,12 +11,9 @@ import type { OutputChunk, RunOutputStore } from '../main/remote/run-output-log'
 import { REMOTE_PROTOCOL_VERSION } from '../shared/desktop-remote'
 import type { SubscribeKnownCursor } from '../shared/orchestration-subscribe'
 
-// How host-process.test.ts reaches a real test daemon: temporary directories, an
-// in-memory output store, the App's local enrollment and one framed socket call.
 
 const dirs: string[] = []
 export function tempDir(): string {
-  // Use /tmp on macOS so `<root>/userData/daemon/host-admin/host-admin.sock` stays well below sun_path's 104-byte limit.
   const base = process.platform === 'darwin' ? '/tmp' : tmpdir()
   const dir = mkdtempSync(join(base, 'scry-d-'))
   dirs.push(dir)
@@ -40,9 +37,6 @@ export class MemoryOutputStore implements RunOutputStore {
   close(): void {}
 }
 
-// local.sock serves the App's own grant only. A device grant is refused there by the
-// transport rule, so the fixture enrolls the way the App does: present the 0600
-// enrollment secret over the enrollment socket.
 export async function enrollLocal(service: Awaited<ReturnType<typeof createDaemonHostProcess>>['service']) {
   const keys = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
   const pkcs8 = await webcrypto.subtle.exportKey('pkcs8', keys.privateKey)
@@ -73,7 +67,6 @@ export function localSubscription(known?: SubscribeKnownCursor, waitMs = 0): Rec
   }
 }
 
-/** Observe one real daemon run using the v3 projection and cursor. */
 export async function waitForProjectedRun(
   socketPath: string, ca: string, cert: string, key: string, runId: string, waitMs = 5_000
 ): Promise<string> {

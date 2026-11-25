@@ -376,7 +376,6 @@ export class SessionLedger {
     return entry?.lifecycle === 'recorded' ? entry.intentDetail : undefined
   }
 
-  // Runs whose executor was started but has not reported a terminal result.
   dispatchedRuns(): string[] {
     this.#assertDeterminate()
     return [...this.#runs.values()].filter((entry) => entry.lifecycle === 'dispatched').map((entry) => entry.runId)

@@ -8,9 +8,6 @@ import {
 } from './index'
 import { renderLaunchdPlist } from '../supervisor-templates'
 
-// W2 review S2, S7, S8 & optional edge cases: symlink refusal, bootout ownership,
-// rollback restoring previous file, Linux start-failure rollback, ephemeral macOS paths,
-// read errors (EACCES), and real execFile timeout / ENOENT handling.
 
 const roots: string[] = []
 function tempRoot(): string {
@@ -84,12 +81,9 @@ describe('login-start security & rollback edge cases (S2, S7, S8)', () => {
     const { manager } = makeSetup({
       runner: async (_file, args) => { calls.push(args); return ok() }
     })
-    // Disable with no plist: no bootout!
     expect(await manager.disable({ daemonRunning: false })).toEqual({ ok: true })
     expect(calls).toEqual([])
 
-    // Enable with no prior plist, daemon not running, but launchctl print says loaded:
-    // refuses without bootout and cleans up the written file!
     expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: false, reason: 'login_start_loaded_without_file' })
     expect(calls).toEqual([['print', 'gui/501/com.scry.daemon']])
     expect(existsSync(manager.filePath)).toBe(false)
@@ -198,7 +192,6 @@ describe('login-start security & rollback edge cases (S2, S7, S8)', () => {
     expect(await manager.enable({ daemonRunning: false })).toEqual({ ok: true })
     expect(await manager.disable({ daemonRunning: true })).toEqual({ ok: true })
     expect(existsSync(manager.filePath)).toBe(false)
-    // Daemon subsequently stops cleanly while the launchd job stays loaded & idle.
     running = false
     calls.length = 0
 
@@ -220,7 +213,6 @@ describe('login-start security & rollback edge cases (S2, S7, S8)', () => {
     expect(existsSync(s1.manager.filePath)).toBe(false)
     expect(calls1).toEqual([['print', 'gui/501/com.scry.daemon']])
 
-    // Empty/unparseable print output with no file on disk also fails closed even if daemonRunning=true.
     const calls2: string[][] = []
     const s2 = makeSetup({ runner: async (_f, args) => { calls2.push(args); return ok('') } })
     expect(await s2.manager.enable({ daemonRunning: true })).toEqual({ ok: false, reason: 'login_start_loaded_without_file' })
@@ -254,18 +246,15 @@ describe('login-start security & rollback edge cases (S2, S7, S8)', () => {
       executable: s.executable, appPath: s.appPath, resourcesPath: s.resourcesPath, userDataDir: s.userDataDir, isPackaged: true
     })), { mode: 0o600 })
 
-    // Already running for our userData -> do not bootout (avoids ExitTimeOut=30 vs 10 s command timeout).
     printOut = `gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => ${s.userDataDir}\n\t}\n\tpid = 4321\n}\n`
     expect(await s.manager.startViaService()).toEqual({ ok: true })
     expect(calls).toEqual([['print', 'gui/501/com.scry.daemon']])
 
-    // Running for another userData -> refuse, never bootout.
     calls.length = 0
     printOut = 'gui/501/com.scry.daemon = {\n\tstate = running\n\tenvironment = {\n\t\tSCRY_DAEMON_USER_DATA_DIR => /other/userData\n\t}\n\tpid = 9999\n}\n'
     expect(await s.manager.startViaService()).toEqual({ ok: false, reason: 'login_start_other_userdata', otherUserDataDir: '/other/userData' })
     expect(calls).toEqual([['print', 'gui/501/com.scry.daemon']])
 
-    // Disable refuses plist belonging to another still-existing App.
     const otherExec = join(s.root, 'Other.app', 'Contents', 'MacOS', 'Scry')
     mkdirSync(join(s.root, 'Other.app', 'Contents', 'MacOS'), { recursive: true })
     writeFileSync(otherExec, '')

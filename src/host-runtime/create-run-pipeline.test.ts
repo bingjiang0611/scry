@@ -2,9 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { createRunPipeline } from './create-run-pipeline'
 import { DockBadgeState } from '../main/dock-badge'
 
-// M2-4: this module is the assembly entry both main and the daemon call. The test
-// builds it with fakes and no Electron at all - if any pipeline module started
-// needing the electron runtime again, importing this file would fail here.
 function inputs(overrides: Record<string, unknown> = {}) {
   const startWorkspaceRun = vi.fn(async () => ({ ok: true, runId: 'workspace' }))
   const startRun = vi.fn(async () => ({ ok: true, runId: 'run' }))

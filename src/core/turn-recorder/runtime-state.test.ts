@@ -72,8 +72,6 @@ describe('runtime diagnostics without an attention index', () => {
     }
     const source = JSON.stringify(open)
     await writeFile(join(sessionDir, 'open.json'), source)
-    // 每条都要写清最后写下东西的时间和是否仍在增长：只报年龄无法区分「慢」和「卡住」。
-    // 转录文件的实际 mtime 由文件系统决定，按它取值而不是按写进去的时间戳。
     const touched = open.transcriptPath && kind === 'old transcript'
       ? (await stat(open.transcriptPath)).mtimeMs
       : undefined
@@ -85,11 +83,9 @@ describe('runtime diagnostics without an attention index', () => {
       ...(touched ? { lastEventAt: new Date(touched).toISOString() } : {}),
       quietMs: touched ? now - touched : 2 * expiryMs,
       growing: false,
-      // 这个 open.json 没写宿主链：诊断必须如实说判断不了，而不是当成已退出。
       host: 'unknown'
     }] : []
 
-    // Call stale diagnostics first: it must not rely on a previous health/daemon call to rebuild.
     expect(await recorderStaleOpenTurns(dataRoot, expiryMs, now)).toEqual(expected)
     expect(await recorderStaleOpenTurns(dataRoot, expiryMs, now)).toEqual(expected)
     expect(await recorderPendingHealth(dataRoot)).toMatchObject({ pendingCount: 0 })

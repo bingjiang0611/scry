@@ -38,7 +38,6 @@ describe('local performance journal', () => {
     for (let index = 0; index < 20; index++) journal.record(observation)
     await journal.close()
     const files = await readdir(path)
-    // One active file plus compressed archives; nothing rotated away within the archive cap.
     expect(files).toContain('performance-0.jsonl')
     const archives = files.filter(file => file !== 'performance-0.jsonl')
     expect(archives.length).toBeGreaterThan(1)
@@ -80,7 +79,6 @@ describe('local performance journal', () => {
       .join('').trim().split('\n').map(line => JSON.parse(line))
     const traces = records.filter(record => record.observation.kind === 'trace')
     expect(traces.map(record => record.observation.sample.durationMs)).toEqual(Array.from({ length: 24 }, (_, index) => index))
-    // Filename ordering must not falsify the actual observation timestamps.
     expect(traces.slice(0, 12).every(record => record.recordedAt === '2026-03-02T00:00:00.000Z')).toBe(true)
     expect(traces.slice(12).every(record => record.recordedAt === '2026-03-01T00:00:00.000Z')).toBe(true)
     expect(records.at(-1).observation.kind).toBe('health')
@@ -197,11 +195,9 @@ describe('local performance journal', () => {
     }
     for (const index of mode === 'interrupted-migration' ? [1, 2] : [1, 2, 3]) {
       await writeFile(join(path, `performance-${index}.jsonl`), `{"legacy":${index}}\n`)
-      // Equal mtimes must still preserve the known legacy order 3 → 2 → 1.
       const time = new Date(Date.UTC(2026, 0, mode === 'distinct' ? 10 - index : 7))
       await utimes(join(path, `performance-${index}.jsonl`), time, time)
     }
-    // A crash after rename but before compression leaves a plain stamped archive and a partial gzip.
     await writeFile(join(path, 'performance-20260120T000000000Z-0000000a.jsonl'), '{"interrupted":true}\n')
     await writeFile(join(path, 'performance-20260120T000000000Z-0000000a.jsonl.gz.partial'), 'broken')
     const onError = vi.fn()

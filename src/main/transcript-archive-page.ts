@@ -58,18 +58,12 @@ function traceArchivePageBounds(availableTurns: number, request: TraceArchivePag
   return { offset: Math.max(0, end - limit), end, totalTurns }
 }
 
-/**
- * Read a bounded page from per-turn archives. A tiny rebuildable index keeps steady-state disk reads
- * proportional to the requested page; legacy monolithic archives transparently use the full reader.
- */
 export async function readTraceArchivePageAsync(
   args: { cwd: string; sessionId: string; userDataDir: string; providerId: ProviderId },
   request: TraceArchivePageRequest = {},
   signal?: AbortSignal
 ): Promise<TraceArchivePage> {
   const page = await readTraceArchivePageBodyAsync(args, request, signal)
-  // Only the newest session snapshot of the page crosses IPC, so only that one is read back
-  // from the content store; older cumulative snapshots stay references on disk.
   if (page.archive) await hydrateNewestSessionSnapshots(args.userDataDir, args.cwd, page.archive.turns)
   return page
 }
@@ -122,11 +116,9 @@ async function readTraceArchivePageBodyAsync(
   if (strictStorage && index?.version === 2 && index.sourceComplete === false) {
     throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
   }
-  // Index reconciliation checks every canonical member and file stamp. Reject
-  // incomplete coverage above, then hydrate only the selected page's bodies.
   if (!index || index.version !== 2) {
     let before: TraceArchiveDirectoryStamp | null = null
-    try { before = archiveDirectoryStamp(await lstat(dir)) } catch { /* inspection below owns absence/corruption semantics */ }
+    try { before = archiveDirectoryStamp(await lstat(dir)) } catch {}
     const inspected = await inspectSegmentedArchivesAsync(args, signal)
     signal?.throwIfAborted()
     try {
@@ -137,11 +129,7 @@ async function readTraceArchivePageBodyAsync(
       }
     } catch (error) {
       if (signal?.aborted) throw signal.reason
-      // A segment changed during the rebuild. The already-inspected canonical snapshot remains safe
-      // for this response; a later request retries the rebuild from current files.
     }
-    // A rebuild already parsed every canonical turn body, so slice that result directly instead of
-    // reading the selected page twice. The next healthy request will use the persisted index.
     if (strictStorage && inspected.invalid.length) throw Object.assign(new Error('history_profile_unavailable'), { code: 'history_profile_unavailable' })
     const merged = mergeArchives(inspected.valid)
     const archive = profileArchive(merged, request)

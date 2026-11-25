@@ -7,8 +7,6 @@ import type { ConversationStore } from '../conversation-store'
 import type { ConversationService } from '../conversation-service'
 import { parseSideChatCreate, parseSideChatListRequest, parseSideChatSource } from '../conversation-request'
 
-// Side-chat channels of the conversation table (bootstrap/conversation.ts), kept apart
-// so each file stays inside the staged size budget. Registered through the same
 // collecting `handle`, so main and the daemon serve them alike.
 export function registerSideChatChannels(
   handle: (channel: string, listener: (event: unknown, ...args: any[]) => unknown) => void,

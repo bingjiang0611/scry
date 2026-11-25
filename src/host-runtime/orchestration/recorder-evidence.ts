@@ -42,7 +42,6 @@ function parseArchiveTurnEvidence(
     const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as ArchiveTurnFile
     const turn = parsed?.turns?.find((candidate) => candidate?.runId === runId)
     if (!turn || turn.done !== true) return undefined
-    // Interrupted archive turns are NOT proven terminal completions; leave honest `interrupted`.
     if (turn.status === 'interrupted') return undefined
     const parsedCompleted = turn.completedAt ? Date.parse(turn.completedAt) : Number.NaN
     const settledAt = Number.isFinite(parsedCompleted)
@@ -88,7 +87,6 @@ function findInTraceArchive(
     return undefined
   }
 
-  // Fast path when run provider + cwd are known.
   if (hint.provider && hint.cwd) {
     const key = ownedCwdKey(hint.cwd)
     if (key) {
@@ -97,7 +95,6 @@ function findInTraceArchive(
     }
   }
 
-  // Fallback bounded scan of exact hash filename across provider/cwd directories.
   try {
     for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
       if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink()) continue
@@ -139,16 +136,10 @@ function findInScryDbSpans(userDataDir: string, runId: string): RecorderTerminal
     try {
       db?.close()
     } catch {
-      // ignore close error on read-only lookup
     }
   }
 }
 
-/**
- * Production recorder-evidence lookup for P4-2 startup recovery (`core §2.4`).
- * Checks committed `trace-archive-turns-v1` turn files first, then committed `scry.db` result spans.
- * Returns `undefined` when no committed terminal evidence exists so recovery honestly marks `interrupted`.
- */
 export function createRecorderEvidenceFinder(
   userDataDir: string,
   sink: EventSink

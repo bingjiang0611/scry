@@ -18,10 +18,6 @@ const realOr = (path, realpath) => {
   try { return realpath(path) } catch { return path }
 }
 
-/**
- * One process against the target: the executable image, the entry it was started with
- * and the environment the App gave it. Every mismatch is listed; any one fails the step.
- */
 export function checkDaemonLaunch({ role, launch, env, target, stateDirectory, realpath = realpathSync }) {
   const entry = join(target.entryDirectory, role === 'daemon' ? 'daemon.js' : 'daemon-supervisor.js')
   const failures = []
@@ -69,7 +65,6 @@ export function daemonProcessEvidence(stateDirectory, target, probes = {}) {
   return {
     ok: checks.every((check) => check.ok),
     daemon: checks[0], supervisor: checks[1],
-    // The resources directory the daemon was given, for the private CLI step.
     daemonResources: resources.status === 'available' ? resources.env.SCRY_DAEMON_RESOURCES_PATH ?? null : null
   }
 }

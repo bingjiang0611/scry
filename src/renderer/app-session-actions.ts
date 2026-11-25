@@ -23,7 +23,6 @@ import {
 } from './app-model'
 import { focusComposerUnlessFocusMoved } from './composer-focus'
 
-// A confirmed save shows briefly, then the row goes back to its time.
 const SAVED_STATUS_MS = 1200
 
 export function createSessionActions({
@@ -66,7 +65,6 @@ export function createSessionActions({
   refreshProviderCatalogs: () => Promise<void>
 }) {
   const { cwd, setCwd, loadProjects, refreshRecent } = workspace
-  // 只记录“用户停在哪里”这一事实；会话内容、运行证据与权限仍需 pickSession 重新读取。
   const rememberWorkspaceOnly = (dir: string | null): void => persistSessionSelection(dir ? {
     cwd: dir,
     sessionId: null,
@@ -112,18 +110,14 @@ export function createSessionActions({
   }
 
   const newConversation = async (): Promise<void> => {
-    // Caret intent is the click: focus that a menu or the user moves later is newer.
     const focusBefore = document.activeElement
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     resetPromptQueueControl()
     shouldStickToBottomRef.current = true
     const pendingDraftKey = sessionComposerDraftKey({ ...draftContextRef.current, sessionId: null })
-    // Reopen this workspace's unsent draft without discarding text or attachments.
-    // Queued send intents are still reset below; restoring a draft never sends it.
     runStructuralTransition('session', () => {
       setSessionLoading(true)
-      // The previous selection no longer owns cleanup once this draft takes over.
       setSessionCacheVisible(false)
       setSessionEvidenceGap(null)
       selectSessionId(null)
@@ -135,7 +129,6 @@ export function createSessionActions({
       })
       session.clearTurns()
       setView('chat')
-      // 新建会话空态也要能被恢复：否则重载后会丢回“未选项目”。
       rememberWorkspaceOnly(cwd)
     })
     try {
@@ -158,7 +151,6 @@ export function createSessionActions({
         focusComposerUnlessFocusMoved(taRef, focusBefore)
       }
     }
-    // Reset is authoritative; refreshing commands and skills is not a send prerequisite.
     if (isCurrent()) void refreshProviderCatalogs()
   }
 
@@ -216,8 +208,6 @@ export function createSessionActions({
     const historyContext: ProviderContext = { providerId, agentProfileId, cwd: projectCwd, externalSessionId }
     const cacheRevision = sessionSnapshots.revision
     const cachedPage = switchingSession ? sessionSnapshots.get(historyContext) : undefined
-    // Publish the target shell immediately. Its history remains unavailable until
-    // the authoritative page arrives; never keep the old session under the new selection.
     const seq = ++sessionSelectionSeqRef.current
     const isCurrent = (): boolean => seq === sessionSelectionSeqRef.current
     const presentationPage = cachedPage ?? (switchingSession ? sessionPreviewPage(sessionId, previewText, previewRunId) : undefined)
@@ -236,7 +226,6 @@ export function createSessionActions({
     integrations.setSelectedId(agentProfileId ?? providerId)
     persistSessionSelection(projectCwd ? { cwd: projectCwd, sessionId, providerId, externalSessionId, agentProfileId } : null, browserStorage())
     try {
-      // Sidebar activity is a display cache, not proof that no live run exists.
       const activeRunsRequest = window.scry.activeRuns()
       const [selectedCwd, activeRuns] = await Promise.all([
         window.scry.setCwd(projectCwd || null, true),
@@ -262,7 +251,6 @@ export function createSessionActions({
               try {
                 return await window.scry.adoptActiveRun(targetRunId)
               } catch (error) {
-                // An unreadable live run is not evidence that saved history is unreadable.
                 console.warn('[Scry] active run adoption failed', error)
                 adoptionFailed = true
                 return null
@@ -303,15 +291,11 @@ export function createSessionActions({
       setSessionCacheVisible(false)
       const page = loadedPage ? sessionSnapshots.put(historyContext, loadedPage, cacheRevision) : null
       if (!page) sessionSnapshots.delete(historyContext)
-      // Confirm only an unchanged display-only installation. A focus/start/clear
-      // supersedes it and must use the normal authoritative replacement.
       const cacheConfirmed = page != null && page === cachedPage && session.confirmCachedSession(sessionId, page)
       const finishPresentation = (): void => {
         setSessionEvidenceGap(sessionEvidenceGapAfterLoad(sessionId, page))
         setSessionLoading(false)
       }
-      // Commit authority together with the turns. Otherwise the structural flush can
-      // remove a failure state while ChatView still suppresses the replacement turns.
       if (cacheConfirmed) finishPresentation()
       else session.replaceWithParsedSession(sessionId, page?.turns ?? [], { activeRun: null, page }, finishPresentation)
       if (adoptionFailed) setComposerError(LOADING_COPY.sessionAdoptFailed)
@@ -370,7 +354,6 @@ export function createSessionActions({
     )
   }
 
-  // 崩溃重载后的兜底恢复：没有仍在跑的轮次时，回到上一棵树停下的位置。
   const restoreLastSelection = async (): Promise<void> => {
     const stored = readStoredSessionSelection(browserStorage())
     if (!stored) return
@@ -388,9 +371,6 @@ export function createSessionActions({
     externalSessionId: session.externalSessionId ?? session.sessionId
   })
 
-  // Pin, archive and title only change the app's own session index: they almost
-  // always succeed and are quietly reversible, so the row changes at once and the
-  // write follows. A failed write puts the row back and says so on the row.
   const markSave = (key: string, state: SessionSaveState | null): void => {
     setSessionSaves((current) => {
       const next = new Map(current)
@@ -408,7 +388,6 @@ export function createSessionActions({
     }
   }
 
-  // 置顶会让会话换分组：先就地移动，写入成功后再拉一次列表校准顺序。
   const togglePinSession = async (cwd: string, session: SessionMeta): Promise<void> => {
     const key = sessionRowKey(cwd, session)
     const pinned = !session.pinnedAt
@@ -424,8 +403,6 @@ export function createSessionActions({
     workspace.loadProjects()
   }
 
-  // The rename dialog stays open until the write answers, so what was typed is kept
-  // on failure; the row shows the new title meanwhile and goes back if it fails.
   const renameSession = async (cwd: string, session: SessionMeta, title: string): Promise<void> => {
     if (!window.scry.renameSession) throw new Error('请重启 Scry 以启用会话重命名')
     workspace.setProjects((current) => patchProjectSession(current, cwd, session, { preview: title }))
@@ -448,14 +425,10 @@ export function createSessionActions({
       providerId: integrations.selectedProviderId,
       agentProfileId: integrations.providerContext.agentProfileId
     })
-    // Queued prompts are dropped before the write, not after it: while the archive is
-    // in flight the current run may finish and would otherwise drain the queue into a
-    // new turn of a session the person is archiving.
     if (ref.providerId !== 'legacy_unknown') clearSessionPromptQueue(archivingActiveSession ? queueKeyRef.current : sessionComposerDraftKey({
       providerId: ref.providerId, agentProfileId: ref.agentProfileId, cwd, sessionId: meta.sessionId
     }))
     const key = sessionRowKey(cwd, meta)
-    // The row leaves the list at once; it comes back from the catalog if the write fails.
     workspace.setProjects((current) => patchProjectSession(current, cwd, meta, null))
     markSave(key, { status: 'saving', action: 'archive' })
     await applySessionArchiveEffects({

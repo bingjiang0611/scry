@@ -7,10 +7,6 @@ import type { DaemonRunTransport } from '../daemon-run-transport'
 import type { DaemonRunRuntime } from '../daemon-run-runtime'
 import { createDaemonRunSurface, routingDetail } from './daemon-run-surface'
 
-// A first send that prepares its workspace, with the daemon as the only runtime. The
-// selection is the request: it must reach the daemon (which prepares or refuses it), the
-// window's own project is checked where only the App knows it, and the run is followed
-// into the workspace the daemon's journal says it registered in.
 
 const dirs: string[] = []
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })

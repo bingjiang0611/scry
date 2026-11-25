@@ -17,20 +17,11 @@ import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli
 import type { RemotePairingCode, RemoteDevice, RemoteStatus } from '../../shared/remote'
 import { encodePairingDeviceCode, projectRemoteDevice, projectRemoteStatus } from './remote-host-status'
 
-// The single object Electron main owns for the remote-access subsystem. It
-// composes the already-proven pieces (persisted host identity + inner CA,
-// HostController with durable pairing/ledger, the inner-mTLS host, and the Mac
-// relay client) into one lifecycle with start()/dispose(). It adds NO new
-// security decisions - authorization stays inside HostController/PairingAuthority
-// and the inner-mTLS fingerprint check.
-//
 // The relay transport is INJECTED. When it is absent the host is fully
 // constructed and can pair and serve locally, but no outbound relay leg is
 // opened, so the subsystem is dormant until its owner supplies a relay. The
 // app composition layer decides whether to inject the official default or a
 // private override. The human-in-the-loop pairing
-// confirmation (begin/confirmLocal/cancel/revoke) is exposed for the trusted
-// LOCAL Scry UI only; it is never reachable from a device.
 
 export type { RemoteHostServiceDependencies } from './remote-host-service-deps'
 
@@ -172,7 +163,6 @@ export class RemoteHostService {
     })
   }
 
-  /** True while a non-revoked, unexpired scope:local grant exists. */
   hasActiveLocalGrant(now = Date.now()): boolean {
     return this.#binding.controller.authority.inspectLocal().grants.some((grant) =>
       grant.scope === 'local' && grant.revokedAt === null && grant.expiresAt > now)
@@ -311,7 +301,6 @@ export class RemoteHostService {
     for (const client of this.#clients) client.refresh({ includeActive: options.includeActive === true })
   }
 
-  // Display-safe snapshot for the pairing screen.
   status(): RemoteStatus {
     return projectRemoteStatus({
       state: this.authority.inspectLocal(),
@@ -373,8 +362,6 @@ export class RemoteHostService {
     }
   }
 
-  // Display/diagnostic view of the direct route: what an authorized phone is
-  // told, or why there is none.
   lanStatus(): { advertisement?: LanAdvertisement; error?: string } {
     const advertisement = this.#lan?.advertisement()
     return { ...(advertisement ? { advertisement } : {}), ...(this.#lanError ? { error: this.#lanError } : {}) }

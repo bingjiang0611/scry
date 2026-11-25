@@ -21,11 +21,6 @@ interface RetainedUsage {
   cost: number | null
 }
 
-/** V16: recover only Scry-persisted results belonging to managed sessions.
- * model_usage survived the old allowlist even when billing discarded its rows.
- * Insert-only: existing canonical costs and provenance must remain untouched.
- * SQLite did not retain per-model reasoning or original cost provenance, so
- * reconstruction cannot claim those fields are exact/provider-reported. */
 export function repairMissingUsageLedger(db: Database.Database): void {
   const retained = db.prepare(`SELECT s.id spanId, s.session_id sessionId, s.run_id runId,
     r.cwd, s.ts_start ts, r.provider_id providerId, r.runtime_provider runtimeProvider,

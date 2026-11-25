@@ -118,7 +118,6 @@ export function useRemoteCatalogs(): Snapshot {
 }
 
 // Keep host session activity fresh even when its conversation is not open.
-// Read host metadata once on connect and apply session updates from main.
 // A failed read retains history, but its error invalidates live activity badges.
 export function useConnectedCatalogLoader(connections: readonly DesktopRemoteConnection[], readError: string | null, refreshing = false): void {
   const connected = readError || refreshing ? [] : connections.filter(connection => connection.state === 'connected')

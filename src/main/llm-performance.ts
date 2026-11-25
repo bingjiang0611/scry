@@ -5,7 +5,6 @@ import type { TraceEvent } from '../shared/trace'
 
 const WINDOW_MS = 3000
 
-/** Observe raw deltas before coalescing. Snapshots and subagents never inflate text speed. */
 export class LlmPerformanceObserver {
   private readonly started: number
   private firstOutputWaitMs?: number
@@ -87,20 +86,15 @@ export class LlmPerformanceObserver {
       ? this.segmentLast - this.segmentStart : 0)
     const results = terminal ? providerUsageResultEvents([...events, event].filter(item => !item.agentId && !item.parentToolUseId)) : []
     const timing = results.length ? deriveModelTiming(results) : undefined
-    // Claude continuation results are cumulative; other adapters emit increments.
-    // Reuse the canonical usage selection and require complete numerator/denominator
-    // coverage. Residual/activity time is never a generation denominator.
     const providerApiMs = timing?.value.method === 'provider_api' && results.every(item => item.durationApiMs != null)
       ? timing.value.cumulativeMs : undefined
     const resultTokens = results.length && results.every(item => item.tokensOut != null)
       ? results.reduce((sum, item) => sum + item.tokensOut!, 0) : undefined
-    // Without Provider API time, pair only per-call tokens with the same calls' local timing.
-    // Turn usage also counts failed/aborted calls, so it is never divided by observed call time.
     const observedCalls = providerApiMs == null && this.calls > 0
     const apiDurationMs = observedCalls ? this.callDurationMs : providerApiMs
     const outputTokens = observedCalls ? this.callTokens : terminal ? resultTokens : undefined
-    // Q8：输出速度只除生成时间（调用时长 − 首 token）。首 token 未全部观测到时不猜，
-    // 宁可没有速度，也不把等待算进分母。
+    // Q8：按观测调用计时时，只有每次调用都观测到首 token 才扣除等待并计算速度。
+    // 使用 Provider API 耗时时，直接采用 Provider 给出的时长。
     const generationMs = observedCalls
       ? (this.firstTokenCalls === this.calls ? this.callDurationMs - this.firstTokenMs : undefined)
       : apiDurationMs

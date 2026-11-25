@@ -31,7 +31,6 @@ function request(source: ConversationSideChatRequest['source'], preview: SideCha
     expectedPrefixFingerprint: preview.prefixFingerprint, expectedManifestFingerprint: preview.manifestFingerprint, commandId }
 }
 
-/** Parent with two completed turns, then a child whose snapshot is frozen at turn 2. */
 async function frozenChild(): Promise<{ fixture: SideChatFixture; parentId: string; child: ConversationSummary }> {
   const current = await fixture()
   const parent = await current.service.create(current.cwd)
@@ -202,7 +201,6 @@ describe('side-chat first send and frozen context', () => {
     // Restoring a tab validates the same identity through one bounded id lookup.
     expect((await current.service.listSideChats({ source: { kind: 'conversation', conversationId: adopted.id },
       ids: [child.id] })).items.map(item => item.id)).toEqual([child.id])
-    // The other direction stays true: the native tuple still finds its own child.
     expect((await current.service.listSideChats({ source })).items.map(item => item.id)).toEqual([child.id])
 
     // The alias covers one exact tuple only: another session, another workspace or

@@ -23,11 +23,9 @@ export interface OpenCodeTurnInput {
   client: OpencodeClient
   externalSessionId: string
   response: { info: Record<string, unknown>; parts: unknown[] }
-  /** Resolved model context windows; unavailable windows stay unknown. */
   modelContext: Promise<Map<string, number>>
   outgoingText: string
   history: HistoricalInput
-  /** Event-stream observation failure, if any; reported as partial observation. */
   observationError: unknown
   /** Publishes turn identity before this call settles so a failure keeps it. */
   publish: (state: { providerTurnId?: string; recordingFailure?: { message: string } }) => void
@@ -99,8 +97,6 @@ export async function publishOpenCodeTurn(input: OpenCodeTurnInput): Promise<{
     const persistedText = parentUserRow ? openCodeUserText(parentUserRow.parts) : undefined
     const snapshotProvesParentUser = parentId !== undefined && persistedText === outgoingText
     if (history.snapshot()?.status === 'unknown') {
-      // The prompt response names the canonical assistant message; only a matching
-      // persisted user message with the exact outgoing text proves our input.
       if ((messageSnapshotStatus === 'complete' || messageSnapshotStatus === 'bounded') && snapshotProvesParentUser) {
         history.accepted(externalSessionId, 'opencode_prompt_user_message', parentId)
       } else {

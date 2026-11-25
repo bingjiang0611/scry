@@ -10,11 +10,8 @@ export interface ShadowCommitSample {
   runId: string
   ledgerRunId: string
   commitKind: string
-  /** Full shadow hook wall time (parse + ordinal lookup + BodyStore fsync + hash + EventSink commit). */
   durationMs: number
-  /** EventSink.execute (decide + SQLite tx + fsync) duration alone. */
   sinkDurationMs: number
-  /** External >16 KiB body file + directory fsync duration, tracked separately per 2026-11-20 decision. */
   bodyWriteMs?: number
   preFirstToken: boolean
   bodyBytes?: number
@@ -22,7 +19,6 @@ export interface ShadowCommitSample {
 
 export interface ShadowMirrorStats {
   acceptedCommits: number
-  /** Alias for acceptedCommits (only accepted commits, never rejected no-ops). */
   commits: number
   duplicates: number
   rejectedSticky: number
@@ -31,7 +27,6 @@ export interface ShadowMirrorStats {
   importRejections: number
   missingBodies: number
   failures: number
-  /** Total shadow parity anomalies: sticky + retryable + ordinalMismatches + importRejections + missingBodies + failures. */
   deviations: number
   failedOpen: boolean
   preFirstTokenCommitsByRun: ReadonlyMap<string, number>

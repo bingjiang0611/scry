@@ -6,10 +6,6 @@ import type { TraceEvent } from '../../shared/trace.js'
 import type { TranscriptRead } from './recorder-contracts.js'
 import { readTranscriptWindow, transcriptIdentity } from './recorder-transcript-io.js'
 
-// Native agent-result rows authorize one level of sidecars, not arbitrary paths. More than 64
-// children or nested delegation remain partial evidence. The byte limits are read budgets, not
-// admission tests: a child transcript that does not fit still contributes every complete row that
-// does, because dropping a whole child loses internal tool/model evidence that was readable.
 const MAX_FILE_BYTES = 256 * 1024
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024
 const MAX_FILES = 64
@@ -17,7 +13,6 @@ const SAFE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
 
 type Row = Record<string, unknown>
 interface Binding { agentId: string; parentToolUseId: string }
-/** A child transcript that was kept only in part, with what the record must say about it. */
 export interface SidecarTruncation {
   agentId: string
   path: string
@@ -36,10 +31,6 @@ function rows(content: string): Array<Row | undefined> {
   })
 }
 
-/**
- * A byte-bounded window can end mid-line. Keep whole JSONL rows only: half a row is not evidence and
- * would fail the scoping check that protects against foreign sidecars.
- */
 function completeRows(content: string): string {
   const end = content.lastIndexOf('\n')
   return end < 0 ? '' : content.slice(0, end + 1)
@@ -74,7 +65,6 @@ export async function qoderSidecarEvents(args: {
     const blocks = object(row.message)?.content
     const block = Array.isArray(blocks) && blocks.length === 1 ? object(blocks[0]) : undefined
     const toolUseId = block?.tool_use_id
-    // Other turns in the same snapshot do not authorize this turn's children.
     if (typeof toolUseId !== 'string' || !args.agentToolUseIds.has(toolUseId)) continue
     const agentId = result.agentId
     if (block?.type !== 'tool_result' || typeof agentId !== 'string' || !SAFE_COMPONENT.test(agentId) ||
@@ -97,8 +87,6 @@ export async function qoderSidecarEvents(args: {
   try {
     const sessionRoot = join(dirname(await realpath(args.transcriptPath)), sessionId)
     sidecarRoot = join(sessionRoot, 'subagents')
-    // Check both components: a regular file under a symlinked session directory
-    // would otherwise escape the native transcript tree.
     for (const path of [sessionRoot, sidecarRoot]) {
       const info = await lstat(path)
       if (!info.isDirectory() || info.isSymbolicLink()) return { events, complete: false, observable, truncations }
@@ -118,8 +106,6 @@ export async function qoderSidecarEvents(args: {
         complete = false
         continue
       }
-      // The window is the file's prefix, so the identity check still proves the bytes came from the
-      // file this binding named; the size cap is what turns an oversized child into partial evidence.
       const limit = Math.min(info.size, MAX_FILE_BYTES, remaining)
       if (limit <= 0) { complete = false; continue }
       const snapshot = await readTranscriptWindow(childPath, limit, 0, transcriptIdentity(info))
@@ -145,9 +131,6 @@ export async function qoderSidecarEvents(args: {
     }
     const childRows = rows(content)
     const header = childRows[0]
-    // Qoder 1.1.93 的子行把 parent_tool_use_id 写成 null：归属由父结果里的 agentId、
-    // 子文件名 agent-<id>.jsonl、sessionId、cwd、agentId 与 isSidechain 共同证明。
-    // 字段有值时必须等于父调用 ID；指向别的调用的子文件宁可不收，也不能挂错父。
     const scoped = (row: Row | undefined): boolean => !!row && row.sessionId === sessionId &&
       row.cwd === cwd && row.agentId === binding.agentId &&
       (row.parent_tool_use_id == null || row.parent_tool_use_id === binding.parentToolUseId) &&
@@ -163,8 +146,6 @@ export async function qoderSidecarEvents(args: {
     })
     if (!turns.length) { complete = false; continue }
     for (const event of turns.flatMap(turn => turn.items)) {
-      // Main request accounting is authoritative; retain child text separately,
-      // but do not add child token/cost/credit totals to it a second time.
       if (event.kind === 'harness' && ['result', 'credit_usage'].includes(event.stage)) continue
       if (event.kind === 'agent') complete = false
       events.push({
@@ -172,7 +153,6 @@ export async function qoderSidecarEvents(args: {
         parentToolUseId: event.parentToolUseId ?? binding.parentToolUseId,
         runtimeMetadata: {
           ...event.runtimeMetadata, childTranscript: childPath, childAgent: binding.agentId,
-          // The child's own rows say which of them came from a transcript kept only in part.
           ...(childTruncation
             ? {
                 childTranscriptTruncated: {

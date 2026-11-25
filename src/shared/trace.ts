@@ -46,13 +46,10 @@ export {
   normalizeWorkspaceOverlap
 } from './turn-diff.js'
 
-// 统一 trace 事件模型 —— 所有 Provider 共享 kind/baggage/stage 设计，
-// 让 SDK stream 和未来 codex adapter 都归一化到同一格式（一份数据多处用）。
 
 export type TraceKind = 'tool' | 'skill' | 'agent' | 'human' | 'model' | 'harness' | 'hook'
 export type FileOp = 'read' | 'write' | 'edit'
 
-// P3 审计：危险工具调用的标记（观测，不阻塞）。danger=高危(删/提权/push/远程脚本)，warn=可疑(跨项目写/MCP写)。
 export type DangerLevel = 'danger' | 'warn'
 export interface DangerVerdict {
   level: DangerLevel
@@ -74,16 +71,9 @@ export interface McpCallRef {
   tool: string
 }
 
-// B1：进行中 run 的快照（main 缓冲、renderer 重挂时拉取恢复，避免 reload/HMR 丢失在途 trace）。
-// 与 renderer 的 Turn 结构一致（结构化类型，可互赋）。
 export interface ActiveRun {
   runId: string
-  /** Stable owner for managed-conversation attention, independent of Provider bindings. */
   conversationId?: string
-  /**
-   * Attention owner when it is not this conversation: a side chat has no sidebar row of its
-   * own, so its unread result and questions belong to the row of the session it came from.
-   */
   attentionKey?: string
   providerId?: ProviderId
   agentProfileId?: string
@@ -93,33 +83,22 @@ export interface ActiveRun {
   attachments?: AgentInputAttachment[]
   pendingQuestions?: AgentQuestionRequest[]
   items: TraceEvent[]
-  /** Latest bounded legacy observation; global summaries must not rescan the trace. */
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   done: boolean
-  /** Provider transport settled. Independent of the local finalization below. */
   providerSettled?: boolean
-  /**
-   * Local finalization (turn diff, archive, managed settlement) is still open after the
-   * Provider settled. Such a run still owns its conversation and its recording fences, so
-   * admission and deletion keep waiting for it, while stop control must not call into an
-   * ended Provider.
-   */
   localFinalizing?: boolean
-  /** 已请求停止时的真实停止进度；缺失表示没有人请求过停止，不表示已终止。 */
   stopState?: AgentStopState
   sessionId?: string
   error?: string
   errorHint?: string
 }
 
-// 斜杠命令：来自各 Provider 的命令目录；可包含原生命令或 Scry 映射的 Skill 别名，供 composer 的 / 命令面板。
 export interface SlashCmd {
   name: string
   description: string
   argumentHint?: string
 }
 
-// MCP 真实状态：来自当前 runtime 的 init/live 信息；Claude SDK 下和终端 /mcp 一致（含 needs-auth）。
 export interface McpLiveStatus {
   name: string
   status: 'connected' | 'cached' | 'disconnected' | 'failed' | 'needs-auth' | 'needs-client-registration' | 'pending' | 'disabled'
@@ -129,11 +108,6 @@ export interface McpLiveStatus {
   toolNames?: string[]
 }
 
-/**
- * Hook 生命周期投递 stage。Provider 只把 hook 事件投递给外部 hook 进程（Codex 终端会话就是这样），
- * 不暴露被执行脚本的 command / exit code / outcome 时，recorder 只能证明「该 hook 事件确实触发过」。
- * 这类事件不得与 `hook_started` / `hook_response`（带脚本身份的真实 hook 运行）混为一谈。
- */
 export const HOOK_DELIVERY_STAGE = 'hook_delivery'
 
 export type CompactionTrigger = 'auto' | 'manual'
@@ -146,22 +120,20 @@ export interface ContextCompaction {
 }
 
 export interface TraceEvent {
-  /** One run-scoped metering snapshot, separate from result USD/token counters. */
   creditUsage?: CreditUsageEvidence
   inputContent?: import('./tool-content.js').ToolContent
   outputContent?: import('./tool-content.js').ToolContent
-  /** Durable assistant/reasoning body with a bounded inline preview. */
   modelContent?: import('./tool-content.js').ToolContent
   id: string
   ts: string
-  runId: string // 一次 query() = 一个 run（模式 A 下 app 自造 baggage）
+  runId: string
   kind: TraceKind
-  stage: string // 如 tool:Bash / skill:xxx / agent:xxx / prompt / text / thinking / result
+  stage: string
   tool?: string
   toolUseId?: string
   parentToolUseId?: string | null
-  agentId?: string // 该事件属于哪个 subagent；主会话事件为 undefined
-  name?: string // skill / agent 名
+  agentId?: string
+  name?: string
   hookId?: string
   hookEvent?: string
   hookName?: string
@@ -173,43 +145,38 @@ export interface TraceEvent {
   mcpServer?: string
   mcpAction?: string
   mcpTool?: string
-  // 一个 shell tool_use 可能串行执行多个 mcporter call。首个调用保留在上方兼容字段，
-  // 完整列表供调用统计/MCP 明细使用；runtime tool 本身仍只有一个 lifecycle。
   mcpCalls?: McpCallRef[]
   fileOp?: FileOp
   filePath?: string
   text?: string
   thinking?: string
   input?: unknown
-  messageId?: string // SDK assistant message.id = llm_request 级（一个 run 内多条）；result 事件无
+  messageId?: string
   durationMs?: number
-  durationApiMs?: number // 仅 result：SDK 权威 API 耗时
-  // 一次成功完成的主 Agent 模型请求：本机计时（请求开始→消息结束，含首 token 等待）。只用于速度观测，不是计费用量。
-  // firstTokenMs：请求开始→模型开始输出第一个内容块（含思考）；Provider 没有可对齐的首块信号时缺省。
+  durationApiMs?: number
   llmCall?: { outputTokens: number; durationMs: number; firstTokenMs?: number; model?: string }
   llmPerformance?: import('./llm-performance.js').LlmPerformance
   costUsd?: number
   costSource?: CostSource
   costConfidence?: CostConfidence
   costUnit?: CostUnit
-  // usage_snapshot is run-cumulative live evidence: replace snapshots, never add them to result usage.
-  tokensIn?: number // result：从 modelUsage 聚合（顶层 usage 会少算，见 probe）
+  tokensIn?: number
   tokensOut?: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
   cacheCreation5mTokens?: number
   cacheCreation1hTokens?: number
   reasoningTokens?: number
-  contextTokens?: number // result / context_usage：Provider 当前上下文占用；cache 口径由 adapter 吸收
-  contextModel?: string // contextTokens 所属模型；多模型会话不得按数组顺序猜窗口
-  contextProvider?: string // contextTokens 所属 upstream provider；与 contextModel 共同绑定窗口
-  contextUsageSource?: string // 上下文证据来源，如 qoder_control / pi_rpc_assistant_usage
-  contextUsageQuality?: 'exact' | 'inferred' // 推导窗口必须显式呈现，不能冒充精确证据
-  modelUsage?: ModelUsageRow[] // result：per-model 明细；context_usage：仅模型身份与窗口，不参与累计
+  contextTokens?: number
+  contextModel?: string
+  contextProvider?: string
+  contextUsageSource?: string
+  contextUsageQuality?: 'exact' | 'inferred'
+  modelUsage?: ModelUsageRow[]
   isError?: boolean
-  output?: string // 工具结果文本（tool_result），渲染时合并进对应 tool_use
-  danger?: DangerVerdict // P3 审计：危险工具标记（normalize 时分类，观测不阻塞）
-  turnDiff?: TurnDiffSnapshot // 每轮开始/结束 Git 工作树快照的净变化；Provider 无关，旧历史可缺失
+  output?: string
+  danger?: DangerVerdict
+  turnDiff?: TurnDiffSnapshot
   providerId?: ProviderId
   runtimeProvider?: RuntimeProvider
   billingProvider?: BillingProvider
@@ -219,9 +186,7 @@ export interface TraceEvent {
   runtimeFailureStage?: RuntimeFailureStage
   terminationReason?: RunTerminationReason
   providerStopReason?: string
-  /** Pi RPC tool result explicitly ended execution; this is not proof of Goal completion. */
   toolTermination?: { tool: string; message: string }
-  /** Pi acknowledged its extension handler without an observed model turn; not an agent_settled result. */
   providerCommand?: { name: string; source: 'extension'; modelTurn: 'unobserved' }
   runtimeMetadata?: Record<string, unknown>
   backgroundWork?: BackgroundWork
@@ -231,7 +196,6 @@ export interface TraceEvent {
   compaction?: ContextCompaction
 }
 
-/** Also reads older Pi archives that retained the raw lifecycle instead of a canonical completion. */
 export function contextCompactionOf(event: TraceEvent): ContextCompaction | null {
   if (event.kind !== 'harness') return null
   if (event.stage === 'context_compaction') return event.compaction ?? {}
@@ -285,7 +249,6 @@ export function contextUsageEvidence(event: Pick<TraceEvent, 'contextTokens' | '
   }
 }
 
-// 工具名 → kind 分类
 export function classifyTool(
   toolName: string,
   input?: Record<string, unknown>
@@ -345,9 +308,6 @@ function matchesFor(
 }
 
 function parseMcporterCommand(command: string): ParsedMcp {
-  // Codex app-server 会把 shell 包装后的命令保存成
-  // `/bin/zsh -lc \"mcporter call ...\"`。先还原仅用于包裹命令的转义引号，
-  // 否则 `\"mcporter` 前没有空白，无法识别为 MCP 调用。
   const normalized = command.replace(/\\(["'`])/g, '$1')
   const direct = matchesFor(
     normalized,
@@ -362,9 +322,6 @@ function parseMcporterCommand(command: string): ParsedMcp {
   return parsedMcp([...direct, ...variable].sort((a, b) => a.index - b.index).map((match) => match.call))
 }
 
-// Qoder 原生 MCP 包装器：tool_use.name 固定是 `mcp_call`，真实工具在 input.toolName
-// （`mcp__<server>__<action>`），实际参数在 input.arguments。只有这一种实测形状被识别；
-// 其他包装名没有证据，仍按普通工具记录，不按名字猜测。
 const QODER_MCP_WRAPPER = 'mcp_call'
 
 function parseWrappedMcp(input?: Record<string, unknown>): ParsedMcp {
@@ -372,11 +329,6 @@ function parseWrappedMcp(input?: Record<string, unknown>): ParsedMcp {
   return typeof wrappedTool === 'string' ? parseDirectMcpTool(wrappedTool) : { isMcp: false }
 }
 
-// MCP 工具识别：
-// 1. Claude SDK 原生 MCP tool_use：mcp__<server>__<action>
-// 2. 本地 MCP bridge：Bash 里执行 mcporter call <server>.<action>
-// 3. Qoder 包装器：mcp_call + input.toolName
-// 三条路径共用同一个判定；历史回放也调用这里，不另写一套推断。
 export function parseMcp(
   toolName: string,
   input?: Record<string, unknown>
@@ -394,24 +346,17 @@ export interface ToolInvocation {
   mcp: ParsedMcp
 }
 
-// 一次工具调用的记录形态。Qoder 的 mcp_call 包装把真实工具名和参数藏在 input 里，
-// 在这里统一还原成与直接 MCP 调用相同的 tool/input，避免 hook、transcript、历史回放
-// 三处各写一份推断，也让同一次调用不会同时落进 tools 和 mcps。
 export function toolInvocation(toolName: string, input?: Record<string, unknown>): ToolInvocation {
   const mcp = parseMcp(toolName, input)
   if (toolName !== QODER_MCP_WRAPPER || !mcp.isMcp) return { tool: toolName, input, mcp }
   const args = input?.arguments
   return {
     tool: mcp.mcpTool ?? toolName,
-    // 只有实测过的对象形状才解包；解不开时保留原始载荷，不把证据丢成 undefined。
     input: args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : input,
     mcp
   }
 }
 
-// 旧会话归档只保存了首个 MCP 的兼容字段，但仍保留原始 shell command。
-// 读取时从 command 重新补齐完整调用列表，保证 Claude/Codex/Qoder/OpenCode 的
-// 实时流、历史回放和 turn recorder 使用同一套逻辑调用语义。
 export function mcpCallsForEvent(
   event: Pick<TraceEvent, 'isMcp' | 'tool' | 'input' | 'mcpCalls' | 'mcpServer' | 'mcpAction' | 'mcpTool'>
 ): McpCallRef[] {
@@ -454,8 +399,6 @@ function payloadEnvelopeFailed(value: unknown): boolean {
   })
 }
 
-// mcporter 可能在 shell exit=0 时返回业务失败 JSON。只检查完整 JSON 或逐行 JSON 的
-// 顶层状态字段，避免把任意工具输出正文里的 “error” 单词误判成失败。
 export function mcpPayloadFailed(output: unknown): boolean {
   if (payloadEnvelopeFailed(output)) return true
   if (typeof output !== 'string') return false
@@ -469,14 +412,11 @@ export function mcpPayloadFailed(output: unknown): boolean {
     try {
       if (payloadEnvelopeFailed(JSON.parse(candidate))) return true
     } catch {
-      // 非完整 JSON 行不是权威失败证据。
     }
   }
   return false
 }
 
-// 文件足迹：Claude/Qoder/Codex 使用 file_path；Pi 原生工具使用 path 和小写工具名。
-// Glob/Grep 是 pattern/path 不算「读写」，Bash/MCP 的文件操作此处统计不到（已知盲区，UI 标注）。
 const FILE_OP_TOOLS: Record<string, FileOp> = {
   read: 'read',
   write: 'write',

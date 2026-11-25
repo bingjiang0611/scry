@@ -43,7 +43,6 @@ describe('run-channel protocol version', () => {
       await expect(fixture.client.catalog(id)).rejects.toThrow('desktop_protocol_host_older')
       fixture.tlsRequest.mockResolvedValueOnce({ error: 'protocol_mismatch', hostProtocol: REMOTE_PROTOCOL_VERSION + 1, clientProtocol: REMOTE_PROTOCOL_VERSION })
       await expect(fixture.client.catalog(id)).rejects.toThrow('desktop_protocol_client_older')
-      // A refusal that names no versions cannot pick a direction; it stays generic.
       fixture.tlsRequest.mockResolvedValueOnce({ error: 'protocol_mismatch' })
       await expect(fixture.client.catalog(id)).rejects.toThrow('desktop_protocol_mismatch')
       // A host that states an older version in `info` is the same refusal, so an

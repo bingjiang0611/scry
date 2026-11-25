@@ -10,13 +10,11 @@ import {
   type PendingResolution
 } from '../composer-pending'
 
-// Readable copy for a failed IPC call, without Electron's wrapper (daemon refusals included).
 const message = ipcErrorMessage
 
 export interface ConversationSubmission {
   /** Matching pending receipt of this draft, if any. Its content is the durable copy. */
   pending?: ComposerPendingSubmission
-  /** Last read-back answer; absent until the durable record was checked. */
   pendingHealth?: PendingResolution
   working: boolean
   /** Explicit send of the editable draft, or of a replaced known-not-sent original. */
@@ -90,8 +88,6 @@ export function useConversationSubmission({ api, draftStore, draftKey, expectedR
     const commandId = current.commandId
     try {
       const page = await api.read(current.conversationId)
-      // Read-only: this never sends, and a receipt that changed while the page was
-      // loading is left for its own owner.
       settlePending(commandId, page.turns)
       return resolvePendingSubmission(current, page.turns)
     } catch (error) {

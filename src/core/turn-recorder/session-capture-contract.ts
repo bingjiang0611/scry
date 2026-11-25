@@ -5,20 +5,8 @@ import { UPLOAD_ENV_KEYS } from './commit-environment.js'
 import { readJson } from './io.js'
 import { safeKey } from './store.js'
 
-/**
- * The wire contract CodeLens and the recorder share for session-scoped capture. CodeLens' private
- * marker file is the only "enabled" switch; the state kept behind these types is recovery and
- * idempotency evidence — claim identity, turn boundary, stop intent — never a second switch.
- */
 export const SESSION_CAPTURE_PROTOCOL = 'codelens.session-capture.v1'
 
-/**
- * Versioned file contract that lets a host guard write a captured session's hook events directly
- * to the recorder's durable inbox without spawning Node per event. The recorder owns the layout
- * and replay semantics; external writers only touch the advertised paths inside `dataRoot` under
- * `attentionLockPath`, mark `attentionMarkerPath` before publishing the atomic JSON entry, and
- * notify the daemon via `POST /v1/wake` (or start it detached).
- */
 export const RECORDER_INBOX_CONTRACT_VERSION = 1
 
 export interface CaptureInboxContract {
@@ -40,16 +28,7 @@ export interface SessionCaptureContext {
   openedAt: string
   source: string
   task: string | null
-  /**
-   * The client application the host runs inside, when that differs from `source`. `source` names who
-   * asked for this capture; `client` names the product the turn happened in, so `source=friday` and
-   * `client=3eye` can describe one turn without either field pretending to be the other.
-   */
   client?: string
-  /**
-   * Absolute paths this session keeps out of its turn diffs, as the integrator declared them.
-   * They belong to the claim, never to `scry.config.json`, and only the diff is affected.
-   */
   diffExclude?: string[]
   stopRequestedAt?: string
 }
@@ -63,7 +42,6 @@ export interface SessionCaptureState extends SessionCaptureContext {
 
 export type CaptureErrorCode = 'invalid_request' | 'unsupported_capture' | 'recorder_unavailable'
 
-/** A request the contract answers with a machine-readable error ACK and a fixed exit code. */
 export class CaptureRequestError extends Error {
   readonly code: CaptureErrorCode
   constructor(code: CaptureErrorCode, message: string) {
@@ -72,7 +50,6 @@ export class CaptureRequestError extends Error {
   }
 }
 
-/** Exit codes are part of the contract: 2 invalid, 3 unsupported, 4 unavailable. */
 export function captureExitCode(code: CaptureErrorCode): number {
   return code === 'invalid_request' ? 2 : code === 'unsupported_capture' ? 3 : 4
 }
@@ -90,10 +67,6 @@ function record(value: unknown): Record<string, unknown> | null {
 
 const PROVIDER_HOSTS: readonly string[] = ['qoder', 'codex', 'claude', 'opencode', 'pi']
 
-/**
- * Validate the CONTEXT object. Every field is required by the contract, and `task` stays a verbatim
- * string or an explicit null — it is never parsed into a REQ or any other identifier.
- */
 export function parseSessionCaptureContext(value: unknown, provider: ProviderId): SessionCaptureContext {
   const raw = record(value)
   if (!raw) throw new CaptureRequestError('invalid_request', 'capture context is required')
@@ -143,10 +116,6 @@ export function parseSessionCaptureContext(value: unknown, provider: ProviderId)
   }
 }
 
-/**
- * The client label is an identifier, not prose: a platform groups and counts by it, so a free-form
- * string with spaces or slashes would silently become a new category. Absent means "not reported".
- */
 export const CLIENT_LABEL_LIMIT = 32
 
 export function parseClient(value: unknown): string | undefined {
@@ -158,13 +127,8 @@ export function parseClient(value: unknown): string | undefined {
   return value
 }
 
-/** At most this many declared paths per session: a workflow declares a handful, not a directory tree. */
 export const DIFF_EXCLUDE_PATH_LIMIT = 64
 
-/**
- * Validate the declared exclusion paths. They are absolute because the integrator's working directory
- * is not the recorder's: resolving again at diff time would guess a different base.
- */
 export function parseDiffExclude(value: unknown): string[] {
   if (value === undefined) return []
   if (!Array.isArray(value) || value.length > DIFF_EXCLUDE_PATH_LIMIT) {
@@ -180,15 +144,12 @@ export function parseDiffExclude(value: unknown): string[] {
   return paths
 }
 
-/** The declared paths plus whatever another start of the same session adds; order is declaration order. */
 export function unionDiffExclude(current: string[] | undefined, added: string[] | undefined): string[] {
   const merged = [...(current ?? [])]
   for (const item of added ?? []) if (!merged.includes(item)) merged.push(item)
   return merged
 }
 
-/** The `{capture, payload}` stdin document shared by start, stop and session hook delivery. */
-/** Delivery body: the Provider's own hook JSON, unchanged. The payload names the session. */
 export function parseHookPayload(source: string): Record<string, unknown> {
   let parsed: unknown
   try {
@@ -214,11 +175,6 @@ export function parseCaptureEnvelope(source: string): { context?: unknown; paylo
   return envelope.capture === undefined ? { payload } : { context: envelope.capture, payload }
 }
 
-/**
- * The CONTEXT object exactly as the contract spells it. This shape is what the published context
- * file holds and what the receiver embeds, so the daemon, the fallback CLI and CodeLens all validate
- * the same document.
- */
 export function captureWireContext(context: SessionCaptureContext): Record<string, unknown> {
   return {
     protocol: context.protocol,
@@ -252,7 +208,6 @@ export function captureStatePath(dataRoot: string, provider: ProviderId, session
   return join(captureSessionDir(dataRoot, provider, sessionId), 'state.json')
 }
 
-/** Handed to CodeLens in the ACK so the guard never reconstructs it. */
 export function captureContextPath(dataRoot: string, provider: ProviderId, sessionId: string): string {
   return join(captureSessionDir(dataRoot, provider, sessionId), 'context.json')
 }
@@ -261,7 +216,6 @@ export function captureReceiverPath(dataRoot: string): string {
   return join(dataRoot, 'capture', 'receiver.sh')
 }
 
-/** Handed to CodeLens in `transport.inbox` so external writers never reconstruct inbox paths. */
 export function captureInboxContract(
   dataRoot: string,
   provider: ProviderId,

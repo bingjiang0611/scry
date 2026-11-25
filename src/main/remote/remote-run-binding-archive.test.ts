@@ -23,7 +23,6 @@ describe('remote run binding (trace streaming and terminal archive)', () => {
       { kind: 'tool', text: 'Edit /w/file.ts' },
       { kind: 'tool_result', text: 'edit applied' }
     ])
-    // Content never leaks into the opaque lifecycle markers.
     const markers = progress.mock.calls.map(c => JSON.parse(c[0] as string))
     expect(markers.some(m => JSON.stringify(m).includes('Hello from the agent'))).toBe(false)
   })
@@ -58,9 +57,6 @@ describe('remote run binding (trace streaming and terminal archive)', () => {
     ])
   })
 
-  // The Mac and the phone's history read this observation while the first turn
-  // is still running (it has no archive yet). Before this hook existed a
-  // device-started run was invisible to both until it ended.
   it('exposes the live run to a Mac observer before the archive, and settles only after it', async () => {
     const order: string[] = []
     let releaseProvider!: () => void
@@ -190,8 +186,6 @@ describe('remote run binding (trace streaming and terminal archive)', () => {
     })
     await expect(start({ runId: 'l', routing: { cwd: '/w', providerId: 'pi', prompt: 'go' }, progress: () => {}, output: () => {} }))
       .rejects.toThrow('spawn failed')
-    // A rejected launch now reports its real failure before settlement, rather
-    // than making the observer guess that every rejection was a startup failure.
     expect(done).toHaveBeenCalledWith({ status: 'failed', errorText: 'spawn failed' })
     expect(settled).toHaveBeenCalledTimes(1)
   })

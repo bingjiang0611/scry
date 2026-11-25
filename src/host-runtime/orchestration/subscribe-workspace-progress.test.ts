@@ -60,7 +60,6 @@ describe('subscribe workspace preparation progress', () => {
       })
       expect(next.hints?.find((item) => item.kind === 'run'))
         .toMatchObject({ kind: 'run', runId: 'run-1', workspaceProgress: { stage: 'completed', cancellable: false } })
-      // A device never receives the App's window notices.
       expect(next.hints?.some((item) => item.kind === 'window')).toBe(false)
     } finally { close() }
   })

@@ -11,10 +11,6 @@ import { appTraceContentRoot } from '../main/trace-tool-content'
 
 afterEach(cleanupTempDirs)
 
-// Recorder content and the Provider command catalog through a real daemon's App endpoint
-// (B4-L4). Recorder content is read for the workspace the App appends (its window's
-// selection); the daemon re-validates it against its own project authority, so a
-// directory it does not know is refused as main refuses a read without a workspace.
 
 async function withDaemon(test: (daemon: TestDaemon) => Promise<void>): Promise<void> {
   const daemon = await startTestDaemon()
@@ -46,14 +42,12 @@ describe('daemon recorder content and command local ops', () => {
       expect(text(served.result)).toBe('recorded body')
       expect(served.result).toMatchObject({ offset: 0, totalBytes: ref.bytes, hasMore: false })
 
-      // The same recorded workspace, unknown to the daemon's project authority.
       mkdirSync(join(daemon.root, 'outside'))
       const outside = realpathSync(join(daemon.root, 'outside'))
       await record(outside)
       for (const cwd of [outside, join(daemon.workspace, '..', 'outside'), 'relative', 42]) {
         expect(await daemon.localOp('recorderContent', 'recorderContentPage', [{ ref }, cwd])).toEqual({ error: 'recorder_workspace_unavailable' })
       }
-      // An App that sends no workspace gets main's refusal for a read without one.
       expect(await daemon.localOp('recorderContent', 'recorderContentPage', [{ ref }])).toEqual({ error: 'recorder_workspace_unavailable' })
       expect(await daemon.localOp('recorderContent', 'recorderContentPage', [{ ref }, ''])).toEqual({ error: 'recorder_workspace_unavailable' })
     })
@@ -74,12 +68,9 @@ describe('daemon recorder content and command local ops', () => {
   it('answers the command catalog as the Provider reports it, never an empty list for unavailable', async () => {
     await withDaemon(async (daemon) => {
       const listed = await daemon.localOp('providerCommands', 'listCommands', [{ providerId: 'codex', cwd: daemon.workspace }])
-      // The fixture Provider has no command facet: main's envelope whole, not the device
-      // op's `{ commands: [] }` and never a bare empty list.
       expect(listed).toEqual({ result: {
         providerId: 'codex', cwd: daemon.workspace, mode: 'none', state: 'unsupported', data: null, reason: '该 Provider 没有可嵌入的命令目录'
       } })
-      // A Provider the daemon does not run is an error, not an empty catalog.
       expect(await daemon.localOp('providerCommands', 'listCommands', [{ providerId: 'claude', cwd: daemon.workspace }])).toEqual({ error: expect.stringContaining('not registered') })
     })
   }, 30_000)

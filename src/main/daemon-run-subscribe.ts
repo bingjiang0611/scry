@@ -235,7 +235,6 @@ async function reconcileVanishedCursors(ctx: SubscribeRuntimeContext, rows: Subs
   }
 }
 
-/** Applies one durable orchestration event from `subscribe` directly to `DaemonRunRuntime`. */
 export async function applySubscribeEventToRuntime(
   ctx: SubscribeRuntimeContext,
   event: SubscribeEventItem
@@ -366,7 +365,6 @@ export function applyRunHintToRuntime(
   }
 }
 
-/** Waits for an admission or terminal event from the subscription. */
 export async function awaitSubscribeAdmission(input: {
   runId: string
   cursor: () => RunCursor | undefined

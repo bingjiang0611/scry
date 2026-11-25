@@ -28,7 +28,6 @@ describe('background notices', () => {
     expect(noticeKind({ active: false, blocked: false, outcome: 'cancelled' })).toBe('cancelled')
     expect(noticeKind({ active: false, blocked: false, outcome: 'interrupted' })).toBe('interrupted')
     expect(noticeKind({ active: false, blocked: false })).toBe('updated')
-    // A run still in progress has nothing to report yet.
     expect(noticeKind({ active: true, blocked: false, outcome: 'completed' })).toBeUndefined()
     expect(['attention', 'failed', 'interrupted'].every((kind) => isStickyNotice(kind as never))).toBe(true)
     expect(['completed', 'cancelled', 'updated'].some((kind) => isStickyNotice(kind as never))).toBe(false)

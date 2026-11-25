@@ -121,9 +121,6 @@ describe('concurrency trace live content oracle', () => {
   })
 
   it('declares exactly the extras the production bootstrap stages emit', () => {
-    // This is the independent expectation check: KNOWN_EXTRA_STAGES must match the raw literal
-    // above, so a bare stage name ('controls' instead of 'runtime:controls') fails here even
-    // though every other extras assertion is written against the same literal.
     expect(oracle.KNOWN_EXTRA_STAGES).toEqual(EXPECTED_EXTRAS)
   })
 

@@ -39,7 +39,6 @@ function showAtBase(path) {
   try { return execFileSync('git', ['show', `${base}:${path}`], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }) } catch { return null }
 }
 
-// 1. New selectors in changed stylesheets.
 const changedCss = git('diff', '--name-only', base, '--', 'src/renderer').split('\n')
   .filter((path) => path.endsWith('.css') && existsSync(join(repoRoot, path)))
 const newSelectors = []
@@ -54,7 +53,6 @@ for (const path of changedCss) {
   }
 }
 
-// 2. Classes no longer rendered but still selected by UI smokes.
 const CLASS_ATTRIBUTE = /className=(?:"([^"]*)"|\{`([^`]*)`\}|\{'([^']*)'\})/g
 const classTokens = (text) => {
   const out = new Set()
@@ -79,7 +77,6 @@ for (const name of [...baseClasses].sort()) {
   if (users.length) goneButSelected.push(`.${name}  ←  ${users.join(', ')}`)
 }
 
-// 3. Smoke assertions that pin exact computed values.
 const PINNED = /(?:===|!==)\s*'-?\d+(?:\.\d+)?px(?:\s+-?\d+(?:\.\d+)?px)*'|font(?:Weight|Size)\)?\s*(?:===|!==)\s*'\d+(?:px)?'|[A-Za-z]*(?:[Hh]eight|[Ww]idth)\s*(?:===|!==)\s*[1-9]\d*\b/
 const pinned = []
 for (const [path, text] of smokeText) {

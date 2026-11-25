@@ -35,11 +35,6 @@ export async function initCommand(args: ParsedArgs): Promise<number> {
   return store.ok ? 0 : 4
 }
 
-/**
- * Six-stage provider matrix. Exit codes: 0 capturing or nothing to report, 2 recorder not
- * enabled for this workspace, 3 configured providers exist but no hook event has ever
- * arrived (or events arrived without a committed record).
- */
 export async function statusCommand(args: ParsedArgs): Promise<number> {
   const report = await workspaceStatus(workspaceOf(args))
   print(report)

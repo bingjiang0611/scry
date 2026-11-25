@@ -27,7 +27,6 @@ export function messageBaseBytes(fields: Record<string, unknown>): number {
   return escapeBytes(empty.slice(0, -1)) + escapeBytes('"}')
 }
 
-/** Cost of the list separators between messages. */
 export const separatorBytes = (): number => escapeBytes(',')
 
 /**

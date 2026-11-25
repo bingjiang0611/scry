@@ -79,7 +79,6 @@ function resolveRelativeTs(from: string, specifier: string): string | undefined 
     try {
       if (statSync(candidate).isFile()) return candidate
     } catch {
-      // Try next candidate.
     }
   }
   return undefined
@@ -120,7 +119,6 @@ describe('P4-0 static single-writer and Recorder Core import boundaries', () => 
     )
     expect(violations).toEqual([])
 
-    // Negative control: verify the checker detects direct, .js-suffixed, and re-exported imports into orchestration/
     const tmp = mkdtempSync(join(tmpdir(), 'scry-boundary-neg-'))
     try {
       const helper = join(tmp, 'reexport.ts')
@@ -153,7 +151,6 @@ describe('P4-0 static single-writer and Recorder Core import boundaries', () => 
     }
     expect(violations).toEqual([])
 
-    // Negative control: verify transitive import + .js suffix + re-export catches better-sqlite3
     const tmp = mkdtempSync(join(tmpdir(), 'scry-recorder-neg-'))
     try {
       const leaf = join(tmp, 'leaf.ts')

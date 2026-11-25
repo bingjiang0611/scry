@@ -97,7 +97,6 @@ export async function* streamNativeTranscriptTurns(
       // A turn that just closed is projected before the next record is read.
       while (ready.length > 0) yield* settleAndRelease(ready.shift()!, options, state, release)
     }
-    // The last turn ends at EOF, not at a following prompt record.
     if (state.current) {
       ready.push(state.current)
       state.current = undefined
@@ -119,7 +118,6 @@ export async function* streamNativeTranscriptTurns(
   }
 }
 
-/** Accumulates one JSONL record and applies the native turn rules when it ends. */
 class RecordProjection {
   private readonly scalars = new Map<ScalarSlot, string | boolean>()
   private blocks: TextSpool[] = []
@@ -227,7 +225,6 @@ class RecordProjection {
     this.blocks = []
   }
 
-  /** Collects a run of small tokenizer pieces into one spool write. */
   private async buffer(target: 'prompt' | 'block', text: string): Promise<void> {
     if (this.pending && this.pending.target !== target) await this.flushText()
     this.pending ??= { target, text: '' }

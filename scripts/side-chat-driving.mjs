@@ -92,7 +92,6 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
     throw new Error('Side-chat entry stayed disabled: ' +
       await evaluate(`document.querySelector('${SIDE_CHAT_SURFACE} [data-surface-chooser] [data-side-chat-entry]')?.getAttribute('title') ?? ''`))
   }
-  /** One click on the chooser entry must dispatch exactly one create. */
   const createChild = async () => {
     await openChooser()
     const before = counts()
@@ -125,7 +124,6 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
         await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
         await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
       } catch {
-        // The hover menu closed before the pointer reached the entry: reopen it.
         continue
       }
       const chosen = await wait(`document.querySelector('${chip}')?.dataset.agentId === ${json(agentId)}`, 5000).then(() => true).catch(() => false)
@@ -212,7 +210,6 @@ export function sideChatDriver({ cdp, evaluate, check, ipcCountsPath, inputsPath
     }
     throw new Error(`the fixture never received "${prompt}": ${json(inputs().map(entry => entry.prompt).slice(-4))}`)
   }
-  /** One child of one source, created through the shipped IPC the chooser also calls. */
   const createChildOf = async (source, commandId) => evaluate(`(async () => {
     const preview = await window.scry.conversations.previewSideChat(${json(source)}, {})
     const created = await window.scry.conversations.createSideChat({

@@ -258,8 +258,6 @@ export async function recoverTraceTurnProgress(
       if (filter.sessionId) continue
       if (filter.providerId && request.providerId !== filter.providerId) continue
       if (filter.isLiveManagedRun?.(request.turn.runId)) continue
-      // Provider 产出任何内容之前就失败的轮次不可能再拿到原生 session id，也不是可恢复的 Provider turn。
-      // 旧版本曾把这类失败永久卡成 pending；保留它只会让修正环境后的下一次启动继续失败。
       if (isProviderlessTerminalTurn(request.turn)) {
         await rm(path, { force: true })
         recovered++

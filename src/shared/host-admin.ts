@@ -1,4 +1,3 @@
-// Shared DTOs and pure helpers for P5 Step 2 host CLI administration (P5-host-cli, P5-host-security §4).
 
 export const HOST_CHILD_ENV = 'SCRY_HOST_CHILD'
 export const HOST_ADMIN_RATE_LIMITS = {
@@ -15,11 +14,6 @@ export type HostAdminNoticeKind =
   | 'pairing_cancelled_via_cli'
   | 'desktop_disabled_via_cli'
 
-/**
- * Sanitized security notice emitted when the CLI approval switch is enabled or
- * `scry-host` performs an approve / cancel / revoke / desktop-off action.
- * Never carries pairing secrets, invite strings, or private keys.
- */
 export interface HostAdminNotice {
   id: string
   kind: HostAdminNoticeKind
@@ -27,7 +21,6 @@ export interface HostAdminNotice {
   deviceId?: string
   deviceLabel?: string
   pairingId?: string
-  /** First 16 hex characters of the device public key fingerprint (display-only). */
   fingerprintPrefix?: string
 }
 
@@ -41,11 +34,6 @@ export type CliApprovalStatus =
   | { state: 'disabled'; updatedAt: number | null; hostCliPath?: string }
   | { state: 'unavailable'; reason: string }
 
-/**
- * True when running inside a Scry-managed Provider run or Scry terminal.
- * Blocks compliant Agents and Scry's own terminals from invoking `scry-host invite/approve`
- * or `login-start enable` (P5-host-security §4.2).
- */
 export function isInsideHostChild(env: NodeJS.ProcessEnv = process.env): boolean {
   const runId = env.SCRY_MANAGED_RUN_ID?.trim()
   const child = env[HOST_CHILD_ENV]?.trim()

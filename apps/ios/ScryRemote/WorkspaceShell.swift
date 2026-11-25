@@ -4,10 +4,6 @@ import RemoteTransport
 import UIKit
 #endif
 
-// Launch lands here: the page is "new session" and the session list is a left
-// drawer that is always collapsed when this page appears. `.home` and
-// `.newSession` render the same shell, so `AppModel.Route` keeps meaning what it
-// meant before; only `.newSession` raises the keyboard. Every session, project,
 // Provider, run and freshness fact still comes from the paired host — the empty
 // middle block is static copy, never invented data.
 struct WorkspaceShell: View {

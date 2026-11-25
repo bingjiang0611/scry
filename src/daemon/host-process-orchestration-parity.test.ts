@@ -25,7 +25,6 @@ describe('authoritative daemon lifecycle parity', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Pre-seed an orphaned dispatched H1 run before daemon startup to verify recovery + incremental import
     const ledgerDirectory = join(userDataDir, 'remote', 'ledger')
     mkdirSync(ledgerDirectory, { recursive: true, mode: 0o700 })
     const orphanRunId = randomUUID()
@@ -83,7 +82,6 @@ describe('authoritative daemon lifecycle parity', () => {
       })
       expect(authority.sink.getRun(orphanRunId)?.lifecycle).toBe('interrupted')
 
-      // 1. Multi-turn conversation (3 turns) + H3 settle parity + peer actor / local origin
       const created = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation',
         method: 'create',
@@ -145,13 +143,11 @@ describe('authoritative daemon lifecycle parity', () => {
       }
       expect(turnRunIds).toHaveLength(3)
 
-      // Real dispatch consumes the durable outbox rows.
       for (const row of authority.sink.listOutbox()) {
         expect(row.state).toBe('done')
         expect(row.payload.shadowOnly).not.toBe(true)
       }
 
-      // 2. Stop a live run and compare its terminal state with the authoritative projection.
       const stopIntent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'submit',
         intentId: randomUUID(),

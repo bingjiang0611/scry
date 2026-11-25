@@ -47,7 +47,6 @@
 }
 /* Text that starts after a picture offsets its band so it stays in line. */
 .skeleton-row .sk-circle ~ .skeleton-row-copy .sk-shape { --sk-offset: var(--sk-avatar-offset, 0px); }
-/* 12px lines stand in for 14px text; meta lines are a step smaller. */
 .sk-text { height: 12px; border-radius: var(--r-xs); }
 .sk-meta { height: 9px; }
 .sk-circle { flex: none; border-radius: 50%; corner-shape: round; }

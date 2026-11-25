@@ -1,10 +1,8 @@
 import { CHILD_PANEL, json, sideChatDriver } from './side-chat-driving.mjs'
 
-/** The row a user selects to go back to the parent. The sidebar prints nothing about its side chats. */
 const PARENT_ROW = `[...document.querySelectorAll('.sb-sess')].filter(node =>
   node.textContent.includes('side chat parent turn'))`
 
-/** Exact native provenance: provider, profile, workspace and native session together. */
 const sameNativeSource = (left, right) => left != null && right != null &&
   left.providerId === right.providerId && (left.agentProfileId ?? null) === (right.agentProfileId ?? null) &&
   left.cwd === right.cwd && left.nativeSessionId === right.nativeSessionId
@@ -30,8 +28,6 @@ export async function exerciseSideChatRestore({ cdp, evaluate, check, ipcCountsP
   const parentRows = await evaluate(`(() => ${PARENT_ROW}.map(node => ({
     conversationId: node.dataset.conversationId ?? null, provider: node.dataset.provider ?? null,
     text: node.textContent.slice(0, 60) })))()`)
-  // Two rows claiming the same source would make "the parent row" ambiguous; zero means the
-  // user cannot get back to this parent at all. Both are findings, not something to skip.
   check(parentRows.length === 1,
     `exactly one sidebar row must be the parent: ${json({ parentRows, rows: await allRows() })}`)
   await clickAt(`${PARENT_ROW}[0]`)

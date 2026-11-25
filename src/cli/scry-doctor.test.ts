@@ -33,9 +33,7 @@ describe('scry doctor schema and exit codes', () => {
     await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
     expect(JSON.parse(fresh.text()).hookScript).toBe('current')
 
-    // 模拟旧版本写下的脚本：受管标记还在，内容已经不是这个 CLI 会写的了。
     await writeFile(script, current.replace('#!/bin/sh', '#!/bin/sh\n# 旧版本残留'), { mode: 0o700 })
-    // 旧脚本仍能正确采集，只是拿不到新版本的快路径：warn 但不改退出码，与 recorder.version 一致。
     const stale = captureStdout()
     await expect(runScryCli(['doctor', '--workspace', root])).resolves.toBe(0)
     const report = JSON.parse(stale.text()) as Record<string, any>
@@ -78,7 +76,6 @@ describe('scry doctor schema and exit codes', () => {
       workspace: root,
       payload: { session_id: 'ver-1', timestamp: '2026-07-19T12:00:01.000Z' }
     })
-    // 模拟另一份更老的安装写下的记录。
     const [name] = await readdir(join(root, '.scry', 'records'))
     const file = join(root, '.scry', 'records', name)
     const record = JSON.parse(await readFile(file, 'utf8')) as Record<string, any>
@@ -111,7 +108,6 @@ describe('scry doctor schema and exit codes', () => {
         payload: { session_id: session, timestamp: '2026-07-19T12:00:01.000Z' }
       })
     }
-    // 较新安装写了最新一条，另一份旧安装仍留在批次里。只看“最新记录”会误判健康。
     const names = (await readdir(join(root, '.scry', 'records'))).sort()
     expect(names).toHaveLength(3)
     for (const name of names.slice(0, 2)) {
@@ -131,13 +127,11 @@ describe('scry doctor schema and exit codes', () => {
       expect.objectContaining({ version: '0.1.0', records: 2 }),
       expect.objectContaining({ version: RECORDER_VERSION, records: 1 })
     ])
-    // 旧版本仍能正确记录：只告警，不把工作区判成不健康。
     expect(report.status).toBe('healthy')
   })
 
   it('静默 open 轮次报诊断警告，但不引导用户伪造中断', async () => {
     const root = await workspace()
-    // 三天前开始、没有 transcript：终态仍未知。
     await handleRecorderHook({
       provider: 'claude',
       event: 'UserPromptSubmit',
@@ -156,11 +150,9 @@ describe('scry doctor schema and exit codes', () => {
     expect(stale.status).toBe('warn')
     expect(stale.remediation).toContain('terminal evidence')
     expect(stale.remediation).toContain('--session <id>')
-    // 没有进程证据的轮次不会被 --expire-open 收掉，诊断要给出这个原因。
     expect(stale.detail).toContain('host unknown')
     expect(stale.detail).toContain('termination unconfirmed')
     expect(report.staleOpenTurns).toMatchObject([{ provider: 'claude', sessionId: 'stale-1' }])
-    // pendingCount 只统计 managed/closing/quarantined，孤儿轮次不在其中，所以必须单独报。
     expect(report.health.pendingCount).toBe(0)
   })
 
@@ -196,7 +188,6 @@ describe('scry doctor schema and exit codes', () => {
     }
     const records = join(degraded, '.scry', 'records')
     const [name] = (await readdir(records)).sort()
-    // Removing a committed record leaves a sequence gap: doctor must report corrupt, not healthy.
     await rm(join(records, name))
     const stdout = captureStdout()
     await expect(runScryCli(['doctor', '--workspace', degraded])).resolves.toBe(4)

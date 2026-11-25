@@ -26,36 +26,16 @@ export interface LegacyImportOptions {
   userDataDir: string
   now?: number
   pendingTtlMs?: number
-  /**
-   * When `false` (P4-1 shadow default), open runs (`recorded`/`dispatched`) are imported faithfully
-   * at their ledger state so H1 `recover()` / `pump()` drive their final state through `onLedgerEvent`
-   * without `illegal_transition` divergence. When `true` (P4-2 authoritative mode), open runs are
-   * reconciled per plan §9 rule 1 (`interrupted` / `pending_expired`).
-   */
   reconcileOpenRuns?: boolean
-  /** Mark imported outbox rows `done` (`shadowOnly`) so P4-2 recovery never dispatches them. */
   shadowOnly?: boolean
-  /** Number of legacy runs / sessions committed per SQLite transaction (default 500). */
   batchSize?: number
-  /**
-   * When `true`, imports only non-terminal (`recorded`/`dispatched`) runs without advancing
-   * `legacy_ledger_seq`, allowing huge historical terminal ledgers to be backfilled after
-   * `openLocalChannel` without blocking daemon startup.
-   */
   openOnly?: boolean
-  /** Extra runIds (e.g. pending conversation turns) to import synchronously alongside `openOnly`. */
   extraRunIds?: ReadonlySet<string>
-  /** Pre-parsed ledger plan from `loadLegacyLedgerPlan` to avoid redundant full-ledger parses. */
   plan?: LegacyLedgerPlan
-  /** Authoritative H3 ordinal lookup for pre-fix ledger intents lacking `conversation.ordinal`. */
   resolveTurnOrdinal?: TurnOrdinalResolver
-  /** Time budget (ms) per yielding slice in `startDeferredLegacyImport` (default 8 ms). */
   maxSliceMs?: number
-  /** Runs between periodic PASSIVE checkpoints during deferred backfill (default 500). */
   walCheckpointRuns?: number
-  /** WAL size threshold (bytes) to trigger an early PASSIVE checkpoint when `-wal` grows past it (default 16 MiB). */
   walCheckpointBytes?: number
-  /** Hard WAL size cap (bytes) to trigger a TRUNCATE checkpoint reclaiming `-wal` disk space (default 64 MiB). */
   walHardCapBytes?: number
 }
 
@@ -67,11 +47,6 @@ export interface LegacyImportSummary {
   catalogSha256: string
 }
 
-/**
- * plan §9 rule 1: idempotent, batched incremental import of H1 `SessionLedger` (entries with
- * `seq > orch_meta.legacy_ledger_seq`) and `app-sessions.json` (when sha256 differs from
- * `orch_meta.legacy_catalog_sha256`).
- */
 export function importLegacyStateIncrementally(options: LegacyImportOptions): LegacyImportSummary {
   const { sink, userDataDir } = options
   const now = options.now ?? Date.now()
@@ -147,10 +122,6 @@ export function importLegacyStateIncrementally(options: LegacyImportOptions): Le
   }
 }
 
-/**
- * Yields between 100-run batches via `setImmediate` so large historical backfills (up to H1's
- * 100k snapshot cap) never block `openLocalChannel` or starve incoming daemon socket requests.
- */
 export function startDeferredLegacyImport(
   options: Omit<LegacyImportOptions, 'openOnly'>
 ): { promise: Promise<LegacyImportSummary>; cancel(): void } {
@@ -248,9 +219,6 @@ export function startDeferredLegacyImport(
           runsSinceCheckpoint += processed
           if (offset >= sortedRuns.length) currentLedgerSeq = plan.lastSeq
           const walSize = sink.walFileBytes()
-          // Off-main-thread WAL checkpointing (W9 Must-Fix 1): fire non-blocking PASSIVE
-          // checkpoints on the worker connection so main-thread event loop & live commits never stall.
-          // Apply async backpressure to backfill slicing (not live commits) when WAL reaches soft/hard caps.
           if (ckptWorker && walSize >= walHardCapBytes) {
             runsSinceCheckpoint = 0
             void ckptWorker

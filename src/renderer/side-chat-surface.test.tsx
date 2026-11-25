@@ -37,7 +37,6 @@ const summary = (overrides: Partial<ConversationSummary> = {}): ConversationSumm
   ...overrides
 })
 
-/** Renders the real controller so its public control surface can be inspected. */
 function Probe({ conversation, agents }: { conversation: ConversationSummary; agents: DetectedAgent[] }) {
   const instance = useSideChatInstance({ conversation, agents })
   const props = instance.chatProps
@@ -107,7 +106,6 @@ describe('side chat runtime seeding', () => {
     expect(unblocked.selectedAgentId).toBe('pi:rotom')
     expect(unblocked.blocked).toBeNull()
     expect(unblocked.sendBlocked).toBeNull()
-    // 已登记的稳定 id 选中时同样可以发送。
     const registered = summary({ sideChat: { ...summary().sideChat!,
       initialTarget: { providerId: 'pi', agentProfileId: 'pi:0123456789abcdef' } } })
     expect(probe(registered, [{ ...rotom, agentProfileId: 'pi:0123456789abcdef' },
@@ -127,7 +125,6 @@ describe('side chat runtime seeding', () => {
     expect(rendered.selectedAgentId).toBe('qoder')
     expect(rendered.permissionMode).toBe('full_access')
     expect(rendered.blocked).toBe(SIDE_CHAT_COPY.providerUnavailable('qoder'))
-    // Reading is not "installed": nothing is claimed before the agent list arrives.
     expect(probe(child, []).blocked).toBe(SIDE_CHAT_COPY.providerReading)
   })
 
@@ -151,7 +148,6 @@ describe('side chat runtime seeding', () => {
     expect(providerContextOf('not-a-provider', '/repo', [])).toBeUndefined()
   })
 
-  // 回归：截图里的 Pi · Rotom 是历史发现 id，不是已登记的 Agent Profile。
   it('reads Pi controls under the registered profile reported for that exact agent', () => {
     const detected = { ...agent('pi:rotom'), agentProfileId: 'pi:0123456789abcdef' }
     expect(providerContextOf('pi:rotom', '/repo', [agent('claude'), detected]))

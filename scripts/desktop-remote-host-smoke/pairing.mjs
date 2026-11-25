@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { decodeInvitation, RUN_PROTOCOL_VERSION, tlsRequest } from './harness.mjs'
 
-// Pairing, the negotiated info reply and the directory-selection authority rules.
 export async function pairDevice({ evaluate, transport, temp, userDataDir, workspace, canonicalWorkspace }) {
   const remoteStatus = await evaluate(`(async () => {
     const deadline = Date.now() + 10000;

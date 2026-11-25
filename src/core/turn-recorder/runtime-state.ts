@@ -18,34 +18,16 @@ import {
   suspendedSessionKeys
 } from './session-failures.js'
 
-/**
- * The last segment this session sealed. A background wake that arrives after the seal opens a
- * continuation segment from here: it slices content past what the sealed turn already published and
- * links back to the turn that asked the user's original question.
- */
 export interface RecorderSealedSegment {
   recordId: string
-  /** The turn that owns the user's question; every continuation of it points here. */
   rootRecordId: string
   at: string
   providerTurnId?: string
   transcriptPath?: string
-  /**
-   * Transcript items the sealed record already published. Absent when the seal could not measure
-   * its own boundary, which is the one case a continuation cannot slice at.
-   */
   publishedEvents?: number
-  /**
-   * Each repository's end state at this seal: the tree the record published plus the store holding
-   * its blobs. The next segment diffs against it, so its record shows only its own work.
-   */
   frozenDiffs?: RecorderFrozenDiff[]
 }
 
-/**
- * A sealed segment's per-repository end state. Blobs live in the recorder's isolated object store,
- * never in the user's repository; `tempDir` owns them until the next segment publishes.
- */
 export interface RecorderFrozenDiff {
   requestedRoot: string
   repoRoot?: string
@@ -64,26 +46,16 @@ export interface RecorderSessionState {
   lastCommittedRecordId?: string
   committedProviderTurnIds?: string[]
   recentQoderRequests?: { generation: number; id: string }[]
-  /**
-   * Object stores kept alive for the active segment chain. A continuation's baseline tree can name
-   * blobs from any earlier segment of the same chain, so they are released only when a real user
-   * prompt starts a new chain (or the session state stops naming them).
-   */
   chainStores?: string[]
-  /** Repositories discovered from files this session touched; later turns baseline them too. */
   captureRepositories?: string[]
   lastSegment?: RecorderSealedSegment
 }
 
-/** What a continuation segment inherits from the sealed segment it continues. */
 export interface RecorderContinuation {
   rootRecordId: string
   sealedRecordId: string
-  /** Items the sealed segment already published; content before this point belongs to it. */
   publishedEvents?: number
-  /** The continued turn's native identity, used to read the transcript this segment sits in. */
   providerTurnId?: string
-  /** The wake's own request set, which is this segment's identity. */
   requestSetId?: string
 }
 
@@ -96,22 +68,12 @@ export interface RecorderOpenTurnState {
   generation: number
   turnIndex: number
   status: 'open' | 'closing'
-  /** Capture opens publish their identity before the baseline; only complete is adoptable. */
   initialization?: 'pending' | 'complete'
   startedAt: string
-  /** When closing began. Bookkeeping for pending health only — never an end time. */
   closingAt?: string
-  /** Credible end of Agent work, set only by a real terminal observation. */
   terminalAt?: string
   terminalAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
-  /** Verdict pinned when closing was deferred, so background finalize cannot upgrade it. */
   terminalFallbackStatus?: AgentTurnRecord['status']
-  /**
-   * When this turn's own Stop was observed, and whose clock said so. A hold that later background
-   * work cancels keeps the fact: the turn did reach its terminal, so a following prompt supersedes a
-   * completed turn, and the ending it reported is the end time. A session end is not a Stop and does
-   * not set it.
-   */
   stopObservedAt?: string
   stopObservedAtSource?: 'provider_terminal_event' | 'recorder_observed_terminal'
   endReason?: import('../../shared/turn-record.js').TurnEndReason
@@ -127,64 +89,40 @@ export interface RecorderOpenTurnState {
   transcriptStartOffset?: number | null
   piTranscriptAnchor?: import('./recorder-contracts.js').PiTranscriptAnchor
   providerTurnId?: string
-  /** Qoder hook identity; it must be mapped to a native promptId before use. */
   requestSetId?: string
   terminalDiffs?: Array<{ repository: string; snapshot: TurnDiffSnapshot }>
   continuationProviderTurnIds?: string[]
   managedByScry?: boolean
-  /**
-   * The processes this turn's host sat in when it opened, nearest first. Only an observation taken
-   * at start time: recovery can say a recorded host is still running, never that the session is alive.
-   */
   host?: import('./host-process.js').HostProcess[]
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
   deferredTerminalFirstAt?: string
   deferredTerminalEventId?: string
-  /** Why this Stop is held rather than published, so recovery and health can name it. */
   deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks' | 'qoder_native_id_unproven'
   deferredQoderStopAttribution?: 'matched' | 'unproven'
   deferredQoderNativeStopId?: string
   qoderRequestStopConfirmed?: true
-  /** Present when a background notification opened this segment instead of a user prompt. */
   continuation?: RecorderContinuation
-  /** End states frozen at this segment's Stop, before the quiet window decided to publish it. */
   frozenDiffs?: RecorderFrozenDiff[]
-  /** SessionEnd proved that a deferred unidentified terminal belongs to the final open turn. */
   terminalIdentityConfirmedBySessionEnd?: boolean
-  /**
-   * When the Provider session ended while this turn was still open. A session end closes the turn on
-   * the evidence it has even when an earlier terminal already claimed `endReason`; it never rewrites
-   * that earlier verdict.
-   */
   sessionEndedAt?: string
   repositoryDiscovery?: Pick<RepositoryDiscovery, 'maxDepth' | 'depthLimitedDirectories' | 'worktreeDiscovery'>
   captures: Array<{ repository: string; capture: GitTurnDiffCapture }>
-  /**
-   * Present only for a turn recorded under an explicit session capture. `baselineAt` says the Git
-   * baseline was taken mid-turn (at the claim), so earlier work in the same turn is not in the diff.
-   */
   capture?: {
     protocol: string
     captureId: string
     source: string
     task: string | null
-    /** The client the host ran inside, when the claim reported one. */
     client?: string
     openedAt: string
-    /** Absolute paths this session keeps out of its diffs; only the diff is affected. */
     diffExclude?: string[]
     baselineAt?: string
   }
-  /** Stop intent for a captured session; the turn still finishes from its own terminal events. */
   captureStopRequestedAt?: string
-  /** Transcript bytes at stop time, so a later prompt can never be read back into this turn. */
   captureTranscriptEndOffset?: number
 }
 
 export const SESSION_LOCK_WAIT_MS = 10_000
-// A lifecycle hook queues its event once this wait expires, so it must stay well under the
-// Provider's hook timeout (10s for tool hooks); otherwise the host kills the hook before it queues.
 export const HOOK_LOCK_WAIT_MS = 3_000
 
 export function recorderSessionRoot(dataRoot: string, provider: ProviderId, sessionId: string): string {
@@ -214,27 +152,20 @@ export function withRecorderSessionLock<T>(
   return withRecorderSessionKeyLock(dataRoot, provider, safeKey(sessionId), action, options)
 }
 
-/** Recovery can lock a corrupt inbox without trusting its first payload for a session id. */
 export function withRecorderSessionKeyLock<T>(
   dataRoot: string, provider: ProviderId, sessionKey: string,
   action: () => Promise<T>, options: { waitMs?: number; ttlMs?: number } = {}
 ): Promise<T> {
   return withDirectoryLock(join(dataRoot, 'locks', 'sessions', provider, `${sessionKey}.lock`), async () => {
-    // Admission only: GC either observes our session lock, or finishes before we publish.
-    // Release the maintenance gate before work so independent sessions remain concurrent.
     await withDirectoryLock(join(dataRoot, 'locks', 'maintenance.lock'), async () => {}, options)
     return action()
   }, options)
 }
 
-/** Derived indexes live outside runtime sessions: readers must not create or fsync session state. */
 export function recorderQuarantineIndexPath(root: string): string {
   return join(dirname(dirname(dirname(root))), 'quarantine-index', basename(dirname(root)), `${basename(root)}.json`)
 }
 
-// An index of candidates, not a replacement for pending-open.json. Publish index-first under
-// one lock; readers prune missing candidates under the same lock. Legacy/restored state is
-// reconciled once on initialization and by explicit full recovery, never every idle poll.
 async function quarantineGenerations(root: string, reconcile = false): Promise<string[]> {
   const indexed = await readJson<string[]>(recorderQuarantineIndexPath(root))
   if (!reconcile && Array.isArray(indexed) && indexed.every(value =>
@@ -243,7 +174,7 @@ async function quarantineGenerations(root: string, reconcile = false): Promise<s
   const generations: string[] = []
   const entries = await readdir(join(root, 'turns'), { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return []
-    throw error // Never persist an empty index after an incomplete scan.
+    throw error
   })
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
@@ -288,10 +219,6 @@ export async function recorderQuarantinedOpenTurns(
   })
 }
 
-/**
- * Rebuild the attention index from the authoritative session directories: `open.json`, a queued
- * hook, or a quarantined turn. Also drops markers whose session directory is gone.
- */
 export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedSession[]> {
   const indexed = new Set((await markedSessions(dataRoot)).map(marker => `${marker.provider}__${marker.sessionKey}`))
   const failures = await readSessionFailures(dataRoot)
@@ -301,7 +228,6 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
   const live = new Set<string>()
   for (const provider of ATTENTION_PROVIDERS) {
     const providerRoot = join(dataRoot, 'runtime', provider)
-    // Missing providers are empty; an interrupted/unreadable scan must not publish readiness.
     const entries = await readdir(providerRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return []
       throw error
@@ -317,8 +243,6 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
       if (suspended.has(key)) continue
       try {
         await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
-        // Nothing is removed on this path. A publisher arriving after the snapshot keeps its marker.
-        // Only existing markers or legacy pending evidence need a locked, authoritative recheck.
         if (indexed.has(`${provider}__${sessionKey}`) || await sessionHasPendingEvidence(sessionDir)) {
           await withSessionAttentionLock(dataRoot, provider, sessionKey, async () => {
             if (await sessionHasPendingEvidence(sessionDir)) {
@@ -343,7 +267,6 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
   }
   for (const marker of await markedSessions(dataRoot)) {
     if (!live.has(`${marker.provider}__${marker.sessionKey}`)) {
-      // A publisher may have created the session after the directory snapshot; recheck under lock.
       await releaseStaleAttention(dataRoot, marker.provider, marker.sessionDir)
     }
   }
@@ -351,11 +274,6 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
   return markedSessions(dataRoot)
 }
 
-/**
- * Drop the index entry for a session a recovery pass just visited and left nothing to do: no open
- * turn, no queued hook, no quarantined turn. Without this a stale marker would keep asking for
- * passes forever.
- */
 export async function releaseStaleAttention(
   dataRoot: string,
   provider: ProviderId,
@@ -368,18 +286,12 @@ export async function releaseStaleAttention(
   })
 }
 
-/**
- * Whether the session still holds evidence only a recovery pass can resolve. Keeps the index entry
- * alive even when nothing is retryable: `pendingHealth` still has to report that evidence.
- */
 async function sessionHasPendingEvidence(sessionDir: string): Promise<boolean> {
-  // Presence, not content: a corrupt open.json still needs a recovery pass to say so.
   if (await pathExists(recorderOpenPath(sessionDir))) return true
   if ((await recorderInboxEntries(sessionDir)).length > 0) return true
   return (await recorderQuarantinedOpenTurns(sessionDir)).length > 0
 }
 
-/** Whether a pass could make progress: the failed/unreadable remainder waits for manual repair. */
 async function sessionNeedsPass(sessionDir: string): Promise<boolean> {
   if (await pathExists(recorderOpenPath(sessionDir))) return true
   if (await recorderHasRetryableInbox(sessionDir)) return true
@@ -391,14 +303,11 @@ async function pathExists(path: string): Promise<boolean> {
     await access(path)
     return true
   } catch (error) {
-    // Anything other than absence is treated as present: recovery decides what it means.
     return (error as NodeJS.ErrnoException).code !== 'ENOENT'
   }
 }
 
 async function attentionSessions(dataRoot: string): Promise<MarkedSession[]> {
-  // An uninitialized index means unknown, not an empty workspace. Diagnostic readers rebuild it:
-  // doctor/status may run before the daemon has visited a legacy or restored workspace.
   return await attentionIndexPresent(dataRoot)
     ? await markedSessions(dataRoot)
     : await reconcileAttentionIndex(dataRoot)
@@ -415,17 +324,8 @@ async function sessionsToVisit(dataRoot: string): Promise<{ sessions: MarkedSess
   return { sessions, suspendedSessions: all.length - sessions.length }
 }
 
-/** How long an open turn must be silent before its own finished reply counts as its end. */
 export const STALE_OPEN_TURN_QUIET_MS = 30 * 60 * 1_000
 
-/**
- * What one open turn still owes the store, in the terms a reader can check.
- *
- * `lastEventAt` and `quietMs` come from the files the turn actually wrote (its stored events and its
- * transcript), never from wall-clock age alone: a turn waiting on a long tool keeps growing, and one
- * whose host died stops. `stale` is just "silent past the threshold" — it is not a verdict, because
- * ending a turn needs evidence of its own.
- */
 export interface RecorderOpenTurnInspection {
   provider: ProviderId
   sessionId: string
@@ -437,15 +337,9 @@ export interface RecorderOpenTurnInspection {
   quietMs: number
   growing: boolean
   stale: boolean
-  /**
-   * Whether the processes that hosted this stale turn at start are still there. Set only for stale
-   * turns, and only because `recover --expire-open` needs `gone` before it closes anything: the
-   * operator needs to see why a silent turn stayed open (`running`, or `unknown` for no evidence).
-   */
   host?: 'running' | 'gone' | 'unknown'
 }
 
-/** When this turn last wrote anything, and how long ago that was. Shared by health and recovery. */
 export async function openTurnQuiet(
   sessionDir: string,
   open: RecorderOpenTurnState,
@@ -458,10 +352,6 @@ export async function openTurnQuiet(
   return lastAt ? { lastAt, quietMs: Math.max(0, now - lastAt) } : { quietMs: Number.POSITIVE_INFINITY }
 }
 
-/**
- * Every open turn in the workspace. A diagnostic: it stats stored events and transcripts, so the
- * callers are CLI commands and health refreshes, never the hook hot path.
- */
 export async function recorderOpenTurns(
   dataRoot: string,
   options: { now?: number; quietMs?: number } = {}
@@ -487,7 +377,6 @@ export async function recorderOpenTurns(
       stale: open.status === 'open' && !open.managedByScry && quietMs >= quietThreshold
     })
   }
-  // One process table read for every stale turn in this workspace, and none when nothing is stale.
   const waiting = result.filter((turn) => turn.stale)
   if (waiting.length) {
     const table = await processTable()
@@ -501,7 +390,6 @@ export async function recorderOpenTurns(
 
 const eventClockCache = new Map<string, { identity: string; newest: number | undefined }>()
 
-/** Stored events are atomically renamed into this directory, never rewritten in place. */
 async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState): Promise<number | undefined> {
   const eventsDir = join(recorderTurnRoot(sessionDir, open.generation), 'events')
   const directoryIdentity = async (): Promise<string | undefined> => {
@@ -510,8 +398,6 @@ async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState):
       throw error
     })
     if (!info) return undefined
-    // Restoring or touching open state invalidates the event observation too. In particular,
-    // operator aging/repair must not inherit a clock sampled before that repair.
     const state = await stat(recorderOpenPath(sessionDir)).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined
       throw error
@@ -525,7 +411,6 @@ async function turnLastEventAt(sessionDir: string, open: RecorderOpenTurnState):
   const names = await readdir(eventsDir)
   let newest: number | undefined
   for (const name of names) {
-    // A failed scan is not evidence of silence and must never populate the cache.
     const touched = (await stat(join(eventsDir, name))).mtimeMs
     if (Number.isFinite(touched) && (newest === undefined || touched > newest)) newest = touched
   }
@@ -548,12 +433,9 @@ export async function recorderPendingHealth(
   const { sessions, suspendedSessions } = await sessionsToVisit(dataRoot)
   for (const session of sessions) {
     const root = session.sessionDir
-    // One unusable session must not hide the health of every other one. Health runs once per pass,
-    // so this is the one place that can count a repeated failure without double counting it.
     try {
       for (const entry of await recorderInboxEntries(root)) {
         pendingCount++
-        // queueHook encodes the arrival clock in the name; file mtime would reset on repair.
         const arrival = /^(\d{15})-/.exec(entry.name)
         if (arrival) oldestPendingAgeMs = Math.max(oldestPendingAgeMs, Math.max(0, now - Number(arrival[1])))
       }
@@ -571,9 +453,6 @@ export async function recorderPendingHealth(
           oldestPendingAgeMs = Math.max(oldestPendingAgeMs, Math.max(0, now - started))
         }
       }
-      // An open turn that never reached `closing` is not "pending finalization" — nothing is waiting
-      // to be committed — but it is the turn a reader means by "still open", and the one that goes
-      // missing from a count that only looks at closing/managed turns.
       if (open) {
         openTurns++
         const { quietMs } = await openTurnQuiet(root, open, now)
@@ -581,7 +460,6 @@ export async function recorderPendingHealth(
         if (open.status === 'open' && !open.managedByScry && silence >= STALE_OPEN_TURN_QUIET_MS) staleOpenTurns++
       }
     } catch (error) {
-      // A read error inside a turn is evidence we could not inspect, not an entry we can skip.
       if (!isUnusableSessionError(error)) throw error
       await noteSessionFailure(dataRoot, session.provider, session.sessionKey, error).catch(() => undefined)
     }
@@ -590,11 +468,6 @@ export async function recorderPendingHealth(
   return { pendingCount, oldestPendingAgeMs, openTurns, staleOpenTurns, suspendedSessions }
 }
 
-/**
- * Open turns that can no longer converge: nothing terminal arrived and the transcript stopped
- * growing. A long-running turn keeps appending to its transcript, so the file's mtime — not the
- * turn's age alone — is what separates "still working" from "the Provider died".
- */
 export async function recorderStaleOpenTurns(
   dataRoot: string,
   expiryMs: number,
@@ -604,24 +477,19 @@ export async function recorderStaleOpenTurns(
   sessionId: string
   startedAt: string
   ageMs: number
-  /** The newest thing this turn wrote, so a reader can tell "idle for a day" from "age only". */
   lastEventAt?: string
   quietMs: number
-  /** Still writing inside the stale window: slow, not stuck. */
   growing: boolean
-  /** Same meaning as `RecorderOpenTurnInspection.host`: why a forced expiry would not act. */
   host?: HostProcessState
 }>> {
   const result: Awaited<ReturnType<typeof recorderStaleOpenTurns>> = []
   let table: Map<number, ProcessTableEntry> | undefined
   let tableRead = false
-  // One process table for the whole listing: `ps` costs more than the lookups it serves.
   const hostTable = async (): Promise<Map<number, ProcessTableEntry> | undefined> => {
     if (!tableRead) { tableRead = true; table = await processTable() }
     return table
   }
   for (const { provider, sessionDir } of (await sessionsToVisit(dataRoot)).sessions) {
-    // A diagnostic listing reports the sessions it can read; one broken session is not the answer.
     try {
       const open = await readJson<RecorderOpenTurnState>(recorderOpenPath(sessionDir))
       if (!open || open.status !== 'open' || open.managedByScry) continue
@@ -629,7 +497,6 @@ export async function recorderStaleOpenTurns(
       if (!Number.isFinite(startedAt) || now - startedAt <= expiryMs) continue
       if (open.transcriptPath) {
         const touchedAt = await transcriptTouchedAt(open.transcriptPath)
-        // Unreadable transcript counts as no activity: the turn cannot converge from it either.
         if (touchedAt != null && now - touchedAt <= expiryMs) continue
       }
       const { lastAt, quietMs } = await openTurnQuiet(sessionDir, open, now)
@@ -644,8 +511,6 @@ export async function recorderStaleOpenTurns(
         host: await hostProcessState(open.host, await hostTable())
       })
     } catch (error) {
-      // Skipped here only when the entry itself is unusable; the pass records the failure that
-      // suspends it. A turn that failed to read may still change a verdict, so it stays loud.
       if (!isUnusableSessionError(error)) throw error
     }
   }
@@ -661,10 +526,6 @@ async function transcriptTouchedAt(path: string): Promise<number | null> {
   }
 }
 
-/**
- * Whether a recovery pass should run. An absent index cannot answer the question, so it asks for a
- * pass: that pass rebuilds the index from the session directories.
- */
 export async function recorderHasOpenTurn(dataRoot: string): Promise<boolean> {
   const { sessions } = await sessionsToVisit(dataRoot)
   for (const session of sessions) {

@@ -227,7 +227,6 @@ export function createDesktopHostReader(deps: {
       }
       if (!query.delta || !shown) result = { kind: 'trace', run: shown, ...images }
       else {
-        // Same authorization as a full read above; only the response shape differs.
         const answer = traceRevisions.observe(query.runId, shown.items, query.delta.after, now)
         const { items, ...meta } = shown
         result = answer.reset

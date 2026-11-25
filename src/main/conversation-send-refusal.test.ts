@@ -85,7 +85,6 @@ function service(store: ConversationStore, before = async (): Promise<void> => u
   })
 }
 
-/** A source turn with real archive evidence, so a preview offers concrete missing items. */
 async function seededConversation(store: ConversationStore, user: string, answer: string): Promise<Conversation> {
   expect(upsertTraceArchiveTurn({ userDataDir: userData, cwd, sessionId: 'archive-seed', providerId: 'claude',
     turn: { runId: 'seed-run', userText: user, done: true, status: 'completed', ts: Date.now(),
@@ -163,7 +162,6 @@ describe('conversation send refusal evidence', () => {
 
     const replay = await api.send(request(conversation.id, archived.revision, 'accepted-command'))
     expect(replay).toMatchObject({ status: 'accepted', disposition: 'duplicate' })
-    // A new command on the deleting conversation is still refused as not sent.
     await expect(api.send(request(conversation.id, archived.revision, 'fresh-command')))
       .resolves.toMatchObject({ status: 'not_sent' })
   })
@@ -183,7 +181,6 @@ describe('conversation send refusal evidence', () => {
     await expect(api.send(request(conversation.id, pending.revision, 'pending-command')))
       .rejects.toThrow('该命令的投递结果尚未确认')
 
-    // The same command after a host-restart style unknown resolution stays unknown.
     await store.settle(conversation.id, pending.turns.at(-1)!.runId, { status: 'unknown', reason: '回执丢失' }, [])
     const unknown = (await store.read(conversation.id))!
     await expect(api.send(request(conversation.id, unknown.revision, 'pending-command')))
@@ -202,7 +199,6 @@ describe('conversation send refusal evidence', () => {
       selectedItems: view.missingItems.map((item) => item.ref)
     }
     await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'created' })
-    // The same command with the same ordered selection is the same intent.
     await expect(api.send(selectionRequest)).resolves.toMatchObject({ status: 'accepted', disposition: 'duplicate' })
     // A reused command id may not carry a different history/side-chat selection, in either
     // direction: dropping, replacing or reordering the frozen items is a different request.

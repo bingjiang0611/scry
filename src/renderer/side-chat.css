@@ -1,4 +1,3 @@
-/* Side-chat surface: its own frame, evidence panel and diff panel. */
 .side-chat-surface {
   display: flex;
   flex-direction: column;
@@ -126,7 +125,6 @@
   padding: 24px 24px 16px;
 }
 
-/* C2: the approved entry card, one flat tab strip for tools and child instances. */
 .surface-card.surface-card-wide {
   grid-column: 1 / -1;
   min-height: 84px;
@@ -347,5 +345,4 @@
   }
 }
 
-/* Paging keeps the previous page on screen, dimmed, until the next page answers. */
 .side-chat-history-items[data-paging] { opacity: 0.5; transition: opacity var(--duration-sm) var(--ease-out); }

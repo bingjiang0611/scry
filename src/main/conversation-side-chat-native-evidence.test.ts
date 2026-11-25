@@ -101,7 +101,6 @@ describe('native side-chat completion evidence', () => {
       piRecord({ id: 'u1', parentId: null, role: 'user', text: 'pi question one' }),
       piRecord({ id: 'a1', parentId: 'u1', role: 'assistant', text: 'pi answer one', stopReason: 'stop' }),
       piRecord({ id: 'u2', parentId: 'a1', role: 'user', text: 'pi question two' }),
-      // Streaming: the runtime has not finished this assistant message.
       piRecord({ id: 'a2', parentId: 'u2', role: 'assistant', text: 'pi in-flight', stopReason: 'toolUse' })
     ])
     const hydrated = await readPiNativeHistory({

@@ -22,7 +22,6 @@ describe('recorder diff inline storage', () => {
   it('persists one complete Unicode body and its reference without mutating the Git snapshot', async () => {
     const root = await mkdtemp(join(tmpdir(), 'scry-diff-storage-'))
     roots.push(root)
-    // Larger than the shared parser's 1.1M-character limit on the legacy patch field.
     const patch = '@@ -1 +1 @@\n-old\n+' + '正文😀'.repeat(300_000) + '\n+END-OF-PATCH\n'
     const source = snapshot(patch)
     const [stored] = await persistTurnDiffContent(root, [source])
@@ -43,7 +42,6 @@ describe('recorder diff inline storage', () => {
     expect(source.files[0].patch).toBe(patch)
     expect(source.files[0]).not.toHaveProperty('patchContent')
 
-    // Compare the exact saved bytes with the former two-inline-body shape, not a size estimate.
     const legacy = { ...decoded, files: [{ ...file, patch }] }
     const legacyBytes = Buffer.byteLength(`${JSON.stringify(legacy)}\n`)
     expect(legacyBytes - bytes.length).toBe(Buffer.byteLength(`,"patch":${JSON.stringify(patch)}`))

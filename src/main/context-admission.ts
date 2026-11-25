@@ -73,7 +73,6 @@ export class ContextAdmission {
   }
 }
 
-/** 启动一轮 run 的准入：与 runMany 相同，但等待持有者让位有 ADMISSION_DEADLINE_MS 上限。 */
 export function admitRun<T>(admission: ContextAdmission, keys: readonly string[], action: () => Promise<T>): Promise<T> {
   return admission.runMany(keys, action, { admitDeadlineMs: ADMISSION_DEADLINE_MS })
 }

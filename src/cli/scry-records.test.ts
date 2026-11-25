@@ -111,7 +111,6 @@ describe('scry records archive and maintenance', () => {
     const root = await withTurns(3)
     const out = join(root, 'archived')
     const stdout = captureStdout()
-    // Records are stamped with the payload timestamp, so a future cutoff selects all of them.
     await expect(runScryCli(['records', 'archive', '--before', '2030-01-01T00:00:00.000Z', '--out', out, '--yes', '--workspace', root])).resolves.toBe(0)
     const result = JSON.parse(stdout.text()) as Record<string, any>
     expect(result).toMatchObject({ status: 'done', archived: 3, archivedThrough: 3, remaining: 0, storeOk: true })

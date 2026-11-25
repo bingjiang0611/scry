@@ -40,7 +40,6 @@ export function catalogChannelHandlers(deps: {
   } satisfies ChannelHandlers
 }
 
-/** Installed Provider discovery and the descriptors the composer renders. */
 export function providerDetectionChannelHandlers(deps: {
   smokeProviderEnabled: boolean
   smokeDetectedAgents: DetectedAgent[]
@@ -82,9 +81,9 @@ export function providerDetectionChannelHandlers(deps: {
   } satisfies ChannelHandlers
 }
 
-/** Run controls for one Provider context, queued with that Provider's auth operations. */
 import { rememberCatalogPrices } from '../db-model-prices'
 
+/** Run controls for one Provider context, queued with that Provider's auth operations. */
 export function providerControlChannelHandlers(deps: {
   providerRegistry: Pick<ProviderRegistry, 'runControls'>
   withProviderOperation: <T>(providerId: ProviderContext['providerId'], operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>

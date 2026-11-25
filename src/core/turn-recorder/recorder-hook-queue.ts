@@ -11,10 +11,6 @@ import { recorderSessionRoot } from './runtime-state.js'
 import { safeKey, stableHash } from './store.js'
 import type { SessionCaptureContext } from './session-capture-contract.js'
 import { captureWireContext } from './session-capture-contract.js'
-/**
- * A replayed capture context must still be the same capture for this Provider and session; anything
- * else would make the replay look like a different recording of the same work.
- */
 export function validQueuedCapture(queued: QueuedHook, provider: ProviderId): boolean {
   const capture = queued.capture
   if (capture === undefined) return true
@@ -23,15 +19,6 @@ export function validQueuedCapture(queued: QueuedHook, provider: ProviderId): bo
     capture.sessionId === queued.sessionId
 }
 
-/**
- * Arrival-ordered inbox name.
- *
- * Names are the replay order, so a claim always replays before the event that proved it. Millisecond
- * resolution alone cannot order two entries written in the same tick (a claim and its own event are
- * exactly that case), hence the durable per-session counter: it only breaks ties, it never reorders
- * entries from different milliseconds. The UUID keeps the name unique and the ordering independent of
- * a counter that a crash could reset.
- */
 async function inboxEntryName(root: string, arrivedAt: string): Promise<string> {
   const millis = String(Date.parse(arrivedAt)).padStart(15, '0')
   const sequence = await nextInboxSequence(root)
@@ -45,30 +32,17 @@ async function nextInboxSequence(root: string): Promise<number> {
     const parsed = Number((await readFile(path, 'utf8')).trim())
     if (Number.isSafeInteger(parsed) && parsed > 0) previous = parsed
   } catch {
-    // Absent or unreadable: a fresh counter still names this entry, and the UUID keeps it unique.
   }
   const next = previous + 1
-  // Not synced: this is an ordering hint, not evidence. A lost increment can only tie two entries,
-  // which the name's UUID and at-least-once replay already tolerate.
   await writeJsonAtomic(path, next, { sync: false }).catch(() => undefined)
   return next
 }
 
-/**
- * Persist a hook event durably before it can be dropped.
- *
- * Returns the inbox entry path so a caller that applies the event inline can remove that exact
- * copy afterwards; leaving it would replay the same event as a later duplicate.
- */
 export async function queueHook(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   input: RecorderHookInput,
   sessionId: string,
   arrivedAt: string,
-  /**
-   * `reason` explains the queue in the operator log; `announce: false` keeps a queue drain silent,
-   * for a copy that the caller applies and removes inline in the same critical section.
-   */
   options: { reason?: string; announce?: boolean } = {}
 ): Promise<string> {
   const entry: QueuedHook = {
@@ -85,8 +59,6 @@ export async function queueHook(
   }
   const root = recorderSessionRoot(enablement.dataRoot, input.provider, sessionId)
   const sessionKey = safeKey(sessionId)
-  // This must not take the session lock: a busy session is precisely why this hook is queued.
-  // Hold the attention lock from index-first publication until the inbox entry is durable.
   const path = await withSessionAttentionLock(enablement.dataRoot, input.provider, sessionKey, async () => {
     await markSessionAttention(enablement.dataRoot, input.provider, sessionKey)
     const target = join(root, 'inbox', await inboxEntryName(root, arrivedAt))
@@ -102,7 +74,6 @@ export async function queueHook(
   return path
 }
 
-/** Discard anything that cannot be host evidence; a claim is never allowed to invent a process. */
 function validHostChain(value: unknown): HostProcess[] | undefined {
   if (!Array.isArray(value) || value.length === 0 || value.length > 64) return undefined
   const chain: HostProcess[] = []
@@ -116,13 +87,6 @@ function validHostChain(value: unknown): HostProcess[] | undefined {
   return chain
 }
 
-/**
- * Persist one session-capture claim for the recorder daemon.
- *
- * The entry, not a hook process, is what carries the claim: it holds the validated context, the
- * Provider event the claim was proved on and the host chain that must outlive the turn. Returns the
- * entry path and the inbox it was written into, so the caller can answer for that exact request.
- */
 export async function queueCaptureCommand(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   args: {
@@ -147,8 +111,6 @@ export async function queueCaptureCommand(
     provider: args.provider,
     sessionId: args.sessionId,
     action: args.action,
-    // The wire document, like every other place this context is persisted: the drain validates it
-    // with the same parser the CLI uses for stdin.
     context: captureWireContext(args.context),
     payload: args.payload,
     event: args.event,

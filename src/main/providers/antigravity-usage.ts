@@ -38,15 +38,6 @@ function finiteNonNeg(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
-/**
- * Project ACP `PromptResponse.usage` + `usage_update` into honest Scry usage fields (P7 §3).
- * Empirical A0 contract (`agy 1.5.12`):
- * - `totalTokens === inputTokens + cachedReadTokens + cachedWriteTokens + outputTokens` (`separate` accounting)
- * - `thoughtTokens` is ALREADY included inside `outputTokens` (never added to total!)
- * - Actual answering model is never reported -> `modelStatus: 'unobserved'`
- * - Cost is never reported -> `costUsd: undefined` (never `0`)
- * - Missing `usage` -> `unavailable`; cancelled / failed / subagent (`invoke_subagent`) -> `partial`.
- */
 export function buildAntigravityUsageFields(args: {
   usage?: AcpPromptUsage | null
   contextUsage?: AcpContextUsage | null

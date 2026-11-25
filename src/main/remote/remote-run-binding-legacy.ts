@@ -14,8 +14,6 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
   // A managed worktree is prepared only by the canonical App runtime; this seam cannot.
   if (routing.workspace) throw new Error('remote_workspace_requires_canonical_runtime')
   const prompt = typeof routing.prompt === 'string' ? routing.prompt.trim() : ''
-  // A run with no prompt is not a Provider run; fail closed and truthfully
-  // rather than launch an empty turn.
   if (prompt.length === 0) throw new Error('remote_run_missing_prompt')
   const resume = typeof routing.resume === 'string' ? routing.resume.trim() : ''
   const routedAttachments = routing.attachments ?? []
@@ -39,7 +37,6 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
     progress(marker({ event: 'session', externalSessionId: capturedExternalSessionId, resumed: true }))
     try { deps.onRunSession?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId: capturedExternalSessionId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
   } else {
-    // A new run is pending only until the Provider reports its session id.
     try { deps.onRunStarted?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, agentProfileId: routing.agentProfileId }) } catch { /* catalog visibility is best-effort; never fail the run */ }
   }
   let lastErrorText: string | undefined
@@ -161,12 +158,9 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
           if (forwarded.text.length > 0) output(forwarded)
         }
       }
-      // Only lifecycle markers cross to the dispatcher. Trace evidence keeps its own provenance.
       if (ev.stage === 'runtime:controls') { progress(marker({ event: 'started' })); return }
       if (ev.kind === 'harness' && ev.stage === 'result') {
         if (ev.isError && typeof ev.text === 'string') lastErrorText = ev.text.slice(0, 512)
-        // Fallback: surface the final answer if it only ever arrived on the
-        // result event (never streamed as stage:'text'). Non-error only.
         else if (!sawAssistantText && typeof ev.text === 'string' && ev.text.length > 0) {
           sawAssistantText = true
           output({ kind: 'output', text: ev.text })
@@ -179,9 +173,6 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
       prompt: providerPrompt,
       cwd: routing.cwd,
       agentProfileId: routing.agentProfileId,
-      // Continue the SAME conversation when the device opened a session and sent a
-      // follow-up (routing.resume = that session's Provider id); a new session
-      // omits it. This gives the resumed run the prior context/memory.
       ...(resume ? { resume } : {}),
       attachments,
       ...(routing.modelId ? { model: { id: routing.modelId, ...(routing.modelProviderId ? { providerId: routing.modelProviderId } : {}) } } : {}),
@@ -196,8 +187,6 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
         scheduleCheckpoint()
         observer?.session(externalSessionId)
         progress(marker({ event: 'session', externalSessionId }))
-        // Bind the Provider's REAL session id into the Mac catalog so the owner
-        // can open/resume the exact conversation on their Mac. Best-effort.
         try { deps.onRunSession?.({ providerId: routing.providerId, cwd: routing.cwd, prompt, scryRunId, externalSessionId, agentProfileId: routing.agentProfileId }) } catch { /* never fail the run for a catalog write */ }
       },
       requestUserInput: async (request, signal) => {
@@ -258,6 +247,5 @@ export async function startLegacyRemoteRun(deps: RemoteRunBindingDependencies, s
     if (result.status === 'failed') {
       throw new Error(lastErrorText ? `provider_run_failed: ${lastErrorText}` : 'provider_run_failed')
     }
-    // The outer finally persists evidence before the ledger can settle.
   }
 }

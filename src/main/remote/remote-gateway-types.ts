@@ -111,10 +111,6 @@ export interface RemoteSessionPage {
   unchanged?: true
 }
 
-// One turn of a session's REAL conversation content, replayed for the device.
-// `userText` is the owner/device prompt; `items` are the assistant's ordered
-// content chunks (text/reasoning/tool/tool_result), the SAME shape a live run
-// streams. This is trace-derived content, never fabricated.
 
 
 export type RemoteHistoryScope = 'session' | 'profile'

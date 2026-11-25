@@ -7,12 +7,7 @@ export const LOADER_MIN_VISIBLE_MS = 500
 
 type DelayedFlagState = { flag: boolean; delayMs: number; visible: boolean; shownAt: number }
 
-// Delay decoration only. Callers keep authority and aria-busy on the raw flag.
-//
-// The minimum hold applies to the indicator, never to evidence: when content
-// replaces the loader, callers branch on the raw flag so arriving data is shown
-// at once. The hold matters where an indicator shares space with content
-// (a refresh pill, a button spinner) and would otherwise blink.
+// Delay decoration only. Use the raw flag for aria-busy and to reveal ready content.
 export function useDelayedFlag(flag: boolean, delayMs = LOADER_DELAY_MS, minVisibleMs = LOADER_MIN_VISIBLE_MS): boolean {
   const [state, setState] = useState<DelayedFlagState>({ flag, delayMs, visible: false, shownAt: 0 })
   let current = state

@@ -30,7 +30,6 @@ describe('DesktopRemoteClient startup restoration', () => {
       await Promise.all([client.restoreConnections(), client.restoreConnections()])
       await expect(client.list()).resolves.toMatchObject([{ id: fixture.id, state: 'connected' }])
       expect(fixture.openTunnel).toHaveBeenCalledTimes(1)
-      // Running connection restoration negotiates v3 without writing an intent.
       expect(fixture.tlsRequest.mock.calls.map(([options]) => options.request)).toEqual([
         { protocol: REMOTE_PROTOCOL_VERSION, op: 'desktop', query: { kind: 'info' } }
       ])

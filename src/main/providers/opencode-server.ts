@@ -195,7 +195,6 @@ export async function persistPrivateOpenCodeMcpAuth(
   }
 }
 
-/** Build an isolated Provider seed; Scry-private credentials are matched to exact workspace/config identities. */
 export interface OpenCodeMcpAuthSeedOptions {
   /** Only a complete target inventory may prove that an omitted private credential is stale. */
   completeTargetInventory?: boolean

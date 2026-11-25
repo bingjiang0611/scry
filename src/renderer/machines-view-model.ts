@@ -1,4 +1,3 @@
-// 机器页的纯投影：把一份 HostMetricsSnapshot 变成卡片上的文字和条。
 // 规则只有一条来源：读不到的数值是 null，界面写「不可用」，绝不写 0。
 import {
   hostMetricsPercent, hostMetricsTone,
@@ -58,7 +57,6 @@ export function formatSampleAge(sampledAt: number | null | undefined, now: numbe
   return `${Math.floor(elapsed / 86_400_000)} 天前更新`
 }
 
-/** Full timestamp of the sample, e.g. 「采样于 16:42:07」. */
 export function formatSampleTime(sampledAt: number | null | undefined): string {
   if (sampledAt === null || sampledAt === undefined || !Number.isFinite(sampledAt)) return ''
   const date = new Date(sampledAt)
@@ -85,7 +83,6 @@ export function runsText(runs: HostMetricsSnapshot['runs']): string {
   return `进行中 ${runs.active} · 排队 ${queued}`
 }
 
-/** 「10 核 · 开机 3 天 · 运行中 2」 */
 export function hostSummary(snapshot: HostMetricsSnapshot): string {
   const running = snapshot.runs.active === 0 ? '没有运行' : `运行中 ${snapshot.runs.active}`
   return `${snapshot.cpu.cores} 核 · ${formatUptime(snapshot.uptimeSec)} · ${running}`

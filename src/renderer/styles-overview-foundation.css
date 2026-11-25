@@ -1,4 +1,3 @@
-/* 每轮 footer：cost / token / duration / tool·mcp / 文件统计 */
 .footer {
   display: flex;
   flex-wrap: wrap;
@@ -23,7 +22,6 @@
   background: var(--dim2);
   color: var(--bg);
 }
-/* 右侧纵览/详情栏 */
 .panel {
   width: 100%;
   flex: none;
@@ -45,7 +43,6 @@
   color: var(--dim2);
 }
 
-/* P2 Files：写覆盖率 / 只写不读风险 */
 .covrow {
   font-size: var(--text-sm);
   color: var(--dim);
@@ -58,7 +55,6 @@
   gap: 4px;
 }
 
-/* P3 审计：危险操作徽标 */
 .tag.danger {
   font-size: var(--text-xs);
   padding: 1px 8px;
@@ -73,10 +69,6 @@
   color: var(--write);
 }
 
-/* ============================================================
-   蓝本视觉升级：右栏 panel-section / verdict-card / mini-bar / sdot
-   （从 9 屏高保真蓝本 shared.css 移植，hex/间距照搬不调）
-   ============================================================ */
 .panel-section {
   border-bottom: 1px solid var(--border3);
 }
@@ -122,7 +114,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 行内状态点（蓝本）——补上现有代码已引用、但 CSS 一直缺失的 .sdot */
 .sdot {
   width: 7px;
   height: 7px;
@@ -148,7 +139,6 @@
   background: var(--dim3);
 }
 
-/* TOP TOOLS 排名 mini bar */
 .top-tools-section h4 {
   color: var(--dim);
 }

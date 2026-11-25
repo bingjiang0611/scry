@@ -1,6 +1,5 @@
 import type { DaemonLocalOpTable } from './types'
 
-// Project store writes, workspace selection, Provider context invalidation, Pi profiles.
 // The daemon writes the recent folders and projects (its workspace authorization input)
 // and stores Pi profiles in its userData; the pickers, the Pi failure dialog and the
 // window's selection stay in the App (bootstrap/project-daemon.ts). Only the two reads

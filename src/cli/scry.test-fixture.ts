@@ -51,7 +51,6 @@ export function captureStdout(): { text: () => string } {
   return { text: () => output }
 }
 
-/** `scry init` refuses anything that is not a Git project root. */
 export async function gitWorkspace(): Promise<string> {
   const root = await workspace()
   execFileSync('git', ['init', '-q', '.'], { cwd: root })

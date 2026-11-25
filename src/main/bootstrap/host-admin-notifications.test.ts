@@ -79,7 +79,6 @@ describe('W11 P5-7: App & paired device host-admin notifications', () => {
     }, 'host-1')
     expect(info.hostAdminNotices).toBe(1)
 
-    // Legacy host without hostAdminNotices still validates cleanly.
     const legacyInfo = validateInfo({
       desktop: { kind: 'info', protocol: REMOTE_PROTOCOL_VERSION, hostId: 'host-1', execution: 'canonical' }
     }, 'host-1')

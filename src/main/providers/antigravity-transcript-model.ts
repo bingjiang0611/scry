@@ -23,7 +23,6 @@ export async function observeAntigravityTranscriptModel(args: {
       sessionId, startedAt: Date.parse(startedAt), endedAt: Date.parse(result.ts), outputTokens
     })
   } catch {
-    // Optional local evidence: missing or invalid logs never change the recorded usage or timing.
     return undefined
   }
 }
@@ -54,7 +53,6 @@ async function readAntigravityTranscriptModel(args: {
       if (!chunk.bytesRead) return
       read += chunk.bytesRead
     }
-    // The transcript is append-only. Never parse a line cut by the bounded read.
     const first = offset ? bytes.indexOf(10) : -1
     const last = bytes.lastIndexOf(10)
     if (last <= first || (offset && first === -1)) return
@@ -63,7 +61,6 @@ async function readAntigravityTranscriptModel(args: {
     await file.close()
   }
 
-  // agy timestamps have second precision. More than one candidate input is ambiguous.
   const lower = Math.floor(args.startedAt / 1000) * 1000
   let input = false
   let lastStep: number | undefined

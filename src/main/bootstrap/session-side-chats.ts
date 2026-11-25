@@ -36,7 +36,6 @@ export function createSessionSideChats({ appSessionStore, sideChatCascade, notif
       return (await sideChatCascade.run(scope)).failed
     } catch (error) { return failureOf(error) }
   }
-  /** The session was not deleted because of its side chats; say why instead of failing silently. */
   async function kept(failed: Failure[], notify: boolean, base: Pick<DeleteSessionResult, 'deleted' | 'retained'>): Promise<DeleteSessionResult> {
     if (notify && notifyFailure) {
       await notifyFailure({ message: '会话未删除：它的侧边会话还不能删除',

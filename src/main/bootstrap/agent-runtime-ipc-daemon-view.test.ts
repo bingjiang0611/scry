@@ -5,9 +5,6 @@ import type { DaemonRunSurface } from './daemon-run-surface'
 
 const { registerAgentRuntimeHandlers } = await import('./agent-runtime-ipc')
 
-// E1b: focusing or adopting a run views its session and clears its unread mark. The run
-// lives in the daemon, and this window must still say so, or a session the user is
-// looking at stays unread on the daemon's side.
 
 const RUN = { runId: 'turn-1', providerId: 'codex', cwd: '/w', externalSessionId: 'native-1', userText: '', items: [], done: false } as unknown as ActiveRun
 

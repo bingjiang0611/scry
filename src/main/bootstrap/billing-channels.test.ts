@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { billingChannelHandlers } from './billing-channels'
 
-// The billing table main registers and the daemon serves. The billing functions are
-// injected here: no test may reach a real admin API.
 
 describe('billing channels', () => {
   it('warms the shell environment, where the admin keys come from, before each call', async () => {

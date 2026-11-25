@@ -175,7 +175,6 @@ describe('Pi RPC Provider', () => {
   }, 15_000)
 
   // These verify command completion/evidence, not a three-second cold-start budget.
-  // Await the native result within the existing 15-second test timeout.
   it('preserves visible custom command messages without inventing a model turn', async () => {
     await withCommandFixture(async (profile, cwd) => {
       const adapter = createPiAdapter({ listProfiles: async () => [profile], resolveProfile: async () => profile })

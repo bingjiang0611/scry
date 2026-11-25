@@ -1,7 +1,3 @@
-/**
- * Qoder 原生数据的最小公共工具：事件 ID、宽松 record 读取和会话文件访问错误说明。
- * 这些不承载业务规则，只避免同一实现散落在 run / hooks / evidence 里各写一份。
- */
 let counter = 0
 
 export const newId = (): string => `qoder-${Date.now().toString(36)}-${(counter++).toString(36)}`

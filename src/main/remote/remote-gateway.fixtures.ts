@@ -5,8 +5,6 @@ import { SessionLedger, type LedgerEvent, type LedgerStore } from './session-led
 import { RemoteGateway, type RemoteDirectoryListing, type RemoteProviderRef } from './remote-gateway'
 import type { RunOutputLog } from './run-output-log'
 
-// Synthetic authority and in-memory stores for gateway tests that need a real
-// PairingAuthority but no cryptography or disk.
 const KEY = 'a'.repeat(64)
 const CSR = 'b'.repeat(64)
 const ANCHOR = 'c'.repeat(64)

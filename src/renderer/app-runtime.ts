@@ -37,9 +37,7 @@ export interface AppRuntimeContext {
   loadProjects: () => void | Promise<void>
   setRunningRunIds: Dispatch<SetStateAction<ReadonlySet<string>>>
   setWaitingQuestionRunIds: Dispatch<SetStateAction<ReadonlySet<string>>>
-  /** Kind of the pending question of a run, so a clarification is never shown as an approval. */
   setQuestionKindsByRun: Dispatch<SetStateAction<ReadonlyMap<string, import('@shared/runtime').AgentQuestionKind>>>
-  /** 崩溃重载后回到用户离开时的会话；由 session actions 注入，仍走 canonical pickSession 读取。 */
   restoreStoredSelection: MutableRefObject<(() => Promise<void>) | null>
   setComposerErrorText?: (message: string) => void
 }
@@ -128,7 +126,6 @@ export function useAppRuntimeEffects(context: AppRuntimeContext): void {
         ? window.scry.onRemoteSessionRecorded(() => { loadProjects() })
         : () => { }
     const questionAttentionOverrides = new Map<string, boolean>()
-    /** Kind reported by a live attention event; applied after the startup answer. */
     const questionKindOverrides = new Map<string, import('@shared/runtime').AgentQuestionKind>()
     const offQuestionAttention =
       typeof window.scry.onQuestionAttention === 'function'

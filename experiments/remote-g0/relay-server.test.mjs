@@ -31,13 +31,11 @@ test('relay bridges an authenticated host leg to a device over WSS, raw-shuttlin
     const ws = new WebSocket(`ws://127.0.0.1:${devicePort}/?host=${HOST_ID}&mode=run`)
     await once(ws, 'open')
 
-    // device -> host
     const hostRecv = once(leg, 'data')
     ws.send(Buffer.from('client-hello'), { binary: true })
     const [fromDevice] = await hostRecv
     assert.equal(fromDevice.toString('utf8'), 'client-hello')
 
-    // host -> device
     const devRecv = once(ws, 'message')
     leg.write(Buffer.from('server-hello'))
     const [fromHost, isBinary] = await devRecv

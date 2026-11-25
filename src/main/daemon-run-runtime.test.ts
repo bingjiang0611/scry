@@ -102,8 +102,6 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     })
     await start(runtime, canonical)
     const delivered = deliveredEvents(sent).length
-    // The live-run list names the canonical id; adopting it must resolve to the run this
-    // window is already following, not start a second cursor over the same items.
     expect(runtime.isTracking(canonical)).toBe(true)
     await runtime.adopt(canonical)
     expect(deliveredEvents(sent).length).toBe(delivered)
@@ -125,7 +123,6 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     await read(runtime)
     await read(runtime)
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['chunk 1\n', 'chunk 2\n', 'chunk 3\n'])
-    // An append is not a resynchronisation: the renderer keeps its single message.
     expect(sent.some((entry) => entry.channel === 'agent:traceHealth')).toBe(false)
   })
 
@@ -133,14 +130,12 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     const { runtime, sent } = fixture({
       trace: [
         { kind: 'trace', run: run([event('one'), event('two')]), cursor: { revision: 'r1', count: 2 } },
-        // Index 0 changed: the renderer's copy is stale, so this is not an append.
         { kind: 'trace_delta', run: run([]), base: 'r1', revision: 'r2', count: 2, changes: [{ index: 0, item: event('rewritten') }] }
       ]
     })
     await start(runtime)
     await read(runtime)
     expect(deliveredEvents(sent).map((item) => item.text)).toEqual(['one', 'two'])
-    // The gap is reported, so the view knows to re-read the authoritative snapshot.
     expect(sent.some((entry) => entry.channel === 'agent:traceHealth')).toBe(true)
     await expect(runtime.snapshot(RUN, CONTEXT)).resolves.toBeNull()
   })
@@ -165,7 +160,6 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
 
   it('answers a start with the canonical run id the trace will carry', async () => {
     const { runtime } = fixture({
-      // The daemon binds the ledger run to its own canonical run on dispatch.
       trace: [{ kind: 'trace', run: run([]), cursor: { revision: 'r1', count: 0 } }]
     })
     await expect(start(runtime, 'run-abc-7')).resolves.toMatchObject({
@@ -174,8 +168,6 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
   })
 
   it('binds a run whose canonical id starts with remote-', async () => {
-    // A run the daemon starts for a device - or for the App itself - carries a
-    // `remote-run-...` id, which is the same shape the device client accepts.
     const { runtime } = fixture({
       trace: [{ kind: 'trace', run: { ...run([]), runId: 'remote-run-mw6osn9o-0' }, cursor: { revision: 'r1', count: 0 } }]
     })
@@ -190,11 +182,8 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
       trace: [{ kind: 'trace', run: { ...run([event('done')], true), runId: canonical }, cursor: { revision: 'r1', count: 1 } }]
     })
     await expect(start(runtime, canonical)).resolves.toMatchObject({ runId: canonical, bound: true })
-    // The window holds the canonical id; the map is keyed by the ledger id.
     expect(runtime.runView(canonical)).toMatchObject({ runId: canonical, done: true })
-    // The trace read is addressed by that canonical id, not by the ledger id.
     expect(traceRequests[0]).toMatchObject({ query: { runId: canonical } })
-    // And a run this window has not read yet is absent, not an empty run.
     expect(runtime.runView('remote-run-unread-0')).toBeNull()
   })
 
@@ -206,11 +195,7 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     })
     await start(runtime, canonical)
     await projectQuestions(runtime, [question])
-    // The renderer answers with the id it was shown, which is the canonical one; the
-    // daemon names pending questions by its ledger run, so the id is translated here.
     await expect(runtime.answerQuestion({ runId: canonical, questionId: 'q1', behavior: 'answered', answers: {} } as never)).resolves.toBe(true)
-    // The whole payload speaks the daemon's id: the answer travels inside it. The
-    // daemon's `answerId` is its own idempotency key (a UUID), not the question id.
     const first = answerRequests[0] as { runId: string; answerId: string; response: Record<string, unknown> }
     expect(first.runId).toBe(RUN)
     expect(first.response).toMatchObject({ runId: RUN, questionId: 'q1' })
@@ -228,10 +213,8 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     await start(runtime)
     await projectQuestions(runtime, [{ runId: RUN, questionId: 'q1', providerId: 'codex', questions: [] }])
     const answer = { runId: RUN, questionId: 'q1', behavior: 'answered', answers: {} } as never
-    // A lost reply is reported as unknown, never retried behind the user's back.
     await expect(runtime.answerQuestion(answer)).rejects.toMatchObject({ reason: 'daemon_outcome_unknown' })
     await expect(runtime.answerQuestion(answer)).resolves.toBe(true)
-    // One key per question: a retry must not look like a second answer to the daemon.
     expect((answerRequests[0] as { answerId: string }).answerId).toBe((answerRequests[1] as { answerId: string }).answerId)
   })
 
@@ -244,8 +227,6 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
       trace: [{ kind: 'trace', run: null, cursor: { revision: 'r1', count: 0 } }]
     })
     const receipt = await start(runtime, mine, theirs)
-    // Handing back the other run's id would make the window show, answer and stop a run
-    // the user did not start.
     expect(receipt.runId).toBe(mine)
   })
 
@@ -258,7 +239,6 @@ describe('daemon run runtime (the App view is fed by the daemon, not a local pip
     })
     await start(runtime, canonical)
     await runtime.stop(canonical)
-    // The daemon stops runs by the id its own ledger recorded, not the trace's.
     expect(stopRequests[0]).toMatchObject({ runId: RUN })
   })
 

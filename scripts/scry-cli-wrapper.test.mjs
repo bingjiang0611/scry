@@ -27,7 +27,6 @@ function writeFakeElectron(path) {
   chmodSync(path, 0o755)
 }
 
-// 按真实产物布局搭一个最小文件树：electron 可执行文件、bin/scry、scry-cli/dist/cli/scry.js。
 function writeLayout(root, { platform }) {
   const appPath = join(root, 'app')
   const layout = packagedAppLayout(appPath, { platform })

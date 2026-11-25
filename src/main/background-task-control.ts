@@ -6,7 +6,7 @@ interface ActiveTaskRun {
   control: { stopBackgroundTask?: (taskId: string) => Promise<BackgroundTaskStopResult> }
 }
 
-/** Called only behind handleTrusted. Renderer cannot supply a PID, command or session. */
+/** Resolves a stop request against tasks observed in an active run; forwards only the task ID. */
 export async function stopObservedBackgroundTask(payload: unknown, lookup: (runId: string) => ActiveTaskRun | undefined): Promise<BackgroundTaskStopResult> {
   const denied: BackgroundTaskStopResult = { status: 'rejected', message: '不是当前活动轮次中可停止的后台任务。' }
   if (!payload || typeof payload !== 'object') return denied

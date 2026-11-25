@@ -8,8 +8,6 @@ import type { RunOutputStore } from './run-output-log'
 import type { ProviderOperationGate } from '../provider-operation-gate'
 import type { LocalEndpointHandlers } from './host-local-ops'
 
-// What Electron main supplies to RemoteHostService. Kept apart from the service
-// lifecycle so the contract can be read on its own.
 export interface RemoteHostServiceDependencies {
   // Direct route for paired phones on the same network. Bootstrap passes it by
   // default (maintainer decision on bingjiang0611/scry#52; SCRY_REMOTE_LAN=0
@@ -20,12 +18,10 @@ export interface RemoteHostServiceDependencies {
   readHostMetrics?: HostControllerFactoryDependencies['readHostMetrics']
   desktopWorkbench?: import('./desktop-workbench').DesktopWorkbenchHost
   desktopDirectories?: HostControllerFactoryDependencies['desktopDirectories']
-  // Directory under Scry userData; identity/pairing/output subdirs live here.
   stateDirectory: string
   // Maps a device-requested cwd to an already directory-picker-authorized
   // workspace, or throws. A device can never smuggle an unlisted path.
   authorizeWorkspace(cwd: string): string
-  // Delegates a fully-authorized remote intent to the live run-start path.
   startRun: HostControllerFactoryDependencies['startRun']
   onDispatchRefused?: HostControllerFactoryDependencies['onDispatchRefused']
   onRunActivity?: HostControllerFactoryDependencies['onRunActivity']
@@ -71,10 +67,9 @@ export interface RemoteHostServiceDependencies {
   // prove endpoint), so the relay keeps a separate warm pool per mode. The
   // context carries the stable hostId + anchor the relay routes/authenticates by.
   createTransport?: (ctx: { hostId: string; anchorSHA256: string; mode: 'run' | 'pair' }) => RelayTransport
-  // The device-facing coordinates of the SAME relay, embedded in the scannable
-  // pairing code so the phone can reach this host. For a public wss relay
-  // (Cloudflare) this is { host: '<name>.workers.dev', port: 443, tls: 'system' };
-  // a local dev relay uses tls: 'plaintext'. Absent => no device code is emitted.
+  // Device-facing coordinates for the same relay, embedded in the pairing code.
+  // WSS uses tls: 'system'; WS uses tls: 'plaintext'. No device code is emitted
+  // without both a relay advertisement and a configured relay.
   relayAdvertisement?: { host: string; port: number; tls: 'system' | 'plaintext' }
 }
 

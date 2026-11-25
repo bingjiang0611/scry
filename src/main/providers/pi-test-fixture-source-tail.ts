@@ -1,4 +1,3 @@
-// Fixture RPC script, second half.
 export const piFixtureSourceTail = `
               scenario === 'resume' ? 'Previous completion review is unresolved. It will not be replayed, including after resume. Completion remains unverified.' :
               'Completion review unresolved: Review tool-call limit reached. No automatic retry; completion remains unverified.' }],

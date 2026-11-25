@@ -1,8 +1,6 @@
 import SwiftUI
 
-// v5 pairing keeps one clear action and makes the trust boundary explicit. A
-// fingerprint means proof succeeded but is never rendered as paired until the
-// Mac issues a real grant.
+// A fingerprint confirms proof, not pairing. Wait for the Mac to issue a grant.
 struct PairView: View {
   @EnvironmentObject var model: AppModel
   @Environment(RemoteRunStore.self) var run

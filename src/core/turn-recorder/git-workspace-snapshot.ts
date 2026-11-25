@@ -7,7 +7,6 @@ import { computeGitTurnDiff } from './git-compute.js'
 import { GitDeadlineError, TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
 import { WorkspaceReadUnavailable } from './git-workspace-limits.js'
 
-/** No second worktree read: reuse the captured after-tree for statistics and patches. */
 export async function readWorkspaceDiffSnapshot(
   cwd: string,
   excludedPaths: string[] = [],

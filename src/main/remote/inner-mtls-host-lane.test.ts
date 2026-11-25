@@ -97,8 +97,6 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
     minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', checkServerIdentity: () => undefined
   })
   await once(socket, 'secureConnect')
-  // The device declares the run-channel version on every request, exactly like
-  // the desktop client and the phone do.
   const framed = request && typeof request === 'object' && !Array.isArray(request) ? { protocol: REMOTE_PROTOCOL_VERSION, ...request as Record<string, unknown> } : request
   socket.write(JSON.stringify(framed) + '\n')
   let buffer = ''
@@ -109,7 +107,6 @@ async function call(addr: { port: number; host: string }, caPEM: string, certPEM
 
 const routing = (over: Partial<RemoteIntentRouting> = {}) => JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', ...over })
 
-// The loopback production stack: real TLS, real pairing, real controller.
 describe('InnerMtlsHost lane framing and targets', () => {
   it('serves execution target discovery and stamped mobile replies through the production mTLS wrapper', async () => {
     const target = { id: 'mac2-opaque', binding: 'b'.repeat(64) }

@@ -10,15 +10,6 @@ import {
   session, start, stop, toolUse, user
 } from './state-machine-continuation-fixture'
 
-/**
- * Qoder continues one logical turn after its Stop when a background task reports: the wake arrives
- * as a `UserPromptSubmit` whose prompt is a `<task-notification>` and whose request id is new, while
- * the native transcript folds the row into the turn that stopped.
- *
- * These cases pin the segment model: every Stop is published once its segment goes quiet, a wake
- * inside that window belongs to the same segment, and a wake after the seal opens a continuation
- * segment that links back to the question instead of inventing a prompt nobody sent.
- */
 export function registerContinuationSuite(): void {
   it('同一个提问之后多次 Stop，间隔超过静默窗口：每段一条记录，内容不重不漏且能关联回原提问', async () => {
     const root = await workspace()
@@ -33,14 +24,12 @@ export function registerContinuationSuite(): void {
       provider: 'qoder', event: 'UserPromptSubmit', workspace: root,
       payload: start(transcript, 'request-1', 'ship the release', '2026-07-19T12:00:00.000Z')
     })
-    // The Agent stops to wait for the background build; publishing here is fine once it is quiet.
     await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: stop(transcript) }))
       .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
     await sealQuietSegment(root)
     const first = (await listRecords(join(root, '.scry')))[0]
     expect(first).toMatchObject({ turnIndex: 1, status: 'completed', user: { value: { text: 'ship the release' } } })
 
-    // First wake: the build reported and the Agent kept working, but the segment was already sealed.
     await appendFile(transcript, `${[
       notification('prompt-2', 'task-1', 'call-bg-1'),
       assistantText('prompt-2', 'Build finished; running verification.'),
@@ -55,7 +44,6 @@ export function registerContinuationSuite(): void {
       .resolves.toMatchObject({ status: 'pending', reason: expect.stringContaining('background task') })
     await sealQuietSegment(root)
 
-    // Second wake after the second seal: another continuation of the same original question.
     await appendFile(transcript, `${[
       notification('prompt-3', 'task-2', 'call-bg-2'),
       assistantText('prompt-3', 'Verification finished; the release is out.')
@@ -69,7 +57,6 @@ export function registerContinuationSuite(): void {
 
     const records = await listRecords(join(root, '.scry'))
     expect(records.map((record) => [record.turnIndex, record.status])).toEqual([[1, 'completed'], [2, 'completed'], [3, 'completed']])
-    // The question is asked once; the segments after it say why they have no prompt.
     expect(records[0].user).toMatchObject({ status: 'available', value: { text: 'ship the release' } })
     for (const record of records.slice(1)) {
       expect(record.user.status).toBe('unavailable')
@@ -81,7 +68,6 @@ export function registerContinuationSuite(): void {
         parentId: records[0].recordId
       })
     }
-    // Each tool call and each assistant sentence belongs to exactly one record.
     expect(records.map((record) => record.tools.value?.map((call) => call.id) ?? [])).toEqual([
       ['call-bg-1'], ['call-bg-2'], []
     ])
@@ -90,7 +76,6 @@ export function registerContinuationSuite(): void {
       'Build finished; running verification.',
       'Verification finished; the release is out.'
     ])
-    // A continuation has no Git baseline of its own, so it must not claim one.
     expect(records[2].diff.status).toBe('unavailable')
     await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 0, expired: 0 })
   })
@@ -111,7 +96,6 @@ export function registerContinuationSuite(): void {
     await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: stop(transcript) }))
       .resolves.toMatchObject({ status: 'pending' })
 
-    // The wake arrives inside the silence window, so it extends this segment rather than opening one.
     await appendFile(transcript, `${[
       notification('prompt-2', 'task-1', 'call-bg-1'),
       assistantText('prompt-2', 'Checks passed.')
@@ -156,7 +140,6 @@ export function registerContinuationSuite(): void {
       payload: start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z')
     })
 
-    // A real question ends the extended turn and starts its own.
     await appendFile(transcript, `${[
       user('prompt-3', 'second request', { requestSetId: 'request-3' }),
       assistantText('prompt-3', 'Second answer.')
@@ -181,7 +164,6 @@ export function registerContinuationSuite(): void {
   it('强制封箱保留本段正文并标记 partial', async () => {
     const root = await workspace()
     const transcript = join(root, 'qoder-forced.jsonl')
-    // The transcript kept this turn's rows but never wrote its request id, so identity cannot match.
     await writeFile(transcript, `${[
       user('prompt-1', 'summarise the release'),
       assistantText('prompt-1', 'Summary written before the identity was lost.')
@@ -196,7 +178,6 @@ export function registerContinuationSuite(): void {
       provider: 'qoder', event: 'SessionEnd', workspace: root,
       payload: { session_id: session, cwd: '/tmp', transcript_path: transcript, hook_event_name: 'SessionEnd' }
     })).resolves.toMatchObject({ status: 'pending' })
-    // Replay starts the continuation segment; the commit below is what proves it was applied.
     await expect(recoverRecorder(root)).resolves.toMatchObject({ pending: 0 })
 
     const [record] = await listRecords(join(root, '.scry'))
@@ -232,8 +213,6 @@ export function registerContinuationSuite(): void {
       user('prompt-1', 'wait for the build', { requestSetId: 'request-1' }),
       toolUse('prompt-1', 'call-bg-1', 'sleep 30'),
       launchReceipt('call-bg-1', 'task-1'),
-      // Qoder also writes the completion as a queued attachment when the task ended while the Agent
-      // was busy; that row is the only place the task id and its final status appear.
       JSON.stringify({
         type: 'attachment', timestamp: '2026-07-19T12:00:20.000Z',
         attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: notificationPrompt('task-1', 'call-bg-1') }
@@ -284,14 +263,11 @@ export function registerContinuationSuite(): void {
       notification('prompt-2', 'task-1', 'call-bg-1'),
       assistantText('prompt-2', 'The queued wake finished the work.')
     ].join('\n')}\n`)
-    // A daemon delivery the recorder could not confirm is queued instead of applied: the wake is
-    // replayed later, and must still belong to the same capture.
     await applySessionCaptureHook({
       workspace: root, provider: 'qoder', event: 'UserPromptSubmit', sessionId: session,
       dataDir: join(root, '.scry'), queueOnly: true,
       payload: start(transcript, 'request-2', notificationPrompt('task-1', 'call-bg-1'), '2026-07-19T12:00:41.000Z')
     })
-    // Replay starts the continuation segment; the committed record below proves it was applied.
     await expect(recoverRecorder(root)).resolves.toMatchObject({ pending: 0 })
     await expect(captureHook(root, 'Stop', stop(transcript))).resolves.toMatchObject({ status: 'accepted' })
 

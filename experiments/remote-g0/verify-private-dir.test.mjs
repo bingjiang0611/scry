@@ -71,7 +71,6 @@ test('refuses a results directory that is not this account\'s own', (t) => {
   const dir = join(root, 'results')
   mkdirSync(dir)
   const owner = statSync(dir).uid
-  // Checked as another account: the tree is then someone else's.
   assert.throws(() => ensurePrivateDir(dir, { uid: owner + 4242 }), /owned by uid/)
 })
 

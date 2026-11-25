@@ -1,4 +1,3 @@
-/* Session transcript and fixed composer */
 .chat { padding-block: 16px 16px; }
 
 /* 选中的历史会话读不到证据：这是一个明确的“证据不可用”状态，不是新会话空态。 */
@@ -89,7 +88,6 @@
   box-shadow: 0 0 0 1px var(--selected-soft);
 }
 
-/* Overview evidence dossier */
 .right-panel-slot,
 .panel {
   background: var(--overview-surface);
@@ -128,7 +126,6 @@ button.turn-id.turn-call-open:focus-visible {
   border-color: var(--selected-line);
 }
 
-/* Graph and segment ledgers */
 .turn-head {
   border-top: 1px solid var(--border);
   border-bottom-color: var(--border);

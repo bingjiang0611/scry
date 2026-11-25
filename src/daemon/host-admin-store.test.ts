@@ -90,7 +90,6 @@ describe('W11 P5-5b: HostAdminStore persistence, permissions & rate limits', () 
     expect(existsSync(store.filePath)).toBe(true)
     expect(statSync(store.filePath).mode & 0o777).toBe(0o600)
 
-    // Re-opening reads persisted enabled state.
     const reopened = new HostAdminStore({ stateDirectory: remoteDir, clock: () => now })
     expect(reopened.isCliApprovalEnabled()).toBe(true)
 
@@ -128,18 +127,15 @@ describe('W11 P5-5b: HostAdminStore persistence, permissions & rate limits', () 
       expect(blockedApprove.retryAfterMs).toBeGreaterThan(3_590_000)
     }
 
-    // Persists across daemon restart (re-open store).
     const restarted = new HostAdminStore({ stateDirectory: remoteDir, clock: () => now })
     expect(restarted.consumeRate('approve').allowed).toBe(false)
 
-    // Invite limit is independent: 6 per hour.
     for (let i = 0; i < 6; i++) {
       expect(restarted.consumeRate('invite')).toEqual({ allowed: true })
       now += 1_000
     }
     expect(restarted.consumeRate('invite').allowed).toBe(false)
 
-    // Advance past 1 hour from first approve -> slot opens.
     now = 1_700_000_000_000 + 3_600_001
     expect(restarted.consumeRate('approve')).toEqual({ allowed: true })
   })
@@ -154,7 +150,6 @@ describe('W11 P5-5b: HostAdminStore persistence, permissions & rate limits', () 
     store.setCliApprovalEnabled(true)
     expect(received).toHaveLength(1)
     expect(received[0]).toMatchObject({ kind: 'cli_approval_enabled' })
-    // Enabling when already enabled does not duplicate notice.
     store.setCliApprovalEnabled(true)
     expect(received).toHaveLength(1)
     expect(store.recentNotices()).toHaveLength(1)

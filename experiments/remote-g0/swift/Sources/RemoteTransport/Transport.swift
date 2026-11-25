@@ -24,8 +24,6 @@ public enum RelayTransportError: Error, Sendable {
   case tlsHandshake(layer: TLSLayer, detail: String)
   case closed(code: UInt16?, reason: String)
   case timedOut(stage: String)
-  // The peer sent a WebSocket frame above the 1.5 MiB device limit. Older Mac
-  // hosts sent a whole history page as one frame; newer hosts split it.
   case frameTooLarge
 
   // UI recovery is limited to read operations. Never turn TLS, policy,

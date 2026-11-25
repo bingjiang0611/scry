@@ -2,12 +2,7 @@ import type { AgentPermissionMode, AgentRunControlCatalog, AgentRunControls } fr
 import type { DesktopRemoteContext, DesktopRemoteIntent, RemoteProviderRef } from '@shared/desktop-remote'
 import { REMOTE_ACCESS_COPY, REMOTE_SESSION_COPY } from '../constants/copy'
 
-// Minimum gap between poll cycles. The wait now happens on the host: one long
-// poll holds until something changes, so this is only the gap between a reply
-// and the next request, not the latency budget. Quiet results still back off.
 export const POLL_MS = 250
-// A run the device is following may stream content that its live-set revision
-// does not reflect; its trace is re-read no faster than this.
 export const TRACE_REFRESH_FLOOR_MS = 1_000
 export const QUIET_POLL_MAX_MS = 5000
 
@@ -73,17 +68,6 @@ export function errorText(error: unknown, host?: string): string {
   return message.includes('desktop_session_operation_unknown') ? REMOTE_SESSION_COPY.operationUnknown : message
 }
 
-// Whether the shown run's content needs another read.
-//
-// A run that is not the one on screen is read at once: opening a session must not
-// wait for a floor. Otherwise at most one content read happens per floor, however
-// many change reports arrive in between: an active run emits a ledger batch every
-// few hundred milliseconds, and reading on every report made one followed run cost
-// six times the trace reads the pre-long-poll renderer did per minute.
-// The external run whose content the renderer should follow, if any. A run started
-// on the host UI, a phone or another desktop is followed from the first time it is
-// seen: gating this on "was it already followed last poll" leaves the window that
-// discovered it unread.
 export function followedLiveRunId(live: { scryRunId?: string } | null | undefined): string | undefined {
   return live?.scryRunId
 }

@@ -56,7 +56,6 @@ const traces = []
 const resourceWindows = []
 const rendererWindows = []
 
-// Only complete, unparseable lines are malformed.
 function handleLine(line) {
   logLines += 1
   const target = line.includes('[scry:resource]') ? resourceWindows
@@ -70,7 +69,6 @@ function handleLine(line) {
 }
 const capture = createOutputCapture({ onLine: handleLine })
 
-// Record even an empty App log and report write errors.
 function flushLog() {
   const text = capture.finish()
   const appOutput = text.trim() !== ''
@@ -88,7 +86,6 @@ function diagnostics() {
   return { logLines, logTruncated: capture.truncated(), malformedDiagnosticLines, malformedSamples, logPath }
 }
 
-// Attempt identity-checked cleanup once for both runtime processes.
 function attemptCleanup(child) {
   cleanupAttempted = true
   return stopOwnedDaemonApp(child, join(temp, 'userData'))

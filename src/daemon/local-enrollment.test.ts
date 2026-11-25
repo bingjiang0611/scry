@@ -21,7 +21,6 @@ class MemoryStore implements PairingPersistence {
 function setup() {
   const time = { wall: 1_000_000 }
   let issued = 0
-  // Every issuance mints a distinct certificate hash, like the real CA does.
   const issue = vi.fn(async ({ deviceId, publicKeySHA256 }: { deviceId: string; publicKeySHA256: string }): Promise<IssuedPairingCertificate> => {
     issued += 1
     const prefix = publicKeySHA256 === LOCAL_KEY ? '9' : '8'
@@ -37,8 +36,6 @@ function setup() {
     store: new MemoryStore(), hostId: randomUUID(), anchorSHA256: ANCHOR,
     clock: () => time.wall, monotonic: () => 0,
     verifyCSR: vi.fn(async (csrPEM: string) => {
-      // The synthetic adapter reads the key from the CSR text so one authority can
-      // serve both a phone and the App.
       const key = csrPEM.includes('phone') ? PHONE_KEY : LOCAL_KEY
       return { csrPEM, csrSHA256: 'd'.repeat(64), publicKeySHA256: key }
     }),
@@ -68,7 +65,6 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     expect(grant.scope).toBe('local')
     expect(grant.source).toBe('local_socket')
     expect(grant.publicKeySHA256).toBe(LOCAL_KEY)
-    // Issued in one transaction: no second human confirmation exists for local.
     expect(authority.authorizesCertificate(grant.certificateSHA256, 'local')).toBe(true)
     expect(store.present()).toBe(false)
   })
@@ -92,7 +88,6 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     const store = openLocalEnrollmentStore(directory)
     store.ensure(false)
     const secret = JSON.parse(readFileSync(store.secretPath, 'utf8')).secret
-    // A rejected CSR must not consume the secret: verify before spending it.
     const broken = new PairingAuthority({ ...deps, verifyCSR: vi.fn(async () => { throw new Error('invalid_csr_signature') }) })
     await expect(broken.enrollLocal({ csrPEM: 'garbage', deviceLabel: 'Scry App' }, () => store.consume(secret)))
       .rejects.toThrow('invalid_csr_signature')
@@ -107,8 +102,6 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     const pair = await authority.begin()
     await authority.prove({ pairingId: pair.pairingId, secret: pair.secret, csrPEM: 'CSR phone', deviceLabel: 'iPhone' }, PHONE_KEY)
     const phone = await authority.confirmLocal(pair.pairingId, PHONE_KEY)
-    // Policy that differs by scope reads this, so the narrow accessor must never say
-    // "local" for a device grant or the other way round.
     expect(authority.grantScope(local.certificateSHA256)).toBe('local')
     expect(authority.grantScope(phone.certificateSHA256)).toBe('remote')
     expect(authority.grantScope('f'.repeat(64))).toBeUndefined()
@@ -123,7 +116,6 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     const grant = await authority.enrollLocal({ csrPEM: 'CSR local', deviceLabel: 'Scry App' }, storeless)
     expect(authority.authorizesCertificate(grant.certificateSHA256, 'local')).toBe(true)
     expect(authority.authorizesCertificate(grant.certificateSHA256, 'network')).toBe(false)
-    // Internal callers (pairing bookkeeping, gateway internals) stay scope-agnostic.
     expect(authority.authorizesCertificate(grant.certificateSHA256)).toBe(true)
   })
 
@@ -138,8 +130,6 @@ describe('local enrollment (L1: secret + unix socket + same uid is the proof)', 
     const local = await authority.enrollLocal({ csrPEM: 'CSR local', deviceLabel: 'Scry App' }, () => true)
     await authority.revoke(local.deviceId)
     expect(authority.authorizesCertificate(local.certificateSHA256, 'local')).toBe(false)
-    // Revocation is immediate and the App must not retry silently: a second request
-    // fails exactly like a first one, with no automatic re-enrollment.
     expect(authority.inspectLocal().grants.filter((grant) => grant.scope === 'local' && grant.revokedAt === null)).toHaveLength(0)
   })
 
@@ -176,7 +166,6 @@ describe('local enrollment secret lifecycle (L1: no time-based expiry, rotate on
     store.ensure(false)
     const first = readFileSync(store.secretPath, 'utf8')
     expect(store.present()).toBe(true)
-    // A daemon restart with no grant rotates the secret instead of reusing it.
     store.ensure(false)
     expect(readFileSync(store.secretPath, 'utf8')).not.toBe(first)
     store.ensure(true)
@@ -191,7 +180,6 @@ describe('local enrollment secret lifecycle (L1: no time-based expiry, rotate on
       store.ensure(false)
       const secret = JSON.parse(readFileSync(store.secretPath, 'utf8'))
       expect(secret.createdAt).toBe(0)
-      // A daemon started at login may wait hours; only use or restart rotates it.
       expect(store.consume(secret.secret)).toBe(true)
     }
   })

@@ -1,5 +1,3 @@
-/* 分页历史窗口：一行元信息说明已挂载哪一段，更早轮次仍可回取。
-   滚到接近顶部会自动续读，按钮只留给键盘与主动点击。 */
 .history-window-note {
   display: flex;
   align-items: center;
@@ -36,7 +34,6 @@
   color: var(--dim3);
 }
 
-/* 已经回到第一轮：分隔线说明这条时间线没有更早内容了。 */
 .history-window-start {
   margin: 0 0 12px;
   padding-bottom: 8px;
@@ -47,7 +44,6 @@
   text-align: center;
 }
 
-/* 实时视图降级提示：只描述 live 镜像落后，明确不影响归档与 runState 的完整证据。 */
 .run-status-trace-degraded {
   flex: none;
   padding: 2px 8px;
@@ -60,9 +56,6 @@
   white-space: nowrap;
 }
 
-/* 已回答的 AskUserQuestion 是人工决定记录，不是遥测行：状态、问题数与等待压成一行等宽小字，
-   问答按行对齐、答案落在与等待同一条右轨。这块的基础规则在 ab5601b 从 styles.css 删除后
-   一直没有补回，此前渲染的是浏览器默认的 <dl>/<dd>/<summary>。 */
 .question-result {
   margin-top: 8px;
   padding-top: 8px;
@@ -129,7 +122,6 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
-/* 没拿到答案时不能读成“用户选了这个”。 */
 .question-result-list dd.missing {
   color: var(--dim2);
   font-weight: var(--weight-medium);
@@ -198,7 +190,6 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* 右栏打开或窗口变窄时，两列读不出对应关系，退化成上下两行。 */
 @container main-pane (max-width: 640px) {
   .question-result-list > div {
     grid-template-columns: minmax(0, 1fr);

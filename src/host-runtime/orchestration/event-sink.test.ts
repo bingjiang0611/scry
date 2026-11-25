@@ -83,7 +83,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         expect(r1.kind).toBe('accepted')
         expect(sink.getRun('remote-run-1')?.outputSeq).toBeNull()
 
-        // Re-importing or updating session metadata must preserve active_run_id & pending_questions
         expect(
           sink.execute({
             type: 'run.effect_result',
@@ -128,12 +127,10 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         expect(preserved?.activeRunId).toBe('remote-run-1')
         expect(preserved?.pendingQuestions).toBe(1)
 
-        // Idempotent replay of identical commandId returns same receipt, no duplicate events/outbox
         const r1Dup = sink.execute(sub)
         expect(r1Dup.kind).toBe('duplicate')
         expect(sink.listEvents().filter((e) => e.type === 'run.intent_recorded')).toHaveLength(1)
 
-        // Settle
         const settled: OrchestrationCommand = {
           type: 'run.effect_result',
           commandId: 'effect:e1:settled',
@@ -153,7 +150,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         expect(turn?.delivery).toBe('accepted')
         expect(turn?.author).toBe('user')
 
-        // Projection replay from empty equals online projection field-for-field including rev_seq
         const replayCheck = sink.verifyReplayConsistency()
         expect(replayCheck.matches).toBe(true)
       } finally {
@@ -191,7 +187,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
           )
         ).toThrow(expect.objectContaining({ code: 'orchestration_write_indeterminate' }))
 
-        // Fence is active: new writes rejected retryably, reads throw unavailable
         expect(sink.isWriteIndeterminate()).toBe(true)
         const afterFence = sink.execute(
           makeSubmit(sink, { commandId: 'c3', runId: 'run-3', sessionKey: 'sess-3', prompt: 'blocked' })
@@ -206,7 +201,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
           expect.objectContaining({ code: 'orchestration_write_indeterminate' })
         )
 
-        // Tightening-only stop STILL works while fenced, and cascades via memory RunRegistry.parentRunId (R5)
         const registry = new RunRegistry<RunRegistryState, RunRegistryControl>()
         registry.register({ runId: 'run-1', done: false }, { runId: 'run-1' })
         registry.register({ runId: 'run-1-child', done: false, parentRunId: 'run-1' }, { runId: 'run-1-child' })
@@ -221,7 +215,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
 
         sink.close()
 
-        // Reopening clears fence; verify transaction rolled back cleanly (no run-2, no partial events)
         const reopened = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
         try {
           expect(reopened.isWriteIndeterminate()).toBe(false)
@@ -247,7 +240,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
 
         const eventsBefore = sink.listEvents().length
         const currentPages = Number(sink.handle.db.pragma('page_count', { simple: true }))
-        // Cap DB growth at current page_count so SQLite itself raises SQLITE_FULL during write
         sink.handle.db.pragma(`max_page_count = ${currentPages}`)
 
         const chunk = 'Z'.repeat(8_000)
@@ -274,7 +266,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         expect(String((caught as Error).message)).toMatch(/full/i)
         expect(sink.isWriteIndeterminate()).toBe(true)
 
-        // Subsequent command is rejected retryably while fenced
         expect(
           sink.execute(makeSubmit(sink, { commandId: 'after-full', runId: 'run-after', sessionKey: 's-after', prompt: 'x' }))
         ).toEqual({
@@ -284,7 +275,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
           writeReceipt: false
         })
 
-        // Tightening-only stop still works while fenced
         const registry = new RunRegistry<RunRegistryState, RunRegistryControl>()
         registry.register({ runId: 'run-full-1', done: false }, { runId: 'run-full-1' })
         const stopped: string[] = []
@@ -293,7 +283,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
 
         sink.close()
 
-        // Reopen without page cap: failed transaction must have rolled back atomically
         const reopened = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
         try {
           expect(reopened.getRun(failedRunId)).toBeUndefined()
@@ -331,7 +320,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         })
 
         expect(sink.execute(subA).kind).toBe('accepted')
-        // Settle run-a so sess-a can start a second run
         expect(
           sink.execute({
             type: 'run.effect_result',
@@ -363,11 +351,9 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         expect(sink.getRun('run-a')).toBeUndefined()
         expect(sink.getTurn('sess-a', 1)).toBeUndefined()
 
-        // Exclusive body for sess-a is unlinked; shared body still referenced by sess-b stays!
         expect(sink.bodyStore.hasExternalBody(shaA)).toBe(false)
         expect(sink.bodyStore.hasExternalBody(shaShared)).toBe(true)
 
-        // Historical event previews for sess-a are redacted; session.deleted tombstone preserves cwd
         const sessAEvents = sink.listEvents().filter((e) => e.sessionKey === 'sess-a')
         const tombstone = sessAEvents.find((e) => e.type === 'session.deleted')
         expect(tombstone?.cwd).toBe('/tmp/ws')
@@ -375,7 +361,6 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
           expect(evt.payload).toEqual({ redacted: true })
         }
 
-        // Deleting non-existent session returns not_present
         expect(
           sink.deleteSession({
             sessionKey: 'sess-never-existed',
@@ -455,10 +440,8 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         const pruned = sink.pruneEvents({ olderThanAt: 5_000 })
         expect(pruned.deletedEvents).toBeGreaterThan(0)
         expect(pruned.prunedThrough).toBeGreaterThan(0)
-        // Latest event per stream stays
         const remaining = sink.listEvents()
         expect(remaining.some((e) => e.stream === 'run:old-run')).toBe(true)
-        // Receipt is permanent even after event pruning (data §4.3)
         expect(sink.getReceipt('old-cmd', PEER_A)).toBeDefined()
         expect(sink.getMeta('pruned_through')).toBe(String(pruned.prunedThrough))
       } finally {

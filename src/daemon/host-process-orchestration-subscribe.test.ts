@@ -151,7 +151,6 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       expect(typeof logId).toBe('string')
       expect(Number.isSafeInteger(seq)).toBe(true)
 
-      // Submit a run and confirm subscribe wakes with run events
       const intentId = randomUUID()
       const waiting = daemon.request({
         op: 'subscribe',
@@ -170,7 +169,6 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       const eventTypes = (delta.subscribe?.events as Array<{ type: string }>).map((e) => e.type)
       expect(eventTypes).toContain('run.intent_recorded')
 
-      // W11 host-admin notice arrives via hostNotice hint with unchanged payload
       const notice = daemon.host.hostAdmin.recordNotice({
         kind: 'device_approved_via_cli',
         deviceLabel: 'TestPhone',
@@ -185,7 +183,6 @@ describe('Daemon local subscribe op (W16 P4-3 Unit 2)', () => {
       const hints = (withNotice.subscribe?.hints ?? []) as Array<{ kind: string; notice?: { id?: string; kind?: string; deviceLabel?: string } }>
       expect(hints.some((h) => h.kind === 'hostNotice' && h.notice?.id === notice.id && h.notice?.kind === 'device_approved_via_cli' && h.notice?.deviceLabel === 'TestPhone')).toBe(true)
 
-      // The dispatcher must leave subscribe disabled when neither handler is supplied.
       const { dispatchRemoteRequest } = await import('../main/remote/inner-mtls-dispatch')
       const netReply = await dispatchRemoteRequest(
         daemon.host.service.controller,

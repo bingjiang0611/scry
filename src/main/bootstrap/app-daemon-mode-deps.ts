@@ -27,7 +27,6 @@ export function appDaemonModeDeps(input: {
   loginStart?: LoginStartManager
   /** Called whenever a service-manager launch falls back to direct supervisor spawn. */
   onServiceLaunchFallback?: (fallback: ReturnType<ServiceLaunchController['latestFallback']>) => void
-  /** Main window getter for native host-admin notifications (P5-7). */
   getWindow?: () => BrowserWindow | null
 }): DaemonRunModeDeps {
   const userDataDir = app.getPath('userData')

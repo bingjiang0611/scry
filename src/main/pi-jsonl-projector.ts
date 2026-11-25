@@ -71,7 +71,6 @@ interface Capture {
   text: string
 }
 
-/** Projects one Pi record stream at the requested depth. */
 export class PiRecordProjector implements RecordProjector<PiJsonlEvent> {
   private readonly roles: Role[] = []
   private readonly events: PiJsonlEvent[] = []

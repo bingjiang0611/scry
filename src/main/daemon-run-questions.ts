@@ -19,14 +19,12 @@ export function windowRunId(cursor: RunCursor): string {
 
 export interface QuestionSinks {
   send: (channel: string, payload: unknown) => void
-  // P3f W2: the run's own subscription, when a view subscribed to it.
   subscription?: {
     publishQuestion(request: AgentQuestionRequest): void
     publishQuestionClosed(runId: string, questionId: string): void
   }
 }
 
-/** Publish questions the daemon now holds, and close the ones it no longer does. */
 export async function publishQuestions(
   cursor: RunCursor,
   pending: AgentQuestionRequest[],

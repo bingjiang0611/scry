@@ -5,8 +5,6 @@ import type { PreparedStop, StopOutcome } from './background-service-stop'
 import { quitWithBackgroundService, reconnectBackgroundService, restartBackgroundService, type BackgroundServiceActionDeps } from './background-service-actions'
 import { confirmPrompt, reasonMessage } from './background-service-copy'
 
-// Order and consent for the three actions: who is asked, when, and what may happen
-// before and after the user answers. Every step is recorded so the sequence is checked.
 
 const holder: DaemonLockRecord = { pid: 4242, startedAt: 's', identityKey: '4242:s', startedBy: 'supervisor:1' }
 
@@ -169,7 +167,6 @@ describe('reconnect after revocation', () => {
   it('does nothing without consent and keeps the stored credential', async () => {
     const { deps, steps } = harness({ connection: { state: 'device-not-authorized' }, answer: false })
     await expect(reconnectBackgroundService(deps)).resolves.toEqual({ status: 'cancelled' })
-    // Nothing was stopped, discarded or requested.
     expect(steps).toEqual(['connection', 'prepare', 'confirm:reconnect:null'])
   })
 

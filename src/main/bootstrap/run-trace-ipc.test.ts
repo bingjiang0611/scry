@@ -89,7 +89,6 @@ describe('run trace IPC trust gate', () => {
   it('refuses a foreign sender before the privileged listener runs', () => {
     const { handlers, router, mainFrame } = fixture()
     const foreignFrame = { url: 'https://evil.example/index.html' }
-    // 非本窗口的 sender，以及被篡改的 frame，都必须先被拦住。
     for (const event of [
       { sender: { id: 2, mainFrame, isDestroyed: () => false }, senderFrame: mainFrame },
       { sender: { id: 1, mainFrame: foreignFrame, isDestroyed: () => false }, senderFrame: foreignFrame }

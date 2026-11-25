@@ -34,7 +34,6 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
   const parentRun = readJsonLines(inputsPath).at(-1)
   check(parentRun?.prompt === 'side chat parent turn', `the parent turn never reached the fixture: ${json(parentRun)}`)
 
-  // Step A — the surface sends its first real question and the fixture really runs.
   const childId = await createChild()
   // The child's own frozen source says what this side chat was frozen from. A parent
   // driven as a Provider session freezes a native source, so no conversation id exists.
@@ -86,7 +85,6 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
   const conversationProviders = ['codex', 'claude', 'qoder', 'opencode', 'pi:0123456789abcdef']
   const receipts = []
   let turns = 0
-  /** Type like a user, prove the send is not blocked, then really click it. */
   const sendChildPrompt = async (prompt) => {
     await type(CHILD_COMPOSER, prompt)
     // The persisted turn can settle before its change notification reaches the composer.
@@ -112,7 +110,6 @@ export async function exerciseSideChatExecution({ cdp, evaluate, check, ipcCount
     })
     return { page: await waitSettled(childId, turns), runs: readJsonLines(inputsPath).slice(before) }
   }
-  /** One real send through the clicked composer, with its own fixture evidence. */
   const sendOnce = async (provider, prompt, options = {}) => {
     const { page, runs } = await sendChildPrompt(prompt)
     const run = runs.at(-1)
@@ -252,7 +249,6 @@ export async function verifySideChatRestart({ cdp, evaluate, check, documentEpoc
   })()`)
   check(restoredFirst.tabs.includes(childId), `the restarted workbench must restore the child tab: ${json(restoredFirst)}`)
   if (restoredFirst.autoSelectedChild !== childId) {
-    // The tab strip is the way back in: clicking the restored tab must show that child.
     await click(`[data-side-chat-tab-id="${childId}"] [role="tab"]`)
     await wait(`document.querySelector('${CHILD_PANEL} .side-chat-surface')?.dataset.sideChatId === ${json(childId)}`)
     await idle()

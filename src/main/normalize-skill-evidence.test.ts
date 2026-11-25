@@ -53,7 +53,6 @@ describe('Skill 证据', () => {
       injectedAt: AT(3),
       injectedName: 'cart-skill'
     })
-    // 激活提示不是模型说的话。
     expect(aggregateTurnEvidence({ userText: '按流程执行', events: turns.flatMap((turn) => turn.items) })
       .assistant.value?.text).toBe('开始执行。')
   })

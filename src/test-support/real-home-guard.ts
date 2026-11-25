@@ -2,14 +2,6 @@ import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 
-// Guards one user directory (the real ~/.scry) against changes made while the suite runs.
-//
-// A change is only the suite's fault when it can be attributed to a test run: the changed grant
-// file names a workspace that lives under this run's temporary root or the system temporary
-// directory. Everything else is the developer's own machine working normally — a real Scry
-// session commits a turn, the agent running the tests is itself captured, another checkout runs
-// its own tests — so in a normal local run those changes warn once and fail nobody. CI is
-// different: nobody else writes there, so every change there is a real leak and fails.
 
 export interface TreeEntry {
   kind: 'file' | 'dir' | 'other'
@@ -32,7 +24,7 @@ export function snapshotTree(root: string): Map<string, TreeEntry> {
     try {
       children = readdirSync(directory, { withFileTypes: true })
     } catch {
-      return // A missing guarded directory means "no user data", not a failure.
+      return
     }
     for (const child of children) {
       const path = join(directory, child.name)
@@ -54,13 +46,10 @@ export function changedEntries(before: Map<string, TreeEntry>, after: Map<string
     const previous = before.get(path)
     if (!previous) changes.push({ status: 'added', path })
     else if (previous.kind !== entry.kind) changes.push({ status: 'modified', path })
-    // A directory's mtime only follows the files inside it; reporting the parent as well would
-    // duplicate every change and add an entry that names no workspace of its own.
     else if (entry.kind !== 'dir' && (previous.size !== entry.size || previous.mtimeMs !== entry.mtimeMs)) {
       changes.push({ status: 'modified', path })
     }
   }
-  // A removed entry has no content left to name a workspace, so it can never be attributed.
   for (const path of before.keys()) if (!after.has(path)) changes.push({ status: 'removed', path })
   return changes
 }
@@ -97,9 +86,7 @@ export interface GuardInput {
   guardDir: string
   before: Map<string, TreeEntry>
   after: Map<string, TreeEntry>
-  /** Directories that belong to this test run: its HOME root plus the system temporary directory. */
   temporaryRoots: string[]
-  /** CI: nobody else shares the machine, so every change is the suite's responsibility. */
   strict: boolean
 }
 
@@ -127,15 +114,9 @@ export function describe(change: Change, guardDir: string): string {
 export interface ReportInput {
   guardDir: string
   testPath: string
-  /** Collects one warning block per test file; the run prints them together at the end. */
   warn: (message: string) => void
 }
 
-/**
- * Turn one file's outcome into the two visible effects: a warning block, or a failure naming the
- * file. Warning and failure are exclusive per file: an attributable change is never "only a
- * warning", because that is exactly the case the guard exists to stop.
- */
 export function applyOutcome(outcome: GuardOutcome, input: ReportInput): void {
   if (outcome.warnings.length > 0) {
     input.warn([

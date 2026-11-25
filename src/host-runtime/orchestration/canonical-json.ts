@@ -13,7 +13,6 @@ function normalizeValue(value: unknown): unknown {
   return sorted
 }
 
-/** Deterministic sorted-key JSON serialization (data §4.2). */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(normalizeValue(value))
 }
@@ -74,7 +73,6 @@ function containsForbiddenUsageKey(value: unknown): string | null {
   return null
 }
 
-/** data §3.3: usage numbers must never enter any orchestration event. */
 export function assertNoUsageNumbersInEvent(type: string, payload: unknown): void {
   const forbidden = containsForbiddenUsageKey(payload)
   if (forbidden) {

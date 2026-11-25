@@ -11,7 +11,6 @@ export async function commandExists(command: string, env: NodeJS.ProcessEnv): Pr
   return false
 }
 
-/** Non-throwing detection shared by `init` and `status`. */
 export async function detectWorkspaceProviders(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env
@@ -25,10 +24,6 @@ export async function detectWorkspaceProviders(
   return checks.filter(([, found]) => found).map(([provider]) => provider)
 }
 
-/**
- * Identify managed hooks by handler id rather than by exact command equality, so a changed
- * command shape is still recognised as installed instead of silently appending a duplicate.
- */
 export async function providerHookInstalled(workspace: string, provider: InitProvider): Promise<boolean> {
   const path = provider === 'opencode'
     ? join(workspace, '.opencode/plugins/scry-recorder.js')
@@ -37,11 +32,6 @@ export async function providerHookInstalled(workspace: string, provider: InitPro
   return source != null && source.includes(`SCRY_HANDLER_ID=${HANDLER_ID}`)
 }
 
-/**
- * `scry upgrade` replaces the CLI, never the workspace files it once wrote, so a script from an
- * older release keeps running until `init` or `integrations repair` rewrites it. `outdated` is the
- * state nothing reported before; `unmanaged` means a hand-written bridge that Scry must not touch.
- */
 export async function providerHookScriptState(
   workspace: string
 ): Promise<'current' | 'outdated' | 'unmanaged' | 'absent'> {

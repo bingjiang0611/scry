@@ -1,7 +1,6 @@
 import { closeSync, mkdirSync, openSync, renameSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-// The background service's one log file, `<userData>/logs/daemon.log`. Whoever starts the
 // supervisor (the App, or the login service, P5 §2.1) points its output here, so the
 // directory is created owner-only and the file is opened append-only, 0600. Plain Node:
 // no Electron, usable by the daemon side.
@@ -23,7 +22,6 @@ function sizeOf(path: string): number | undefined {
   try { return statSync(path).size } catch { return undefined }
 }
 
-/** Rotates `daemon.log` when it has grown past `maxBytes`. Returns whether it rotated. */
 export function rotateDaemonLog(userDataDir: string, maxBytes = DAEMON_LOG_MAX_BYTES, keep = DAEMON_LOG_KEEP): boolean {
   const path = daemonLogPath(userDataDir)
   const size = sizeOf(path)
@@ -36,17 +34,12 @@ export function rotateDaemonLog(userDataDir: string, maxBytes = DAEMON_LOG_MAX_B
   return true
 }
 
-/** Opens the log for appending, creating `logs` (0700) and the file (0600) when absent. */
 export function openDaemonLog(userDataDir: string): number {
   mkdirSync(join(userDataDir, 'logs'), { recursive: true, mode: 0o700 })
   try { rotateDaemonLog(userDataDir) } catch { /* a failed rotation must not stop the launch */ }
   return openSync(daemonLogPath(userDataDir), 'a', 0o600)
 }
 
-/**
- * Creates the directory and file a service manager will append to, then closes it: a
- * service manager would otherwise create them with its own umask. Returns the path.
- */
 export function precreateDaemonLog(userDataDir: string): string {
   closeSync(openDaemonLog(userDataDir))
   return daemonLogPath(userDataDir)

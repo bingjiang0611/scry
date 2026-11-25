@@ -1,6 +1,3 @@
-/* Background notices sit in the sidebar's flow above the settings footer, like the archive
-   undo strip, so they never float over the composer or the right panel. They fade in
-   without moving and need no reduced-motion variant. */
 
 .background-notices {
   flex: none;

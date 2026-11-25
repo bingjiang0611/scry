@@ -51,7 +51,6 @@ describe('surface chooser with the side-chat entry', () => {
     expect(onSelect).not.toHaveBeenCalled()
     expect(html).not.toContain('role="menu"')
     expect(html).toContain('aria-haspopup="menu"')
-    // No child body and no child tab exist before any creation happens.
     expect(html).not.toContain('data-side-chat-panel')
     expect(html).not.toContain('data-side-chat-tab-id')
   })
@@ -72,7 +71,6 @@ describe('flat tabs with child instances', () => {
     expect(html).toContain(`title="${longTitle}"`)
     expect(html).toContain(SIDE_CHAT_COPY.tabStatusPermission)
     expect(html).toContain('关闭 第二个')
-    // Only the active child's body is mounted.
     expect(html).toContain('data-body="child-b"')
     expect(html).not.toContain('data-body="child-a"')
   })

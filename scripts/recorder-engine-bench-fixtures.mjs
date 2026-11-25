@@ -2,11 +2,9 @@
 /**
  * Fixtures and L1 counters shared by `scripts/recorder-engine-bench.mjs`.
  *
- * Everything here is informational: no thresholds, no assertions. The one hard rule is that the
- * probe must not change what the recorder does. Git subprocesses are counted by putting a wrapper
- * named `git` first on PATH; the wrapper only appends its argv (and optionally the size of
- * GIT_INDEX_FILE it was handed) and then execs the real binary, so exit codes, signals and
- * deadlines behave exactly as without the probe.
+ * The counters are informational, with no pass/fail thresholds. A wrapper named `git`
+ * goes first on PATH, logs the arguments and index size when available, then execs
+ * the real Git binary with the original arguments. The logging adds work before Git runs.
  */
 import { execFile, execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -43,7 +41,6 @@ export async function commitAll(cwd, message = 'bench') {
   return (await git(['rev-parse', 'HEAD'], cwd)).trim()
 }
 
-/** Root directory for every temporary fixture of this run; removed by `cleanupTemp`. */
 export function makeTempRoot() {
   return mkdtempSync(join(tmpdir(), 'scry-recorder-engine-'))
 }
@@ -59,7 +56,7 @@ function findExecutable(name) {
     try {
       execFileSync('test', ['-x', candidate])
       return candidate
-    } catch { /* keep looking */ }
+    } catch { }
   }
   throw new Error(`cannot find ${name} on PATH`)
 }

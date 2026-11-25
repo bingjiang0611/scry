@@ -75,7 +75,6 @@ describe('trace event byte measurement', () => {
     expect(sizeOf(unicode)).toBeGreaterThan(40 * 2)
     expect(sizeOf(unicode)).toBe(Buffer.byteLength(JSON.stringify(unicode), 'utf8'))
 
-    // 星外字符（surrogate pair）同样按真实 UTF-8 字节计。
     const emoji = event('e3', '🙈'.repeat(100))
     expect(sizeOf(emoji)).toBeGreaterThanOrEqual(400)
   })
@@ -182,7 +181,6 @@ describe('TraceOutputBridge bounded delivery', () => {
     runPendingTimers()
     expect(pendingTimers()).toBe(0)
     for (let index = 1; index <= 20; index++) bridge.push(event(`e${index}`))
-    // 20 次 push 全在阻塞期到达：一个定时器都不该留下。
     expect(pendingTimers()).toBe(0)
     expect(bridge.snapshot().bufferedEvents).toBe(20)
   })
@@ -277,7 +275,6 @@ describe('TraceOutputBridge bounded delivery', () => {
 
     const state = bridge.snapshot()
     expect(state.degraded).toBe(true)
-    // 1 在途 + 2 缓冲 = 3 条已到上限；其余 3 条如实计为跳过。
     expect(state.skippedEvents).toBe(3)
     expect(state.bufferedEvents).toBe(2)
     expect(health.at(-1)).toMatchObject({ degraded: true, skippedEvents: 3 })

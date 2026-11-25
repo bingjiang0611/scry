@@ -2,9 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { gateDaemonChannel, installDaemonChannelForwarder, installDaemonRequestForwarder } from '../daemon-channel-gate'
 import { detachDaemonTerminalRenderer, installTerminalDaemonWindow, shutdownDaemonTerminals } from './terminal-daemon'
 
-// P3-terminal, App side: the daemon runs main's terminal handlers without a window, so
-// this window names its workspace on every call and refuses where main's handler did
-// while it cannot receive output.
 
 type Call = { op: string; method: string; args: unknown[]; read: boolean }
 
@@ -54,7 +51,7 @@ describe('terminal in daemon mode, window side', () => {
       await expect(w.channel(name)({}, { id: 'terminal-1', ownershipEpoch: 1 }), name).rejects.toThrow('终端窗口已关闭')
     }
     expect(w.forwarder).not.toHaveBeenCalled()
-    // ready/ack/active/recordings never asked about the window in main either.
+    // The acknowledgement still forwards when the window cannot receive output.
     await w.channel('terminal:ack')({}, { id: 'terminal-1', ownershipEpoch: 1, bytes: 10 })
     expect(w.forwarder).toHaveBeenCalledTimes(1)
   })

@@ -3,12 +3,6 @@ import type { AgentInputAttachment } from '@shared/runtime'
 import { NOT_SENT_REASON_LIMIT, updateComposerDraft, type ComposerDraft, type ComposerDraftAttachment,
   type ComposerDraftStore, type ComposerPendingSubmission } from './composer-drafts'
 
-/**
- * What the durable record proves about one pending submission.
- *
- * `absent` is deliberately not `not_sent`: a read of the latest page cannot prove a
- * concurrent IPC never reached the host, so the renderer keeps it blocked.
- */
 export type PendingResolution =
   | { kind: 'accepted' }
   | { kind: 'not_sent' }
@@ -16,7 +10,6 @@ export type PendingResolution =
   | { kind: 'unknown'; reason?: string }
   | { kind: 'absent' }
 
-/** Matches the command id the dispatch published, never a run id or a prompt guess. */
 export function resolvePendingSubmission(
   pending: Pick<ComposerPendingSubmission, 'commandId'>,
   turns: ConversationPage['turns']
@@ -31,12 +24,6 @@ export function resolvePendingSubmission(
   return { kind: 'absent' }
 }
 
-/**
- * The submitted content moves into the receipt; one copy of every byte stays in the
- * bounded draft entry. Anything the user typed or attached while the request was
- * being prepared is theirs and stays editable: only the exact submitted text and
- * the exact submitted attachments leave the composer.
- */
 export function dispatchedDraft(
   draft: ComposerDraft,
   pending: ComposerPendingSubmission,
@@ -51,7 +38,6 @@ export function dispatchedDraft(
   }
 }
 
-/** Only the matching command clears; a newer edit or another submission is untouched. */
 export function clearPendingSubmission(draft: ComposerDraft, commandId: string): ComposerDraft {
   if (draft.pending?.commandId !== commandId) return draft
   const { pending: _pending, ...rest } = draft
@@ -67,10 +53,6 @@ export function updatePendingPhase(
   return { ...draft, pending: { ...draft.pending, phase } }
 }
 
-/**
- * Only the named receipt may be settled by an answer that was read for it. A page read
- * before a newer submission existed cannot clear or relabel the newer one.
- */
 export function settleOwnedPending(
   current: ComposerPendingSubmission | undefined,
   commandId: string
@@ -78,7 +60,6 @@ export function settleOwnedPending(
   return current && current.commandId === commandId ? current : undefined
 }
 
-/** Content a known-not-sent original may be resent with; a fresh command id is added by the caller. */
 export interface PendingContent {
   prompt: string
   attachments: ComposerDraftAttachment[]
@@ -90,30 +71,18 @@ export function pendingContent(pending: ComposerPendingSubmission): PendingConte
 
 export type SubmissionResult =
   | { status: 'sent'; commandId: string; duplicate: boolean }
-  /** The host proved nothing was dispatched; the receipt may be resent explicitly. */
   | { status: 'not-sent'; commandId: string; error: string }
   | { status: 'unknown'; commandId: string; error: string }
   | { status: 'refused'; error: string }
   | { status: 'not-prepared'; error: string }
-  /** The view or its submission was gone before anything was written or sent. */
   | { status: 'aborted' }
 
 export interface SubmissionInput {
   prompt: string
   attachments: ComposerDraftAttachment[]
-  /** Known-not-sent original this submission replaces; only that receipt is cleared. */
   replaceCommandId?: string
 }
 
-/**
- * One explicit send: prepare the exact request, move the content into a durable
- * pending receipt, then dispatch.
- *
- * Order matters. The receipt must be on disk before the send IPC, because a reply
- * lost afterwards can only be recovered from that record. If the durable write
- * fails the send is refused and the live draft is restored rather than dispatched
- * from memory. No path resends an unresolved command id by itself.
- */
 export async function runSubmission({
   draftStore, draftKey, prepare, send, input, expectedRevision, isActive = () => true, now = Date.now()
 }: {
@@ -123,10 +92,6 @@ export async function runSubmission({
   send: (request: ConversationSendRequest) => Promise<ConversationSendResult>
   input: SubmissionInput
   expectedRevision?: number
-  /**
-   * Owns this child draft right now. A closed view or a newer submission answers false,
-   * and a preparation that answers late writes and sends nothing.
-   */
   isActive?: () => boolean
   now?: number
 }): Promise<SubmissionResult> {
@@ -138,8 +103,6 @@ export async function runSubmission({
   } catch (error) {
     return { status: 'not-prepared', error: error instanceof Error ? error.message : String(error) }
   }
-  // Preparation is the only await before the receipt exists. Losing ownership here is
-  // the close/reopen and supersession case: nothing has been written or dispatched.
   if (!isActive()) return { status: 'aborted' }
   const submission: ComposerPendingSubmission = {
     commandId: request.commandId,
@@ -156,7 +119,6 @@ export async function runSubmission({
     selectedItems: request.selectedItems.map(item => ({ ...item })),
     expectedRevision: expectedRevision ?? request.expectedRevision,
     expectedContinuationKey: request.expectedContinuationKey,
-    // Nothing is acknowledged yet: `unknown` is the honest durable state.
     phase: 'unknown',
     submittedAt: now
   }
@@ -169,10 +131,8 @@ export async function runSubmission({
     if (result.refused) { refused = true; return drafts }
     return result.drafts
   })
-  // The pending reserve is full: refuse before dispatch and leave every draft intact.
   if (refused) return { status: 'refused', error: PENDING_CAPACITY_FULL }
   if (draftStore.flushDrafts() !== true) {
-    // Undo only this child's entry, and only while it is still our receipt.
     draftStore.update(drafts => {
       if (drafts.get(draftKey)?.pending?.commandId !== submission.commandId) return drafts
       const restored = new Map(drafts)
@@ -185,8 +145,6 @@ export async function runSubmission({
   try {
     const result = await send(request)
     if (result.status === 'not_sent') {
-      // A host-confirmed refusal is durable proof that nothing was dispatched. The
-      // original text stays in this receipt and only an explicit resend unlocks it.
       draftStore.update(drafts => updateComposerDraft(drafts, draftKey,
         draft => markPendingNotSent(draft, request.commandId, result.reason)).drafts)
       draftStore.flushDrafts()
@@ -197,7 +155,6 @@ export async function runSubmission({
     draftStore.flushDrafts()
     return { status: 'sent', commandId: request.commandId, duplicate: result.disposition === 'duplicate' }
   } catch (error) {
-    // The reply was lost or failed after dispatch: keep the receipt unresolved.
     draftStore.update(drafts => updateComposerDraft(drafts, draftKey,
       draft => updatePendingPhase(draft, request.commandId, 'unknown')).drafts)
     draftStore.flushDrafts()
@@ -206,11 +163,6 @@ export async function runSubmission({
   }
 }
 
-/**
- * Records the host's refusal on this exact receipt; no other draft is touched. The reason
- * is capped here, before the receipt can be persisted, so a long Provider message cannot
- * outgrow the draft record and be dropped on reload.
- */
 export function markPendingNotSent(draft: ComposerDraft, commandId: string, reason: string): ComposerDraft {
   if (draft.pending?.commandId !== commandId) return draft
   return { ...draft, pending: { ...draft.pending, notSent: { reason: reason.slice(0, NOT_SENT_REASON_LIMIT) } } }
@@ -220,29 +172,16 @@ export const DURABLE_WRITE_FAILED = '本地存储不可用，发送状态与原�
 export const PENDING_CAPACITY_FULL =
   '待核对的发送已有 8 条；为避免覆盖最旧一条的原文，本次没有发送。请先核对其中一条的状态。'
 
-/** Visible state of a pending receipt; copy lives in the constants module. */
 export type PendingRecoveryState = 'not_sent' | 'unresolved'
 
-/**
- * Which recovery state the user must see, if any.
- *
- * `waiting` (a recorded dispatch whose run is still open) needs no recovery block:
- * the run status already covers it. A missing record is shown as unresolved, never
- * as unsent, so nothing here can unlock an accidental duplicate send.
- */
 export function pendingRecovery(
   pending: Pick<ComposerPendingSubmission, 'phase' | 'notSent'>,
   health: PendingResolution | undefined
 ): { state: PendingRecoveryState; reason?: string } | undefined {
   if (health?.kind === 'not_sent') return { state: 'not_sent' }
   if (health?.kind === 'unknown') return { state: 'unresolved', ...(health.reason ? { reason: health.reason } : {}) }
-  // The host refused the request outright, so the absence of a page record proves nothing
-  // new: this stays a known-not-sent receipt instead of being relabelled unresolved.
   if (pending.notSent !== undefined) return { state: 'not_sent', reason: pending.notSent.reason }
   if (health?.kind === 'absent') return { state: 'unresolved' }
-  // The host still holds the attempt pending, but this surface already lost the reply and
-  // marked its own receipt unknown: the user needs the inspect/check affordance in this
-  // process instead of a receipt that quietly looks dispatched.
   if (health?.kind === 'pending' && pending.phase === 'unknown') return { state: 'unresolved' }
   if (health === undefined && pending.phase === 'unknown') return { state: 'unresolved' }
   return undefined

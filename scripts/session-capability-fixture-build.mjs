@@ -5,7 +5,6 @@ import { build } from 'vite'
 
 // Builds the hidden-UI fixtures for session-capability-ui-smoke.mjs into `temp`: one IIFE
 // page bundle per fixture, the meta-prompts preload and IPC bundles, and each page's HTML.
-// Split from the smoke runner by responsibility (bundling vs. driving the campaigns).
 export async function buildCapabilityFixtures({ root, temp, fixtures }) {
   for (const fixture of fixtures) await build({
     worker: { format: 'es' },

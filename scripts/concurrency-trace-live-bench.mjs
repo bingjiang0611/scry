@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Launcher for the live concurrency trace lane (R6.3).
-//
 // Runs one fixed workload: 16 hidden host runs of the offline `concurrency trace live`
 // prompt, each read by 0, 1 or 4 private client peers through the production
 // DesktopRemoteClient. The real built App (out/main) hosts loopback TLS; the client is the

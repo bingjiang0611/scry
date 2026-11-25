@@ -12,11 +12,9 @@ import { readAuthorizedRecorderContentPage } from '../recorder-content-access'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ChannelHandler, ChannelHandlers } from './startup-channels'
 
-// Read-only query channels that both Electron main and the daemon serve (B4-L4): main
-// registers them for the in-process App, the daemon answers them as local ops for an
-// App whose runs and userData it owns. One implementation per channel, so the two
-// answers cannot drift. No Electron values are used here: userData is passed in, and
-// the run list is whichever registry owns the runs in this process.
+// Shared read-only query handlers take userData and run state from their caller;
+// the daemon supplies its own stores and registry. Reusing the handlers does not
+// make results from different state sources interchangeable.
 
 /**
  * Usage totals (usage JSONL) and the SQLite ledger's analytics. Whatever the source
@@ -31,21 +29,18 @@ export function usageChannelHandlers(deps: { userDataDir: () => string }) {
     return rangeDays
   }
   return {
-    // B2-lite: cumulative usage aggregated from usage.jsonl.
     'agent:usageStats': (context?: ProviderContext) =>
       readUsageStats(deps.userDataDir(), context ? {
         providerId: context.providerId,
         agentProfileId: context.agentProfileId,
         cwd: context.cwd ?? ''
       } : {}),
-    // B2: cross-session SQLite analysis (tool frequency, spend per directory).
     'agent:stats': () => statsQuery(),
     'agent:usageAnalytics': (rangeDays: unknown) => usageAnalyticsQuery(usageRange(rangeDays)),
     'agent:usageCredits': (rangeDays: unknown) => usageAnalyticsWithCreditsQuery(usageRange(rangeDays))
   } satisfies ChannelHandlers
 }
 
-/** LLM performance: recorded samples, and a summary of the runs this process owns. */
 export function llmPerformanceChannelHandlers(deps: { userDataDir: () => string; activeRuns: () => ActiveRun[] }) {
   return {
     'agent:llmPerformanceHistory': () => readLlmPerformanceHistory(deps.userDataDir()),
@@ -85,7 +80,6 @@ export function providerCommandChannelHandlers(deps: {
   withProviderOperation: <T>(providerId: ProviderContext['providerId'], operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
 }) {
   return {
-    // An unavailable catalog stays `data: null` with its reason, never an empty list.
     'agent:listCommands': (context: ProviderContext) =>
       deps.withProviderOperation(context.providerId, () => deps.providerRegistry.listCommands(context), context.agentProfileId)
   } satisfies ChannelHandlers
@@ -100,7 +94,7 @@ export function providerCommandChannelHandlers(deps: {
  */
 export function recorderContentChannelHandlers(deps: {
   userDataDir: () => string
-  /** The workspace to read for; given the argument after the request, which only the daemon trusts. */
+  /** Resolves the workspace to read. The daemon revalidates the App-appended selection. */
   workspace: (appended: unknown) => string
   /** Whether that workspace is still selected. The daemon answers true; its App checks after the reply. */
   stillCurrent: (cwd: string) => boolean

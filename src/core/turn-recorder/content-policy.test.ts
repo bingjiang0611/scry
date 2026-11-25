@@ -29,9 +29,6 @@ describe('tool content persistence policy', () => {
     } }, '')
     expect(turn.turnEvidence.mcps).toEqual(turnEvidence.mcps)
     expect(protectToolContent(turn, '')).toEqual(turn)
-    // 15 bytes cannot hold a JSON object plus the marker that names what was dropped, so this field
-    // is omitted rather than cut: an unparseable prefix claiming to be JSON is worse than a stated
-    // omission, and the durable reference above still has the body.
     expect(turn.turnEvidence.tools.value![0].inputContent).toMatchObject({ storage: 'omitted', savedBytes: 0 })
   })
 
@@ -46,10 +43,7 @@ describe('tool content persistence policy', () => {
     const content = turn.turnEvidence.tools.value![0].inputContent
     expect(content?.storage).toBe('truncated')
     expect(content?.encoding).toBe('json')
-    // The long value keeps a prefix; what remains is still JSON and still says how much it replaced.
     const parsed = JSON.parse(content!.content!) as Record<string, unknown>
-    // Either the long value keeps a bounded prefix, or the whole body becomes one marker that
-    // states how many bytes it replaced. Both parse; neither is a byte cut.
     expect(parsed.password ?? parsed.originalBytes).toBeDefined()
     if (parsed.originalBytes !== undefined) expect(parsed.originalBytes).toBe(Buffer.byteLength(JSON.stringify({ password: 'p'.repeat(200) })))
     expect(isToolContent(content!)).toBe(true)

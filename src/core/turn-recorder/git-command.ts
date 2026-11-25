@@ -19,9 +19,6 @@ import {
 
 const pexecFile = promisify(execFile)
 
-// Keep the pre-turn snapshot short because the Provider waits for it before starting.
-// The post-turn snapshot runs after turnDone, so it can spend longer producing an exact diff
-// without making the user wait for the Agent response.
 export const TURN_DIFF_BEGIN_DEADLINE_MS = 5_000
 
 export const TURN_DIFF_FINISH_DEADLINE_MS = 20_000
@@ -87,11 +84,8 @@ export function snapshotGitArgs(filterOverrides: string[], command: string[]): s
 }
 
 export async function copyIndexWithTimestamps(source: string, target: string): Promise<void> {
-  // Git 用 index mtime 判定 racy-clean。普通 copy 会把 mtime 改成“现在”，可能漏掉
-  // 本轮开始前已存在、但尺寸/mtime 恰好与 index entry 相同的内容变化。
   const sourceStat = await stat(source)
   await copyFile(source, target)
-  // 向下截到毫秒，宁可让 Git 多 hash 一次，也不能因浮点进位把副本写成“比源 index 更新”。
   await utimes(target, Math.floor(sourceStat.atimeMs) / 1_000, Math.floor(sourceStat.mtimeMs) / 1_000)
 }
 
@@ -121,8 +115,6 @@ export async function writeSnapshotTree(options: {
   } catch {}
 
   try {
-    // 从 HEAD 重建逻辑内容，清掉真实 index 中与观测无关的 staged/unmerged 状态；
-    // really-refresh 再强制核对 assume-unchanged，避免它让 add 漏掉真实改动。
     await gitCommand(snapshotGitArgs(filterOverrides, ['read-tree', '--reset', 'HEAD']), { cwd, env, deadline })
     await gitCommand(snapshotGitArgs(filterOverrides, ['update-index', '--really-refresh']), {
       cwd,

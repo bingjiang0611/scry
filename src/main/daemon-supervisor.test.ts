@@ -3,8 +3,6 @@ import { ensureDaemon } from './daemon-supervisor'
 
 const VERSION = '0.2.237'
 
-// Each scenario is the same question the App asks at startup and after a loss: is
-// there a usable daemon on this socket, and if not, what do we do about it?
 describe('daemon supervision (L2: probe, adopt, launch, ready)', () => {
   it('adopts a daemon that is already serving and does not launch a second one', async () => {
     const launch = vi.fn(async () => ({ status: 'started' as const }))
@@ -73,11 +71,9 @@ describe('daemon supervision (L2: probe, adopt, launch, ready)', () => {
     expect(result).toEqual({
       status: 'version-mismatch', running: VERSION, runningBuild: old, expected: VERSION, expectedBuild: current, action: 'restart_daemon'
     })
-    // A daemon that reports no build at all is not the same build either.
     expect(await ensureDaemon({ probe: async () => ({ version: VERSION }), launch, appVersion: VERSION, appBuild: current }))
       .toMatchObject({ status: 'version-mismatch', running: VERSION, expectedBuild: current })
     expect(launch).not.toHaveBeenCalled()
-    // Control: the same version and build is adopted as before.
     expect(await ensureDaemon({ probe: async () => ({ version: VERSION, build: current }), launch, appVersion: VERSION, appBuild: current }))
       .toEqual({ status: 'adopted', version: VERSION })
   })

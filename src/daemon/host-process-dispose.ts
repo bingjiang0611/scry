@@ -8,7 +8,6 @@ import { usageLimitResumeSettings } from './usage-limit-resume'
 import { findRestartBackgroundNotes, storeRestartBackgroundNotes } from './restart-background-note'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
-/** Attaches the daemon’s authoritative event log and subscription hub. */
 export async function attachHostProcessOrchestration<
   State extends RunRegistryState,
   Control extends RunRegistryControl
@@ -66,7 +65,6 @@ export async function attachHostProcessOrchestration<
   return authority
 }
 
-/** Bounded provider registry shutdown helper extracted from host-process.ts to stay within the 20 KB file budget. */
 export async function disposeProviderRegistryBounded(
   providerRegistry: { dispose(): Promise<void> },
   timeoutMs: number,

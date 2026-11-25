@@ -101,8 +101,6 @@ const TranscriptTurn = memo(function TranscriptTurn({
     const measure = () => {
       const rect = element.getBoundingClientRect()
       const scroller = element.closest<HTMLElement>('.chat-transcript')
-      // `applyViewRestore` marks the turn it positioned. The row may materialize a frame
-      // later, so the marker survives the restore call and is consumed here.
       const restoreAnchor = element.dataset.restoreAnchor === 'true'
       if (restoreAnchor) delete element.dataset.restoreAnchor
       if (windowed && scroller) {

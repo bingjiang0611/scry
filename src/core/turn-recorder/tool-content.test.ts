@@ -66,7 +66,6 @@ describe('full raw tool content', () => {
     const bounded = safe[0].inputContent!
     expect(bounded).toMatchObject({ encoding: 'json', storage: 'truncated', reasons: ['field_budget'] })
     expect(bounded.savedBytes).toBeLessThanOrEqual(120)
-    // The budget cut one field, so the stored body must still parse and say what it replaced.
     const parsed = JSON.parse(bounded.content!) as { a: { storage: string; originalBytes: number; preview: string }; b: number }
     expect(parsed.a).toMatchObject({ storage: 'truncated', originalBytes: 200 })
     expect(parsed.a.preview.startsWith('xxx')).toBe(true)
@@ -94,8 +93,6 @@ describe('full raw tool content', () => {
     const bounded = sanitizeToolEvents(raw, { toolOutput: 'full', toolContentFieldBytes: 8 * 1024, toolContentTurnBytes: 16 * 1024 }, 'fixture')
     const saved = bounded.reduce((total, event) => total + (event.outputContent?.savedBytes ?? 0) + (event.inputContent?.savedBytes ?? 0), 0)
     expect(saved).toBeLessThanOrEqual(16 * 1024)
-    // Early calls keep their complete body; an exhausted turn budget omits the rest
-    // with explicit provenance instead of silently dropping it.
     expect(bounded[1].outputContent).toMatchObject({ content: body, storage: 'complete' })
     expect(bounded.at(-1)!.outputContent).toMatchObject({ storage: 'omitted', reasons: expect.arrayContaining(['turn_budget']) })
     expect(isToolContent(bounded.at(-1)!.outputContent)).toBe(true)
@@ -140,7 +137,6 @@ describe('full raw tool content', () => {
   it('cuts UTF-8 safely and never cuts JSON into a fragment', () => {
     const text = captureToolContent('中😀文', { source: 'fixture', maxBytes: 5 })
     expect(text).toMatchObject({ content: '中', savedBytes: 3, storage: 'truncated', reasons: ['field_budget'] })
-    // A JSON body keeps a valid structure: the oversized string becomes a marker, not a byte cut.
     const json = captureToolContent({ text: '中😀文'.repeat(50) }, { source: 'fixture', maxBytes: 128 })
     expect(json).toMatchObject({ encoding: 'json', storage: 'truncated', reasons: ['field_budget'] })
     expect(json.savedBytes).toBeLessThanOrEqual(128)
@@ -150,7 +146,6 @@ describe('full raw tool content', () => {
     expect(Buffer.byteLength(parsed.text.preview)).toBeLessThan(500)
     expect(json.content).not.toContain('\uFFFD')
     expect(isToolContent(json)).toBe(true)
-    // Too small for even a marker: omit instead of storing an unparseable prefix.
     const tiny = captureToolContent({ text: '中😀文'.repeat(50) }, { source: 'fixture', maxBytes: 12 })
     expect(tiny).toMatchObject({ encoding: 'json-fragment', storage: 'omitted', savedBytes: 0, reasons: ['field_budget'] })
     expect(tiny.content).toBeUndefined()
@@ -164,7 +159,6 @@ describe('full raw tool content', () => {
     expect(captured.savedBytes).toBeLessThanOrEqual(512)
     const parsed = JSON.parse(captured.content!) as { items?: unknown[]; note?: { originalBytes?: number }; storage?: string; originalBytes?: number }
     if (parsed.storage === 'truncated') {
-      // Structure overhead alone exceeded the budget: the whole body is replaced by one marker.
       expect(parsed.originalBytes).toBeGreaterThan(512)
     } else {
       expect(parsed.note).toMatchObject({ storage: 'truncated', originalBytes: 4098 })

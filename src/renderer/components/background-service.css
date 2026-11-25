@@ -1,5 +1,3 @@
-/* Settings «后台服务». Token-based like the remote-access tab; unknown values are
-   dimmed so they never read as a healthy zero. */
 .background-service { max-width: 620px; }
 .background-service__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .background-service__rows { display: flex; flex-direction: column; margin: 0; }

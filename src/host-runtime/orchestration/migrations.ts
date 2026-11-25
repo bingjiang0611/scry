@@ -7,11 +7,6 @@ export interface MigrateOrchestrationOptions {
   logId?: string
 }
 
-/**
- * Independent migration runner for `orchestration.db` (data §4.0).
- * Never shares `src/main/db-migrations.ts` (which runs a hardcoded v16 usage repair hook
- * and silently ignores newer `user_version` values).
- */
 export function migrateOrchestrationDatabase(
   db: Database.Database,
   migrations: readonly (readonly string[])[] = ORCHESTRATION_MIGRATIONS,
@@ -41,7 +36,6 @@ export function migrateOrchestrationDatabase(
     version = nextVersion
   }
 
-  // Ensure orch_meta baseline keys exist whenever orch_meta table is present.
   const hasMeta = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'orch_meta'")
     .get()

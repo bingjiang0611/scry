@@ -10,12 +10,9 @@ export interface ProviderIntegrationDiff {
   provider: InitProvider
   path: string
   present: boolean
-  /** Lifecycle events that carry a managed entry, identified by handler id. */
   managedEvents: string[]
   missingEvents: string[]
-  /** Events whose managed entry appears more than once (drift from command reshapes). */
   duplicateEvents: string[]
-  /** Entries written by someone else; uninstall must preserve them. */
   foreignEntries: number
   detail?: string
 }
@@ -176,11 +173,6 @@ export interface IntegrationsUninstallResult {
   skipped: Array<{ path: string; reason: string }>
 }
 
-/**
- * Remove only entries carrying our handler id. Foreign hooks in the same group survive, and a
- * group is dropped solely when it becomes empty. Records, config and the Git exclude entry are
- * retained on purpose and reported, so uninstall never silently discards a team's evidence.
- */
 export async function integrationsUninstall(
   workspace: string,
   env: NodeJS.ProcessEnv = process.env
@@ -275,11 +267,6 @@ export interface IntegrationsRepairResult {
   unchanged: string[]
 }
 
-/**
- * Re-apply managed hooks for providers that are already installed. Managed entries are stripped
- * by handler id and rewritten in canonical form, which repairs duplicates left by an earlier
- * command reshape; foreign hooks and providers that were never installed are left alone.
- */
 export async function integrationsRepair(options: {
   workspace: string
   cliPath: string
@@ -324,7 +311,6 @@ export async function integrationsRepair(options: {
   return { workspace: root, providers: installed, rewritten, unchanged }
 }
 
-/** Drop every managed entry so the canonical merge cannot append a duplicate. */
 export function stripManagedHooks(source: string | null, path: string, provider: Exclude<InitProvider, 'opencode'>): string | null {
   if (source == null) return null
   let parsed: unknown

@@ -12,9 +12,6 @@ export function electronSecurityTestEnvironment(temp) {
   }
 }
 
-// Which electron-security-smoke campaign `argv` selects, and whether it drives the dev
-// layout or a packaged App. Split from electron-security-smoke.mjs by responsibility
-// (argument modes vs. driving the App); the flags and their meanings are unchanged.
 export function electronSecurityModes(argv) {
   const steerOnly = ['--dev-steer-only', '--steer-only'].includes(argv[2])
   const structureOnly = argv[2] === '--dev-structure-only'

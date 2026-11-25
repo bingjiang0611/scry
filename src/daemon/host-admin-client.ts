@@ -12,10 +12,6 @@ import {
 const MAX_REPLY_BYTES = 256 * 1024
 const DEFAULT_TIMEOUT_MS = 10_000
 
-/**
- * Safely read a per-request challenge file using O_NOFOLLOW + fstat on the open fd
- * (never statSync, which follows symlinks — P5-host-cli §3.3).
- */
 export function readHostAdminChallengeFile(
   adminDir: string,
   fileName: string,

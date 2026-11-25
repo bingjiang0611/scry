@@ -4,7 +4,6 @@ import NIOPosix
 import NIOSSL
 import NIOTLS
 
-// One open tunnel (relay or direct) owned by a lane.
 final class LaneConnection: Sendable {
   enum Kind: Sendable {
     case serial(LaneHandler)

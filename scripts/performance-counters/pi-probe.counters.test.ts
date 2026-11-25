@@ -67,7 +67,6 @@ describe('Pi capability probe work and phases', () => {
           expect(result.models).toEqual([])
           expect(result.levels).toEqual(['off'])
           expect(result.commands).toEqual([{ name: 'fixture-menu', source: 'extension' }])
-          // The second read reuses the parked child: one spawn, eight answers.
           expect(starts()).toEqual([cwd])
           expect(meter.spawned).toBe(1)
           expect(meter.responses).toBe(8)

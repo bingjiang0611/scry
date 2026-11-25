@@ -105,7 +105,6 @@ describe('兼容性判定', () => {
       status: 'unknown',
       reason: '没有适用于 Scry 0.2.186 的 pi 兼容性策略'
     })
-    // scryRange 命中时同一条策略生效
     expect(resolve('1.0.0', 'pi', '9.1.0').status).toBe('supported')
   })
 

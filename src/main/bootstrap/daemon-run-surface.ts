@@ -14,20 +14,11 @@ import type { TraceBatchReceipt } from '../trace-output'
 import type { PreparedWorkspace } from '../../shared/workspace-selection'
 import { canonicalExistingDirectory } from '../workspace-authorization'
 
-// The run half of the daemon-mode App: the renderer keeps sending the same IPC
-// payloads, and this surface turns them into daemon frames. Nothing here decides
-// policy — the daemon does — so a refusal comes back as the renderer's own error
-// shape instead of a locally invented success.
 
 export interface DaemonRunSurfaceDeps {
   transport: DaemonRunTransport
   runtime: DaemonRunRuntime
-  // The workspace the App currently shows. A run started without a directory uses
-  // it, exactly like the in-process App does.
   currentCwd: () => string | undefined
-  // The window channel. In process, a started run is announced as `agent:focusedRun`
-  // (run-startup.ts) so the window selects its project and session; a daemon run is
-  // announced the same way from here.
   send?: (channel: string, payload: unknown) => void
   watchDetail?: (key: string | null) => boolean
 }
@@ -36,8 +27,6 @@ export interface DaemonRunSurface {
   // `intentId` is the caller's idempotency key: fixed before the first attempt so a
   // retry after a connection failure cannot record a second intent.
   start(payload: AgentStartRequest, intentId?: string): Promise<AgentStartResult>
-  // Async on purpose: in daemon mode the run state lives behind a socket, and the
-  // IPC handlers await both this surface and the in-process registry uniformly.
   activeRun(): Promise<ActiveRun | null>
   activeRuns(): Promise<ActiveRun[]>
   focusedRunSnapshot(): Promise<ActiveRun | null>
@@ -47,23 +36,14 @@ export interface DaemonRunSurface {
   answerQuestion(response: AgentQuestionResponse): Promise<boolean>
   ack(receipt: TraceBatchReceipt): Promise<boolean>
   resynchronized(): Promise<true>
-  // App-only controls. The daemon answers from the registry that owns the run; the
-  // App's own memory has no entry for a daemon run.
   steer(payload: unknown): Promise<AgentSteerResult>
   stopBackgroundTask(payload: unknown): Promise<BackgroundTaskStopResult>
   adopt(runId: string): Promise<ActiveRun | null>
-  // Follow a run the daemon recorded for this window (a conversation send). Unlike
-  // adopt it does not take focus: in process a conversation run never does either.
   follow(ledger: { runId: string; seq?: number }): Promise<{ runId: string; bound: boolean }>
-  // An App channel the daemon answers through a local op (B4-L4).
   localOp(call: { op: string; method: string; args: unknown[]; read: boolean }): Promise<unknown>
-  // An existing op the daemon serves paired devices, sent for an App channel (route `forward`).
   forward(request: Record<string, unknown>, read: boolean): Promise<Record<string, unknown>>
 }
 
-// The intent detail is the daemon's routing contract, so only fields the App
-// actually has are sent. An unknown or absent cwd stays absent: the daemon decides
-// what that means for this grant scope.
 export function routingDetail(payload: AgentStartRequest, currentCwd: string | undefined, attachments = payload.attachments): string {
   const cwd = payload.cwd ?? currentCwd
   return JSON.stringify({
@@ -77,8 +57,6 @@ export function routingDetail(payload: AgentStartRequest, currentCwd: string | u
     ...(payload.permissionMode ? { permissionMode: payload.permissionMode } : {}),
     ...(payload.expectedExternalSessionId ? { resume: payload.expectedExternalSessionId } : {}),
     ...(attachments?.length ? { attachments } : {}),
-    // The workspace selection is the request: dropping it would run a plain turn in the
-    // source checkout, a request the user did not make. The daemon prepares or refuses it.
     ...(payload.workspace ? { workspace: payload.workspace } : {})
   })
 }
@@ -150,15 +128,9 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// The App half of a first send that prepares its workspace (switch a branch, create or
-// reuse a worktree). The daemon prepares the workspace and refuses a stale selection with
-// the same source-control checks an in-process start ran; what only the App knows - which
-// project its window shows - is checked here, and the prepared workspace is read back
-// from the daemon's own journal instead of being guessed.
 
 type LocalOp = (call: { op: string; method: string; args: unknown[]; read: boolean }) => Promise<unknown>
 
-/** In process the same check ran against the window's selection (workspace-start.ts). */
 export function assertWorkspaceSourceSelected(payload: AgentStartRequest, currentCwd: string | undefined): void {
   if (!payload.workspace || !payload.cwd || !currentCwd) return
   if (canonicalExistingDirectory(payload.cwd) !== canonicalExistingDirectory(currentCwd))
@@ -194,8 +166,6 @@ export async function registeredWorkspace(localOp: LocalOp, payload: AgentStartR
 export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSurface {
   let focusedRunId: string | null = null
   const { runtime } = deps
-  // Right after the submit the window has read no trace yet, so the announcement is the
-  // run's own context, the same fields in-process run-startup.ts sends before any output.
   const announceFocusedRun = (runId: string, context: DesktopRemoteContext, userText: string): void => {
     if (!deps.send) return
     const view: ActiveRun = runtime.runView(runId) ?? {
@@ -216,7 +186,6 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       const context = runContext(payload, deps.currentCwd())
       if (!context) throw new Error('daemon_run_workspace_required')
       assertWorkspaceSourceSelected(payload, deps.currentCwd())
-      // The App's commandId wins over the fallback key kept across a daemon reconnect.
       // A lost submit reply is reconciled inside runtime.start from the recorded receipt,
       // then bound and admitted like any other start; it is never submitted again.
       const prepared = await prepareSubmit(deps.transport, payload, context.cwd, payload.commandId?.trim() || intentId || randomUUID())
@@ -224,7 +193,6 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
       // `bound: false` means the trace will not carry this id yet. Say so instead
       // of handing the view an id it cannot match.
       if (!receipt.bound) throw new Error('daemon_run_not_bound')
-      // A prepared workspace runs where it was prepared; the window follows it there.
       const workspace = payload.workspace ? await registeredWorkspace(deps.transport.localOp.bind(deps.transport), payload, receipt.runId) : undefined
       focusedRunId = receipt.runId
       announceFocusedRun(receipt.runId, workspace ? { ...context, cwd: workspace.cwd } : context, payload.prompt)
@@ -244,8 +212,6 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     async activeRuns() {
       return runtime.activeRuns()
     },
-    // Ignores `done`, exactly like the in-process handler: the renderer uses this to
-    // recover a terminal event it missed, and a finished run is when that matters most.
     async focusedRunSnapshot() {
       return focusedRunId === null ? null : runtime.runView(focusedRunId)
     },
@@ -264,7 +230,6 @@ export function createDaemonRunSurface(deps: DaemonRunSurfaceDeps): DaemonRunSur
     },
     async adopt(runId) {
       const run = await deps.transport.adopt(runId)
-      // Adopting means this window now shows the run, so the next activeRun() agrees.
       if (run) focusedRunId = runId
       return run
     },

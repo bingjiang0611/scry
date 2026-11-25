@@ -1,7 +1,6 @@
 import type { ConversationPage } from '@shared/conversation-api'
 import { MAX_RESTORE_PAGES, type SideChatViewPosition } from './side-chat-view-state'
 
-/** A remembered reading position that is still waiting to be applied. */
 export interface PendingViewRestore {
   conversationId: string
   position: SideChatViewPosition

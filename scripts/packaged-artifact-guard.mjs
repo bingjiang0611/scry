@@ -24,8 +24,6 @@ export function assertArtifactMatchesSource(appPath, { platform = process.platfo
   const artifactVersion = packagedArtifactVersion(appPath, platform)
   const sourceVersion = JSON.parse(readFileSync(resolve(sourcePackage), 'utf8')).version
   if (artifactVersion === sourceVersion) return sourceVersion
-  // Not a warning: continuing would assert against the wrong build and report a
-  // failure that has nothing to do with the source under test.
   console.error(`[scry] 产物过期，请先 npm run pack:artifact：${appPath} 是 ${artifactVersion ?? '未知版本'}，源码是 ${sourceVersion}`)
   process.exit(2)
 }

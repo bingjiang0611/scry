@@ -2,18 +2,7 @@ import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 
-/**
- * Sessions whose every pass fails the same way, with no new evidence to act on: an unreadable
- * session directory, or an index entry that stopped being a session. A recovery pass used to retry
- * them forever and the whole pass paid for it, so every enumeration now stops treating a repeated
- * failure as work: it records why, skips the session, and retries once an hour so a repaired
- * workspace heals without a restart.
- *
- * The ledger is a report, never authority: skipping a session never closes its turn, drops its
- * marker, or deletes evidence. A suspended session keeps its `open.json` and its attention marker.
- */
 export const SESSION_FAILURE_SUSPEND_AFTER = 3
-// The daemon polls every 1–15 seconds. A five-minute streak spans many polls, not one burst.
 export const TURN_FAILURE_MIN_AGE_MS = 5 * 60_000
 const TRANSIENT_SYSTEM_CODES = new Set(['EMFILE', 'ENFILE', 'ENOSPC', 'EAGAIN', 'EBUSY', 'EIO'])
 export const SESSION_FAILURE_RETRY_MS = 60 * 60 * 1_000
@@ -83,16 +72,6 @@ export function suspendedSessionKeys(ledger: SessionFailureLedger, now = Date.no
   return keys
 }
 
-/**
- * Count one failed pass for a session. Turn scope additionally requires a sustained streak.
- * A repeat after an hourly re-probe restarts the pause without another suspension log.
- *
- * Only the same failure counts twice. A pass that fails differently has learned something new
- * (a different file, a lock that was not there before), so the streak restarts: the ledger suspends a
- * reason, never a session with changing reasons. Read errors inside a turn are recorded here too —
- * an `ERR_STRING_TOO_LONG` on the same window cannot turn into evidence by being retried every pass —
- * but the suspension still only skips recovery passes and never closes, drops or rewrites a turn.
- */
 export async function noteSessionFailure(
   dataRoot: string,
   provider: ProviderId,
@@ -160,7 +139,6 @@ export async function clearSessionFailure(
   })
 }
 
-/** How many sessions are currently skipped, for the health report every reader already reads. */
 export async function suspendedSessionCount(dataRoot: string, now = Date.now()): Promise<number> {
   return suspendedSessionKeys(await readSessionFailures(dataRoot), now).size
 }

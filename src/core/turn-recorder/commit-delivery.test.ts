@@ -89,7 +89,6 @@ async function retry(f: Awaited<ReturnType<typeof fixture>>, flags: Map<string, 
   finally { output.mockRestore(); vi.unstubAllEnvs() }
 }
 
-// VE2 changes scheduling, not the five-failure threshold or the conservative ACK contract.
 describe('persistent commit notification failures', () => {
   it('reports the failed sequence, dead-letters at five, and delivers later records without claiming a contiguous ACK', async () => {
     const f = await fixture()
@@ -216,7 +215,6 @@ describe('persistent commit notification failures', () => {
     const config = { ...f.config, commitHook: { entry: 'receiver.cjs', files: ['receiver.cjs'] } }
     await writeFile(join(f.root, 'scry.config.json'), JSON.stringify(config))
     const baseEnv = { HOME: f.root, SCRY_GRANT_DIR: join(f.root, 'grants') }
-    // Load the validated config through the public recorder path before inspecting its state.
     await drainRecorderDelivery(f.root, baseEnv)
     const { recorderEnablement } = await import('./recorder.js')
     const enabled = await recorderEnablement(f.root, baseEnv)
@@ -267,7 +265,6 @@ describe('persistent commit notification failures', () => {
     await writeFile(f.blocked, '[1,2]')
     await exhaust(f)
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ ackedThrough: 0, deadLetterCount: 2 })
-    // A still-failing explicit replay starts a new episode, not an automatic sixth attempt.
     expect(await retry(f, new Map([['sequence', '1']]))).toBe(3)
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
       ackedThrough: 0, deadLetterCount: 1, failure: { sequence: 1, attempts: 1 }

@@ -51,7 +51,6 @@ export function assertIsolatedTestUserData(env: NodeJS.ProcessEnv, paths?: AppUs
 /** The retired switch; read only to say that it no longer does anything. */
 export const RETIRED_DAEMON_MODE_ENV = 'SCRY_HOST_DAEMON'
 
-/** The warning for an explicit `SCRY_HOST_DAEMON` other than `1`, or none. */
 export function retiredDaemonModeWarning(env: NodeJS.ProcessEnv): string | undefined {
   const value = env[RETIRED_DAEMON_MODE_ENV]
   if (value === undefined || value === '1') return undefined

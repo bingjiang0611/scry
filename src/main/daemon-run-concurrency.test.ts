@@ -88,7 +88,6 @@ function daemon() {
   const delivered: string[] = []
   const transport = new DaemonRunTransport(request)
   // Not wrapped: the event wiring receives the runtime itself, as daemon mode passes it.
-  // What a run-level subscription receives (W2), in order.
   const subscription: string[] = []
   const runTraces = {
     route: (event: { runId: string; text?: string }) => { if (event.text) subscription.push(`${event.runId}:${event.text}`) },
@@ -108,7 +107,6 @@ function daemon() {
     }),
     bindBudgetMs: 300
   })
-  // The App's event wiring, exactly as daemon mode starts it (daemon-run-mode.ts).
   const start = () => startDaemonRunEvents({ transport, waitMs: 5_000, send: () => {}, runtime })
   return {
     runtime, delivered, start, isLive: () => isLive, statusOpens, subscription, settle,

@@ -4,10 +4,10 @@
 // How often does a device that follows one run re-read that run's trace content?
 // The scenario is fixed so two refs are comparable: the run produces a ledger
 // event batch every 100 ms for 60 s (600 change reports), the device is on the
-// screen showing that run, and every poll cycle is assumed to take no time. The
-// policy — poll interval, and whether a change report forces a read — is read from
-// the renderer source at each ref, so this counts what the shipped code decides
-// rather than what a test stub decides.
+// screen showing that run, and every poll cycle is assumed to take no time.
+// The model extracts the poll interval and refresh floor from renderer source
+// and infers from the source shape whether changes bypass the floor. It counts
+// modeled reads without executing the renderer.
 //
 // Usage:
 //   node scripts/remote-trace-read-frequency.mjs                # working tree

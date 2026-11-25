@@ -125,7 +125,6 @@ export async function exerciseUnifiedConversationContinuation(state) {
   await settled(evaluate, liveConversation.id, 1)
   assert.deepEqual(await evaluate(`window.scry.conversations.send(${json(liveRequest)})`), { status: 'accepted', runId: liveStart.runId, disposition: 'duplicate' })
 
-  // A completed result is not an input receipt. Persist unknown and never retry it.
   const unknown = await evaluate(`window.scry.conversations.create(${json(fixture.workspace)})`)
   const unknownView = await preview(evaluate, unknown.id, 'codex')
   const unknownRequest = sendRequest(unknownView, 'unknown-command', 'conversation unknown input')

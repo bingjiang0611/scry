@@ -58,7 +58,6 @@ export async function exerciseWorkspaceDiff(contents) {
   await click('#diff-switch')
   await wait(state('captured', '无改动'))
   await click('#diff-release')
-  // The rejected older context must not replace the second project's accepted result.
   await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   if (!(await read(state('captured', '无改动')))) throw new Error('Stale Git reply replaced the current workspace')
   await click('#diff-unbind')

@@ -12,7 +12,6 @@ export function readWorkspaceDraft(value: unknown): WorkspaceDraftSelection | un
   try {
     return parseWorkspaceStartSelection(value)
   } catch {
-    // Keep the text draft and an explicit blocked selection; never silently send to current cwd.
     return { invalid: true }
   }
 }
@@ -36,7 +35,6 @@ export function workspaceSendLabel(selection?: WorkspaceDraftSelection, choices?
   return branch ? branch.worktreeIds.length ? workspaceCopy.reuseSend : workspaceCopy.switchSend : workspaceCopy.prepareSend
 }
 
-/** Consume only the acknowledged operation; newer drafts and occupied destinations stay intact. */
 export function consumeWorkspaceDraft(
   drafts: ReadonlyMap<string, ComposerDraft>, sourceKey: string, operationId: string, targetKey?: string, submitted?: ComposerDraft
 ): ReadonlyMap<string, ComposerDraft> {
@@ -56,7 +54,6 @@ export function consumeWorkspaceDraft(
   return next
 }
 
-/** Resolve only a catalog alias attached to this exact run, never the latest session in a cwd. */
 export async function workspaceRunSession(context: ProviderContext, runId: string): Promise<string> {
   const sessions = await window.scry.listSessions(context)
   const session = sessions.find(candidate => candidate.runId === runId || candidate.sessionId === runId)
@@ -64,7 +61,6 @@ export async function workspaceRunSession(context: ProviderContext, runId: strin
   return session.externalSessionId
 }
 
-/** A lost reply can be reconciled by its exact command receipt, never by repeating the write. */
 export async function startWithWorkspaceReceipt(request: AgentStartRequest): Promise<AgentStartResult> {
   try {
     return await window.scry.start(request)

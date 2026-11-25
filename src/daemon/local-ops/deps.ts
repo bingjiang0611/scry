@@ -20,8 +20,6 @@ import type { SourceControlService } from '../../main/source-control/service'
 import type { createProviderDiscovery } from '../../main/remote/provider-discovery'
 import type { SideChatCascade } from '../../main/bootstrap/conversation-delete'
 
-// What the daemon's local-op groups are built from: the same runtime objects Electron
-// main builds its handlers from, owned here by the daemon.
 
 export interface DaemonLocalEndpointDeps {
   catalog: ReturnType<typeof createSessionCatalog>
@@ -37,25 +35,17 @@ export interface DaemonLocalEndpointDeps {
   runs: () => RunRegistry<ActiveRun, RunControl>
   startupManagedRecovery: () => Promise<void>
   requestRunStop: (runId: string) => boolean
-  // This daemon's host when remote access is enabled on main's rule, else null.
   remoteHost: () => import('../../main/bootstrap/pairing-channels').PairingHost | null
   forkSessionWithAuthority: (request: DesktopRemoteForkSessionRequest) => Promise<AgentForkSessionResult>
   userDataDir: string
-  // What this daemon reports as its version (the «后台服务» section, B4-S S0-1).
   appVersion: string
-  /** Packaged flag used to compute the daemon's effective remote policy self-report. */
   isPackaged: boolean
-  // Worktree selection reads, and the repository ids they hand out, live in this one service.
   sourceControl: SourceControlService
-  // The metadata paired devices see; Provider context and Pi profile changes invalidate it.
   providerDiscovery: Pick<ReturnType<typeof createProviderDiscovery>, 'invalidate' | 'refreshMetadata'>
-  // Primary-App forwarding bridge for ExecutionTargetRouter (W10).
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
-  // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
   hostAdmin?: import('../host-admin-store').HostAdminStore
   // P8 host metrics: the daemon's own sampler, local scope (may carry the PID).
   hostMetrics?: () => Promise<import('../../shared/host-metrics').HostMetricsSnapshot>
-  // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   /** D4: the authority records metadata changes; it is attached after the local ops are built. */
   getOrchestrationAuthority?: () => {
@@ -68,7 +58,6 @@ export interface DaemonLocalEndpointDeps {
       actor: string
     }) => unknown
   } | undefined
-  // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
   /** D1: the projection read, plus the one session lookup, so the App can show the host's queue. */
@@ -80,11 +69,6 @@ export interface DaemonLocalEndpointDeps {
   log?: (line: string) => void
 }
 
-/**
- * What one group hands another, as main's bootstrap does (index.ts): conversation deletion
- * deletes sessions, and session deletion checks a conversation's deletion plan. Set while
- * the groups are built, read only when a call runs.
- */
 export interface DaemonSessionLinks {
   reconcileSessionMetadata?: () => Promise<number>
   deleteNativeProjection?: import('../../main/bootstrap/session-lifecycle').SessionLifecycleDependencies['deleteNativeProjection']
@@ -100,16 +84,13 @@ export interface DaemonSessionLinks {
     }
   ) => Promise<boolean>
   prepareConversationDeletion?: (conversation: Conversation) => Promise<ConversationDeletionPreview>
-  // Session deletion takes the session's side chats along (conversation-delete.ts).
   sideChatCascade?: SideChatCascade
 }
 
 export type DaemonLocalGroupDeps = DaemonLocalEndpointDeps & { links: DaemonSessionLinks }
 
-/** One group's App channels, keyed by channel, called with the renderer's arguments. */
 export type DaemonLocalOpGroup = (deps: DaemonLocalGroupDeps) => Record<string, LocalOpHandler>
 
-/** An IPC listener table (event first) as a local-op table (arguments only). */
 export function withoutEvent(table: Record<string, unknown>): Record<string, LocalOpHandler> {
   return Object.fromEntries(Object.entries(table).map(([channel, listener]) =>
     [channel, ((...args: unknown[]) => (listener as (event: unknown, ...values: unknown[]) => unknown)(undefined, ...args)) as LocalOpHandler]))

@@ -49,7 +49,6 @@ describe('daemon host process', () => {
 
     const workspace = join(root, 'workspace')
     mkdirSync(workspace, { mode: 0o700 })
-    // The picker stores canonical paths; on macOS tmpdir is /var → /private/var.
     createRecentFoldersStore(userDataDir).push(realpathSync(workspace))
     const staleAtomicTemp = join(userDataDir, 'app-sessions.json.tmp')
     writeFileSync(staleAtomicTemp, 'stale', { mode: 0o600 })
@@ -87,21 +86,14 @@ describe('daemon host process', () => {
       const desktop = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'desktop', query: { kind: 'info' }
       })
-      // W17: daemon owns session lifecycle/fork, so sessionActions/Fork/Delete are advertised;
-      // without a live primary App polling the bridge, shell workbenchOps stay false/false.
       expect(desktop.desktop.sessionActions).toBe(true)
       expect(desktop.desktop.sessionFork).toBe(true)
       expect(desktop.desktop.sessionDelete).toBe(true)
       expect(desktop.desktop.workbenchOps).toEqual({ openPath: false, trashItem: false })
-      // The App's run controls are served on the local endpoint only. The daemon used to
-      // build them and then drop them before the host, so every steer, background-task stop
-      // and adopt answered unsupported_op in a real daemon.
       const adopted = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'runControl', method: 'adopt', runId: 'run-not-here'
       })
       expect(adopted.error).toBeUndefined()
-      // App channels the daemon answers for its App (B4-L4), over the same local socket and
-      // grant; the answers come from the handlers main registers, run against daemon state.
       const recent = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'projectStore', method: 'recentFolders', args: []
       })
@@ -115,18 +107,12 @@ describe('daemon host process', () => {
         op: 'providerCatalog', method: 'providerDescriptors', args: []
       })
       expect((descriptors.result as Array<{ id: string }>).map((descriptor) => descriptor.id)).toContain('codex')
-      // Conversation ledger reads are served from the daemon's own store; a write that is
-      // not migrated yet stays refused rather than answered from part of the table.
       const conversations = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'list', args: [workspace]
       })
       expect(conversations.error).toBeUndefined()
       expect(Array.isArray(conversations.result)).toBe(true)
-      // Ledger writes the daemon can make on its own (B4-L4-2b): create, then read it back
-      // and rename it, all against the daemon's store.
-      // The App begins with the current snapshot and then reads daemon changes.
       const handshake = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription())
-      // It carries the current unread set as state (E1b); nothing is unread yet.
       expect(handshake.subscribe.hints).toEqual([{ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) }])
       const create = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'create', args: [workspace]
@@ -143,18 +129,14 @@ describe('daemon host process', () => {
         op: 'conversation', method: 'update', args: [created.id, created.revision, { kind: 'rename', title: 'from the App' }]
       })
       expect(renamed.error).toBeUndefined()
-      // The sidebar's "new session": the daemon forgets the context it runs.
       const newSession = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'providerContext', method: 'newSession', args: [{ providerId: 'codex', cwd: workspace }]
       })
       expect(newSession).toEqual({ result: true })
-      // Fork is served now: main's own validation answers a malformed request.
       const refused = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'fork', args: [created.id]
       })
       expect(refused.error).toBe('统一对话请求格式或字段不受支持；仅支持普通文本和主进程派生的历史引用')
-      // A send runs through this daemon's ledger under the caller's grant, with the
-      // conversation turn's own run id, so the App can follow it like its own runs.
       const preview = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'preview', args: [created.id, { providerId: 'codex' }]
       })
@@ -187,9 +169,6 @@ describe('daemon host process', () => {
       const alias = runAuthority.sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
         .get(receiptId) as { run_id: string } | undefined
       expect(alias?.run_id ?? receiptId).toBe(conversationRunId)
-      // The renderer's read(id) leaves its cursor out; over JSON that arrives as null.
-      // Named as absent, the daemon's handler sees what main's does; unnamed, the null
-      // is refused, which is the page read that stalled the daemon-mode conversation view.
       const unnamed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'conversation', method: 'read', args: [created.id, null]
       })
@@ -205,12 +184,8 @@ describe('daemon host process', () => {
         expect.objectContaining({ type: 'run.session_bound', runId: conversationRunId }),
         expect.objectContaining({ type: 'run.settled', runId: conversationRunId })
       ]))
-      // E1b: a finished run that nobody viewed is unread in the daemon. This daemon cannot
-      // see the App's window, so the App says when the user viewed it, and the set clears.
       const fresh = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription())
       const unread = fresh.subscribe.hints.find((item: { kind: string }) => item.kind === 'attention')?.snapshot.unreadSessionKeys as string[]
-      // A conversation turn's attention is the conversation's row, whichever native
-      // session carried it (the Provider binding may change between turns).
       expect(unread).toEqual([`conversation\u0000${created.id}`])
       for (const sessionKey of unread) {
         const viewed = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
@@ -220,10 +195,7 @@ describe('daemon host process', () => {
       }
       const cleared = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, localSubscription(fresh.subscribe, 1_000))
       expect(cleared.subscribe.hints).toContainEqual({ kind: 'attention', snapshot: expect.objectContaining({ unreadSessionKeys: [] }) })
-      // The rename above is announced by the daemon itself; the App no longer stands in.
       expect(hints).toContainEqual({ kind: 'data', event: { kind: 'conversation_changed', conversationId: created.id } })
-      // History pages are loaded by the daemon against its own catalog: a session it does
-      // not know is refused by the same check the App ran in process.
       const history = await call(host.channel.socketPath, host.service.caCertificatePEM, device.certPEM, device.keyPEM, {
         op: 'sessionHistory', method: 'loadSession', args: [{ providerId: 'codex', cwd: workspace, externalSessionId: 'not-in-catalog' }]
       })

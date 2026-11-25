@@ -13,10 +13,6 @@ import { useRemoteChatPresentation } from './RemoteChatPresentation'
 import { useRemoteChatExecution } from './RemoteChatExecution'
 import { RemoteChatView } from './RemoteChatView'
 
-// A conversation that executes on a saved remote Scry desktop. It renders the same
-// ChatView as local sessions; only the controller differs. The host owns Provider
-// install, credentials, files and archive, so this view never falls back to local
-// runtime state: an offline, unknown or forgotten host keeps the draft and blocks send.
 
 
 export { errorText, remoteAgentId, remoteControlsValid, remoteDraftKey, remotePermissionOption, remoteRunControlCatalog } from './RemoteChatShared'

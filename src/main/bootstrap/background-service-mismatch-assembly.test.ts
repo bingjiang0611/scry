@@ -6,10 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DAEMON_LOCK_NAME } from '../../daemon/ledger-lock'
 import { processIdentityKey, type ProcessRow } from '../process-diagnostics'
 
-// Assembly-layer tests for background-service.ts mismatch auto-restart gating (W15 R2):
-// - Packaged build (`app.isPackaged === true`) NEVER auto-restarts (kills mutation at background-service.ts:257)
-// - S2: dev build refuses auto-restart against packaged/daily daemon or foreign lock holder
-// - S1: live activeRuns re-check right before SIGTERM falls back to confirmation dialog when non-zero
 
 const electron = vi.hoisted(() => ({
   userData: '',
@@ -162,7 +158,6 @@ describe('background-service mismatch auto-restart assembly (W15 R2)', () => {
     const probeActiveRuns = vi.fn<() => Promise<number | undefined>>()
       .mockResolvedValueOnce(0)
       .mockResolvedValueOnce(1)
-    // Default mock response=1 cancels confirmation dialog.
     daemon.emit({
       status: 'version-mismatch', running: '1.0.0', expected: '2.0.0', action: 'restart_daemon',
       runningActiveRuns: 0, runningIsPackaged: false, probeActiveRuns

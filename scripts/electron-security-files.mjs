@@ -103,8 +103,6 @@ export async function exerciseFiles(smokeContext) {
     await clickFile(`${reportPath} · 打开文件`)
     await wait(`document.querySelector('.workspace-preview h1')?.textContent === 'Actual encoded report'`)
     await clickFile('rotom-team/docs/NATIVE-DELIVERY.md · 在右侧文件面板打开')
-    // Markdown opens as a read-only preview first (7d4b6bd); expanding the
-    // source must show the actual file bytes in a read-only textarea.
     await wait(`document.querySelector('.workspace-preview h1')?.textContent === 'Actual sibling delivery' && document.querySelector('.workspace-editorbar')?.textContent.includes('只读预览')`)
     await evaluate(`Array.from(document.querySelectorAll('.workspace-editorbar button')).find(button => button.textContent === '展开源码').click()`)
     await wait(`document.querySelector('textarea[aria-label="查看 NATIVE-DELIVERY.md"]')?.value === '# Actual sibling delivery\\n'`)

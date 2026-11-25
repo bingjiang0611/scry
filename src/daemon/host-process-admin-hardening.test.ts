@@ -32,7 +32,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
     let daemonOff: Awaited<ReturnType<typeof startTestDaemon>> | undefined
     let daemonOn: Awaited<ReturnType<typeof startTestDaemon>> | undefined
     try {
-      // Flag OFF: pair a remote device, record a notice in HostAdminStore, and verify neither desktop info nor catalogSnapshot exposes it.
       process.env.SCRY_EXPERIMENTAL_HOST_CLI = '0'
       daemonOff = await startTestDaemon({ root })
       const begun = await daemonOff.localOp('localPairing', 'begin', [])
@@ -54,7 +53,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
       await daemonOff.dispose()
       daemonOff = undefined
 
-      // Flag ON: desktop info advertises hostAdminNotices: 1 and catalogSnapshot includes hostAdminNoticeItems.
       process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
       daemonOn = await startTestDaemon({ root })
       daemonOn.host.hostAdmin.recordNotice({ kind: 'desktop_disabled_via_cli' })
@@ -82,8 +80,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
     process.env.SCRY_EXPERIMENTAL_HOST_CLI = '1'
     process.env.SCRY_REMOTE_HOST = '1'
     const base = makeShortRoot()
-    // Size longRoot so `daemonStateDir` is 78 bytes: local.sock (89 B) & local-enroll.sock (96 B) <= 100 B,
-    // while host-admin/host-admin.sock (105 B) > 100 B and triggers host_admin_socket_path_too_long only on admin socket.
     const suffixLen = Math.max(1, 78 - Buffer.byteLength(join(base, 'a', 'userData', 'daemon')))
     const longRoot = join(base, 'x'.repeat(suffixLen))
     mkdirSync(longRoot, { recursive: true })
@@ -99,7 +95,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
       const badRoot = makeShortRoot()
       const badStateDir = join(badRoot, 'userData', 'daemon')
       mkdirSync(badStateDir, { recursive: true })
-      // Place a regular file where `host-admin` directory should be.
       writeFileSync(join(badStateDir, HOST_ADMIN_DIR_NAME), 'not-a-dir')
       const logsBad: string[] = []
       dBadDir = await startTestDaemon({ root: badRoot, log: (line) => logsBad.push(line) })
@@ -131,7 +126,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
     let restarted: Awaited<ReturnType<typeof startTestDaemon>> | undefined
     try {
       daemon = await startTestDaemon({ root, log: (line) => logs.push(line) })
-      // Startup cleanup removes leftover challenge-* files.
       expect(existsSync(staleChallenge)).toBe(false)
 
       const id = buildIdentity('test')
@@ -139,7 +133,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
       const call = (method: string, args?: Record<string, unknown>) =>
         callHostAdmin({ daemonStateDirectory: stateDir, clientIdentity: id, method, ...(args ? { args } : {}) })
 
-      // Method log injection must be escaped onto a single line.
       const forged = 'bad\nhost-admin method=approve result=ok'
       expect(await call(forged)).toEqual({ ok: false, error: 'unsupported_method' })
       const methodLogs = logs.filter((line) => line.includes('unsupported_method'))
@@ -148,7 +141,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
         expect(line).not.toContain('\n')
       }
 
-      // Enable CLI approval and exhaust 6/h invite rate limit across phone & desktop.
       expect((await daemon.localOp('localHostAdmin', 'setCliApproval', [true])).error).toBeUndefined()
       for (let i = 0; i < 6; i++) {
         const res = await call(i % 2 === 0 ? 'invite_phone' : 'invite_desktop')
@@ -157,7 +149,6 @@ describe('W11 review hardening: notice gate, invite rate limit, non-fatal socket
       const seventh = await call('invite_phone')
       expect(seventh).toMatchObject({ ok: false, error: 'host_cli_rate_limited', retryAfterMs: expect.any(Number) })
 
-      // Restart preserves invite rate limit counter.
       await daemon.dispose()
       daemon = undefined
       restarted = await startTestDaemon({ root })

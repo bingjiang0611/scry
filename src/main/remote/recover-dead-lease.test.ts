@@ -98,7 +98,6 @@ describe('trusted remote lease recovery', () => {
 
   it('takes over a stale lease whose pid is this live process with a different identity', () => {
     const { directory, path } = fixture()
-    // A previous boot left this lease under a pid the OS has since handed to us.
     const stale = { pid: process.pid, lease: randomUUID(), createdAt: 0, startedAt: 'Mon Jan  1 00:00:00 2026', identityKey: `${process.pid}:Mon Jan  1 00:00:00 2026` }
     writeFileSync(path, JSON.stringify(stale), { mode: 0o600 })
     const current = utcRemoteProcessSnapshot().get(process.pid)!

@@ -12,8 +12,6 @@ function contextLabel(provider: string, profile: string): string {
   return named ? name : `${provider} · ${name}`
 }
 
-// One phone picker entry for one available Provider context (Pi profiles are
-// separate contexts). Pure so the probe-failure rule below is testable.
 export function remoteProviderMetadata(input: {
   descriptor: { id: string; label: string; available?: boolean }
   profile?: { id: string; label: string }
@@ -33,7 +31,6 @@ export function remoteProviderEntry(input: {
   descriptor: { id: string; label: string }
   profile?: { id: string; label: string }
   controls: CapabilityEnvelope<AgentRunControlCatalog>
-  // The previously published snapshot, for the probe-failure rule.
   previous: readonly RemoteProviderRef[]
   // Owner-set SCRY_REMOTE_PERMISSION_MODE override.
   permissionOverride?: AgentPermissionMode

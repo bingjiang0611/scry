@@ -33,7 +33,6 @@ describe('commit notification drain budget', () => {
     const hook = await commitHook(root)
     const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
     let clock = 0
-    // Deadline already elapsed before the first record: the drain must still make progress.
     const now = (): number => (clock += 10_000)
 
     await expect(drainCommitNotifications(join(root, '.scry'), env, { budgetMs: 1, now }))

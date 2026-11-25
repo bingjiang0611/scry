@@ -21,7 +21,6 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       try {
         return await actual.mkdir(...args)
       } catch (error) {
-        // Signal real native contention, not a process-local promise queue or a timing guess.
         if (args[0] === contention.path && (error as NodeJS.ErrnoException).code === 'EEXIST') contention.blocked?.()
         throw error
       }
@@ -92,7 +91,7 @@ process.disconnect()
       cleaning = releaseStaleAttention(enablement.dataRoot, 'claude', sessionDir)
       await Promise.race([blocked, cleaning.then(() => { throw new Error('cleanup bypassed the live writer') })])
       if (mode === 'publish') writer.send('resume')
-      else writer.kill('SIGKILL') // This test owns only this private fixture process.
+      else writer.kill('SIGKILL')
       await cleaning
       expect(await exited).toBe(mode === 'publish' ? 0 : null)
       const hasPublished = mode !== 'crash-before'

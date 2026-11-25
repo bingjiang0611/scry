@@ -11,8 +11,6 @@ import { listRecords } from './store.js'
 import { isAgentTurnRecord } from '../../shared/turn-record.js'
 import { normalizeTurnDiffSnapshot } from '../../shared/trace.js'
 
-// Inject two baseline failures, not synthetic records. Discovery, successful Git capture,
-// finish, aggregation, commit and cold record reads all use production implementations.
 vi.mock('./git.js', async importOriginal => {
   const actual = await importOriginal<typeof import('./git.js')>()
   return { ...actual, beginGitTurnDiff: (...args: Parameters<typeof actual.beginGitTurnDiff>) => {
@@ -27,9 +25,6 @@ vi.mock('./git.js', async importOriginal => {
 
 const roots: string[] = []
 const exec = promisify(execFile)
-// 夹具只跑临时仓库，但 `git` 会读宿主配置：`core.hooksPath` 指向拒绝提交的 hook 就让 `commit` 失败，
-// `GIT_DIR`/`GIT_INDEX_FILE` 这些仓库定位变量还会把对象和提交写进宿主仓库（`git -C` 只改工作目录）。
-// 整个文件统一隔离宿主全局/系统配置、环境配置与模板，保留临时仓库自己的 .git/config。
 beforeAll(() => {
   vi.stubEnv('GIT_CONFIG_GLOBAL', '/dev/null')
   vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1')
@@ -60,7 +55,6 @@ it('retains every discovered repository and its captured/timeout/failed outcome 
     repositories: { mode: 'discover-nested-git' },
     capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: true, hooks: true }
   }))
-  // Simultaneous finishes must not collapse different repositories into one harness event.
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-10-25T12:00:00Z'))
   const payload = { session_id: 'snapshot-session', turn_id: 'snapshot-turn', timestamp: new Date().toISOString() }
@@ -90,8 +84,6 @@ it('retains every discovered repository and its captured/timeout/failed outcome 
   expect(isAgentTurnRecord(legacy)).toBe(true)
 }, 15_000)
 
-// The finish path may reuse the start capture's index instead of rebuilding it with
-// `read-tree --reset`; the candidate set must stay exactly the worktree-vs-baseline one.
 async function committedRepo(name: string): Promise<string> {
   const root = await realpath(await mkdtemp(join(tmpdir(), `scry-reuse-${name}-`)))
   roots.push(root)
@@ -115,7 +107,6 @@ async function turnDiffOf(root: string, session: string) {
   return payload
 }
 
-// 复用启动 index 是纯性能优化：发布错了不会改结果，只会白跑调用。用直接观测把发布条件钉住。
 it('publishes the reusable start index only while sparse checkout is off', async () => {
   const dirtyRoot = await committedRepo('index-publish')
   const dirtyRepo = join(dirtyRoot, 'repo')
@@ -130,7 +121,6 @@ it('publishes the reusable start index only while sparse checkout is off', async
   expect(clean.baselineClean).toBe(true)
   expect(clean.indexState).toBeDefined()
 
-  // GIT_TEMPLATE_DIR='' 让 `git init` 不复制默认模板，`.git/info` 得自己建。
   await mkdir(join(dirtyRepo, '.git', 'info'), { recursive: true })
   await writeFile(join(dirtyRepo, '.git', 'info', 'sparse-checkout'), '')
   const sparse = await beginGitTurnDiff(dirtyRepo, 15_000, dirtyRoot)
@@ -138,7 +128,6 @@ it('publishes the reusable start index only while sparse checkout is off', async
   expect(sparse.beforeIndex).toBeUndefined()
   expect(sparse.indexState).toBeUndefined()
 
-  // linked worktree 的规则文件在自己的 git 目录里，common 目录看不到它。
   const linked = join(cleanRoot, 'linked')
   await exec('git', ['-C', join(cleanRoot, 'repo'), 'worktree', 'add', '-q', linked, '-b', 'sparse-linked'])
   await exec('git', ['-C', linked, 'sparse-checkout', 'set', '--no-cone', 'untracked-only.txt'])
@@ -150,8 +139,6 @@ it('publishes the reusable start index only while sparse checkout is off', async
   expect(linkedSparse.indexState).toBeUndefined()
 }, 20_000)
 
-// 只有 ENOENT 能证明“这个工作树没有 sparse 规则文件”。其他 stat 错误只说明判断失败，
-// 这时必须按 sparse 处理：白跑一次 read-tree --reset 只是慢，误判会把 skip-worktree 条目写成删除。
 it('sparse 规则文件探测只把 ENOENT 当作“没有 sparse checkout”', async () => {
   const root = await committedRepo('index-sparse-probe')
   const repo = join(root, 'repo')
@@ -159,7 +146,6 @@ it('sparse 规则文件探测只把 ENOENT 当作“没有 sparse checkout”', 
   expect(clean.status).toBe('ready')
   expect(clean.indexState).toBeDefined()
 
-  // `info` 变成普通文件后，`info/sparse-checkout` 的 stat 返回 ENOTDIR 而不是 ENOENT。
   await rm(join(repo, '.git', 'info'), { recursive: true, force: true })
   await writeFile(join(repo, '.git', 'info'), 'not a directory\n')
   const unreadable = await beginGitTurnDiff(repo, 15_000, root)

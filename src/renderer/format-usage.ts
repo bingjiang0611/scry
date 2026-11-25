@@ -1,4 +1,4 @@
-// 用量口径：cache token 是否计入输入由 Provider 决定；缺字段的轮次不能被算成 0。
+// Cache token 口径由 Provider 决定；总量与是否观测到用量分别判断。
 import type { TraceEvent } from '@shared/trace'
 import { tokenCacheAccounting as classifyTokenCache, usageTokenTotal, type TokenCacheAccounting } from '@shared/token-accounting'
 

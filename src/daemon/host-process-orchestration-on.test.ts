@@ -70,7 +70,6 @@ describe('P4-2 daemon authoritative orchestration integration', () => {
       const cert = device.certPEM
       const key = device.keyPEM
 
-      // 1. Submit a >16 KiB prompt through inner-mTLS socket -> body must be durable in BodyStore BEFORE commit
       const largePrompt = 'P4-2 large prompt ' + 'L'.repeat(INLINE_BODY_MAX_BYTES + 2048)
       const intentId1 = randomUUID()
       const submitted = await call(host.channel.socketPath, ca, cert, key, {
@@ -88,7 +87,6 @@ describe('P4-2 daemon authoritative orchestration integration', () => {
       expect(runRow?.body?.storage).toBe('external')
       expect(authority.sink.bodyStore.hasExternalBody(runRow!.body!.sha256)).toBe(true)
 
-      // Idempotent duplicate replay with same intentId returns exact same runId
       const dup = await call(host.channel.socketPath, ca, cert, key, {
         op: 'submit',
         intentId: intentId1,
@@ -97,7 +95,6 @@ describe('P4-2 daemon authoritative orchestration integration', () => {
       expect(dup.runId).toBe(runId1)
       expect(dup.status).toBe('duplicate')
 
-      // 2. resolveIntent writes permanent tombstone -> late submit conflicts with 0 runs created
       const absentIntent = randomUUID()
       const resolved = await call(host.channel.socketPath, ca, cert, key, {
         op: 'resolveIntent',
@@ -112,7 +109,6 @@ describe('P4-2 daemon authoritative orchestration integration', () => {
       })
       expect(lateSubmit.error).toBe('command_payload_conflict')
 
-      // 3. Projection replay consistency matches from empty
       expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
 
     } finally {
@@ -130,7 +126,6 @@ describe('P4-2 daemon authoritative orchestration integration', () => {
     const canonicalWs = realpathSync(workspace)
     createRecentFoldersStore(userDataDir).push(canonicalWs)
 
-    // Pre-seed orchestration.db with a dispatched run + open question as if previous daemon SIGKILLed
     const orphanRunId = randomUUID()
     const seedSink = EventSink.open({ userDataDir, checkpointIntervalMs: 0 })
     try {

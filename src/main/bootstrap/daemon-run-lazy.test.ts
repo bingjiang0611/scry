@@ -33,8 +33,6 @@ function surface(overrides: Partial<DaemonRunSurface> = {}): DaemonRunSurface {
   }
 }
 
-// The daemon can be absent, refused, or restart underneath the App. Each case has one
-// honest answer, and only the last one is worth a reconnect.
 
 describe('lazy daemon run surface', () => {
   it('reports the refusal reason instead of pretending the run exists', async () => {
@@ -43,8 +41,6 @@ describe('lazy daemon run surface', () => {
   })
 
   it('asks again after a daemon that was not ready yet', async () => {
-    // A daemon that is still starting is not a decision for the user: the first call
-    // reports it, and the next call must be able to find the daemon it became.
     let attempts = 0
     const lazy = createLazyDaemonRunSurface(deps, async () => {
       attempts += 1
@@ -66,7 +62,6 @@ describe('lazy daemon run surface', () => {
     const lazy = createLazyDaemonRunSurface(deps, createMode)
     await expect(lazy.activeRuns()).resolves.toEqual([{ runId: 'run-abc-1' }])
     expect(createMode).toHaveBeenCalledTimes(2)
-    // The dead connection is closed, not left open behind a new one.
     expect(dispose).toHaveBeenCalled()
   })
 

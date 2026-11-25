@@ -5,10 +5,6 @@ import { join } from 'node:path'
 import { sameBuild, type BuildIdentity } from '../shared/build-identity'
 import { trackConnections } from './socket-server-close'
 
-// Local-only Unix socket for `scry-host` CLI (P5-host-cli §3.3, §3.4).
-// Auth is a per-request 32-byte random challenge file created with O_CREAT|O_EXCL|O_NOFOLLOW
-// at mode 0600 inside a 0700 directory: proves the caller can read a 0600 file as this uid
-// on this host (blocking SSH streamlocal socket forwarding), with zero long-lived secrets.
 
 export const HOST_ADMIN_DIR_NAME = 'host-admin'
 export const HOST_ADMIN_SOCKET_NAME = 'host-admin.sock'
@@ -34,7 +30,6 @@ export interface HostAdminSocket {
 }
 
 export interface HostAdminSocketOptions {
-  /** `<userData>/daemon` directory; creates `<directory>/host-admin/host-admin.sock`. */
   daemonStateDirectory: string
   daemonIdentity: BuildIdentity
   handle(method: string, args: Record<string, unknown>): Promise<HostAdminReply>
@@ -48,7 +43,6 @@ const CHINESE_ERROR_MAP: ReadonlyArray<[string, string]> = [
   ['这是本机 App 与后台服务的连接，不是已配对设备，不能在这里撤销', 'local_grant_not_revocable']
 ]
 
-/** Map pairing/host errors to bounded machine codes (P5-host-cli §3.3). Never echoes secrets or paths. */
 export function mapHostAdminError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error ?? '')
   for (const [text, code] of CHINESE_ERROR_MAP) {
@@ -121,7 +115,7 @@ export async function openHostAdminSocket(options: HostAdminSocketOptions): Prom
       if (!activeChallenge) return
       const path = activeChallenge.filePath
       activeChallenge = null
-      try { rmSync(path, { force: true }) } catch { /* ignore */ }
+      try { rmSync(path, { force: true }) } catch {}
     }
 
     const replyAndClose = (payload: HostAdminReply): void => {
@@ -178,7 +172,6 @@ export async function openHostAdminSocket(options: HostAdminSocketOptions): Prom
       if (stage === 'request') {
         stage = 'done'
         const expectedToken = activeChallenge?.token
-        // Always burn the challenge file BEFORE checking the token so replay is impossible.
         cleanupChallenge()
         if (!expectedToken || !timingSafeTokenEqual(expectedToken, parsed.challenge)) {
           replyAndClose({ ok: false, error: 'host_admin_auth_failed' })
@@ -219,8 +212,6 @@ export async function openHostAdminSocket(options: HostAdminSocketOptions): Prom
   })
 
   const tracked = trackConnections(server)
-  // P5-host-cli §3.3: tighten umask to 0177 around the synchronous bind in server.listen()
-  // and restore immediately before awaiting so process umask is never held across an await.
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     const previousUmask = process.umask(0o177)

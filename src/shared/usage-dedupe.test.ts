@@ -38,7 +38,6 @@ describe('CodexUsageDeltaFilter', () => {
     expect(filter.admit({ input_tokens: 100, output_tokens: 10 })).toBe(true)
     expect(filter.admit({ output_tokens: 10, input_tokens: 100 })).toBe(false)
     expect(filter.admit({ input_tokens: 50, output_tokens: 5 })).toBe(true)
-    // 隔了一帧之后再次出现同样的数值是真实的第二次请求。
     expect(filter.admit({ input_tokens: 100, output_tokens: 10 })).toBe(true)
     expect(filter.duplicatesDropped).toBe(1)
   })

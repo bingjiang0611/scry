@@ -225,7 +225,6 @@ describe('history admission staging', () => {
   const fixtureTasks = Array.from({ length: 16 }, (_, index) => ({ cwd: `/tmp/run-${index}`,
     historySessionId: `conc-${index}-history` }))
   const shapeTargets = () => planAdmissionTargets({ runs: fixtureTasks, scenario: selectScenario('history-switch') })
-  // Two answers per batch: the bounded wait, then the single read-only state read.
   const reader = answers => {
     const evaluated = []
     return { evaluated, evaluate: async expression => { evaluated.push(expression); return answers.shift() } }
@@ -254,7 +253,6 @@ describe('history admission staging', () => {
       prompt: 'performance long stream' })
   })
 
-  // One gate invocation, so the closed and open cases cannot drift apart.
   async function gate(rows) {
     const page = fake()
     const switches = await performHistorySwitches({ ...page, targets: shapeTargets().slice(0, 4), preparation,

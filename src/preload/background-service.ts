@@ -5,9 +5,6 @@ import type {
   BackgroundServiceStatus
 } from '../shared/background-service'
 
-// The «后台服务» settings section (B4-S S0-1, P5-2). Action channels take no argument
-// except setBackgroundServiceLoginStart, which forwards a single boolean; paths, service
-// definitions, and native confirmations are all owned by main.
 export const backgroundServiceApi = {
   backgroundServiceStatus: (): Promise<BackgroundServiceStatus> => ipcRenderer.invoke('remote:backgroundService:status'),
   backgroundServiceRuntimeNotice: (): Promise<BackgroundServiceRuntimeNotice | null> =>

@@ -40,7 +40,6 @@ describe('side chat capability reader', () => {
     await vi.waitFor(() => expect(settle).toHaveBeenCalledTimes(1))
     expect(read).toHaveBeenCalledTimes(1)
     expect(settle.mock.calls[0][0]).toMatchObject({ key: contextKey(codex), result: { status: 'ready' } })
-    // A later open of the context already loaded needs no second read.
     reader.request(codex)
     expect(read).toHaveBeenCalledTimes(1)
   })

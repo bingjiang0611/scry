@@ -39,7 +39,6 @@ describe('side-chat scroll anchor', () => {
         { runId: 'turn-5', top: 190, height: 300, ordinal: 5 }
       ]
     }))
-    // The first turn still visible at the top edge is the anchor, with its own ordinal.
     expect(position).toMatchObject({ atBottom: false, anchorRunId: 'turn-4', anchorOrdinal: 4 })
   })
 
@@ -61,7 +60,6 @@ describe('side-chat scroll anchor', () => {
         { runId: 'turn-c', top: 180, height: 400 }
       ]
     }))
-    // The turn covering the top edge is the anchor: a turn fully above it is not on screen.
     expect(position).toEqual({ atBottom: false, anchorRunId: 'turn-b', anchorOffset: -40, turnCount: 3 })
   })
 
@@ -103,7 +101,6 @@ describe('side-chat scroll anchor', () => {
       rememberSideChatViewPosition(`child-${index}`, { atBottom: true, anchorOffset: 0, turnCount: 1 })
     }
     expect(readSideChatViewPosition('child-19')).toBeDefined()
-    // The oldest entries leave the window instead of growing the map forever.
     expect(readSideChatViewPosition('child-0')).toBeUndefined()
     expect(readSideChatViewPosition('child-4')).toBeDefined()
     expect(readSideChatViewPosition('child-3')).toBeUndefined()

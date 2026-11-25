@@ -10,9 +10,6 @@ import { commitManagedRecorderTurn, prepareManagedRecorderTurn } from './managed
 import { handleRecorderHook } from './recorder'
 import { listRecords, stableHash } from './store'
 
-// Pi drives Qoder models through Rotom, so the agent identity and the billing
-// identity differ. Keep this cross-provider commit contract separate from the
-// oversized managed recorder suite.
 
 const roots: string[] = []
 afterEach(async () => {

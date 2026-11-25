@@ -1,4 +1,3 @@
-// Pure timeline selection and percentile/segment aggregation for S1 daemon timing.
 
 export const percentile = (values, fraction) => {
   if (values.length === 0) return null

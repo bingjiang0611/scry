@@ -16,6 +16,4 @@ describe('DesktopRemoteClient session catalog bindings', () => {
       expect(viewed).toHaveBeenNthCalledWith(2, pending.connection.id, null)
     } finally { await fixture.client.dispose(); await rm(fixture.directory, { recursive: true, force: true }) }
   })
-  // The host-confirmed session binding and the live-run lookup are covered with the
-  // run-channel wire in desktop-client-reads.test.ts.
 })

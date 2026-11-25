@@ -227,7 +227,6 @@ describe('RelayClient (device -> relay -> host reverse tunnel, loopback)', () =>
     const device = await pairDevice(identity, controller)
     const caPEM = identity.caCertificatePEM
 
-    // First device session through the relay reverse tunnel.
     const submit = await deviceCall(relay.devicePort, caPEM, device.certPEM, device.keyPEM, { op: 'submit', intentId: randomUUID(), detail: JSON.stringify({ cwd: AUTHORIZED, providerId: 'claude', prompt: 'go' }) })
     expect(submit.status).toBe('recorded')
     await controller.idle()
