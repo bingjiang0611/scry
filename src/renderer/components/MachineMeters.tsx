@@ -37,7 +37,7 @@ function Meter({ meter }: { meter: MeterView }): JSX.Element {
   )
 }
 
-/** 一行「Scry 占用」：后台服务 + Provider 进程的合计。读不到就说读不到。 */
+/** 一行「Scry 占用」：分别显示后台服务和 Provider 进程合计；读不到 Provider 数据时明确提示。 */
 export function ScryUsageLine({ snapshot }: { snapshot: HostMetricsSnapshot }): JSX.Element {
   const providers = providerUsageRows(snapshot)
   const totals = providerUsageTotals(snapshot)

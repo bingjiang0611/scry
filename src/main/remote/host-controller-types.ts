@@ -168,8 +168,8 @@ export interface HostControllerDependencies {
   sessionAction?(context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void): Promise<boolean> | boolean
   sessionFork?(request: DesktopRemoteForkSessionRequest, authorize: () => void): Promise<{ externalSessionId: string }>
   sessionDelete?(request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult>
-  // Read-only tool panels for the paired device. Production passes the same
-  // aggregations the Mac UI shows; nothing here scans or executes.
+  // Optional sources for the paired device's read-only tool panels. The host
+  // shapes the returned data; an absent source makes its panel unavailable.
   toolPanels?: ToolPanelSources
   // Snapshot of the host session catalog a device may browse. Absent => empty.
   listSessions?(): RemoteSessionRef[]

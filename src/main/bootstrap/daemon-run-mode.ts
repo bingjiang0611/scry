@@ -50,7 +50,7 @@ export interface DaemonRunModeDeps {
   credentialCipher: () => { ok: true; encrypt: (value: string) => Buffer; decrypt: (value: Buffer) => string } | { ok: false; reason: string }
   send: (channel: string, payload: unknown) => void
   currentCwd: () => string | undefined
-  /** Client-level probe: a thrown DaemonClientError is a refusal, `undefined` is absence. */
+  /** Client-level probe: `undefined` means no daemon info; only recognized refusal errors are preserved. */
   probe?: () => Promise<DaemonProbeInfo | undefined>
   launch?: DaemonLaunch
   /** Fallback direct launch when a service-manager launch timed out waiting for ready (P5 §2.4). */

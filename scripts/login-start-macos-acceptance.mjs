@@ -4,7 +4,7 @@
 // (`com.scry.daemon.test.p54.<pid>`), a temporary service-file directory
 // (`SCRY_TEST_LOGIN_START_DIR`, never touching `~/Library/LaunchAgents`), and an isolated
 // userData path containing spaces and Chinese characters. Registers SIGINT/SIGTERM
-// cleanup so interruption never leaves a background service behind.
+// handlers that attempt to unload the test service and remove its temporary files.
 //
 // Note: invokes the plain-Node login-start module directly (not Electron main IPC or
 // native confirmation dialogs, which are verified by unit tests).
@@ -103,7 +103,7 @@ function cleanup() {
   if (cleanedUp) return
   cleanedUp = true
   launchctl(['bootout', serviceTarget])
-  try { rmSync(temp, { recursive: true, force: true }) } catch { /* ignore */ }
+  try { rmSync(temp, { recursive: true, force: true }) } catch { /* best-effort temp cleanup */ }
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -308,7 +308,7 @@ try {
   }
 
   // 6. Crash recovery under KeepAlive={Crashed:true}: SIGABRT verified supervisor PID,
-  //    confirm launchd restarts supervisor + daemon after default 10 s ThrottleInterval.
+  //    confirm launchd reports a new supervisor PID and the daemon answers under it.
   const preCrashSupervisorPid = reloaded.supervisorPid
   const preCrashCmd = pidCommand(preCrashSupervisorPid)
   if (!preCrashCmd.includes(target.executable) || !preCrashCmd.includes('daemon-supervisor.js')) {

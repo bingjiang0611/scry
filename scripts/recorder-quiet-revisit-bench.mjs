@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-/** L2 harness, not a real host: no daemon, no upload, no host hooks, nothing written outside a temp
- * workspace (or the workspace copy given by --workspace).
+/** L2 harness, not a real host: no daemon, no upload, no host hooks. Pass a disposable copy
+ * to --workspace; the harness uses it in place. The report is written separately to --out
+ * or its default path.
  * node scripts/recorder-quiet-revisit-bench.mjs --mode=visit|defer --sessions=45 --transcript-kb=64 --passes=20
  * node scripts/recorder-quiet-revisit-bench.mjs --mode=defer --workspace=/tmp/copied-store --passes=10
  *

@@ -101,9 +101,9 @@ describe('desktop lane connection bounds', () => {
   })
 
   it('gives up on a silent listener instead of waiting forever', async () => {
-    // A daemon that was killed mid-restart can still have its socket in the kernel's
-    // accept backlog: connect succeeds, the handshake never starts. Nothing has been
-    // written, so the request must fail fast and be retried, not hang the window.
+    // The listener never completes the TLS handshake. This checks that the
+    // connector fails within the asserted bound and classifies the failure as
+    // not sent; it does not exercise a retry.
     const dir = mkdtempSync(join(tmpdir(), 'scry-lane-silent-')); dirs.push(dir)
     const path = join(dir, 'silent.sock')
     const accepted = new Set<import('node:net').Socket>()

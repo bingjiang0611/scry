@@ -183,8 +183,8 @@ describe('pairing history cleanup (synthetic crypto adapter)', () => {
     authority.close()
     reopened.close()
 
-    // The strict reader (unchanged since before cleanup existed) accepts the file, and it
-    // holds only entries that were already there: a subset of the original state.
+    // The saved file passes the current validator and contains only grant and
+    // pairing entries from the original state.
     const reader = new PairingFileStore(path)
     try {
       const loaded = reader.load() as Record<string, unknown>

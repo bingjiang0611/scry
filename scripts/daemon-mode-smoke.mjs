@@ -41,8 +41,7 @@ if (!options.ok) {
 const temp = realpathSync(mkdtempSync('/tmp/scry-daemon-m3-'))
 const userDataDir = join(temp, 'userData')
 const home = join(temp, 'home')
-// Inside the fixture HOME: the App only accepts a working directory it can prove is
-// the user's own, so a directory outside it is refused before any run starts.
+// Put the workspace under the fixture HOME and seed it in the isolated project list below.
 const workspace = join(home, 'workspace')
 mkdirSync(userDataDir, { recursive: true })
 mkdirSync(home, { recursive: true })

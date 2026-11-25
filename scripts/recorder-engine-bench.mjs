@@ -2,8 +2,9 @@
 /**
  * Informational L1 benchmark for the recorder turn path and the Git snapshot engine.
  *
- * It always exits 0 once the CLI bundle exists: no thresholds, no assertions. Absolute numbers
- * move with machine, disk and load, so compare runs on one machine.
+ * Results have no pass/fail thresholds. Scenario failures are reported without
+ * forcing a nonzero exit, but setup or report I/O can still fail the script.
+ * Absolute numbers move with machine, disk and load, so compare runs on one machine.
  *
  * What is counted, per stage (start / tool events / end / recovery / commit):
  *   - git subprocesses by subcommand, from a counting wrapper placed first on PATH

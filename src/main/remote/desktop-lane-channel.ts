@@ -17,7 +17,8 @@ export interface DesktopLaneEndpoint {
 // The minimal duplex the lane needs. Tests supply a fake channel instead of TLS;
 // production uses connectDesktopLane.
 export interface DesktopLaneChannel {
-  // Resolves once the frame left this process; rejects when it did not.
+  // Resolves when the channel reports write completion, not peer receipt.
+  // A rejection alone does not establish that the frame was never sent.
   send(frame: string): Promise<void>
   // One reply line, bounded by the lane's response timeout.
   receive(): Promise<string>

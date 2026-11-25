@@ -6,7 +6,7 @@ export function selectScenario(args) {
     if (!defaultScenarios.includes(selected)) throw new Error(`Unknown DesktopRemote scenario: ${selected}`)
     return selected
   }
-  // Existing focused/performance modes keep their original fixture and deadline.
+  // Focused and performance flags select one fixture run instead of the default scenario sweep.
   const focusedFlags = [
     '--unknown-receipt-only', '--remote-settings-only', '--session-parity-only',
     '--composer-history-only', '--session-lifecycle-only', '--conversation-navigation-only',

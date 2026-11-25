@@ -71,7 +71,7 @@ describe('internal publish staging', () => {
     expect(manifest.publishConfig.registry).toBe(INTERNAL_REGISTRY)
     expect(await readFile(join(target, 'dist', 'cli', 'scry.js'), 'utf8')).toBe('#!/usr/bin/env node\n')
     expect(await readFile(join(target, 'integrations', 'claude.json'), 'utf8')).toBe('{}\n')
-    // The repository manifest is not touched: the public name stays where contributors see it.
+    // Staging leaves the fixture source manifest's public package name unchanged.
     expect(JSON.parse(await readFile(join(source, 'package.json'), 'utf8')).name).toBe('scry-turn-recorder')
   })
 

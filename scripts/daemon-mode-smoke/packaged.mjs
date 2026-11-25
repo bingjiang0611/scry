@@ -1,9 +1,6 @@
-// S0-5: which artifact the daemon-mode smoke drives, and what the packaged one must prove.
-//
-// `--app <executable>` names the packaged binary (dist/linux-unpacked/scry, or
-// Scry.app/Contents/MacOS/Scry). Everything the smoke later asserts about the daemon is
-// compared against this one resolved layout, so "the check passed" and "the process that
-// ran" cannot be two different builds. Anything that does not resolve to a packaged
+// `--app <executable>` selects the packaged binary (dist/linux-unpacked/scry, or
+// Scry.app/Contents/MacOS/Scry). The smoke uses the resolved layout for launch and
+// as the reference for packaged process checks. Anything that does not resolve to a packaged
 // layout fails here, before an App is launched: a dev Electron, a renamed binary, a
 // missing file, or an artifact older than the source.
 import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
@@ -85,11 +82,9 @@ export function devTarget(root, platform = process.platform) {
 const inside = (child, parent) => child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`)
 
 /**
- * The private recorder CLI the packaged daemon resolves: `<resources>/bin/scry`, where the
- * resources directory is the one the daemon was actually given (read from its
- * environment), not the one this script expects. The daemon refuses to start without it
- * when packaged (daemon_recorder_cli_unavailable), so a running packaged daemon plus this
- * file is the path in use; running it proves it is the App's own CLI and that it works.
+ * Check the private CLI candidate under the observed daemon resources against the
+ * selected package. Verify that it is executable and that `--version` matches the
+ * bundled CLI manifest; this does not observe a daemon invocation of the CLI.
  */
 export function privateCliEvidence(target, daemonResources, { exec = execFileSync, env = process.env } = {}) {
   if (!target.packaged) return refused('not_packaged')

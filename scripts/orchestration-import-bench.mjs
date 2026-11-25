@@ -3,11 +3,10 @@
  * P4-1 startup legacy import benchmark (S3 reproducible script).
  *
  * Measures:
- *   1. Pre-`openLocalChannel` synchronous blocking time (`EventSink.open` + single
- *      `loadLegacyLedgerPlan` + `openOnly` sync import).
- *   2. Post-`openLocalChannel` deferred backfill (`startDeferredLegacyImport` in 100-run
- *      yielding batches) wall time and per-batch event-loop pauses (P50 / P95 / Max).
- *   3. Subsequent no-op startup parse time after `legacy_ledger_seq` has caught up.
+ *   1. Startup-phase wall time: `EventSink.open`, async plan loading, and synchronous
+ *      `openOnly` import.
+ *   2. Deferred backfill wall time and event-loop delay during backfill.
+ *   3. Time to reload the legacy import plan after backfill.
  *
  * Datasets (default runs all 3; pass `--only snapshot|jsonl|conversations` to filter):
  *   - `100k-snapshot-plus-tail`: 99,500 runs in `session-ledger.snapshot.json` + 500 in

@@ -59,7 +59,6 @@ describe('record summaries are the same answer as a full parse', () => {
     const root = await dataRoot()
     await seed(root, 5)
     expect(await listRecordSummaries(root)).toEqual(await fromFullParse(root))
-    // A cold read leaves a cache behind, so this is a one-time cost per store.
     expect(JSON.parse(await readFile(recordSummaryPath(root), 'utf8')).schemaVersion).toBe(1)
   })
 

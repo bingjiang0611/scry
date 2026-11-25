@@ -264,9 +264,9 @@ it('measures redundant content publishes for repeated identical payloads', async
 }, 60_000)
 
 /**
- * A daemon recovery sweep asks for the same open turn repeatedly while its transcript grows. Measure
- * that sequence twice: with the anchor cache reset before every call (the pre-cache behaviour, which
- * rescans the whole window) and with it warm (only appended bytes are searched).
+ * Model repeated recovery reads of one growing transcript with direct `stableTranscript` calls.
+ * Compare anchor and parse bytes with both caches reset before each call versus retained
+ * between calls.
  */
 it('measures transcript reads across repeated sweeps of one growing open turn', async () => {
   const root = join(await mkdtemp(join(tmpdir(), 'scry-engine-sweeps-')), 'session.jsonl')

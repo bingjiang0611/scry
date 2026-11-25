@@ -46,8 +46,7 @@ describe('long polling instead of ticking', () => {
     try {
       await withPairedHost(async ({ lanes, endpoint }) => {
         const response = await requestOn(lanes, 'watch', 'c1', { endpoint, request: { op: 'watch', runId: '11111111-1111-4111-8111-111111111111', cursor: 0, outputCursor: 0, waitMs: 0, output: false }, replayable: true })
-        // Lifecycle only: the reply never carries an output page, so an output-cache
-        // fault cannot appear here at all.
+        // The retired watch operation returns only unknown_op, with no output page.
         expect(response).toEqual({ error: 'unknown_op' })
       })
       expect(JSON.stringify(samples)).not.toContain('11111111')

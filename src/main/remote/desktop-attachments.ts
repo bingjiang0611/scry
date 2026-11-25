@@ -191,7 +191,7 @@ export class DesktopAttachmentStore {
 export function newAttachmentId(): string { return randomUUID() }
 export function attachmentSha256(attachment: AgentInputAttachment): string { return digest(Buffer.from(attachment.dataBase64, 'base64')) }
 
-/** Upper bound on a remote intent detail: the prompt plus inline attachment data. */
+/** Upper bound on the length of the serialized intent detail string, before parsing. */
 export const MAX_REMOTE_DETAIL_CHARS = 1_200_000
 
 

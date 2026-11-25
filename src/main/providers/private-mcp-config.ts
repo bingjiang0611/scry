@@ -86,9 +86,8 @@ function processAlive(pid: number): boolean {
 }
 
 /**
- * Crash recovery: remove directories whose owning process is gone. A live owner,
- * including another Scry instance or a reused pid, keeps its directory; only this
- * user's real directories are touched, never a symlink.
+ * Best-effort crash recovery for private MCP config directories. Skips live PIDs
+ * (including reused PIDs) and symlinks, and checks ownership when a UID is available.
  */
 export async function sweepStalePrivateMcpConfigs(
   root = tmpdir(),

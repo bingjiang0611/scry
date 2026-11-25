@@ -66,7 +66,7 @@ function canonicalAllowedHookRoots(geminiRoot: string, scanRoots: readonly strin
   for (const root of [geminiRoot, ...scanRoots]) {
     try {
       realRoots.push(realpathSync(root))
-    } catch { /* non-existent root cannot contain real files */ }
+    } catch { /* Omit roots that cannot be canonicalized. */ }
   }
   return [...new Set(realRoots)]
 }
@@ -257,10 +257,12 @@ function isEmptyUserPlaceholder(filePath: string): boolean {
 }
 
 /**
- * Explicit MCP config paths for Antigravity (`agy acp`), covering:
- * - User-level `~/.gemini/config/mcp_config.json` (0-byte placeholder created by `agy` is skipped; non-empty files still fail closed)
- * - `cwd` up to `.git` root across all four alias dirs `{.agents,.agent,_agents,_agent}/mcp_config.json`
- * - Inline plugins under `{alias}/plugins/<name>/mcp_config.json` and `plugins.json` targets
+ * Candidate MCP config paths for Antigravity (`agy acp`), covering:
+ * - `config/mcp_config.json` under the selected Gemini root, except an empty regular-file placeholder
+ * - `mcp_config.json` in each supported alias directory along the workspace scan
+ * - Inline plugin configs and `plugins.json` targets
+ *
+ * Path enumeration does not authorize execution.
  */
 export function antigravityMcpConfigPaths(
   cwd: string | undefined,

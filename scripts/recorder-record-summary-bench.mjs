@@ -3,7 +3,7 @@
  * Informational benchmark: what the record summary index saves on the hook path.
  *
  * Nothing here asserts a threshold; absolute numbers move with machine, disk and load, so compare
- * runs on one machine. Three modes, each in its own child process so peak RSS is not carried over
+ * runs on one machine. Five modes, each in its own child process so peak RSS is not carried over
  * from an earlier mode:
  *
  *   full   `listRecords()` — parse every record, which is what the identity paths did before

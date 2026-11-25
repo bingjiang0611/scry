@@ -105,8 +105,6 @@ it('never defers a session whose own files say something moved', async () => {
   const { sessionDir } = await quietSession(root, 's-moving', { backdate: true })
   expect(await pass(root)).toBeGreaterThan(0)
 
-  // Rewriting the open state is what any new event does first; the size and mtime change even when
-  // the bytes do not.
   await writeFile(join(sessionDir, 'open.json'), await readFile(join(sessionDir, 'open.json'), 'utf8'))
   expect(await pass(root)).toBeGreaterThan(0)
 })
@@ -191,11 +189,6 @@ it('never defers a managed session: its recovery pass only runs because the loop
   await expect(deferQuietSession(dataRoot, 'codex', sessionDir)).resolves.toBe(false)
 })
 
-/**
- * A recorded host is the one way a turn's verdict can change while every file stays byte-identical:
- * recovery closes it when the recorded process is gone, and a dead process moves no mtime. So these
- * sessions keep full frequency - the fix is structural, not tuned to today's callers.
- */
 it('never defers a session whose open turn recorded its host: a dead host closes it on the next pass', async () => {
   const root = await workspace()
   const { dataRoot, sessionDir } = await quietSession(root, 's-host', { backdate: true })

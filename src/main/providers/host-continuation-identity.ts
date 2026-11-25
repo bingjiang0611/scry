@@ -275,9 +275,10 @@ export async function openCodeContinuationKey(
 const antigravityLaunchEnv = (): RuntimeEnv => runtimeCliEnv(undefined, { providerId: 'antigravity' })
 
 /**
- * Antigravity native continuation identity (P7 D4 option a):
- * hashes executable identity, canonical `~/.gemini` (or allowed `GEMINI_HOME`), allowed env vars,
- * and file-storage token file hash when present (Keychain mode records `keychain_or_absent`).
+ * Antigravity continuation identity combines workspace, agent profile, executable,
+ * Gemini root, and selected authentication inputs. It uses the canonical Gemini
+ * root when available, otherwise the resolved path. An absent token file does
+ * not establish that Keychain is in use.
  */
 export async function antigravityContinuationKey(
   context: ProviderContext,

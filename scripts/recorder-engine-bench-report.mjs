@@ -6,8 +6,8 @@
 import { median } from './recorder-engine-bench-fixtures.mjs'
 
 /**
- * The tracked artifact is the per-scenario aggregate: rounds repeat the same deterministic Git
- * counts, so keeping every round would only inflate the file past the repository size budget.
+ * Keep the tracked artifact compact by aggregating rounds per scenario and stage.
+ * For each stage group, retain the Git sample with the highest total and the median timing.
  */
 export function summarize(input) {
   return {

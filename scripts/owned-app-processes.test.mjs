@@ -42,7 +42,7 @@ describe('smoke-owned process cleanup', () => {
     } finally {
       if (child.exitCode === null && child.signalCode === null) await stopOwnedApp(child, { crash: true })
       // The exact pid this fixture's own child reported; never a name-based sweep.
-      if (excluded) try { process.kill(excluded, 'SIGKILL') } catch { /* already gone */ }
+      if (excluded) try { process.kill(excluded, 'SIGKILL') } catch { /* best-effort fixture cleanup */ }
     }
   }, 15_000)
 })

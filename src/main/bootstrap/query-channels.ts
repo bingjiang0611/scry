@@ -96,7 +96,7 @@ export function providerCommandChannelHandlers(deps: {
  */
 export function recorderContentChannelHandlers(deps: {
   userDataDir: () => string
-  /** The workspace to read for; given the argument after the request, which only the daemon trusts. */
+  /** Resolves the workspace to read. The daemon revalidates the App-appended selection. */
   workspace: (appended: unknown) => string
   /** Whether that workspace is still selected. The daemon answers true; its App checks after the reply. */
   stillCurrent: (cwd: string) => boolean

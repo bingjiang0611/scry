@@ -8,7 +8,7 @@ import { stopOwnedApp } from './owned-app-processes.mjs'
 import { stopFixtureDaemon } from './b4v/fixture.mjs'
 
 // Run after `npm run build`. Use the real main/preload/renderer with isolated data;
-// intercept only OS browser launch/dialogs so this test never visits a live service.
+// record browser-open and confirmation calls without launching a browser or showing a dialog.
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const entry = join(root, 'out/main/index.js')
 await access(entry)

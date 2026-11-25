@@ -1,4 +1,4 @@
-// 只读一次：页面打开时读，之后由页头刷新按钮再读；没有轮询。
+// 页面为尚未读取的目标发起初次读取；之后可从页头刷新或在卡片上重试。不轮询指标。
 import type { DesktopRemoteConnection } from '@shared/desktop-remote'
 import { MACHINES_COPY as copy } from '../constants/machines-copy'
 import { formatSampleAge, targetNotice, type TargetNotice, type TargetNoticeKind } from '../machines-view-model'

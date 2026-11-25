@@ -368,8 +368,9 @@ export async function signalAntigravityProcess(
 }
 
 /**
- * Run-scoped forceKill (P7 §5.1 / S6): identity-verified SIGTERM -> wait up to 2s -> SIGKILL,
- * always cleaning up verified independent-PGID descendants even when the root stays alive.
+ * Run-scoped force stop: if the initial identity-checked SIGTERM is sent and
+ * processes still appear alive after the grace period (2s by default), attempts
+ * identity-checked SIGKILL for the root and tracked independent descendants.
  */
 export async function forceKillAntigravityProcess(
   identityPromise: Promise<ProcessIdentity | undefined> | undefined,

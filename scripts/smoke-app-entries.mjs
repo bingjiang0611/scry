@@ -119,11 +119,10 @@ export function writeConversationFaultEntry(entryPath, markerPath, appPath = rep
 }
 
 /**
- * Count every trusted IPC invocation by channel into one JSON file.
+ * Record IPC handler invocations by channel in one JSON file.
  *
- * The counter is the App's own `ipcMain.handle` registration path, so a channel that is
- * registered twice or invoked in a loop shows up here. A rejected request is counted
- * too: the user-visible result of a refused read is still one round trip.
+ * Count each call, including repeated calls and rejected requests.
+ * The file records invocations, not handler registrations.
  *
  * With `windowControlPath`, the same entry also accepts fixture-only native window sizes:
  * the acceptance writes one JSON request and main applies the real `setContentSize` of the
