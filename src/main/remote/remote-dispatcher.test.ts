@@ -294,8 +294,12 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
       beforeDispatch: () => { throw new Error('authority_unavailable') }
     })
 
-    expect(dispatcher.pump()).toEqual([])
-    expect(outbox.settled).toEqual(['claim:eff-boom', 'retry:eff-boom'])
+    for (let attempt = 0; attempt < 6; attempt++) {
+      expect(dispatcher.pump()).toEqual([])
+      expect(outbox.rows[0]).toMatchObject({ state: 'pending', attempts: 0 })
+      outbox.rows[0]!.availableAt = undefined
+    }
+    expect(outbox.settled).toEqual(Array.from({ length: 6 }, () => ['claim:eff-boom', 'defer:eff-boom']).flat())
     expect(calls).toEqual([])
     expect(ledger.runState(runId)).toBe('recorded')
     dispatcher.dispose()

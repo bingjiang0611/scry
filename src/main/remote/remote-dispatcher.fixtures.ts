@@ -78,6 +78,7 @@ export function memoryOutbox(seed: Array<{ effectId: string; runId: string | nul
       const row = rows.find((r) => r.effectId === effectId)
       if (row) {
         row.state = 'pending'
+        row.attempts = Math.max(0, row.attempts - 1)
         row.availableAt = now + delayMs
       }
       return true

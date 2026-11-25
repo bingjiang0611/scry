@@ -262,8 +262,11 @@ export class RemoteDispatcher {
         try {
           gate = this.#beforeDispatch(runId, detail)
         } catch {
-          const retried = outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'before_dispatch_failed')
-          this.#scheduleRetry(retried.delayMs ?? 100)
+          // A failed admission check has made no decision. Do not spend the effect's retry budget
+          // while the authority is unable to record a terminal outcome.
+          const delay = 100
+          outbox.defer(effect.effectId, this.#leaseOwner, 'before_dispatch_failed', Date.now(), delay)
+          this.#scheduleRetry(delay)
           continue
         }
         if (!gate.ok) {
