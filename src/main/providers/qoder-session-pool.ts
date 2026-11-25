@@ -31,8 +31,13 @@ export interface QoderSessionLease {
   recordNativeSession(nativeSessionId: string): void
   /** C3: messages that arrive after the turn ended — a settled turn's child still reports here. */
   watchIdle(listener: (message: Record<string, unknown>) => void): () => void
-  /** The turn ended; the session may now wait for its idle window. */
-  release(): void
+  /**
+   * The turn ended; the session may now wait for its idle window. `dead` says the process went away
+   * during the turn, so it cannot serve another one (R12).
+   */
+  release(options?: { dead?: boolean }): void
+  /** The CLI reported the process gone: the next acquire must open a new one (R12). */
+  markExited(): void
   close(): Promise<void>
 }
 
@@ -70,6 +75,9 @@ export interface QoderSessionPool {
 
 interface Entry {
   lease: QoderSessionLease
+  closed: boolean
+  /** The process is gone; the entry is only kept until `acquire` replaces it. */
+  exited: boolean
   turn: QoderSessionTurnSlot
   session: QoderSession
   prompt: ReturnType<typeof createPromptStream>
@@ -90,16 +98,29 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
   const idleMs = options.idleMs ?? sessionIdleWindowMs(process.env, 'SCRY_QODER_IDLE_MS')
   const cap = options.cap ?? SESSION_POOL_CAP
   const now = options.now ?? Date.now
-  const entries = new Map<string, Entry>()
-  /** R3: native session id -> the key of the entry that reported it, so a later turn finds it. */
-  const nativeAliases = new Map<string, string>()
+  /**
+   * R12: a key maps to the entries that were opened for it. A busy session is never overwritten by the
+   * next acquire — a second run under the same key starts its own process, and each entry's idle timer
+   * closes only itself.
+   */
+  const entries = new Map<string, Entry[]>()
+  /** R3: native session id -> the entry that reported it, so a later turn finds its process. */
+  const nativeAliases = new Map<string, Entry>()
 
-  const closeEntry = async (key: string, reason: SessionReleaseReason): Promise<void> => {
-    const entry = entries.get(key)
-    if (!entry) return
-    entries.delete(key)
-    for (const [nativeId, keyOfAlias] of nativeAliases) {
-      if (keyOfAlias === key) nativeAliases.delete(nativeId)
+  const forget = (key: string, entry: Entry): void => {
+    entry.closed = true
+    const list = entries.get(key)
+    if (!list) return
+    const rest = list.filter((row) => row !== entry)
+    if (rest.length === 0) entries.delete(key)
+    else entries.set(key, rest)
+  }
+
+  const closeEntry = async (key: string, entry: Entry, reason: SessionReleaseReason): Promise<void> => {
+    if (entry.closed) return
+    forget(key, entry)
+    for (const [nativeId, owner] of nativeAliases) {
+      if (owner === entry) nativeAliases.delete(nativeId)
     }
     if (entry.idleTimer) clearTimeout(entry.idleTimer)
     entry.controller.abort()
@@ -111,39 +132,65 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
 
   const startIdle = (key: string, entry: Entry): void => {
     if (entry.idleTimer) clearTimeout(entry.idleTimer)
-    entry.idleTimer = setTimeout(() => { void closeEntry(key, 'idle') }, idleMs)
+    entry.idleTimer = setTimeout(() => { void closeEntry(key, entry, 'idle') }, idleMs)
     // A timer must not hold the process open on its own.
     entry.idleTimer.unref?.()
   }
 
+  const keyOfEntry = (target: Entry): string => {
+    for (const [key, list] of entries) if (list.includes(target)) return key
+    return target.lease.key
+  }
+
+  const allEntries = (): Array<[string, Entry]> => {
+    const rows: Array<[string, Entry]> = []
+    for (const [key, list] of entries) for (const entry of list) rows.push([key, entry])
+    return rows
+  }
+
   const evictIfNeeded = async (): Promise<void> => {
-    while (entries.size > cap) {
-      let oldest: string | undefined
+    while (allEntries().length > cap) {
+      let oldest: [string, Entry] | undefined
       let oldestAt = Number.POSITIVE_INFINITY
-      for (const [key, entry] of entries) {
+      for (const row of allEntries()) {
+        const [, entry] = row
         if (entry.idleTimer === undefined) continue
-        if (entry.lastUsed < oldestAt) { oldestAt = entry.lastUsed; oldest = key }
+        if (entry.lastUsed < oldestAt) { oldestAt = entry.lastUsed; oldest = row }
       }
       // A busy session is never evicted: its turn is still using the process.
       if (!oldest) return
-      await closeEntry(oldest, 'lru')
+      await closeEntry(oldest[0], oldest[1], 'lru')
     }
   }
 
   const aliasTarget = (key: string): Entry | undefined => {
     const match = /^native:([^|]+)\|(.*)$/.exec(key)
     if (!match) return undefined
-    const aliasKey = nativeAliases.get(match[1]!)
-    if (!aliasKey) return undefined
-    const entry = entries.get(aliasKey)
-    if (!entry) { nativeAliases.delete(match[1]!); return undefined }
+    const entry = nativeAliases.get(match[1]!)
+    if (!entry) return undefined
+    if (entry.closed) { nativeAliases.delete(match[1]!); return undefined }
     // Reuse only when the turn asks for the same options the session was opened with.
     return entry.lease.key.endsWith(`|${match[2]}`) ? entry : undefined
   }
 
+  /** A busy entry for the same key is not reusable, and a dead one must not be handed out. */
+  const reusable = (list: readonly Entry[] | undefined): Entry | undefined => {
+    if (!list) return undefined
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const entry = list[index]!
+      if (entry.closed) continue
+      if (entry.exited) {
+        void closeEntry(keyOfEntry(entry), entry, 'crashed')
+        continue
+      }
+      if (entry.idleTimer !== undefined) return entry
+    }
+    return undefined
+  }
+
   return {
     acquire(key, open) {
-      const existing = entries.get(key) ?? aliasTarget(key)
+      const existing = reusable(entries.get(key)) ?? reusable([aliasTarget(key)].filter((row): row is Entry => !!row))
       if (existing && existing.idleTimer !== undefined) {
         if (existing.idleTimer) clearTimeout(existing.idleTimer)
         existing.idleTimer = undefined
@@ -156,6 +203,8 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
       const opened = open(prompt.stream, controller.signal, turn)
       const session = createQoderSession(opened.query)
       const entry: Entry = {
+        closed: false,
+        exited: false,
         turn,
         controller,
         prompt,
@@ -171,25 +220,30 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
           send: (message) => prompt.push(message),
           recordNativeSession: (nativeSessionId) => {
             // R3: the alias is how the next turn of this conversation finds this process again.
-            nativeAliases.set(nativeSessionId, key)
+            nativeAliases.set(nativeSessionId, entry)
             options.observer?.onNativeSessionId?.(key, nativeSessionId)
           },
           watchIdle: (listener) => session.watchIdle(listener),
-          release: () => {
+          release: (releaseOptions) => {
+            // R12: a session whose process died during the turn cannot serve the next one.
+            if (releaseOptions?.dead || entry.exited) { void closeEntry(key, entry, 'crashed'); return }
             entry.lastUsed = now()
             startIdle(key, entry)
           },
-          close: () => closeEntry(key, 'dispose')
+          markExited: () => { entry.exited = true },
+          close: () => closeEntry(key, entry, 'dispose')
         }
       }
-      entries.set(key, entry)
+      const list = entries.get(key) ?? []
+      list.push(entry)
+      entries.set(key, list)
       options.observer?.onOpened?.(key, options.provider, now())
       void evictIfNeeded()
       return entry.lease
     },
     keys: () => [...entries.keys()],
     async disposeAll() {
-      for (const key of [...entries.keys()]) await closeEntry(key, 'dispose')
+      for (const [key, entry] of allEntries()) await closeEntry(key, entry, 'dispose')
     }
   }
 }
