@@ -120,6 +120,8 @@ export interface RecorderOpenTurnState {
   managedPromptHash?: string
   startFingerprint: string
   transcriptPath?: string
+  /** Pinned first Qoder transcript path; not readable evidence until a regular file appears. */
+  pendingQoderTranscriptPath?: string
   /** Byte where this turn's rows begin; `null` when the recorder could not read it. Never a guess. */
   transcriptStartOffset?: number | null
   piTranscriptAnchor?: import('./recorder-contracts.js').PiTranscriptAnchor

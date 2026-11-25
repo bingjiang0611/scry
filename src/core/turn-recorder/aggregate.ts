@@ -292,6 +292,7 @@ export function aggregateTurnEvidence(args: {
   const policy = policyOmitted.length === 0 ? undefined : policyOmissionReason(policyOmitted)
   const policyReason = policy?.reason
   // 新建 worktree 拿不到可信基线时，记清楚是哪一种原因，不把「无法归因」退化成一句泛化文案。
+  const lateWriteBaseline = diffs.some(diff => diff.reason === 'baseline_after_write')
   const worktreeBaselineReasons = new Set(diffs.flatMap((diff) => diff.baselineReason ? [diff.baselineReason] : []))
   const dangers = starts.flatMap((event) =>
     event.danger ? [{ ...event.danger, tool: event.tool, toolUseId: event.toolUseId }] : []
@@ -460,7 +461,9 @@ export function aggregateTurnEvidence(args: {
                 diffs,
                 [source],
                 capturedDiffs.length < diffs.length
-                  ? worktreeBaselineReasons.size > 0
+                  ? lateWriteBaseline
+                    ? 'one or more repository baselines were taken after a write targeting that repository had started'
+                    : worktreeBaselineReasons.size > 0
                     ? `one or more repository snapshots were unavailable: new worktree baselines were untrustworthy (${[...worktreeBaselineReasons].join(', ')})`
                     : 'one or more repository snapshots were unavailable'
                   : `one or more file patches were omitted or truncated: ${[...incompletePatchReasons].join(', ')}` +
@@ -478,7 +481,9 @@ export function aggregateTurnEvidence(args: {
                 quality: 'unavailable',
                 source: [source],
                 value: diffs,
-                omissionReason: 'no repository snapshot was captured'
+                omissionReason: lateWriteBaseline
+                  ? 'no repository snapshot was captured; a repository baseline was taken after a write targeting it had started'
+                  : 'no repository snapshot was captured'
               },
     dangerousOperations: !observable.tools
       ? unavailable('tool evidence was unavailable', [source])

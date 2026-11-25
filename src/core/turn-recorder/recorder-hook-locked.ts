@@ -19,6 +19,7 @@ import { resumeAfterStorage } from './git.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 import { hostProcessChain } from './host-process.js'
 import { forgetSessionVisit } from './session-visit.js'
+import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -31,6 +32,7 @@ export async function applyHookLocked(
   // the event itself leaves every file byte-identical.
   forgetSessionVisit(enablement.dataRoot, input.provider, safeKey(sessionId))
   let open = await readJson<OpenTurnState>(openPath(root))
+  if (open) await observePendingQoderTranscript(open)
   // Set when this start had to be persisted to the inbox before a fallible seal of the open turn.
   let supersededStart: string | undefined
   const incomingProviderTurnId = providerTurnIdOf(input.payload, input.provider)

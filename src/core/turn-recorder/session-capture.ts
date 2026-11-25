@@ -1,5 +1,6 @@
 import { chmod, realpath, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { pendingQoderTranscriptPath } from './pending-qoder-transcript.js'
 import type { ProviderId } from '../../shared/provider.js'
 import { readJson, writeJsonAtomic, writeTextAtomic } from './io.js'
 import { RECORDER_VERSION } from './store.js'
@@ -52,8 +53,8 @@ function captureTransport(
 }
 
 /**
- * Everything a claim must prove before any turn is opened: a readable transcript, an enabled recorder,
- * a writable capture root and this capture's resolved exclusion paths. A deferred claim validates the
+ * Everything a claim must prove before any turn is opened: a usable transcript path, an enabled
+ * recorder, a writable capture root and this capture's resolved exclusion paths. A deferred claim validates the
  * same evidence when it is queued, so an integrator learns about a refusal before the daemon runs.
  */
 export interface PreparedCaptureStart {
@@ -66,6 +67,7 @@ export interface PreparedCaptureStart {
   payload: Record<string, unknown>
   ancestryFromPid?: number
   hostChain?: import('./host-process.js').HostProcess[]
+  pendingTranscriptPath?: string
   transport: Record<string, unknown>
 }
 
@@ -98,11 +100,19 @@ export async function prepareCaptureStart(args: {
     await resolveCommitHookActivation(workspaceRoot, enablement.config, args.env ?? process.env)
   }
   const transcriptPath = transcriptPathOf(args.payload) ?? args.context.transcriptPath
+  let pendingTranscriptPath: string | undefined
   try {
     const info = await stat(transcriptPath)
     if (!info.isFile()) throw new Error('not a regular file')
-  } catch {
-    throw new CaptureRequestError('recorder_unavailable', 'the host transcript is not readable')
+  } catch (error) {
+    // A first Qoder prompt can be delivered before the host creates the file. This only
+    // defers evidence access; both the validated claim and hook must still name the same path.
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && args.provider === 'qoder' &&
+      args.context.host === 'qoder' && args.payload.hook_event_name === 'UserPromptSubmit' &&
+      transcriptPathOf(args.payload) === args.context.transcriptPath) {
+      pendingTranscriptPath = await pendingQoderTranscriptPath(transcriptPath)
+    }
+    if (!pendingTranscriptPath) throw new CaptureRequestError('recorder_unavailable', 'the host transcript is not readable')
   }
   const transport = captureTransport(enablement, workspaceRoot, args.provider, args.sessionId, args.env)
   const context = await resolveDiffExclude(args.context)
@@ -115,7 +125,7 @@ export async function prepareCaptureStart(args: {
   }
   return {
     enablement, workspaceRoot, provider: args.provider, sessionId: args.sessionId, context, state,
-    payload: args.payload, transport,
+    payload: args.payload, transport, pendingTranscriptPath,
     ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {}),
     ...(args.hostChain ? { hostChain: args.hostChain } : {})
   }
@@ -159,7 +169,7 @@ export async function startSessionCapture(args: {
     }
     await beginCaptureTurn(
       enablement, provider, sessionId, context, state.transcriptPath, prepared.payload,
-      prepared.ancestryFromPid, prepared.hostChain
+      prepared.ancestryFromPid, prepared.hostChain, prepared.pendingTranscriptPath
     )
     await writeJsonAtomic(statePath, state)
     await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId), captureWireContext(context))
