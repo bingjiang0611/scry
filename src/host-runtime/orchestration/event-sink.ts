@@ -361,6 +361,9 @@ export class EventSink {
           )
           const seq = Number(info.lastInsertRowid)
           lastSeq = seq
+          if (pending.type === 'run.cancelled' && pending.runId) {
+            this.#stmts.voidQueuedStart.run(pending.at, pending.runId)
+          }
           applyEventToProjection(db, { ...pending, seq })
           // B2: the projection applied position is recorded in the same transaction, so
           // retention can never delete an event a projection has not consumed.

@@ -5,6 +5,7 @@ import { TERMINAL_LIFECYCLE_SQL } from './run-transitions'
 export interface EventSinkStatements {
   insertEvent: Database.Statement
   insertOutbox: Database.Statement
+  voidQueuedStart: Database.Statement
   insertCommand: Database.Statement
   insertLegacyRun: Database.Statement
   advanceLegacySeq: Database.Statement
@@ -37,6 +38,12 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
         effect_id, kind, policy, run_id, causation_seq, payload, state,
         expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error, session_key
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, ?)`
+    ),
+    voidQueuedStart: db.prepare(
+      `UPDATE orch_outbox
+       SET state = 'voided', completed_at = ?, lease_owner = NULL, last_error = 'stopped_before_dispatch'
+       WHERE run_id = ? AND kind = 'provider.run.start' AND state IN ('pending', 'running')
+         AND EXISTS (SELECT 1 FROM orch_p_run WHERE run_id = orch_outbox.run_id AND lifecycle = 'queued')`
     ),
     insertCommand: db.prepare(
       `INSERT INTO orch_command (

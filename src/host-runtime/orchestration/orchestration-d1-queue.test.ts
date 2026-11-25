@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import { EventSink } from './event-sink'
-import { voidExpiredEffects } from './effect-outbox'
+import { claimNextEffect, succeedEffect, voidExpiredEffects } from './effect-outbox'
 import { sessionQueueBlocksDispatch } from '../../daemon/orchestration-dispatch-queue'
 import type { OrchestrationCommand } from './orchestrator-commands'
 
@@ -170,6 +170,39 @@ it('D1: two waiting entries do not block each other — the head dispatches, the
     expect(sessionQueueBlocksDispatch(sink, 'run-tail')).toBe(false)
   } finally {
     sink.close()
+  }
+})
+
+it('R11: cancelling a held head makes its released sibling the next start', () => {
+  const userDataDir = mkdtempSync(join(tmpdir(), 'scry-r11-held-head-'))
+  const sink = EventSink.open({ userDataDir, authorizedActors: [PEER_A] })
+  const at = 1_700_000_000_000
+  const control = (type: 'run.stop' | 'run.release_queue', runId: string) => {
+    const payload = { runId }
+    expect(sink.execute({ type, commandId: `${type}:${runId}`, actor: PEER_A, scope: 'local', at: at + 2,
+      payload, payloadSha256: sha256Hex(canonicalJson(payload)) }).kind).toBe('accepted')
+  }
+  try {
+    for (const runId of ['live', 'head', 'sibling']) {
+      expect(sink.execute(submit({ commandId: runId, runId, at, claimMode: 'queued' })).kind).toBe('accepted')
+      if (runId === 'live') {
+        const start = claimNextEffect({ db: sink.handle.db, owner: 'daemon', now: at }).effect!
+        expect(start.runId).toBe('live')
+        sink.execute(effect('dispatch', runId, 'dispatched', at + 1))
+        expect(succeedEffect({ db: sink.handle.db, effectId: start.effectId, owner: 'daemon', now: at + 1 })).toBe(true)
+      }
+    }
+    control('run.stop', 'live')
+    sink.execute(effect('settle', 'live', 'settled', at + 3))
+    expect(sink.getRun('head')).toMatchObject({ lifecycle: 'queued', queueHeld: true })
+    control('run.stop', 'head')
+    control('run.release_queue', 'sibling')
+    expect(sessionQueueBlocksDispatch(sink, 'sibling')).toBe(false)
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'daemon', now: at + 4, kind: 'provider.run.start' }).effect?.runId)
+      .toBe('sibling')
+  } finally {
+    sink.close()
+    rmSync(userDataDir, { recursive: true, force: true })
   }
 })
 
