@@ -13,6 +13,7 @@ import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
 import { hostProcessChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
+import { rememberQoderRequest } from './qoder-stop-evidence.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecordSummaries, stableHash, updateHealth } from './store.js'
 import { publishQuarantinedOpenTurn, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
@@ -140,7 +141,7 @@ export async function beginOpenTurn(
     await markSessionAttention(enablement.dataRoot, provider, safeKey(sessionId))
     await writeJsonAtomic(openPath(root), open)
   })
-  await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
+  await writeJsonAtomic(statePath(root), rememberQoderRequest({ ...session, lastGeneration: generation, lastTurnIndex: turnIndex }, open))
   // A continuation segment's baseline is its predecessor's sealed end state — never a new baseline
   // taken at the wake, which would attribute the previous segment's work to this one.
   if (!managedByScry && continuation && enablement.config.capture.diff) {

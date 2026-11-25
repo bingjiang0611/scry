@@ -19,6 +19,7 @@ import { unmatchedIdentityReason } from './recorder-transcript-background.js'
 import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
+import { rememberQoderRequest } from './qoder-stop-evidence.js'
 import { rm } from 'node:fs/promises'
 import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence, captureRecordMetadata } from './record-capture-metadata.js'
 
@@ -43,8 +44,6 @@ export async function finalizeOpenTurn(
     transcriptUnavailable?: string
     /** Already verified from an exact Codex terminal row; do not reparse the capped window. */
     terminalOnlyTranscript?: TranscriptRead
-    /** Stable, identity-checked Qoder snapshot used to resolve a Stop. */
-    verifiedQoderTranscript?: TranscriptRead
   } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
@@ -69,7 +68,7 @@ export async function finalizeOpenTurn(
   }
   await observePendingQoderTranscript(open)
   const pendingTranscript = !!open.pendingQoderTranscriptPath && !open.transcriptPath
-  let transcript: TranscriptRead = options.terminalOnlyTranscript ?? options.verifiedQoderTranscript ?? (options.transcriptUnavailable
+  let transcript: TranscriptRead = options.terminalOnlyTranscript ?? (options.transcriptUnavailable
     ? unobservedTranscript
     : open.transcriptPath
       ? await stableTranscript(
@@ -93,7 +92,8 @@ export async function finalizeOpenTurn(
         })
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
-  const unmatchedReason = options.transcriptUnavailable ?? unmatchedIdentityReason(open, options.forcedReason)
+  const unmatchedReason = options.transcriptUnavailable ?? unmatchedIdentityReason(open, options.forcedReason) ??
+    (open.qoderRequestStopConfirmed ? 'Qoder Stop matched the open request; its transcript identity was unavailable at the boundary' : undefined)
   let retainedWindow = false
   if (!options.terminalOnlyTranscript && (transcript.identityMatched === false || options.transcriptUnavailable)) {
     // A prompt cancelled before model execution may never reach the native transcript, and a session
@@ -102,7 +102,8 @@ export async function finalizeOpenTurn(
     // would throw away a body the transcript still held.
     if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
-    if (!options.transcriptUnavailable) {
+    if (open.qoderRequestStopConfirmed) transcript = unobservedTranscript
+    else if (!options.transcriptUnavailable) {
       const window = await forcedIdentityWindow(open, runId, enablement.workspaceRoot)
       retainedWindow = window.retained
       transcript = window.transcript
@@ -383,7 +384,7 @@ export async function finalizeOpenTurn(
     ? session.chainStores
     : await releaseSegmentChain(root, session, sealedFrozen, !!open.continuation)
   await writeJsonAtomic(statePath(root), {
-    ...session,
+    ...rememberQoderRequest(session, open),
     lastCommittedRecordId: committed.record.recordId,
     ...(committedProviderTurnIds ? { committedProviderTurnIds } : {}),
     lastSegment: {

@@ -63,6 +63,7 @@ export interface RecorderSessionState {
   lastTurnIndex: number
   lastCommittedRecordId?: string
   committedProviderTurnIds?: string[]
+  recentQoderRequests?: { generation: number; id: string }[]
   /**
    * Object stores kept alive for the active segment chain. A continuation's baseline tree can name
    * blobs from any earlier segment of the same chain, so they are released only when a real user
@@ -141,7 +142,10 @@ export interface RecorderOpenTurnState {
   deferredTerminalFirstAt?: string
   deferredTerminalEventId?: string
   /** Why this Stop is held rather than published, so recovery and health can name it. */
-  deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks'
+  deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks' | 'qoder_native_id_unproven'
+  deferredQoderStopAttribution?: 'matched' | 'unproven'
+  deferredQoderNativeStopId?: string
+  qoderRequestStopConfirmed?: true
   /** Present when a background notification opened this segment instead of a user prompt. */
   continuation?: RecorderContinuation
   /** End states frozen at this segment's Stop, before the quiet window decided to publish it. */

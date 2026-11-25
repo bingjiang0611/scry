@@ -8,19 +8,18 @@ import { recorderInboxEntries, INBOX_MAX_ATTEMPTS, quarantineInboxEntry, readInb
 import { validQueuedCapture, queueHook } from './recorder-hook-queue.js'
 import { captureStateContext, parseSessionCaptureContext, readCaptureState, START_EVENT_NAMES } from './session-capture-contract.js'
 import { recordCaptureRepositories } from './session-capture-discovery.js'
-import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
+import { recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
 import { BACKGROUND_WAKE_PROVIDERS, CODEX_SUBAGENT_MARKER, END_EVENTS, SESSION_END_EVENTS, START_EVENTS, hookArrival, type RecorderHookInput, type RecorderHookResult, type QueuedCaptureCommand, type QueuedHook, explicitTimestampOf, providerTurnIdOf, promptOf, stringAt, subagentScopedPayload, timestampOf, startFingerprintOf, STALE_TERMINAL_PROVIDERS, STOP_HOOK_ACTIVE_PROVIDERS, STALE_TERMINAL_WINDOW_MS } from './recorder-contracts.js'
 import { beginOpenTurn, quarantineOpenTurn, storeLifecycleEvent } from './recorder-turn-state.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { codexSubagentTranscript, isCodexInternalPrompt, isSynthetic, isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, markCodexInternalTurn, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn, trustedManagedIdentityPayload } from './recorder-hook-support.js'
-import { holdSeal, refreshSealWindow } from './recorder-segment.js'
-import { resumeAfterStorage } from './git.js'
+import { holdSeal, refreshSealWindow, revokeSeal } from './recorder-segment.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 import { hostProcessChain } from './host-process.js'
 import { forgetSessionVisit } from './session-visit.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
-import { logQoderStopHold, qoderStopEvidence, readQoderStopTranscript } from './qoder-stop-evidence.js'
+import { isTopLevelQoderStop, logQoderStopAttribution, logQoderStopHold, qoderNativeStopAttribution, qoderRequestStopAttribution, readQoderStopTranscript, type QoderStopAttribution } from './qoder-stop-evidence.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -101,6 +100,7 @@ export async function applyHookLocked(
         )
       } else {
         await logQoderStopHold(enablement.dataRoot, open, 'superseded')
+        if (open.deferredQoderNativeStopId) await revokeSeal(root, open)
         const fallback = open.status === 'closing' || open.stopObservedAt ? 'completed' : 'interrupted'
         protectNextStart ||= fallback === 'interrupted' &&
           STALE_TERMINAL_PROVIDERS.has(input.provider) &&
@@ -177,6 +177,11 @@ export async function applyHookLocked(
     }
     return storeOrphanEvent(enablement, root, input, terminal)
   }
+  if (input.provider === 'qoder' && (input.event === 'SubagentStop' ||
+    (input.event === 'Stop' && !isTopLevelQoderStop(input)))) {
+    await storeLifecycleEvent(enablement, open, input.event, input.payload)
+    return { status: 'recorded' as const, reason: 'non-top-level Qoder terminal' }
+  }
   if (open.managedByScry) {
     if (!END_EVENTS.has(input.event) && !SESSION_END_EVENTS.has(input.event)) return { status: 'recorded' as const }
     open.status = 'closing'
@@ -185,8 +190,9 @@ export async function applyHookLocked(
     await writeJsonAtomic(openPath(root), open)
     return { status: 'pending' as const, reason: 'managed turn awaits canonical Scry evidence' }
   }
+  const qoderStop = isTopLevelQoderStop(input)
   if (
-    incomingProviderTurnId &&
+    !qoderStop && incomingProviderTurnId &&
     open.providerTurnId &&
     incomingProviderTurnId !== open.providerTurnId &&
     !isContinuationProviderTurn(open, incomingProviderTurnId)
@@ -204,36 +210,39 @@ export async function applyHookLocked(
   }
   const sessionEndEvent = SESSION_END_EVENTS.has(input.event)
   const endEvent = END_EVENTS.has(input.event) || sessionEndEvent
-  let qoderRead
-  let mappedStop = false
-  if (input.provider === 'qoder' && endEvent && !sessionEndEvent && incomingProviderTurnId && !open.providerTurnId) {
-    if (await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId)) {
-      return { status: 'duplicate' as const }
+  let attribution: QoderStopAttribution | undefined
+  let requestConfirmed = false
+  if (qoderStop) {
+    attribution = qoderRequestStopAttribution(input.payload, open, await readJson<SessionState>(statePath(root)))
+    requestConfirmed = attribution === 'matched'
+    if (attribution !== 'stale' && incomingProviderTurnId) {
+      const differentKnownId = incomingProviderTurnId !== open.providerTurnId &&
+        (open.providerTurnId || await isCommittedProviderTurn(enablement.dataRoot, root, input.provider, sessionId, incomingProviderTurnId))
+      if (differentKnownId) attribution = 'stale'
+      else if (!requestConfirmed) attribution = qoderNativeStopAttribution(open, incomingProviderTurnId,
+        !open.providerTurnId && open.requestSetId ? await readQoderStopTranscript(enablement, open) : undefined)
     }
-    if (open.requestSetId) {
-      qoderRead = await readQoderStopTranscript(enablement, open)
-      if (qoderRead?.stable && qoderRead.complete && qoderRead.identityMatched &&
-        qoderRead.providerTurnId === incomingProviderTurnId) {
-        mappedStop = true
-      } else {
-        return { status: 'pending' as const, reason: 'Qoder terminal did not match the open request set' }
-      }
-    }
+    await logQoderStopAttribution(enablement.dataRoot, attribution)
   }
+  if (attribution === 'stale') return { status: 'duplicate' as const, reason: 'Qoder Stop belongs to an earlier or different turn' }
   const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
   // An old terminal must not refresh or revoke the current generation's hold.
   if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
     return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
   }
+  const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
+  const unprovenNativeId = qoderStop && attribution === 'unproven' ? incomingProviderTurnId : undefined
   if (open.deferredTerminalEventId) {
-    const identifiedForOpen = mappedStop || (!!incomingProviderTurnId && incomingProviderTurnId === open.providerTurnId)
-    if (endEvent && !sessionEndEvent && !identifiedForOpen) {
+    const identifiedForOpen = qoderStop ? attribution === 'matched' :
+      !!incomingProviderTurnId && incomingProviderTurnId === open.providerTurnId
+    const replaceAnonymous = !!unprovenNativeId && open.deferredTerminalReason === 'stale_terminal'
+    if (endEvent && !sessionEndEvent && !identifiedForOpen && !replaceAnonymous) {
       // Another Stop in this segment restarts the silence window: a burst that keeps stopping and
       // waking stays one segment.
       await refreshSealWindow(root, open)
       return { status: 'pending' as const, reason: 'unidentified terminal is already deferred' }
     }
-    if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted') {
+    if (sessionEndEvent && open.terminalFallbackStatus === 'interrupted' && !open.deferredQoderNativeStopId) {
       await logQoderStopHold(enablement.dataRoot, open, 'session_end')
       await storeLifecycleEvent(enablement, open, input.event, input.payload)
       open.terminalIdentityConfirmedBySessionEnd = true
@@ -244,42 +253,28 @@ export async function applyHookLocked(
     }
     await logQoderStopHold(enablement.dataRoot, open,
       sessionEndEvent ? 'session_end' : identifiedForOpen && endEvent ? 'identified_stop' : 'activity')
-    await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
-    open.status = 'open'
-    delete open.closingAt
-    delete open.terminalAt
-    delete open.terminalAtSource
-    delete open.terminalFallbackStatus
-    delete open.endReason
-    delete open.deferredTerminalAt
-    delete open.deferredTerminalEventId
-    delete open.deferredTerminalReason
-    delete open.deferredTerminalFirstAt
-    delete open.terminalDiffs
-    // The chain is dropped with the hold: this turn keeps its own baseline.
-    for (const { capture } of open.captures) resumeAfterStorage(capture)
-    delete open.frozenDiffs
-    delete open.terminalIdentityConfirmedBySessionEnd
-    if (open.provider !== 'qoder') delete open.staleTerminalProtection
-    await writeJsonAtomic(openPath(root), open, { sync: false })
+    await revokeSeal(root, open)
   }
-  const terminalAt = explicitTerminalAt ?? explicitTimestampOf(input.payload) ?? timestampOf(input.payload)
+  if (unprovenNativeId) {
+    return holdSeal(enablement, root, open, input, 'qoder_native_id_unproven', terminalAt,
+      { attribution: 'unproven', nativeId: unprovenNativeId })
+  }
   const elapsed = Date.parse(terminalAt) - Date.parse(open.startedAt)
   const needsAttribution = endEvent && !sessionEndEvent && !incomingProviderTurnId && !explicitTerminalAt &&
     open.staleTerminalProtection && elapsed >= 0 && elapsed <= STALE_TERMINAL_WINDOW_MS
-  if (needsAttribution) qoderRead = await readQoderStopTranscript(enablement, open)
-  const pendingBackground = (qoderRead?.pendingBackgroundTasks?.length ?? 0) > 0
-  const proof = qoderRead && !pendingBackground ? qoderStopEvidence(qoderRead, open) : undefined
-  if (needsAttribution && !proof?.completedAt && !pendingBackground) {
-    return holdSeal(enablement, root, open, input, 'stale_terminal', terminalAt)
-  }
+
+  if (requestConfirmed) open.qoderRequestStopConfirmed = true
   // A Provider that continues this turn after its Stop must not publish while its own background
   // work is unreported: the wake's rows belong to this same burst.
   if (endEvent && !sessionEndEvent) {
     const held = await holdStopForBackgroundWork({
-      enablement, input, sessionId, open, terminalAt, read: qoderRead
+      enablement, input, sessionId, open, terminalAt, attribution
     })
     if (held) return held
+  }
+  if (needsAttribution && attribution !== 'matched') {
+    return holdSeal(enablement, root, open, input, 'stale_terminal', terminalAt,
+      attribution ? { attribution } : undefined)
   }
   if (sessionEndEvent && open.terminalIdentityConfirmedBySessionEnd) {
     return { status: 'pending' as const, reason: 'session end already confirmed the deferred terminal' }
@@ -322,10 +317,7 @@ export async function applyHookLocked(
   ) {
     return { status: 'pending' as const, reason: 'Claude turn awaits continuations or recorder recovery' }
   }
-  return finalizeOpenTurn(enablement, open, input.payload, 'completed', {
-    allowUnstableTranscript: true,
-    ...(proof?.completedAt && qoderRead ? { verifiedQoderTranscript: { ...qoderRead, completedAt: proof.completedAt } } : {})
-  })
+  return finalizeOpenTurn(enablement, open, input.payload, 'completed', { allowUnstableTranscript: true })
 }
 
 export function isLockTimeout(error: unknown): boolean {

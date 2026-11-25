@@ -1,9 +1,11 @@
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { TraceEvent } from '../../shared/trace.js'
 import { partial, unavailable, type TurnEvidence, type TurnRole } from '../../shared/turn-record.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import {
-  recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath,
+  recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot,
   type RecorderOpenTurnState as OpenTurnState, type RecorderSealedSegment, type RecorderSessionState as SessionState
 } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
@@ -15,7 +17,7 @@ import {
 import { beginOpenTurn, degradeEvidenceSections, storeLifecycleEvent } from './recorder-turn-state.js'
 import { hostProcessChain } from './host-process.js'
 import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript } from './recorder-transcript-background.js'
-import { snapshotSessionNetDiff } from './git.js'
+import { resumeAfterStorage, snapshotSessionNetDiff } from './git.js'
 import { segmentFreeze } from './recorder-segment-diff.js'
 import { terminalSnapshot } from './git-capture.js'
 import { logQoderStopHold } from './qoder-stop-evidence.js'
@@ -25,7 +27,7 @@ import { logQoderStopHold } from './qoder-stop-evidence.js'
  * go quiet, because a Provider that keeps writing into the same turn would otherwise fragment a
  * single burst of Agent work into several records.
  */
-export type SealHoldReason = 'stale_terminal' | 'pending_background_tasks'
+export type SealHoldReason = NonNullable<OpenTurnState['deferredTerminalReason']>
 
 export const CONTINUATION_ROLE_SOURCE = 'recorder_background_wake'
 export const CONTINUATION_USER_REASON =
@@ -50,13 +52,15 @@ export async function holdSeal(
   open: OpenTurnState,
   input: RecorderHookInput,
   reason: SealHoldReason,
-  terminalAt: string
+  terminalAt: string,
+  qoder?: { attribution: 'unproven' | 'matched'; nativeId?: string }
 ): Promise<RecorderHookResult> {
   const eventId = await storeLifecycleEvent(enablement, open, input.event, input.payload)
   open.status = 'closing'
   open.closingAt = terminalAt
   open.terminalAt = terminalAt
-  open.terminalAtSource = 'recorder_observed_terminal'
+  open.terminalAtSource = qoder?.nativeId && explicitTimestampOf(input.payload)
+    ? 'provider_terminal_event' : 'recorder_observed_terminal'
   open.endReason ??= 'provider_terminal'
   // Freeze at the Provider boundary without consuming the baseline: a newer prompt can still
   // cancel this hold. Runtime promise queues stay on the temporary view, never in the JSON state.
@@ -97,6 +101,8 @@ export async function holdSeal(
   open.deferredTerminalEventId = eventId
   open.deferredTerminalReason = reason
   open.deferredTerminalFirstAt = open.deferredTerminalAt
+  open.deferredQoderStopAttribution = qoder?.attribution
+  open.deferredQoderNativeStopId = qoder?.nativeId
   await writeJsonAtomic(openPath(root), open)
   await logQoderStopHold(enablement.dataRoot, open, 'deferred')
   return reason === 'pending_background_tasks'
@@ -111,6 +117,32 @@ export async function holdSeal(
 export async function refreshSealWindow(root: string, open: OpenTurnState): Promise<void> {
   if (!open.deferredTerminalEventId) return
   open.deferredTerminalAt = new Date().toISOString()
+  await writeJsonAtomic(openPath(root), open, { sync: false })
+}
+
+/** Revoke the pending boundary without consuming the original baseline. */
+export async function revokeSeal(root: string, open: OpenTurnState): Promise<void> {
+  if (open.deferredTerminalEventId) {
+    await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })
+  }
+  open.status = 'open'
+  delete open.closingAt
+  delete open.terminalAt
+  delete open.terminalAtSource
+  delete open.terminalFallbackStatus
+  delete open.endReason
+  delete open.deferredTerminalAt
+  delete open.deferredTerminalEventId
+  delete open.deferredTerminalReason
+  delete open.deferredTerminalFirstAt
+  delete open.deferredQoderStopAttribution
+  delete open.deferredQoderNativeStopId
+  delete open.qoderRequestStopConfirmed
+  delete open.terminalDiffs
+  for (const { capture } of open.captures) resumeAfterStorage(capture)
+  delete open.frozenDiffs
+  delete open.terminalIdentityConfirmedBySessionEnd
+  if (open.provider !== 'qoder') delete open.staleTerminalProtection
   await writeJsonAtomic(openPath(root), open, { sync: false })
 }
 

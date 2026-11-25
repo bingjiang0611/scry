@@ -3,7 +3,9 @@ import type { TranscriptRead } from './recorder-contracts.js'
 import { hostProcessState } from './host-process.js'
 import { openTurnQuiet, STALE_OPEN_TURN_QUIET_MS, type RecorderOpenTurnState } from './runtime-state.js'
 
-import { FINISHED_STOP_REASONS } from './qoder-stop-evidence.js'
+
+/** A tool-use stop or an unknown reason does not prove that a reply finished. */
+const FINISHED_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens', 'complete', 'completed', 'stop'])
 
 export interface StaleOpenTurnVerdict {
   status: Extract<AgentTurnRecord['status'], 'completed' | 'interrupted'>

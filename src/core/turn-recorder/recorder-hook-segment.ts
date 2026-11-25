@@ -3,7 +3,6 @@ import type { RecorderHookInput, RecorderHookResult } from './recorder-contracts
 import { recorderSessionRoot as sessionRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import { beginContinuationTurn, holdSeal, holdsStopForBackgroundWork } from './recorder-segment.js'
 import { readQoderStopTranscript } from './qoder-stop-evidence.js'
-import type { TranscriptRead } from './recorder-contracts.js'
 
 /**
  * The two places where a Provider's own wake decides a record boundary.
@@ -20,14 +19,15 @@ export async function holdStopForBackgroundWork(args: {
   sessionId: string
   open: OpenTurnState
   terminalAt: string
-  read?: TranscriptRead
+  attribution?: 'matched' | 'unproven'
 }): Promise<RecorderHookResult | undefined> {
   const { enablement, input, open } = args
   if (!open.transcriptPath || !holdsStopForBackgroundWork(input.provider)) return undefined
-  const read = args.read ?? await readQoderStopTranscript(enablement, open)
+  const read = await readQoderStopTranscript(enablement, open)
   if ((read?.pendingBackgroundTasks?.length ?? 0) === 0) return undefined
   const root = sessionRoot(enablement.dataRoot, input.provider, args.sessionId)
-  return holdSeal(enablement, root, open, input, 'pending_background_tasks', args.terminalAt)
+  return holdSeal(enablement, root, open, input, 'pending_background_tasks', args.terminalAt,
+    args.attribution ? { attribution: args.attribution } : undefined)
 }
 
 /**
