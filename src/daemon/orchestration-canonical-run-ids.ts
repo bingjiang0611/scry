@@ -52,11 +52,10 @@ export function createLedgerIdForSubmit(
 ): (runId: string, duplicate: boolean) => string {
   const alias = db.prepare('SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?')
   return (runId, duplicate) => {
-    if (duplicate) {
-      const row = alias.get(runId) as { ledger_run_id: string } | undefined
-      return row?.ledger_run_id ?? runId
-    }
     if (UUID_V4_RE.test(runId)) return runId
+    const row = alias.get(runId) as { ledger_run_id: string } | undefined
+    if (row) return row.ledger_run_id
+    if (duplicate) return runId
     const ledgerRunId = randomUUID()
     trackCanonical(ledgerRunId, runId)
     return ledgerRunId

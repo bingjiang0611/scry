@@ -168,9 +168,12 @@ describe('createHostController (production persistence binding)', () => {
       })
       return result
     })
-    const submit = await binding.controller.submitReceivedIntent(local, { intentId: randomUUID(), detail })
+    const intentId = randomUUID()
+    const submit = await binding.controller.submitReceivedIntent(local, { intentId, detail })
     await binding.controller.idle()
     expect(leasedTooEarly).toBeNull()
+    expect(await binding.controller.submitReceivedIntent(local, { intentId, detail }))
+      .toMatchObject({ runId: submit.runId, status: 'duplicate' })
 
     expect(started).toEqual(['legacy-turn-7'])
     expect(submit.runId).not.toBe('legacy-turn-7')
