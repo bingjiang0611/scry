@@ -51,8 +51,9 @@ describe('AnalyticsView 渲染：成本与用量', () => {
 
   it('按 Agent → 模型分行，网关只作副标题', () => {
     const html = render()
-    expect(html).toContain('class="analytics-row is-agent"')
-    expect(html).toContain('class="analytics-row is-model"')
+    // 表格行同时带入场动画类，断言只看行类型本身。
+    expect(html).toMatch(/class="analytics-row is-agent /)
+    expect(html).toMatch(/class="analytics-row is-model /)
     expect(html).toContain('Pi')
     expect(html).toContain('model-a')
     expect(html).toContain('openai-codex')
