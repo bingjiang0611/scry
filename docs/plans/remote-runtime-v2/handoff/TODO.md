@@ -44,3 +44,9 @@
 - [ ] **Qoder 复用与记录器**：App 默认开着 managed recorder，记录器身份在启动 CLI 时以环境变量按轮注入（`SCRY_MANAGED_RUN_ID` / `SCRY_MANAGED_PROMPT_HASH`），所以 Qoder 每轮新起进程、不复用。要用上常驻会话的提速，需要让记录器能按会话拿身份，或者在同一进程内切换身份。
 - [ ] **Qoder 第二轮首段文字重测**：当日额度用完，没测成。额度恢复后在同一个临时 HOME 重测，分别测记录器开和关两种情况。
 - [ ] **C 组剩余项**：C3(a) Pi/Qoder 的轮次结算语义；C2 按 Provider 逐个验证原生 steer；C4 的「用户开启」目前只有环境变量，要补一个界面开关。
+
+## 记录器移出 App（维护者 2026-11-25 定方向）
+
+- [ ] **W23**：把轮次记录器移出 App，见 [P10](../P10-recorder-out-of-app.md) 和 [W23 任务单](tasks/W23-recorder-out-of-app.md)。等 PR #205（Qoder Stop 归属）合进 main 后开工。原计划的「记录器按会话取身份」取消，Qoder 进程复用并入 W23。
+- [ ] **W24**：CLI 迁到独立仓库，补上 `exports` 契约、深层路径的兼容别名和消费方测试（trade-telemetry 现在用的是 `dist/cli/*.js` 和 `dist/core/turn-recorder/commit-environment.js`），并解决记录器对 `src/main/normalize`、`src/main/danger` 的反向依赖。需要维护者先建好仓库。
+- [ ] **W23 合并后**：三台 Mac 只在这时升级一次，和上面「真机与部署」里的升级、mac2 签名、机器页对照一起做。
