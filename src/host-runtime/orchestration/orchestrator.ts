@@ -209,6 +209,43 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       const target = view.getRun(cmd.payload.runId)
       if (!target) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
       if (isTerminalRunLifecycle(target.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      // R11: a run that never started has no process to stop. Cancelling it is the whole stop, and it
+      // must not hold the session queue: the stop named one entry, not the queue behind it.
+      const queuedStop = target.lifecycle === 'queued'
+      const stopEvent = (index: number): PendingOrchestrationEvent => makeEvent(cmd, index, {
+        type: 'run.stop_requested',
+        stream: `run:${target.runId}`,
+        sessionKey: target.sessionKey,
+        runId: target.runId,
+        cwd: target.cwd,
+        payload: { runId: target.runId, ...(cmd.payload.reason ? { reason: cmd.payload.reason } : {}) }
+      })
+      if (queuedStop) {
+        const cancelled = makeEvent(cmd, 1, {
+          type: 'run.cancelled',
+          stream: `run:${target.runId}`,
+          sessionKey: target.sessionKey,
+          runId: target.runId,
+          cwd: target.cwd,
+          payload: {
+            runId: target.runId,
+            reason: cmd.payload.reason ?? 'stop_requested',
+            settledAt: cmd.at,
+            recoveredAt: null,
+            outcome: {
+              status: 'unavailable' as const,
+              quality: 'unavailable' as const,
+              source: ['host.stop'] as const,
+              omissionReason: 'stopped_before_dispatch'
+            }
+          }
+        })
+        return acceptDecision(cmd, [stopEvent(0), cancelled], [], {
+          runId: target.runId,
+          lifecycle: 'cancelled',
+          cascadedCount: 0
+        })
+      }
       const events: PendingOrchestrationEvent[] = [...heldQueueEvents(cmd, target, view), makeEvent(cmd, 0, {
           type: 'run.stop_requested',
           stream: `run:${target.runId}`,

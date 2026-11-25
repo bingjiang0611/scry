@@ -172,3 +172,39 @@ it('D1: two waiting entries do not block each other — the head dispatches, the
     sink.close()
   }
 })
+
+// R11: stopping a run that is still waiting for its slot held the whole session queue and left that run
+// `queued` forever, so the user's stop did nothing and every sibling stalled behind it.
+it('R11: stopping a queued run cancels that run and leaves its siblings queued', () => {
+  const userData = mkdtempSync(join(tmpdir(), 'scry-r11-stop-queued-'))
+  try {
+    const sink = EventSink.open({ userDataDir: userData, authorizedActors: [PEER_A] })
+    try {
+      expect(sink.execute(submit({ commandId: 'r1', runId: 'run-live', claimMode: 'immediate' })).kind).toBe('accepted')
+      expect(sink.execute(effect('r-dispatch', 'run-live', 'dispatched', 1_700_000_000_010)).kind).toBe('accepted')
+      expect(sink.execute(submit({ commandId: 'r2', runId: 'run-first', claimMode: 'queued' })).kind).toBe('accepted')
+      expect(sink.execute(submit({ commandId: 'r3', runId: 'run-second', claimMode: 'queued' })).kind).toBe('accepted')
+
+      const stopPayload = { runId: 'run-first' }
+      const stopped = sink.execute({
+        type: 'run.stop', commandId: 'r4', actor: PEER_A, scope: 'local', at: 1_700_000_000_020,
+        payload: stopPayload, payloadSha256: sha256Hex(canonicalJson(stopPayload))
+      })
+      expect(stopped).toMatchObject({ kind: 'accepted' })
+      expect(sink.getRun('run-first')?.lifecycle).toBe('cancelled')
+      // The sibling keeps its place and is not held: the stop only ever named one run.
+      expect(sink.getRun('run-second')).toMatchObject({ lifecycle: 'queued', queuePosition: 2 })
+      expect(sink.getRun('run-second')?.queueHeld ?? false).toBe(false)
+      // Nothing left to stop for a run that never started, so no stop effect is queued for it.
+      const stopEffects = sink.handle.db
+        .prepare("SELECT COUNT(*) AS n FROM orch_outbox WHERE run_id = 'run-first' AND kind = 'provider.run.stop'")
+        .get() as { n: number }
+      expect(stopEffects.n).toBe(0)
+      expect(sink.getRun('run-live')?.lifecycle).toBe('dispatched')
+    } finally {
+      sink.close()
+    }
+  } finally {
+    rmSync(userData, { recursive: true, force: true })
+  }
+})
