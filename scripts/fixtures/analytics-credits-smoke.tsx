@@ -9,8 +9,13 @@ import '../../src/renderer/inventory-evidence.css'
 import '../../src/renderer/session-evidence.css'
 import '../../src/renderer/codex-alignment.css'
 
+type PerformanceFixture = { history: { rows: unknown[]; invalidLines: number; truncated: boolean }, summary: { observedAt: string, sessions: unknown[] } }
+
 declare global {
-  interface Window { setCreditsFixture: (analytics: UsageAnalytics) => void }
+  interface Window {
+    setCreditsFixture: (analytics: UsageAnalytics) => void
+    setPerformanceFixture: (next: PerformanceFixture) => void
+  }
 }
 
 function Fixture() {
@@ -25,12 +30,22 @@ function Fixture() {
   </div>
 }
 
-// 合并后的页面默认打开性能标签；这个 fixture 只关心账本侧，给性能接口一个空桥。
+// 默认给空桥；需要看真实性能数据时用 window.setPerformanceFixture 注入。
+let performance: PerformanceFixture = {
+  history: { rows: [], invalidLines: 0, truncated: false },
+  summary: { observedAt: new Date().toISOString(), sessions: [] }
+}
+const dataListeners = new Set<() => void>()
+// 注入后要像真实数据更新那样通知页面重新读取，否则页面永远停在首屏的空结果。
+Object.defineProperty(window, 'setPerformanceFixture', { value: (next: PerformanceFixture) => {
+  performance = next
+  for (const listener of dataListeners) listener()
+} })
 Object.defineProperty(window, 'scry', {
   value: {
-    llmPerformanceHistory: async () => ({ rows: [], invalidLines: 0, truncated: false }),
-    llmPerformanceSummary: async () => ({ observedAt: new Date().toISOString(), sessions: [] }),
-    onDataUpdated: () => () => {}
+    llmPerformanceHistory: async () => performance.history,
+    llmPerformanceSummary: async () => performance.summary,
+    onDataUpdated: (listener: () => void) => { dataListeners.add(listener); return () => { dataListeners.delete(listener) } }
   }
 })
 createRoot(document.getElementById('root')!).render(<Fixture />)
