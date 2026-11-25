@@ -25,39 +25,20 @@ import {
   qoderTrace,
   type QoderContextEvidence
 } from './qoder-evidence'
-import {
-  qoderProviderTurnId,
-  type QoderHookFallbackState,
-  isAgentLaunchStatus,
-  isAgentTerminalStatus,
-  observedAgentStatus
-} from './qoder-hooks'
+import { qoderProviderTurnId, type QoderHookFallbackState } from './qoder-hooks'
 import { livePrompt, QoderStderrTail, qoderExecutable, qoderMcpLaunch, qoderOptions, signalProcessTree, type QoderMcpLaunch } from './qoder-launch'
 import { expandQoderProjectCommand, projectCommandMatch } from './qoder-commands'
 import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
 import { applyQoderLogFallback } from './qoder-log-fallback'
 import { settleQoderTurn } from './qoder-turn-settlement'
+import { createQoderAgentTracker } from './qoder-agent-tracker'
 import type { QoderSessionLease, QoderSessionPool, QoderSessionTurnSlot } from './qoder-session-pool'
+import { createQoderTurnSlot, qoderSessionKey, type QoderTurnBindings } from './qoder-session-identity'
 import type { QoderTurnChannel } from './qoder-session'
 import { newId } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
 import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
-
-/**
- * R3: what the session's SDK closures need from the turn that is running now. Written into the
- * session's slot before each turn, so a permission question, a pid report or an exit lands on the
- * turn that owns them instead of the turn that happened to open the process.
- */
-interface QoderTurnBindings {
-  canUseTool?: (
-    toolName: string,
-    input: Record<string, unknown>,
-    permission: never
-  ) => Promise<unknown>
-  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
-  onPid?: (pid: number) => void
-}
 
 export interface QoderRunDependencies {
   homeDir: string
@@ -68,32 +49,6 @@ export interface QoderRunDependencies {
    * process per turn. Without it every turn keeps its own process, as before.
    */
   qoderSessions?: QoderSessionPool
-}
-
-/**
- * R3: the identity part of the key names *this conversation*, never the workspace. `continuationKey`
- * is Provider-level, so keying on it made two new conversations in one directory share the same
- * `fresh` session — B's prompt landed in A's context. A fresh turn therefore carries its own run id,
- * and a continued turn is keyed by the native session it resumes (the pool keeps the alias from the
- * native id to the process that reported it).
- */
-function qoderSessionIdentity(request: ProviderRunRequest): string {
-  return request.resume ? `native:${request.resume}` : `fresh:${request.runId}`
-}
-
-/**
- * Reuse is safe only when the next turn asks for exactly what the session was opened with, so the
- * rest of the key is every turn option the SDK fixes at open time.
- */
-function qoderSessionKey(request: ProviderRunRequest): string {
-  return [
-    qoderSessionIdentity(request),
-    request.permissionMode ?? 'default',
-    request.requestUserInput ? 'ask' : 'no_ask',
-    request.model?.id ?? 'default',
-    request.effort ?? 'default',
-    JSON.stringify(request.mcpExecution ?? null)
-  ].join('|')
 }
 
 export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies): ProviderRunHandle {
@@ -127,9 +82,10 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   let releaseProviderPrompt = (): void => {}
   const sdkHooks: TraceEvent[] = []
   const credits = new QoderCreditCollector()
-  const activeAgentCalls = new Set<string>()
-  const terminalAgentCalls = new Set<string>()
   const backgroundTasks = new QoderBackgroundTasks()
+  const agents = createQoderAgentTracker({
+    runId: request.runId, tasks: backgroundTasks, emit: (event) => request.emit(event)
+  })
   let taskControl: QoderTaskControlTransport | undefined
   let liveLease: QoderSessionLease | undefined
   // Only a turn that settled with a child creates a watcher, so its presence is the flag.
@@ -152,48 +108,13 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     backgroundMonitor.pause()
     try { return await action() } finally { backgroundMonitor.resume() }
   }
-  const hasPendingBackgroundWork = (): boolean => activeAgentCalls.size > 0 || backgroundTasks.pending
+  const hasPendingBackgroundWork = (): boolean => agents.hasPending() || backgroundTasks.pending
   const ctx: NormalizeCtx = {
     runId: request.runId,
     cwd: request.cwd,
     newId,
     now: () => new Date().toISOString(),
     contextTokensFromUsage: qoderContextTokensFromUsage
-  }
-  const observeAgentEvent = (event: TraceEvent, hasTerminalEvidence = true): void => {
-    if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
-    const status = observedAgentStatus(event)
-    if (event.stage === 'agent_activity' || isAgentLaunchStatus(status)) {
-      activeAgentCalls.add(event.toolUseId)
-      return
-    }
-    if (event.tool === 'Agent' && event.stage === 'tool_result' && isAgentTerminalStatus(status)) {
-      activeAgentCalls.delete(event.toolUseId)
-      terminalAgentCalls.add(event.toolUseId)
-      if (hasTerminalEvidence) backgroundTasks.settleCall(event.toolUseId, 'Agent')
-    }
-  }
-  const emitAgentFallback = (event: TraceEvent, hasTerminalEvidence: boolean): void => {
-    if (!event.toolUseId || terminalAgentCalls.has(event.toolUseId)) return
-    observeAgentEvent(event, hasTerminalEvidence)
-    request.emit(event)
-  }
-  const settleUnreportedAgents = (agentStatus: 'failed' | 'stopped', source: string): void => {
-    for (const toolUseId of activeAgentCalls) {
-      emitAgentFallback({
-        id: `qoder-fallback:agent:${request.runId}:${toolUseId}:${agentStatus}`,
-        runId: request.runId,
-        ts: new Date().toISOString(),
-        kind: 'tool',
-        stage: 'tool_result',
-        tool: 'Agent',
-        toolUseId,
-        text: agentStatus === 'stopped' ? '后台 Agent 已停止' : '后台 Agent 在 Qoder 结束前未返回终态',
-        output: agentStatus === 'stopped' ? '后台 Agent 已停止' : '后台 Agent 在 Qoder 结束前未返回终态',
-        isError: agentStatus === 'failed',
-        runtimeMetadata: { source, agentStatus }
-      }, false)
-    }
   }
   // Owns the private MCP config file for this launch; removed when the run settles.
   let mcpLaunch: QoderMcpLaunch | undefined
@@ -248,7 +169,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       },
       onPid: () => undefined
     }
-    let turnSlot: QoderSessionTurnSlot = { current: bindings }
+    let turnSlot: QoderSessionTurnSlot = createQoderTurnSlot(bindings)
     const currentTurn = (): QoderTurnBindings | undefined => turnSlot.current as QoderTurnBindings | undefined
     const openQuery = (promptStream: AsyncIterable<SDKUserMessage>): Query => query({
       // Keep control-response stdin open while Qoder-owned Agents or Bash
@@ -375,9 +296,9 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
                 const event = qoderTrace(rawEvent, contextEvidence)
                 // Qoder flushes queued progress and duplicate terminals at query
                 // end. A settled Agent must not reopen in either host state or UI.
-                if (event.tool === 'Agent' && event.toolUseId && terminalAgentCalls.has(event.toolUseId) &&
+                if (event.tool === 'Agent' && event.toolUseId && agents.terminal.has(event.toolUseId) &&
                     (event.stage === 'agent_activity' || event.stage === 'tool_result')) continue
-                observeAgentEvent(event)
+                agents.observe(event)
                 if (event.kind === 'harness' && event.stage === 'result' && event.isError) providerFailureSeen = true
                 if (event.kind === 'hook') sdkHooks.push(event)
                 if (event.kind === 'model' && event.stage === 'text_delta') {
@@ -438,15 +359,15 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       pid: qoderPid,
       externalSessionId,
       sdkHooks,
-      terminalAgentCalls,
+      terminalAgentCalls: agents.terminal,
       backgroundTasks,
       stopped,
       observeProviderTurnId,
-      emitAgentFallback
+      emitAgentFallback: agents.emit
     })) providerStatus = 'failed'
     const settlement = await settleQoderTurn({
-      request, history, backgroundTasks, backgroundMonitor, activeAgentCalls,
-      settleUnreportedAgents, stopped, externalSessionId, forkBaseline,
+      request, history, backgroundTasks, backgroundMonitor, activeAgentCalls: agents.active,
+      settleUnreportedAgents: agents.settleUnreported, stopped, externalSessionId, forkBaseline,
       backgroundWatched: stopBackgroundWatch !== undefined,
       submittedUserUuid, outgoingText, currentProviderTurnId
     })
