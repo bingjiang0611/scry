@@ -37,7 +37,7 @@ export async function runStructure({ driver }) {
         await capture('structure-remote-' + theme + '-cancelled')
         accept = true
         await click('.sb-nav .sb-navitem:first-child')
-        await wait('document.querySelector(".usage-page") != null', 'confirmed remote navigation')
+        await wait('document.querySelector(".analytics-page") != null', 'confirmed remote navigation')
         check(await read('window.structureEntries.length') > before, 'Confirmation positive control has no page entrance')
         await capture('structure-remote-' + theme)
       }

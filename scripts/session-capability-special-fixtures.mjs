@@ -4,6 +4,8 @@ import { exerciseOverlays } from './overlays-ui-checks.mjs'
 import { exerciseLists } from './lists-ui-checks.mjs'
 import { exerciseListStructure } from './lists-structure-ui-checks.mjs'
 import { exerciseLoading } from './loading-ui-checks.mjs'
+import { exerciseInventoryLoading } from './loading-inventory-ui-checks.mjs'
+import { exerciseRemotePicker } from './loading-remote-ui-checks.mjs'
 import { exerciseSidebarActivity } from './sidebar-activity-ui-checks.mjs'
 import { exerciseSidebarActivityContinuation } from './sidebar-activity-ui-continuation.mjs'
 import { exerciseSidebarUnreadResults } from './sidebar-unread-results-ui-checks.mjs'
@@ -37,6 +39,8 @@ export function specialFixtureSources() {
     media: withFixtureMedia.toString(),
     pointer: nativeUiPointer.toString(),
     loading: exerciseLoading.toString(),
+    loadingInventory: exerciseInventoryLoading.toString(),
+    loadingRemote: exerciseRemotePicker.toString(),
     lists: exerciseLists.toString(),
     listStructure: exerciseListStructure.toString(),
     overlays: exerciseOverlays.toString(),
@@ -56,7 +60,8 @@ export async function runSpecialFixtures({ flags, win, paths, sources, screensho
   if (flags.loading) {
     win.setSize(1400, 900)
     return withMedia(win.webContents, () => win.loadFile(paths.loading), async () => ({
-      done: true, result: { loading: await decode(sources.loading)(win.webContents, win, sources.pointer, screenshots.loading) }
+      done: true, result: { loading: await decode(sources.loading)(win.webContents, win, sources.pointer, screenshots.loading,
+        { inventory: decode(sources.loadingInventory), remote: decode(sources.loadingRemote) }) }
     }))
   }
   if (flags.lists) {

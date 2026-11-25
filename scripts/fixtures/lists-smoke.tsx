@@ -5,7 +5,6 @@ import { BackgroundWorkPanel } from '../../src/renderer/components/BackgroundWor
 import { ChatView } from '../../src/renderer/components/ChatView'
 import { MetaPromptsView } from '../../src/renderer/components/MetaPromptsView'
 import { SkillsModal, McpModal } from '../../src/renderer/components/Modals'
-import { LlmPerformancePanel } from '../../src/renderer/components/LlmPerformancePanel'
 import { Sidebar } from '../../src/renderer/components/Sidebar'
 import { RightSurfacePanel } from '../../src/renderer/components/RightSurfacePanel'
 import { writeMetaPrompts } from '../../src/renderer/meta-prompts'
@@ -45,13 +44,17 @@ const aggregate: UsageAnalyticsAggregate = {
   cacheReadKnownRows: 12, cacheWriteKnownRows: 12, reasoningKnownRows: 12, tokenKnownRows: 12,
   costKnownRows: 12, exactCostRows: 12, providerReportedCostRows: 12, estimatedCostRows: 0, inferredCostRows: 0
 }
+// One Agent plus eleven models: twelve rows in the grouped table, matching the old
+// flat list the structure campaign measures.
 const analytics: UsageAnalytics = {
   status: 'ready', rangeDays: 7, fromDay: '2026-10-17', toDay: '2026-10-23', observedAt: 1,
   days: ['2026-10-23'], totals: aggregate, byDay: [{ ...aggregate, day: '2026-10-23' }],
   dailyByProvider: [{ ...aggregate, day: '2026-10-23', provider: 'anthropic' }],
+  dailyByAgent: [{ ...aggregate, day: '2026-10-23', agent: 'claude' }],
   byProvider: [{ ...aggregate, provider: 'anthropic', model: null }],
-  byModel: Array.from({ length: 12 }, (_, index) => ({ ...aggregate, turns: 1, usageRows: 1,
-    costUsd: (12 - index) / 100, provider: 'anthropic', model: `fixture-model-${String(index).padStart(2, '0')}` }))
+  byAgent: [{ ...aggregate, agent: 'claude' }],
+  byModel: Array.from({ length: 11 }, (_, index) => ({ ...aggregate, turns: 1, usageRows: 1, agent: 'claude' as const,
+    costUsd: (11 - index) / 100, provider: 'anthropic', model: `fixture-model-${String(index).padStart(2, '0')}` }))
 }
 const sessions: SessionMeta[] = Array.from({ length: 3 }, (_, index) => ({
   sessionId: `list-${index}`, externalSessionId: `list-${index}`, providerId: 'claude',
@@ -114,7 +117,7 @@ function Fixture() {
   const [cache, setCache] = useState(false)
   const [loading, setLoading] = useState(false)
   const [scope, setScope] = useState('lists-session')
-  const [modal, setModal] = useState<'skills' | 'mcp' | 'llm' | null>(null)
+  const [modal, setModal] = useState<'skills' | 'mcp' | null>(null)
   const [queued, setQueued] = useState<QueuedPrompt[]>([])
   const [tasks, setTasks] = useState<BackgroundWork['tasks']>([])
   const [surfaceIds, setSurfaceIds] = useState<RightSurfaceKind[]>(['overview', 'files'])
@@ -147,7 +150,7 @@ function Fixture() {
 
     hook: appendHook, complete: () => { setTurns(previous => previous.map(turn => ({ ...turn, done: true,
       items: [...turn.items, { id: `${turn.runId}-result`, runId: turn.runId, ts: stamp, kind: 'harness', stage: 'result', tokensIn: 10, tokensOut: 20, durationMs: 500 }] }))); setBusy(false) },
-    skills: () => setModal('skills'), mcp: () => setModal('mcp'), llm: () => setModal('llm'), meta: () => setScene('meta'),
+    skills: () => setModal('skills'), mcp: () => setModal('mcp'), meta: () => setScene('meta'),
     queue: () => setQueued(previous => [...previous, { messageId: `queue-${previous.length}`, text: `${copy.prompt} ${previous.length}`, attachments: [], request: {} }]),
     task: () => { setScene('tasks'); setTasks(previous => [...previous, { taskId: `task-${previous.length}`, toolUseId: `task-${previous.length}`,
       tool: 'Bash', description: `${copy.description} ${previous.length}`, observedAt: Date.now() }]) },
@@ -201,7 +204,6 @@ function Fixture() {
     </div>
     {modal === 'skills' && <SkillsModal skills={skills} onRefresh={actions.refresh} onClose={() => setModal(null)} />}
     {modal === 'mcp' && <McpModal mcps={mcps} status={{ 'server-0': { ok: true, toolNames: ['read_file', 'list_dir', 'search'] } }} live={[]} refreshing={false} onTest={noop} onRefresh={actions.refresh} onClose={() => setModal(null)} />}
-    <LlmPerformancePanel open={modal === 'llm'} onClose={() => setModal(null)} />
   </>
 }
 createRoot(document.getElementById('root')!).render(<Fixture />)

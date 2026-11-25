@@ -7,6 +7,7 @@ import {
   formatChartCost, formatCost, formatCount, formatDay, formatShare, formatTokens,
   displayCostEvidence, isApproximateCost, niceChartMax, smoothPath, tokenEvidence, type ChartPoint
 } from './analytics-format'
+import { useFirstReadyList } from '../hooks/useFirstReadyList'
 import { agentTable, averageCost, chartMax, dailySeries, totalTokens, type AgentFilter, type CostMetric } from './analytics-data'
 import { PROVIDER_LABELS } from '@shared/provider'
 
@@ -97,6 +98,7 @@ export function AnalyticsCostTab({ analytics, metric, onMetric, agent, onShowRan
   onShowRange: (days: UsageAnalytics['rangeDays']) => void
 }) {
   const rows = agentTable(analytics, agent)
+  const motion = useFirstReadyList(rows.length > 0)
   const hasChart = dailySeries(analytics, metric, agent).length > 0
   const tokens = totalTokens(analytics)
   const agents = new Set(rows.filter((row) => row.kind === 'agent').map((row) => row.agent)).size
@@ -143,7 +145,7 @@ export function AnalyticsCostTab({ analytics, metric, onMetric, agent, onShowRan
     <section className="analytics-card" aria-labelledby="analytics-agents">
       <div className="analytics-card-head"><h2 id="analytics-agents">{copy.agentTable}</h2></div>
       <div className="analytics-table-scroll">
-        <table className="analytics-table is-agents">
+        <table className={`analytics-table is-agents ${motion.className}`}>
           <thead>
             <tr>
               <th scope="col">{copy.columns.identity}</th>
@@ -154,7 +156,7 @@ export function AnalyticsCostTab({ analytics, metric, onMetric, agent, onShowRan
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => <tr key={row.key} className={`analytics-row is-${row.kind}`}>
+            {rows.map((row, index) => <tr key={row.key} className={`analytics-row is-${row.kind} motion-stagger-item`} style={motion.itemStyle(index)}>
               <th scope="row">
                 <span className="analytics-identity">
                   {row.kind === 'agent' && <i aria-hidden="true" className="analytics-dot" style={{ background: seriesColor(rows.filter((item) => item.kind === 'agent').findIndex((item) => item.agent === row.agent)) }} />}

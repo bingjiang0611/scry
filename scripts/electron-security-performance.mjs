@@ -33,7 +33,7 @@ export async function exerciseProductionPerformance(smokeContext) {
       return { runIds: [first.runId, second.runId], running: sampled.sessions.length }
     })()`)
     const point = await evaluate(`(() => {
-      const node = document.querySelector('.sb-navitem[title="分析"]')
+      const node = document.querySelector('.sb-navitem:nth-of-type(1)')
       if (!node) throw new Error('Production analytics entry missing')
       node.focus()
       const box = node.getBoundingClientRect()

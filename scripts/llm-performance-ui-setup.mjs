@@ -53,7 +53,7 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   if (nav.indexOf('分析') !== 0) throw new Error('Analytics entry is not first: ' + JSON.stringify(nav))
   if (nav.includes('LLM 性能')) throw new Error('The removed LLM performance entry is still in the sidebar')
   const baselineListeners = await read(`JSON.parse(document.querySelector('#performance-fixture-state').textContent).dataListeners`)
-  await click('.sb-navitem[title="分析"]')
+  await click('.sb-navitem:nth-of-type(1)')
   await wait(`${page} != null`)
   if (await read(`document.querySelector('.llm-perf-modal') != null`)) throw new Error('The removed performance modal reopened')
   if (!await read(`[...${page}.querySelectorAll('.analytics-tabs [role="tab"]')].map(node => node.textContent).join(',') === 'LLM 性能,成本与用量'`)) throw new Error('Tabs differ from design')

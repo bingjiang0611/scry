@@ -96,7 +96,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   if (await read(`${page}.querySelector('.analytics-filter select').value !== 'antigravity'`)) throw new Error('Agent filter was not preserved back on performance')
   await wait(`[...${page}.querySelectorAll('.analytics-alert[role=alert]')].some(node => node.textContent.includes('性能历史'))`)
   if (await read(`${page}.textContent.includes('fixture history unavailable')`)) throw new Error('History error exposed raw diagnostics')
-  await click('.sb-navitem[title="机器"]')
+  await click('.sb-navitem:nth-of-type(2)')
   await wait(`document.querySelector('.analytics-page') == null`)
   if (await read(`${fixtureState}.dataListeners !== ${baselineListeners}`)) throw new Error('Leaving the page retained a subscription')
   return { assertions: ['merged page with performance as the default tab', 'no data rows or cells without evidence', 'real medians and blank missing cells', 'failed rounds never draw performance', 'per-round trend with metric switch', 'provisional samples retained and pooled per Agent', 'output speed excludes the first-token wait', 'stopped rounds leave no row', 'data errors keep readable copy', 'visibility subscription and range/agent retention', 'tabs keep the Agent filter and only reuse a shared range', 'dark/light AA contrast and narrow layout'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)' }
