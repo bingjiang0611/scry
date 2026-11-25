@@ -10,8 +10,9 @@ export type EvidenceQuality = 'exact' | 'estimated' | 'inferred' | 'unavailable'
 export type EvidenceStatus = 'available' | 'partial' | 'disabled' | 'unavailable'
 
 /**
- * Machine-readable causes for a partial evidence section. `omissionReason` stays the human sentence;
- * a code is what a platform, a test or a dashboard matches on, so it must not be parsed out of text.
+ * Machine-readable causes for a partial or unavailable evidence section. `omissionReason` stays the
+ * human sentence; a code is what a platform, a test or a dashboard matches on, so it must not be
+ * parsed out of text.
  */
 export const DIFF_OMISSION_CODES = [
   'baseline_after_turn_start',
@@ -27,7 +28,28 @@ export const DIFF_OMISSION_CODES = [
   'snapshot_unavailable'
 ] as const
 
+/** Why a `usage` section has no value even though the provider did report usage. */
+export const USAGE_OMISSION_CODES = ['usage_baseline_missing'] as const
+
+export const OMISSION_CODES = [...DIFF_OMISSION_CODES, ...USAGE_OMISSION_CODES] as const
+
+/**
+ * Codes this build is allowed to write into a record. Knowing a code is not permission to write it:
+ * every reader that can open the same `.scry/records` has to tolerate it first, because a reader
+ * with an older whitelist rejects the whole record and its hook path parses every record.
+ *
+ * Removing a code from this set needs no coordination. Adding one needs all of these readers on a
+ * tolerant build first:
+ * - desktop-bundled CLI (`Scry.app/Contents/Resources/scry-cli`) ≥ 0.2.87, ships with the app;
+ * - CodeLens runtime recorder/uploader (`@ali/scry-turn-recorder`) ≥ 0.2.87, pinned by CodeLens;
+ * - standalone global CLI (`@ali/scry-turn-recorder` / `scry`) ≥ 0.2.87.
+ * `usage_baseline_missing` stays out of this set until then; `commitRecord` refuses it.
+ */
+export const WRITABLE_OMISSION_CODES = DIFF_OMISSION_CODES
+
 export type DiffOmissionCode = (typeof DIFF_OMISSION_CODES)[number]
+export type UsageOmissionCode = (typeof USAGE_OMISSION_CODES)[number]
+export type OmissionCode = (typeof OMISSION_CODES)[number]
 
 export interface Evidence<T> {
   status: EvidenceStatus
@@ -35,8 +57,11 @@ export interface Evidence<T> {
   source: string[]
   value?: T
   omissionReason?: string
-  /** Only `diff` writes this today: every cause its `omissionReason` names, in the same order. */
-  omissionCodes?: DiffOmissionCode[]
+  /**
+   * Every machine-readable cause the section's `omissionReason` names, in the same order. `diff` and
+   * `usage` write this; other sections still carry the sentence alone.
+   */
+  omissionCodes?: OmissionCode[]
 }
 
 export type TurnCallStatus = 'started' | 'success' | 'failed' | 'cancelled' | 'unknown'

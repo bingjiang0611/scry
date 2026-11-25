@@ -7,7 +7,7 @@ import { flushCodexUserInputs, recordCodexUserInput, type CodexUserInputState } 
 import { CodexUsageDeltaFilter } from '../../shared/usage-dedupe.js'
 import { codexIdentityFromSessionMeta, recordCodexItemCompleted, recordCodexSubAgentActivity } from './recorder-codex-rollout-children.js'
 import { attachCodexCompactions, codexCompactionMarker, type CodexCompactionMarker } from './recorder-codex-compaction.js'
-import { codexTurnUsageDelta, type CodexUsageBaseline } from './recorder-codex-usage.js'
+import { codexBaselineFromLastFrame, codexTurnUsageDelta, codexUsageCounters, type CodexUsageBaseline } from './recorder-codex-usage.js'
 
 export function parseCodexRollout(
   content: string,
@@ -35,6 +35,11 @@ export function parseCodexRollout(
   })
   let cumulativeUsage: UsageCounters = usageBaseline ? { ...usageBaseline } : emptyUsage()
   let turnUsageBaseline: UsageCounters = usageBaseline ? { ...usageBaseline } : emptyUsage()
+  // "No baseline" and "the session started at zero" are different facts that used to collapse into
+  // one empty counter. Only a real cumulative frame, or a proof derived from one, may claim this
+  // turn's usage; otherwise the turn is reported as unknown instead of counting the session total.
+  let turnBaselineProven = usageBaseline !== undefined
+  let sawCumulativeFrame = usageBaseline !== undefined
   let latestTurnCumulative: UsageCounters | undefined
   let usage: Required<Pick<TraceEvent, 'tokensIn' | 'tokensOut' | 'cacheReadTokens' | 'cacheCreationTokens' | 'reasoningTokens'>> = {
     tokensIn: 0,
@@ -83,6 +88,18 @@ export function parseCodexRollout(
     if (!current || usageFinished) return
     usageFinished = true
     if (!usageObserved) return
+    if (latestTurnCumulative && !turnBaselineProven) {
+      // Cumulative frames exist but nothing proves what the session had already spent before this
+      // turn: `latest - 0` would report the whole session as one turn. Report the gap instead.
+      current.events.push({
+        id: `codex-usage-baseline-missing-${stableHash([current.providerTurnId, latestTurnCumulative]).slice(0, 16)}`,
+        ts: at,
+        runId,
+        kind: 'harness',
+        stage: 'usage_baseline_missing'
+      })
+      return
+    }
     const finalUsage = latestTurnCumulative ? codexTurnUsageDelta(latestTurnCumulative, turnUsageBaseline) : usage
     // One model per turn is the only case where usage and context can be attributed; several
     // models stay unattributed instead of picking one.
@@ -246,6 +263,7 @@ export function parseCodexRollout(
       }
       turns.push(current)
       turnUsageBaseline = { ...cumulativeUsage }
+      turnBaselineProven = sawCumulativeFrame
       latestTurnCumulative = undefined
       usage = { tokensIn: 0, tokensOut: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 }
       // 去重只在一轮之内成立：新一轮的第一帧即使和上一轮末帧相同，也是真实用量。
@@ -316,15 +334,20 @@ export function parseCodexRollout(
         lastRequestInputTokens = last.input_tokens
       }
       if (total) {
-        const number = (key: string): number => typeof total[key] === 'number' && Number.isFinite(total[key]) ? total[key] as number : 0
-        latestTurnCumulative = {
-          tokensIn: number('input_tokens'),
-          tokensOut: number('output_tokens'),
-          cacheReadTokens: number('cached_input_tokens'),
-          cacheCreationTokens: number('cache_write_input_tokens'),
-          reasoningTokens: number('reasoning_output_tokens')
+        const counters = codexUsageCounters(total)
+        if (!sawCumulativeFrame) {
+          // First frame of this window: derive the cumulative the session had before it, so the first
+          // turn counts its own request instead of the session's lifetime total.
+          const baseline = codexBaselineFromLastFrame(total, last)
+          if (baseline) {
+            cumulativeUsage = { ...baseline }
+            turnUsageBaseline = { ...baseline }
+            turnBaselineProven = true
+          }
         }
-        cumulativeUsage = { ...latestTurnCumulative }
+        latestTurnCumulative = counters
+        cumulativeUsage = { ...counters }
+        sawCumulativeFrame = true
         usageObserved = true
       }
       // `total_token_usage` 缺失时才会用到这些增量求和。Codex 可能把同一帧
