@@ -66,7 +66,10 @@
   - `succeed`、`retry`、`fail` 都要求租约持有者匹配；`attempts` 递增；退避为 100·2ⁿ ms，上限 30 s，最多 5 次。
   - 解码失败的行置为 `failed`，不阻塞队列。
   - outbox 的所有状态变化都在 EventSink 事务内完成；删除事务外的 `updateRunStartOutbox` 和 `requeueRunStartOutbox`。
-  - 派发、停止、回答、`conversation.writeback`、`catalog.*` 都由 worker 执行。
+  - 派发、停止、回答都由 worker 执行。
+  - 落地后删掉两个没有生产者的 kind：`catalog.*`（扫描本来就是直接调用）与 `conversation.writeback`
+    （会话轮次改在 daemon 终态路径结算，启动对账兜底，见 `reports/W20-5.md` 第九轮）。留一个没人投递的
+    kind，等于在策略表里写一条假承诺。
 - 收尾：`RemoteDispatcher` 改为 `orch_outbox` 的消费者；删除对内存台账（`shadow-mirror.ts`、`shadow-routing.ts`）的派发依赖；随后按真实职责给剩下的模块改名。
 
 **B2 数据保留**
