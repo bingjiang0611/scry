@@ -126,8 +126,6 @@ export function conversationChannelTable(deps: ConversationTableDependencies) {
     if (typeof fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('迁移确认指纹无效')
     return adoptLegacyConversation(source, fingerprint)
   })
-  // Deletion (with its side-chat cascade) is registered through the same collecting
-  // `handle`, so main and the daemon serve it alike.
   const { prepareConversationDeletion, sideChatCascade } = registerConversationDeletionHandlers(handle, {
     providerContextKey, contextAdmission, getStartupManagedRecovery, appSessionStore, conversationStore,
     getRuns, invalidateSessionHistoryLoad, publishDataUpdated, deleteOneSession, resolveSessionRunIds, deleteConversationHistory,
@@ -190,7 +188,6 @@ export interface ConversationBootstrapDependencies extends Omit<ConversationTabl
   getWindow: () => BrowserWindow | null
 }
 
-/** The shared table on a trusted registrar, announcing writes to one window (tests drive the table this way). */
 export function registerConversationHandlers(deps: ConversationBootstrapDependencies) {
   const publishDataUpdated = (event: AgentDataUpdated): void => { deps.getWindow()?.webContents.send('agent:dataUpdated', event) }
   const { handlers, prepareConversationDeletion, sideChatCascade } = conversationChannelTable({ ...deps, publishDataUpdated })
