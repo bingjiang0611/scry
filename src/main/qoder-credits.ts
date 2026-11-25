@@ -282,6 +282,7 @@ export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow
     ...analytics,
     totals: enrich(analytics.totals, evidence),
     byProvider,
+    byAgent: analytics.byAgent.map((row) => row.agent === 'qoder' ? enrich(row, evidence) : row),
     // Credits are attributed to a Provider/turn, not to an auto-routed model.
     byModel: convert && evidence?.credits != null && projectedQoder
       ? [...analytics.byModel.filter((row) => row.provider !== 'qoder'), projectedQoder]

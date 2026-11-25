@@ -35,4 +35,18 @@ describe('Qoder Credits 的每日补齐', () => {
     expect(enriched.dailyByProvider.filter((row) => row.provider === 'qoder')).toHaveLength(2)
     expect(enriched.dailyByAgent.find((row) => row.agent === 'qoder' && row.day === '2026-09-07')).toMatchObject({ costUsd: 0.025 })
   })
+
+  it('按 Agent 的行也带上 Credit 折算的金额', () => {
+    const analytics = buildUsageAnalytics({
+      nowMs: today, rangeDays: 7,
+      tokens: [{
+        tsStart: today, provider: 'qoder', model: 'model-a', inputTokens: 100, outputTokens: 20,
+        cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, runId: 'run-today'
+      }],
+      costs: []
+    })
+    const enriched = withQoderCredits(analytics, [creditRow(today, 'run-today', 2.5)])
+    expect(enriched.byAgent.find((row) => row.agent === 'qoder')).toMatchObject({ costUsd: 0.025, costKnownRows: 1 })
+    expect(enriched.byModel.find((row) => row.agent === 'qoder')).toMatchObject({ costUsd: 0.025 })
+  })
 })

@@ -20,13 +20,13 @@ export function SidebarNav({
   return (
     <nav className="sb-nav" aria-label="主要视图">
       {onAnalytics && (
-        <button type="button" className={`sb-navitem ${analyticsActive ? 'active' : ''}`}
+        <button type="button" className={`sb-navitem ${analyticsActive ? 'active' : ''}`} title="分析"
           aria-current={analyticsActive ? 'page' : undefined} onClick={onAnalytics}>
           <Icon name="overview" /> 分析
         </button>
       )}
       {onMachines && (
-        <button type="button" className={`sb-navitem ${machinesActive ? 'active' : ''}`}
+        <button type="button" className={`sb-navitem ${machinesActive ? 'active' : ''}`} title="机器"
           aria-current={machinesActive ? 'page' : undefined} onClick={onMachines}>
           <Icon name="server" /> 机器
         </button>

@@ -36,8 +36,9 @@ function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; m
     if (run.length) runs.push(run)
     return { agent: item.agent, index, runs, color: seriesColor(index) }
   })
-  const readOut = active == null ? '' : `${formatDay(days[active])}：${series.map((item) => {
-    const value = item.values[active]
+  const spot = active != null && active < days.length ? active : null
+  const readOut = spot == null ? '' : `${formatDay(days[spot])}：${series.map((item) => {
+    const value = item.values[spot]
     return `${agentName(item.agent)} ${value == null ? '无价格' : format(value) || '0'}`
   }).join('，')}`
   return <>
@@ -48,7 +49,13 @@ function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; m
     </div>
     <div className="analytics-chart">
       {series.length > 0 && <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={copy.dailyTitle(metric)} tabIndex={0}
-        aria-describedby="analytics-chart-readout" onFocus={() => setActive(0)} onBlur={() => setActive(null)}
+        aria-describedby="analytics-chart-readout" onBlur={() => setActive(null)}
+        onPointerMove={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          const local = (event.clientX - rect.left) / rect.width * W
+          setActive(Math.max(0, Math.min(days.length - 1, Math.round((local - L) / plotWidth * (days.length - 1)))))
+        }}
+        onPointerLeave={() => setActive(null)}
         onKeyDown={(event) => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Escape'].includes(event.key)) return
           event.preventDefault()
@@ -75,9 +82,9 @@ function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; m
           {path.runs.map((run, index) => <path key={index} className="analytics-line" d={run.length === 1
             ? `M ${run[0].x - 2},${run[0].y} h 4` : smoothPath(run)} />)}
         </g>)}
-        {active != null && <line className="analytics-cursor" x1={x(active)} x2={x(active)} y1={T} y2={H - B} />}
+        {spot != null && <line className="analytics-cursor" x1={x(spot)} x2={x(spot)} y1={T} y2={H - B} />}
       </svg>}
-      {active != null && <p id="analytics-chart-readout" className="analytics-readout" role="status">{readOut}</p>}
+      {spot != null && <p id="analytics-chart-readout" className="analytics-readout" role="status">{readOut}</p>}
     </div>
   </>
 }

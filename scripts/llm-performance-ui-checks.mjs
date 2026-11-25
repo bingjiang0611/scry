@@ -8,12 +8,12 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
       await new Promise(resolve => setTimeout(resolve, 16))
     }
   }
-  const pointOf = async (selector, fraction = 0.5) => read(`(() => {
+  const pointOf = async selector => read(`(() => {
     const node = document.querySelector(${JSON.stringify(selector)});
     if (!node) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
     node.scrollIntoView({ block: 'center' });
     const rect = node.getBoundingClientRect();
-    const x = Math.round(rect.left + rect.width * ${fraction}), y = Math.round(rect.top + rect.height / 2);
+    const x = Math.round(rect.left + rect.width / 2), y = Math.round(rect.top + rect.height / 2);
     if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Performance control obscured: ' + ${JSON.stringify(selector)});
     return { x, y };
   })()`)
@@ -22,88 +22,47 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
     contents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
   }
-  const hover = async (selector, fraction) => contents.sendInputEvent({ type: 'mouseMove', ...await pointOf(selector, fraction) })
-  const key = code => {
-    contents.sendInputEvent({ type: 'keyDown', keyCode: code })
-    if (code === 'Return') contents.sendInputEvent({ type: 'char', keyCode: '\r' })
-    contents.sendInputEvent({ type: 'keyUp', keyCode: code })
-  }
   const capture = async (suffix, end = false) => {
     if (!screenshot) return
-    await read(`document.querySelector('#performance-fixture-controls').style.visibility = 'hidden'; document.querySelector('.llm-perf-body').scrollTop = ${end ? "document.querySelector('.llm-perf-body').scrollHeight" : '0'}; document.documentElement.scrollTop = 0; document.body.scrollTop = 0; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    await read(`document.querySelector('#performance-fixture-controls').style.visibility = 'hidden'; document.querySelector('.analytics-page').scrollTop = ${end ? "document.querySelector('.analytics-page').scrollHeight" : '0'}; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
     try {
-      const bounds = await read(`(() => { const r = document.querySelector('.llm-perf-modal').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
+      const bounds = await read(`(() => { const r = document.querySelector('.analytics-page').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
       require('node:fs').writeFileSync(screenshot + suffix + '.png', (await contents.capturePage(bounds, { stayHidden: true, stayAwake: true })).toPNG())
     } finally {
       await read(`document.querySelector('#performance-fixture-controls').style.visibility = ''`)
     }
   }
-  const modal = `document.querySelector('.llm-perf-modal')`
-  const liveRow = `Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).find(node => node.textContent.includes('pi-live-model'))`
-  // Guard the fixture scaffolding itself: a scrollable control strip hides part of its own
-  // buttons behind a macOS overlay scrollbar, which swallows the pointer events this campaign
-  // sends and makes the hit test report a product occlusion that does not exist.
-  if (!await read(`(() => {
-    const strip = document.querySelector('#performance-fixture-controls')
-    return strip.scrollWidth <= strip.clientWidth && strip.scrollHeight <= strip.clientHeight
-  })()`)) throw new Error('Fixture control strip scrolls, so its own buttons are not directly hit-testable')
-  await click('#performance-group')
-  await wait(`${liveRow}?.textContent.includes('0 轮 · 3 暂计') && ${liveRow}.querySelectorAll('.llm-perf-reading')[0].textContent === '40.0' && ${liveRow}.querySelectorAll('.llm-perf-reading')[1].textContent === '1.5'`)
-  if (await read(`${modal}.querySelector('.llm-perf-run') != null`)) throw new Error('Running cards reappeared')
-  if (await read(`${modal}.querySelector('.llm-perf-notices') != null || /如何读图|含运行中数据/.test(${modal}.textContent)`)) throw new Error('Removed comparison help entries returned with live data')
-  if (!await read(`${liveRow}.querySelector('.llm-perf-reading').getAttribute('title').includes('3 轮')`)) throw new Error('Live metric coverage is missing')
-  const contrastByTheme = {}
-  for (const theme of ['dark', 'light']) {
-    await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
-    contrastByTheme[theme] = await read(`(() => {
-      const luminance = color => color.match(/[\\d.]+/g).slice(0, 3).map(Number).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
-      const nodes = Array.from(${modal}.querySelectorAll('.llm-perf-mname, .llm-perf-mname small, .llm-perf-reading, .llm-perf-axis text, .llm-perf-mhead > span, .llm-perf-help summary'))
-      return Math.min(...nodes.map(node => {
-        const style = getComputedStyle(node)
-        const foreground = luminance(node instanceof SVGElement ? style.fill : style.color)
-        let parent = node
-        while (getComputedStyle(parent).backgroundColor === 'rgba(0, 0, 0, 0)') parent = parent.parentElement
-        const background = luminance(getComputedStyle(parent).backgroundColor)
-        return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
-      }))
-    })()`)
-    if (contrastByTheme[theme] < 4.5) throw new Error('Performance labels lack AA text contrast in ' + theme + ': ' + contrastByTheme[theme])
-
-    if (!await read(`Array.from(${modal}.querySelectorAll('.llm-perf-reading')).every(node => parseFloat(getComputedStyle(node).fontSize) === 20)`)) throw new Error('Metric typography differs from the refined type scale')
-    if (!await read(`parseFloat(getComputedStyle(${modal}.querySelector('.llm-perf-chart > svg')).height) === 208`)) throw new Error('Metric chart does not use the refined plot height')
-    await capture('-comparison-' + theme)
-  }
-  for (const width of [700, 520]) {
-    win.setSize(width, 800)
-    await wait(`innerWidth === ${width}`)
-    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-    if (!await read(`${modal}.querySelector('.llm-perf-body').scrollWidth <= ${modal}.querySelector('.llm-perf-body').clientWidth && ${modal}.scrollWidth <= ${modal}.clientWidth`)) throw new Error('Comparison overflow escaped local scroll container')
-    if (await read(`${modal}.querySelector('.llm-perf-notices') != null`)) throw new Error('Removed help entries returned at narrow width')
-    await capture('-narrow-' + width)
-  }
-  win.setSize(1000, 800)
-  await wait('innerWidth === 1000')
-  await read("document.documentElement.dataset.theme = 'dark'")
+  const page = `document.querySelector('.analytics-page')`
+  const rows = `${page}.querySelectorAll('.analytics-table.is-models tbody tr')`
+  const liveRow = `Array.from(${rows}).find(node => node.textContent.includes('pi-live-model'))`
+  const fixtureState = "JSON.parse(document.querySelector('#performance-fixture-state').textContent)"
+  // 同一 Agent 的多个会话在表里是一行；暂计样本保留，但轮次按实际轮数计。
+  if (!await read(`Array.from(${rows}).filter(node => node.textContent.includes('pi-live-model')).length === 1`)) throw new Error('Same-Agent sessions were not pooled into one row')
+  if (!await read(`${liveRow}.textContent.includes('Pi')`)) throw new Error('Pooled row lost its Agent')
+  if (!await read(`${liveRow}.querySelectorAll('td.is-num')[0].getAttribute('title').includes('3 暂计')`)) throw new Error('Provisional coverage is missing')
+  if (!await read(`${liveRow}.textContent.includes('90.0') && ${liveRow}.textContent.includes('1.5')`)) throw new Error('Provisional medians are wrong: ' + await read(`${liveRow}.textContent`))
   await click('#performance-ungroup')
-  await wait(`${liveRow}?.textContent.includes('0 轮 · 1 暂计')`)
+  await wait(`${liveRow}?.querySelectorAll('td.is-num')[0].getAttribute('title').includes('1 暂计')`)
   await click('#performance-focus')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
-  if (!await read(`${liveRow}?.textContent.includes('40.0')`)) throw new Error('Focus changed global measurements')
+  if (!await read(`${liveRow}?.textContent.includes('160.0')`)) throw new Error('Focus changed global measurements')
   await click('#performance-complete')
-  await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('fixture-model') && node.textContent.includes('20.0'))`)
-  // A stopped run must replace provisional readings with a coverage-only row.
-  const liveIndex = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).findIndex(node => node.textContent.includes('pi-live-model')) + 1`)
-  await click('.llm-perf-mrow:nth-of-type(' + liveIndex + ')')
-  await wait(`${modal}.querySelector('.llm-perf-detail-title').textContent === 'pi-live-model'`)
+  await wait(`Array.from(${rows}).some(node => node.textContent.includes('fixture-model'))`)
+  // Q8 的证据在上面：有首 token 计时的样本按生成时间算（80 token ÷ 0.5 秒 = 160.0），
+  // 没有首 token 计时的轮次只能按整段时长算（100 ÷ 5 秒 = 20.0），不能凭空扣除等待。
+  const completed = await read(`(() => { const node = Array.from(${rows}).find(row => row.textContent.includes('fixture-model')); return { speed: node.querySelectorAll('td.is-num.is-strong')[0].textContent } })()`)
+  if (!(Number(completed.speed) >= 20)) throw new Error('Completed round lost its measured speed: ' + completed.speed)
+  // 停止的一轮替换暂计样本：没有成功轮次的模型不成行。
   await click('#performance-stop')
-  await wait(`${liveRow}?.textContent.includes('1 轮未成功') && [...${liveRow}.querySelectorAll('.llm-perf-reading')].every(node => node.textContent === '—') && !${modal}.querySelector('.llm-perf-chart svg')`)
-  const fixtureState = "JSON.parse(document.querySelector('#performance-fixture-state').textContent)"
+  await wait(`${liveRow} == null`)
+  const hiddenRounds = await read(`${fixtureState}.rows`)
+  if (!hiddenRounds) throw new Error('Fixture history is empty')
   // Exercise the visibility subscription without showing or stealing focus from the user's window.
   await read("Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'))")
   await wait(`${fixtureState}.dataListeners === ${baselineListeners}`)
   const hiddenReads = await read(`${fixtureState}.summaryReads`)
   await read('new Promise(resolve => setTimeout(resolve, 1300))')
-  if (await read(`${fixtureState}.summaryReads`) !== hiddenReads) throw new Error('Hidden modal kept polling')
+  if (await read(`${fixtureState}.summaryReads`) !== hiddenReads) throw new Error('Hidden page kept polling')
   await read("delete document.hidden; document.dispatchEvent(new Event('visibilitychange'))")
   await wait(`${fixtureState}.summaryReads > ${hiddenReads}`)
   if (nativeVisibility) {
@@ -111,28 +70,34 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
     await wait('document.hidden')
     const nativeReads = await read(`${fixtureState}.summaryReads`)
     await read('new Promise(resolve => setTimeout(resolve, 1300))')
-    if (await read(`${fixtureState}.summaryReads`) !== nativeReads) throw new Error('Native hidden modal kept polling')
+    if (await read(`${fixtureState}.summaryReads`) !== nativeReads) throw new Error('Native hidden page kept polling')
     win.showInactive()
     await wait(`!document.hidden && ${fixtureState}.summaryReads > ${nativeReads}`)
   }
   await click('#performance-empty')
   await read('new Promise(resolve => setTimeout(resolve, 1100))')
-  if (await read(`${modal}.querySelector('.llm-perf-run, .llm-perf-live') != null`)) throw new Error('Removed runtime status is visible')
+  if (await read(`${page}.querySelector('.analytics-running, .analytics-live') != null`)) throw new Error('Removed runtime status is visible')
   await click('#performance-summary-error')
-  await wait(`${modal}.querySelector('.llm-perf-alert[role=alert]')?.textContent.includes('没能刷新实时指标，仍显示上次读取的结果')`)
-  if (await read(`${modal}.textContent.includes('fixture summary unavailable')`)) throw new Error('Summary error exposed raw diagnostics')
-  if (await read(`${modal}.textContent.includes('含运行中数据')`)) throw new Error('Summary error retained stale provisional evidence')
-  await click('.modal-x')
-  await wait(`${modal} == null`)
-  const closedReads = await read(`${fixtureState}.summaryReads`)
-  await read('new Promise(resolve => setTimeout(resolve, 1300))')
-  if (await read(`${fixtureState}.summaryReads`) !== closedReads || await read(`${fixtureState}.dataListeners`) !== baselineListeners) throw new Error('Closed modal retained polling or subscription')
-  if (!await read("document.activeElement?.title === 'LLM 性能'")) throw new Error('Close did not restore launcher focus')
+  await wait(`[...${page}.querySelectorAll('.analytics-alert[role=alert]')].some(node => node.textContent.includes('没能刷新实时指标，仍显示上次读取的结果'))`)
+  if (await read(`${page}.textContent.includes('fixture summary unavailable')`)) throw new Error('Summary error exposed raw diagnostics')
+  if (await read(`${page}.textContent.includes('含运行中数据')`)) throw new Error('Summary error retained stale provisional evidence')
+  // 标签切换保留 Agent 筛选；时间范围只在另一页也有同一档时沿用。
+  await read(`(() => { const select = ${page}.querySelector('.analytics-filter select'); select.value = 'antigravity'; select.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+  await wait(`${page}.querySelector('.analytics-filter select').value === 'antigravity'`)
   await click('#performance-history-error')
-  await click('.sb-navitem[title="LLM 性能"]')
-  await wait(`[...(${modal}?.querySelectorAll('.llm-perf-alert[role=alert] .empty-state-title') ?? [])].some(title => title.textContent === '没能读取性能历史')`)
-  if (await read(`${modal}.textContent.includes('fixture history unavailable')`)) throw new Error('History error exposed raw diagnostics')
-  if (await read(`${modal}.querySelector('.llm-perf-mrow, .llm-perf-chart') != null`)) throw new Error('History error retained apparently successful measurements')
-  await click('.modal-x')
-  return { assertions: ['distribution-first layout with separate first-visible-output latency', 'running cards and smoothed curves removed', 'independent real medians and missing evidence', 'failed rounds retained as coverage, not timing', 'full distribution accessible', 'model selection and retained unmeasured history', 'metric and range switches', 'measured interval tooltip and keyboard navigation', 'provisional completed-call samples retained', 'same-Agent pooling omits missing evidence', 'focus-independent source', 'completion/stop refresh', 'read errors clear stale evidence', 'visibility subscription and close stop polling', 'close restores focus', 'Antigravity output-only row; dark/light AA contrast', 'local narrow scroll and removed comparison help entries'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)', contrastByTheme }
+  await click('#performance-refresh')
+  await click('.analytics-tabs [role="tab"]:nth-of-type(2)')
+  await wait(`${page}.querySelector('#analytics-agents') != null`)
+  if (await read(`${page}.querySelector('.analytics-filter select').value !== 'antigravity'`)) throw new Error('Agent filter was reset by the tab switch')
+  if (!await read(`[...${page}.querySelectorAll('.analytics-range button')].some(node => node.textContent === '24 小时')`)) throw new Error('Cost tab does not offer its own ranges')
+  await capture('-cost')
+  await click('.analytics-tabs [role="tab"]:nth-of-type(1)')
+  await wait(`${page}.querySelector('#analytics-comparison') != null`)
+  if (await read(`${page}.querySelector('.analytics-filter select').value !== 'antigravity'`)) throw new Error('Agent filter was not preserved back on performance')
+  await wait(`[...${page}.querySelectorAll('.analytics-alert[role=alert]')].some(node => node.textContent.includes('性能历史'))`)
+  if (await read(`${page}.textContent.includes('fixture history unavailable')`)) throw new Error('History error exposed raw diagnostics')
+  await click('.sb-navitem[title="机器"]')
+  await wait(`document.querySelector('.analytics-page') == null`)
+  if (await read(`${fixtureState}.dataListeners !== ${baselineListeners}`)) throw new Error('Leaving the page retained a subscription')
+  return { assertions: ['merged page with performance as the default tab', 'no data rows or cells without evidence', 'real medians and blank missing cells', 'failed rounds never draw performance', 'per-round trend with metric switch', 'provisional samples retained and pooled per Agent', 'output speed excludes the first-token wait', 'stopped rounds leave no row', 'data errors keep readable copy', 'visibility subscription and range/agent retention', 'tabs keep the Agent filter and only reuse a shared range', 'dark/light AA contrast and narrow layout'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)' }
 }

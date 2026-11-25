@@ -11,10 +11,6 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   const pointOf = async (selector, fraction = 0.5) => read(`(() => {
     const nodes = [...document.querySelectorAll(${JSON.stringify(selector)})];
     if (!nodes.length) throw new Error('Missing performance control: ' + ${JSON.stringify(selector)});
-    // Interval hit bands are 24 units wide, so a dense chart paints the next band over the
-    // previous band's center: the topmost band at an x receives the pointer. Every match is
-    // a real interactive interval, so measure them all and take the first whose own center
-    // is really hit. The guard below still fails the run when none is reachable.
     const attempts = [];
     for (const node of nodes) {
       node.scrollIntoView({ block: 'center' });
@@ -39,78 +35,105 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   }
   const capture = async (suffix, end = false) => {
     if (!screenshot) return
-    await read(`document.querySelector('#performance-fixture-controls').style.visibility = 'hidden'; document.querySelector('.llm-perf-body').scrollTop = ${end ? "document.querySelector('.llm-perf-body').scrollHeight" : '0'}; document.documentElement.scrollTop = 0; document.body.scrollTop = 0; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
+    await read(`document.querySelector('#performance-fixture-controls').style.visibility = 'hidden'; document.querySelector('.analytics-page').scrollTop = ${end ? "document.querySelector('.analytics-page').scrollHeight" : '0'}; new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`)
     try {
-      const bounds = await read(`(() => { const r = document.querySelector('.llm-perf-modal').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
+      const bounds = await read(`(() => { const r = document.querySelector('.analytics-page').getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), width: Math.ceil(r.width), height: Math.ceil(r.height) }; })()`)
       require('node:fs').writeFileSync(screenshot + suffix + '.png', (await contents.capturePage(bounds, { stayHidden: true, stayAwake: true })).toPNG())
     } finally {
       await read(`document.querySelector('#performance-fixture-controls').style.visibility = ''`)
     }
   }
+  const page = `document.querySelector('.analytics-page')`
+  const rows = `${page}.querySelectorAll('.analytics-table.is-models tbody tr')`
+  const liveRow = `Array.from(${rows}).find(node => node.textContent.includes('pi-live-model'))`
   if (nativeVisibility) win.showInactive()
   contents.focus()
-  await wait(`document.querySelector('.sb-navitem[title="LLM 性能"]') != null`)
+  await wait(`document.querySelector('.sb-navitem') != null`)
   const nav = await read(`Array.from(document.querySelectorAll('.sb-navitem')).map(node => node.textContent.trim())`)
-  if (nav.indexOf('LLM 性能') !== 1 || nav.indexOf('技能') !== 2) throw new Error('LLM 性能 entry is not directly above Skills')
+  if (nav.indexOf('分析') !== 0) throw new Error('Analytics entry is not first: ' + JSON.stringify(nav))
+  if (nav.includes('LLM 性能')) throw new Error('The removed LLM performance entry is still in the sidebar')
   const baselineListeners = await read(`JSON.parse(document.querySelector('#performance-fixture-state').textContent).dataListeners`)
-  await click('.sb-navitem[title="LLM 性能"]')
-  await wait(`document.querySelector('.llm-perf-modal') != null`)
-  const modal = `document.querySelector('.llm-perf-modal')`
-  await wait(`${modal}.querySelectorAll('.llm-perf-mrow').length === 4 && ${modal}.querySelectorAll('.llm-perf-interval').length > 0`)
-  if (await read(`${modal}.querySelector('.llm-perf-running, .llm-perf-run, .llm-perf-line') != null`)) throw new Error('Removed running cards or smooth curves remain')
-  const readings = await read(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).map(node => ({model: node.querySelector('b').textContent, values: [...node.querySelectorAll('.llm-perf-reading')].map(n => n.textContent)}))`)
-  if (JSON.stringify(readings) !== JSON.stringify([{model: 'fast-model', values: ['62.0','2.0','—']}, {model: 'slow-model', values: ['21.0','—','—']}, {model: '所选：gemini', values: ['—','—','14.0']}, {model: 'unmeasured-model', values: ['—','—','—']}])) throw new Error('Real comparison medians/missing evidence wrong: '+JSON.stringify(readings))
-  if (!await read(`${modal}.querySelector('.llm-perf-mrow').children.length === 5 && ${modal}.querySelector('.llm-perf-detail-title').textContent === 'fast-model'`)) throw new Error('Comparison columns or default selection wrong')
-  if (!await read(`Array.from(${modal}.querySelectorAll('.llm-perf-metric button')).map(node => node.textContent).join(',') === 'TPS,TTFT,首段回复等待'`)) throw new Error('Metric tabs do not separate first visible output and TTFT')
-  if (await read(`${modal}.querySelector('.llm-perf-detail-summary, .llm-perf-mhead small, .llm-perf-unit') != null`)) throw new Error('Removed metric summary or header units remain')
-  if (await read(`${modal}.textContent.includes('999') || ${modal}.textContent.includes('字符/s')`)) throw new Error('Unsuccessful timing or legacy character units leaked')
-  await wait(`${modal}.querySelector('.llm-perf-mrow:nth-of-type(3)').textContent.includes('Antigravity') && ${modal}.querySelector('.llm-perf-mrow:nth-of-type(1)').textContent.includes('1 轮未成功')`)
-  await click('.llm-perf-mrow:nth-of-type(3)')
-  await wait(`${modal}.querySelector('.llm-perf-chart svg')?.getAttribute('aria-label').includes('首段回复等待') && ${modal}.textContent.includes('不等同于 TTFT')`)
-  await click('.llm-perf-mrow:nth-of-type(1)')
-  await wait(`${modal}.querySelector('.llm-perf-chart svg')?.getAttribute('aria-label').includes('TPS')`)
-  const range = await read(`${modal}.querySelector('.llm-perf-distribution').getAttribute('aria-label')`)
+  await click('.sb-navitem[title="分析"]')
+  await wait(`${page} != null`)
+  if (await read(`document.querySelector('.llm-perf-modal') != null`)) throw new Error('The removed performance modal reopened')
+  if (!await read(`[...${page}.querySelectorAll('.analytics-tabs [role="tab"]')].map(node => node.textContent).join(',') === 'LLM 性能,成本与用量'`)) throw new Error('Tabs differ from design')
+  if (!await read(`[...${page}.querySelectorAll('.analytics-tabs [role="tab"]')].map(node => node.getAttribute('aria-selected')).join(',') === 'true,false'`)) throw new Error('LLM performance is not the default tab')
+  await wait(`${rows}.length === 4`)
+  if (await read(`${page}.querySelector('.analytics-running, .analytics-line, .analytics-card .llm-perf-running') != null`)) throw new Error('Removed running cards or smooth curves remain')
+  const readings = await read(`Array.from(${rows}).map(node => ({ model: node.querySelector('b').textContent, turns: node.querySelectorAll('td.is-num')[0].firstChild.textContent.trim(), values: [...node.querySelectorAll('td.is-num.is-strong')].map(cell => cell.textContent) }))`)
+  const expected = [
+    { model: 'fast-model', turns: '5', values: ['62.0', '2.0', ''] },
+    { model: 'slow-model', turns: '3', values: ['21.0', '', ''] },
+    { model: 'model-agy', turns: '1', values: ['', '', '14.0'] },
+    { model: 'unmeasured-model', turns: '1', values: ['', '', ''] }
+  ]
+  if (JSON.stringify(readings) !== JSON.stringify(expected)) throw new Error('Real comparison medians/missing evidence wrong: ' + JSON.stringify(readings))
+  // 表头带单位，页面不出现「—」「所选：」。
+  if (!await read(`${page}.querySelector('.analytics-table.is-models thead').textContent.includes('token/秒')`)) throw new Error('Speed column lost its unit')
+  if (await read(`/—|所选：/.test(${page}.textContent)`)) throw new Error('Placeholder dash or removed model label is visible')
+  if (!await read(`${page}.querySelectorAll('.analytics-table.is-models thead th').length === 6`)) throw new Error('Comparison columns differ from design')
+  if (await read(`${page}.querySelector('.analytics-models-summary, .analytics-table-unit') != null`)) throw new Error('Removed metric summary remains')
+  if (await read(`${page}.textContent.includes('999') || ${page}.textContent.includes('字符/s')`)) throw new Error('Unsuccessful timing or legacy character units leaked')
+  if (!await read(`${liveRow} == null`)) throw new Error('Live session rows appeared before data arrived')
+  // 第三个模型只有首段回复证据；切换模型后曲线随指标走。
+  await click(`.analytics-table.is-models tbody tr:nth-child(3) .analytics-row-select`)
+  await wait(`${page}.querySelector('#analytics-trend').textContent.includes('model-agy')`)
+  if (!await read(`${page}.querySelector('#analytics-trend').parentElement.textContent.includes('1 轮 · 每点一轮')`)) throw new Error('Trend card lost its per-round note')
+  await click('.analytics-metric button:nth-of-type(3)')
+  await wait(`${page}.querySelector('.analytics-trend svg')?.getAttribute('aria-label').includes('首段回复')`)
+  if (!await read(`${page}.querySelector('.analytics-trend svg').getAttribute('aria-label').includes('每轮一个点')`)) throw new Error('Trend chart lost its per-round basis')
+  if (!await read(`${page}.querySelectorAll('.analytics-point').length === 1`)) throw new Error('Trend chart drew more than one round')
+  const basis = await read(`(() => { const details = ${page}.querySelector('.analytics-basis'); return { open: details.open, visible: details.querySelector('p').checkVisibility(), text: details.querySelector('p').textContent } })()`)
+  if (basis.open || basis.visible) throw new Error('Metric basis is not collapsed by default: ' + JSON.stringify(basis))
+  if (!basis.text.includes('包含工具执行和等待你批准的时间') || !basis.text.includes('不含首 token 之前的等待')) throw new Error('Metric basis lost its definitions')
+  await click(`.analytics-table.is-models tbody tr:nth-child(1) .analytics-row-select`)
+  await wait(`${page}.querySelector('.analytics-trend svg')?.getAttribute('aria-label').includes('输出速度')`)
+  const range = await read(`[...${page}.querySelectorAll('.analytics-table.is-models .analytics-dist')].map(node => node.getAttribute('aria-label')).join(' | ')`)
   if (!range.includes('最小 60.0') || !range.includes('最大 64.0') || !range.includes('P25')) throw new Error('Distribution missing accessible full range')
-  if (await read(`${modal}.querySelector('.llm-perf-notices') != null || /如何读图|含运行中数据/.test(${modal}.textContent)`)) throw new Error('Removed comparison help entries remain')
-  if (!await read(`${modal}.contains(document.activeElement) && ${modal}.getAttribute('role') === 'dialog' && ${modal}.getAttribute('aria-modal') === 'true' && ${modal}.getAttribute('aria-labelledby')`)) throw new Error('Dialog focus/semantics broken')
-  await hover('.llm-perf-interval .llm-perf-hit', .5)
-  await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('token/s')`)
-  if (await read(`${modal}.querySelector('.llm-perf-tip').textContent.includes('空闲')`)) throw new Error('Idle synthesized into measured interval')
+  if (await read(`${page}.querySelector('.analytics-basis summary') == null`)) throw new Error('Metric basis entry is missing')
+  await hover('.analytics-point', .5)
+  await wait(`${page}.querySelector('.analytics-tip')?.textContent.includes('token/秒')`)
+  if (await read(`${page}.querySelector('.analytics-tip').textContent.includes('空闲')`)) throw new Error('Idle synthesized into measured round')
   await capture('-dark')
-  await click('.llm-perf-mrow:nth-of-type(2)')
-  await wait(`${modal}.querySelector('.llm-perf-detail-title').textContent === 'slow-model'`)
-  await click('.llm-perf-metric button:nth-child(2)')
-  await wait(`${modal}.querySelector('.llm-perf-empty')?.textContent.includes('slow-model') && ${modal}.querySelector('.llm-perf-empty').textContent.includes('TTFT') && !${modal}.querySelector('.llm-perf-chart svg')`)
-  await click('.llm-perf-mrow:nth-of-type(1)')
-  await wait(`${modal}.querySelectorAll('.llm-perf-interval').length > 0 && ${modal}.querySelector('.llm-perf-chart svg').getAttribute('aria-label').includes('TTFT')`)
-  await hover('.llm-perf-interval .llm-perf-hit', .5)
-  await wait(`${modal}.querySelector('.llm-perf-tip')?.textContent.includes('秒')`)
-  await click('.llm-perf-mrow:nth-of-type(1)')
-  if (!await read(`${modal}.querySelector('.llm-perf-mrow').getAttribute('aria-pressed') === 'true'`)) throw new Error('Repeated model click deselected detail')
-  await click('.llm-perf-metric button:nth-child(1)')
-  await wait(`${modal}.querySelector('.llm-perf-chart svg') != null && ${modal}.querySelector('.llm-perf-chart svg').getAttribute('aria-label').includes('TPS')`)
-  await click('.llm-perf-chart svg')
-  key('Home')
-  await wait(`${modal}.querySelector('.llm-perf-interval:first-of-type.active') != null || ${modal}.querySelector('.llm-perf-tip') != null`)
-  key('End')
-  await wait(`${modal}.querySelector('.llm-perf-interval:last-child.active') != null`)
-  key('Left')
-  if (!await read(`document.activeElement.matches('.llm-perf-chart svg') && ${modal}.querySelector('.llm-perf-tip') != null`)) throw new Error('Keyboard chart navigation lost focus')
-  key('Escape')
-  await wait(`${modal} != null && ${modal}.querySelector('.llm-perf-tip') == null`)
-  // A range switch remounts MetricChart (keyed by hours); its svg only renders after a follow-up
-  // width render, so the centered modal is ~208px shorter until then and the header sits lower.
-  // Wait for the remounted svg before measuring the next range button, or the click can land on
-  // the pre-settle coordinates and miss once the modal grows back.
-  const rangeSettled = `${modal}.querySelector('.llm-perf-chart svg') != null`
-  await click('.llm-perf-range button:nth-child(1)')
-  await wait(`${modal}.querySelector('.llm-perf-range button').getAttribute('aria-pressed') === 'true' && ${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '61.0' && ${rangeSettled}`)
-  await click('.llm-perf-range button:nth-child(3)')
-  await wait(`${modal}.querySelector('.llm-perf-mrow .llm-perf-reading').textContent === '62.0' && ${rangeSettled}`)
-  await click('.llm-perf-range button:nth-child(2)')
-  await wait(`${modal}.querySelector('.llm-perf-range button:nth-child(2)').getAttribute('aria-pressed') === 'true' && ${rangeSettled}`)
+  const contrastByTheme = {}
+  for (const theme of ['dark', 'light']) {
+    await read(`document.documentElement.setAttribute('data-theme', ${JSON.stringify(theme)})`)
+    contrastByTheme[theme] = await read(`(() => {
+      const luminance = color => color.match(/[\\d.]+/g).slice(0, 3).map(Number).map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0)
+      const nodes = Array.from(${page}.querySelectorAll('.analytics-name, .analytics-sub, .analytics-tile-label, .analytics-axis text, .analytics-table thead th, .analytics-basis summary'))
+      return Math.min(...nodes.map(node => {
+        const style = getComputedStyle(node)
+        const foreground = luminance(node instanceof SVGElement ? style.fill : style.color)
+        let parent = node
+        while (getComputedStyle(parent).backgroundColor === 'rgba(0, 0, 0, 0)') parent = parent.parentElement
+        const background = luminance(getComputedStyle(parent).backgroundColor)
+        return (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
+      }))
+    })()`)
+    if (contrastByTheme[theme] < 4.5) throw new Error('Performance labels lack AA text contrast in ' + theme + ': ' + contrastByTheme[theme])
+    if (!await read(`parseFloat(getComputedStyle(${page}.querySelector('.analytics-trend > svg')).height) === 200`)) throw new Error('Trend chart does not use the design plot height')
+    await capture('-comparison-' + theme)
+  }
+  for (const width of [700, 520]) {
+    win.setSize(width, 800)
+    await wait(`innerWidth === ${width}`)
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    if (!await read(`${page}.scrollWidth <= innerWidth && ${page}.querySelector('.analytics-table-scroll').scrollWidth >= ${page}.querySelector('.analytics-table-scroll').clientWidth`)) throw new Error('Comparison overflow escaped its scroll container')
+    if (await read(`${page}.querySelector('.analytics-basis') == null`)) throw new Error('Metric basis vanished at narrow width')
+    await capture('-narrow-' + width)
+  }
+  win.setSize(1000, 800)
+  await wait('innerWidth === 1000')
+  await read("document.documentElement.dataset.theme = 'dark'")
+  // 时间范围只切换同一份数据的视图：1 小时窗口里只剩最近三轮。
+  await click('.analytics-range button:nth-child(1)')
+  await wait(`[...${rows}][0].querySelectorAll('td.is-num.is-strong')[0].textContent === '61.0'`)
+  await click('.analytics-range button:nth-child(2)')
+  await wait(`[...${rows}][0].querySelectorAll('td.is-num.is-strong')[0].textContent === '62.0'`)
   await click('#performance-stream')
-  await wait(`Array.from(${modal}.querySelectorAll('.llm-perf-mrow')).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('40.0') && node.textContent.includes('1.5') && node.textContent.includes('0 轮 · 1 暂计'))`)
-  if (await read(`${modal}.querySelector('.llm-perf-running, .llm-perf-run') != null`)) throw new Error('Live evidence restored removed cards')
-  return { baselineListeners }
+  await wait(`Array.from(${rows}).some(node => node.textContent.includes('pi-live-model') && node.textContent.includes('160.0') && node.textContent.includes('1.5'))`)
+  await click('#performance-group')
+  await wait(`${liveRow} != null && ${liveRow}.querySelectorAll('td.is-num')[0].getAttribute('title').includes('3 暂计')`)
+  if (await read(`${liveRow}.querySelectorAll('.analytics-dist').length !== 1`)) throw new Error('Provisional samples lost their distribution')
+  return { baselineListeners, contrastByTheme }
 }

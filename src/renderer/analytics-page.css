@@ -296,6 +296,10 @@
   font-weight: var(--weight-medium);
 }
 
+.analytics-table .is-num .analytics-sub {
+  display: block;
+}
+
 .analytics-sub {
   color: var(--dim2);
   font-size: var(--text-xs);
