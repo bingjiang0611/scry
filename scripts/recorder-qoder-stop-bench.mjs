@@ -20,7 +20,7 @@ for (const [build, dist] of [['baseline', baseline], ['candidate', candidate]]) 
   const load = name => import(pathToFileURL(resolve(dist, 'core/turn-recorder', `${name}.js`)))
   const { handleRecorderHook, recoverRecorder } = await load('recorder')
   const { listRecords } = await load('store')
-  for (const scenario of ['short_answer', 'superseded_late_reply']) {
+  for (const scenario of ['short_answer', 'interrupted_resend']) {
     const workspace = await mkdtemp(join(tmpdir(), 'scry-qoder-stop-bench-'))
     const dataRoot = join(workspace, '.scry')
     const transcript = join(workspace, 'fixture.jsonl')
@@ -28,42 +28,56 @@ for (const [build, dist] of [['baseline', baseline], ['candidate', candidate]]) 
     const stamp = () => new Date().toISOString()
     const sessionId = 'synthetic-qoder'
     const row = value => appendFile(transcript, JSON.stringify({ sessionId, timestamp: stamp(), ...value }) + '\n')
-    const user = (id, parentUuid) => row({ type: 'user', promptId: id, uuid: id, parentUuid,
+    const user = (id, parentUuid) => row({ type: 'user', promptId: id, requestSetId: `request-${id}`, uuid: id, parentUuid,
       message: { role: 'user', content: `synthetic ${id}` } })
-    const reply = () => row({ type: 'assistant', uuid: 'reply', parentUuid: 'target',
+    const reply = id => row({ type: 'assistant', uuid: `reply-${id}`, parentUuid: id,
       message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'synthetic answer' }] } })
     const hook = (event, payload = {}) => handleRecorderHook({ provider: 'qoder', event, workspace, env, deferDelivery: true,
-      payload: { session_id: sessionId, transcript_path: transcript, ...payload } })
-    const start = id => hook('UserPromptSubmit', { promptId: id, prompt: `synthetic ${id}`, timestamp: stamp() })
-    const sealed = async () => (await listRecords(dataRoot)).some(record => record.providerTurnId === 'target' && record.status === 'completed')
+      payload: { session_id: sessionId, transcript_path: transcript, cwd: workspace, hook_event_name: event,
+        workspace_dirs: [workspace], permission_mode: 'default', ...payload } })
+    const start = id => hook('UserPromptSubmit', { request_set_id: `request-${id}`, prompt: `synthetic ${id}` })
+    const stop = id => hook('Stop', { parent_request_set_id: `request-${id}`, stop_hook_active: false,
+      last_assistant_message: 'synthetic answer', model: 'synthetic', parent_business_info: {} })
+    const sealed = async () => (await listRecords(dataRoot)).some(record =>
+      record.turnIndex === (scenario === 'short_answer' ? 1 : 2) && record.status === 'completed')
     try {
       now = origin
       globalThis.Date = FixtureDate
       await writeFile(join(workspace, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, enabled: true,
         workspaceId: 'qoder-stop-bench', dataDir: '.scry', capture: { diff: false, toolOutput: 'summary' } }))
-      if (scenario === 'superseded_late_reply') {
+      let oldStopStatus
+      if (scenario === 'interrupted_resend') {
         await user('old', null)
         await start('old')
+        await reply('old')
         now += 2_000
       }
-      await user('target', scenario === 'short_answer' ? null : 'old')
       await start('target')
       now += 2_000
-      if (scenario === 'short_answer') await reply()
-      else await hook('PostToolUse', { promptId: 'target', tool_name: 'Read', tool_use_id: 'fixture' })
+      if (scenario === 'interrupted_resend') {
+        await user('target', 'reply-old')
+        await hook('PostToolUse', { tool_name: 'Read', tool_use_id: 'fixture' })
+        await reply('target')
+        oldStopStatus = (await stop('old')).status
+        assert(!await sealed(), `${build} sealed the replacement on an old Stop`)
+        now += 1_000
+      }
       const arrivedAt = now
       const startWall = performance.now()
-      const hookStatus = (await hook('Stop')).status
+      const hookStatus = (await stop('target')).status
+      const hookWallMs = Math.round(performance.now() - startWall)
       let committedAt = await sealed() ? 0 : undefined
       for (let elapsed = 1_000; committedAt === undefined && elapsed <= 181_000; elapsed += 1_000) {
         now = arrivedAt + elapsed
-        if (scenario === 'superseded_late_reply' && elapsed === 2_000) await reply()
+        if (scenario === 'short_answer' && elapsed === 1_000) {
+          await user('target', null)
+          await reply('target')
+        }
         await recoverRecorder(workspace, env, undefined, undefined, { incremental: true })
         if (await sealed()) committedAt = elapsed
       }
       assert(committedAt !== undefined, `${build} ${scenario} did not commit`)
-      console.log(JSON.stringify({ build, scenario, hookStatus, stopToCommitFixtureMs: committedAt,
-        runnerElapsedMs: Math.round(performance.now() - startWall) }))
+      console.log(JSON.stringify({ build, scenario, oldStopStatus, hookStatus, hookWallMs, stopToCommitFixtureMs: committedAt }))
     } finally {
       globalThis.Date = RealDate
       await rm(workspace, { recursive: true, force: true })
