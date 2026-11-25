@@ -26,4 +26,6 @@ After a terminal notice, a visible turn can lack its result or Qoder credit evid
 
 In the usage chart, a missing day or metric breaks the line; an isolated observation is a point. Keep observed Provider rows even when the amount is unknown. Show that a partial total is a lower bound next to the value, not solely on hover.
 
+Usage analytics model rows are keyed by Agent, optional resolved gateway, and model. The Agent is the user-facing Provider identity; the gateway identifies an upstream when one can be resolved and can distinguish otherwise identical Agent/model rows. Do not use the billing vendor as a UI grouping key. A billing label may inform legacy identity inference, but that inference is not observed upstream provenance. See [usage identity resolution](../../src/shared/usage-identity.ts) and [usage analytics grouping](../../src/main/span-ledger-usage.ts).
+
 See [credit-usage.ts](../../src/shared/credit-usage.ts), [qoder-credit-requests.ts](../../src/shared/qoder-credit-requests.ts), [llm-performance.ts](../../src/shared/llm-performance.ts), and [result-timing.ts](../../src/shared/result-timing.ts).

@@ -125,7 +125,7 @@ export async function exerciseLlmPerformanceSetup(contents, win, screenshot, nat
   win.setSize(1000, 800)
   await wait('innerWidth === 1000')
   await read("document.documentElement.dataset.theme = 'dark'")
-  // 时间范围只切换同一份数据的视图：1 小时窗口里只剩最近三轮。
+  // 切换时间范围，核对首行的速度中位数从 61.0 变为 62.0。
   await click('.analytics-range button:nth-child(1)')
   await wait(`[...${rows}][0].querySelectorAll('td.is-num.is-strong')[0].textContent === '61.0'`)
   await click('.analytics-range button:nth-child(2)')

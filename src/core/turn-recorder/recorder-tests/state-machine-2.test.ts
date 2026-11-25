@@ -118,8 +118,6 @@ export function registerSuite2(): void {
     await completeTurn(root, 'code-session')
     const name = (await readdir(join(dataRoot, 'records')))[0]
     const stored = JSON.parse(await readFile(join(dataRoot, 'records', name), 'utf8'))
-    // `usage_baseline_missing` is readable but not writable yet: readers with an older whitelist
-    // reject the whole record, and their hook path parses every record.
     await expect(commitRecord(dataRoot, {
       ...stored,
       recordId: 'b'.repeat(32),

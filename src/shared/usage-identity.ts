@@ -1,9 +1,6 @@
 import type { BillingProvider } from './billing.js'
 import type { ProviderId } from './provider.js'
 
-// 一行的身份是三个字段：agent、gateway、model。agent 是人用的 Provider 身份
-// （Pi、Claude…），gateway 是上游名（openai-codex、cc-switch…，可以为空）。
-// 厂商只在定价时按模型或上游推导，不在界面上当分组。
 export type UsageAgentId = ProviderId
 
 export const USAGE_AGENT_LABELS: Record<UsageAgentId, string> = {

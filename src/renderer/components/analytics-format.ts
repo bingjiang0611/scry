@@ -2,8 +2,7 @@ import type { UsageAnalyticsAggregate } from '@shared/trace'
 import { QODER_PRICING_URL, QODER_USD_BASIS } from '@shared/qoder-pricing'
 import { ANALYTICS_COPY as copy } from '../constants/analytics-copy'
 
-// 只有一条显示原则：没有数据就不显示。所有格式化函数在缺值时返回空串，
-// 由单元格留空，绝不写「—」。
+// 数值单元格缺值时留空，不用「—」占位；证据提示仍可说明缺失原因。
 export const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
 
 export function tokensOf(row: UsageAnalyticsAggregate): number | null {

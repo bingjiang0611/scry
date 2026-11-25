@@ -131,7 +131,7 @@ export function gatewayLookup(analytics: UsageAnalytics | undefined): (agent?: s
   return (agent, model) => (agent && model ? table.get(`${agent}\u0000${model}`) : undefined)
 }
 
-/** 只保留真正有样本的 Agent，供筛选下拉使用。 */
+/** 筛选下拉只列出受支持且用量账本中有轮次的 Agent。 */
 export function agentOptions(analytics: UsageAnalytics | undefined, agents: readonly UsageAgentId[]): UsageAgentId[] {
   const observed = new Set<UsageAgentId>(analytics?.byAgent.filter((row) => row.turns > 0).map((row) => row.agent) ?? [])
   return agents.filter((agent) => observed.has(agent))

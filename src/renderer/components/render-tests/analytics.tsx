@@ -38,7 +38,7 @@ describe('AnalyticsView 渲染：成本与用量', () => {
   it('展示标题、两个标签、共用的 Agent 与时间范围筛选', () => {
     const html = render()
     expect(html).toContain('<h1 class="analytics-title" id="analytics-title">分析</h1>')
-    // 页面用这个标题当可访问名，冒烟也按它断言。
+    // 核对页面通过 aria-labelledby 引用标题作为可访问名。
     expect(html).toContain('aria-labelledby="analytics-title"')
     expect(html).toContain('role="tablist" aria-label="分析视图"')
     expect(html).toContain('>LLM 性能</button>')
@@ -46,7 +46,7 @@ describe('AnalyticsView 渲染：成本与用量', () => {
     expect(html).toContain('<label class="analytics-filter"><span>Agent</span><select>')
     expect(html).toContain('aria-label="时间范围"')
     expect(html).toContain('aria-label="度量"')
-    // 成本页的刻度从 24 小时开始，没有 1 小时的档。
+    // 核对成本页提供 24 小时和 90 天两个时间范围选项。
     expect(html).toContain('>24 小时</button>')
     expect(html).toContain('>90 天</button>')
   })

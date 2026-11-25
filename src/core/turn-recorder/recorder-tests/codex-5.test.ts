@@ -106,8 +106,6 @@ export function registerCodexUsageBaselineSuite(): void {
     expect(records[0].usage.status).toBe('unavailable')
     expect(records[0].usage.quality).toBe('unavailable')
     expect(records[0].usage.value).toBeUndefined()
-    // No code is written yet: servers and older readers only accept the diff codes, and one unknown
-    // code would reject the whole record. The sentence is the contract until they catch up.
     expect(records[0].usage.omissionCodes).toBeUndefined()
     expect(records[0].usage.omissionReason).toBe(USAGE_BASELINE_MISSING_REASON)
     expect(records[1].usage.status).toBe('available')

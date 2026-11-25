@@ -3,7 +3,7 @@ import type { QoderCreditScope } from './qoder-credits'
 import { withQoderCredits } from './qoder-credits'
 import { buildUsageAnalytics } from './span-ledger'
 
-// Q12：Qoder 的 Credits 按日期补齐——没有账本记录但有 Credits 的日子也要有点。
+// Q12：本例验证没有账本记录、但有可折算为美元的 Qoder Credits 的日期也会补点。
 const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const today = new Date(2026, 8, 9, 12).getTime()
 const twoDaysAgo = new Date(2026, 8, 7, 12).getTime()

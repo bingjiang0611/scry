@@ -36,7 +36,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   const rows = `${page}.querySelectorAll('.analytics-table.is-models tbody tr')`
   const liveRow = `Array.from(${rows}).find(node => node.textContent.includes('pi-live-model'))`
   const fixtureState = "JSON.parse(document.querySelector('#performance-fixture-state').textContent)"
-  // 同一 Agent 的多个会话在表里是一行；暂计样本保留，但轮次按实际轮数计。
+  // 核对同一 Agent 的多个会话合为一行，且保留 Agent、暂计覆盖数和中位数。
   if (!await read(`Array.from(${rows}).filter(node => node.textContent.includes('pi-live-model')).length === 1`)) throw new Error('Same-Agent sessions were not pooled into one row')
   if (!await read(`${liveRow}.textContent.includes('Pi')`)) throw new Error('Pooled row lost its Agent')
   if (!await read(`${liveRow}.querySelectorAll('td.is-num')[0].getAttribute('title').includes('3 暂计')`)) throw new Error('Provisional coverage is missing')
@@ -48,11 +48,11 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   if (!await read(`${liveRow}?.textContent.includes('160.0')`)) throw new Error('Focus changed global measurements')
   await click('#performance-complete')
   await wait(`Array.from(${rows}).some(node => node.textContent.includes('fixture-model'))`)
-  // Q8 的证据在上面：有首 token 计时的样本按生成时间算（80 token ÷ 0.5 秒 = 160.0），
-  // 没有首 token 计时的轮次只能按整段时长算（100 ÷ 5 秒 = 20.0），不能凭空扣除等待。
+  // 上面核对有首 token 计时的样本显示 160.0（80 token ÷ 0.5 秒）。
+  // 无首 token 计时的样本按整段时长预期为 20.0（100 token ÷ 5 秒）；下面只核对读数不低于 20。
   const completed = await read(`(() => { const node = Array.from(${rows}).find(row => row.textContent.includes('fixture-model')); return { speed: node.querySelectorAll('td.is-num.is-strong')[0].textContent } })()`)
   if (!(Number(completed.speed) >= 20)) throw new Error('Completed round lost its measured speed: ' + completed.speed)
-  // 趋势图每轮一个点，但仍要能用键盘逐个查看，Esc 收起读数（沿用旧图表的键盘断言）。
+  // 核对趋势图可聚焦且至少有两个点；End/Home 切换首尾读数，Esc 收起读数。
   const trend = await read(`(() => { const svg = document.querySelector('.analytics-trend svg'); if (!svg) return { points: 0 }; svg.focus({ preventScroll: true }); return { points: svg.querySelectorAll('.analytics-point').length, focused: document.activeElement === svg } })()`)
   if (trend.points < 2 || !trend.focused) throw new Error('Trend chart cannot be focused: ' + JSON.stringify(trend))
   const tipText = () => read(`document.querySelector('.analytics-tip')?.textContent ?? ''`)
@@ -99,7 +99,7 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await wait(`[...${page}.querySelectorAll('.analytics-alert[role=alert]')].some(node => node.textContent.includes('没能刷新实时指标，仍显示上次读取的结果'))`)
   if (await read(`${page}.textContent.includes('fixture summary unavailable')`)) throw new Error('Summary error exposed raw diagnostics')
   if (await read(`${page}.textContent.includes('含运行中数据')`)) throw new Error('Summary error retained stale provisional evidence')
-  // 标签切换保留 Agent 筛选；时间范围只在另一页也有同一档时沿用。
+  // 往返切换标签时核对 Agent 筛选不变，并确认成本页提供 24 小时档。
   await read(`(() => { const select = ${page}.querySelector('.analytics-filter select'); select.value = 'antigravity'; select.dispatchEvent(new Event('change', { bubbles: true })) })()`)
   await wait(`${page}.querySelector('.analytics-filter select').value === 'antigravity'`)
   await click('#performance-history-error')

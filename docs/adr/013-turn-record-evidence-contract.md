@@ -13,4 +13,6 @@ Aggregate tool, skill and MCP records into mutually exclusive sections, retainin
 
 In Overview, missing structured Skill evidence is not proof that no Skill was used. A risk observation is not proof that execution was blocked.
 
+Recognizing an omission code on read does not authorize writing it. Before adding a code to the writer allowlist, verify that every reader sharing the store tolerates it, including readers that scan records on the hook path. An older whitelist reader can reject the entire record. This build keeps `usage_baseline_missing` out of the write allowlist and emits the fixed reason without `omissionCodes` for that outcome. The local fixtures establish this writer behavior, not downstream reader readiness.
+
 See [turn-record-contracts.ts](../../src/shared/turn-record-contracts.ts), [turn-record.test.ts](../../src/shared/turn-record.test.ts), and the [recorder evidence limits](../../packages/turn-recorder-cli/docs/evidence-limits.md).

@@ -59,7 +59,7 @@ describe('LLM 性能记录的模型归属', () => {
   it('失败且没有观测到模型时保留证据，但不带模型', async () => {
     const rows = await persist([terminal(performance({ firstOutputWaitMs: 800 })), result()],
       { failed: true, requestedModel: 'model-requested' })
-    // Q7 管的是统计和成行：样本留下，行里没有模型，读出来不进对比表。
+    // Q7：保留失败样本，但不把请求的模型当成观测到的模型。
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ failed: true, performance: { firstOutputWaitMs: 800 } })
     expect(rows[0].model).toBeUndefined()

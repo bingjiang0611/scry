@@ -7,7 +7,7 @@ import { clock, day, formatMetric, metricAxisMax, type ModelDistribution, type R
 
 const agentLabel = (providerId: ModelDistribution['providerId']): string => providerId ? PROVIDER_LABELS[providerId] : ''
 
-/** 模型对比表：表头带单位，缺值留空；没有成功轮次的模型不成行。 */
+/** 模型对比表：表头带单位，缺值留空；已完成和运行中轮次均为零的模型不成行。 */
 export function PerfTable({ groups, selected, colorOf, gatewayOf, onSelect }: {
   groups: ModelDistribution[]
   selected: string
