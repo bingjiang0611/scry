@@ -22,20 +22,26 @@ vi.mock('../process-diagnostics', async () => {
 })
 
 /** A fake CLI: one process answers every user message it receives on the prompt stream. */
-function fakeCli() {
+function fakeCli(nativeSessionId = 'native-1', onTurn?: (turn: number, options: Record<string, unknown>) => void) {
   const seen: string[] = []
+  let turn = 0
   const close = vi.fn(async () => undefined)
   const interrupt = vi.fn(async () => undefined)
-  async function* serve(prompt: AsyncIterable<{ message: { content: { text: string }[] } }>) {
+  async function* serve(
+    prompt: AsyncIterable<{ message: { content: { text: string }[] } }>,
+    options: Record<string, unknown>
+  ) {
     for await (const message of prompt) {
+      turn += 1
       seen.push(message.message.content[0].text)
-      yield { type: 'system', subtype: 'init', session_id: 'native-1', mcp_servers: [] }
-      yield { type: 'result', subtype: 'success', session_id: 'native-1' }
+      yield { type: 'system', subtype: 'init', session_id: nativeSessionId, mcp_servers: [] }
+      onTurn?.(turn, options)
+      yield { type: 'result', subtype: 'success', session_id: nativeSessionId }
     }
   }
   return {
-    create: (input: { prompt: AsyncIterable<{ message: { content: { text: string }[] } }> }) => {
-      const iterator = serve(input.prompt)
+    create: (input: { prompt: AsyncIterable<{ message: { content: { text: string }[] } }>; options?: Record<string, unknown> }) => {
+      const iterator = serve(input.prompt, input.options ?? {})
       return { [Symbol.asyncIterator]: () => iterator, close, interrupt }
     },
     seen,
@@ -54,17 +60,18 @@ const runInput = (runId: string, prompt: string) => ({
 describe('Qoder kept session in the run path', () => {
   beforeEach(() => { sdk.query.mockReset(); sdk.getSessionMessages.mockReset().mockResolvedValue([]) })
 
-  it('serves two turns of one conversation from a single CLI process', async () => {
-    const cli = fakeCli()
-    sdk.query.mockImplementation((input: never) => cli.create(input))
-    const opened: string[] = []
+  it('R3: two new conversations in one workspace never share a CLI process', async () => {
+    const clis = [fakeCli('native-a'), fakeCli('native-b')]
+    let opened = 0
+    sdk.query.mockImplementation((input: never) => clis[opened++]!.create(input))
+    const openedKeys: string[] = []
     const released: string[] = []
     const native: string[] = []
     const pool = createQoderSessionPool({
       provider: 'qoder_cli',
       idleMs: 60_000,
       observer: {
-        onOpened: (key) => opened.push(key),
+        onOpened: (key) => openedKeys.push(key),
         onReleased: (key, reason) => released.push(`${key}:${reason}`),
         onNativeSessionId: (key, id) => native.push(`${key}:${id}`)
       }
@@ -76,13 +83,64 @@ describe('Qoder kept session in the run path', () => {
 
     expect(first.status).toBe('completed')
     expect(second.status).toBe('completed')
-    // One process, two turns: the second run reuses the session instead of spawning again.
+    // Two new conversations are two sessions: sharing one streamed B's prompt into A's context.
+    expect(sdk.query).toHaveBeenCalledTimes(2)
+    expect(clis[0]!.seen).toEqual(['first'])
+    expect(clis[1]!.seen).toEqual(['second'])
+    expect(openedKeys).toHaveLength(2)
+    expect(native.map((entry) => entry.slice(entry.lastIndexOf(':') + 1))).toEqual(['native-a', 'native-b'])
+    await pool.disposeAll()
+    expect(released.map((entry) => entry.slice(entry.lastIndexOf(':') + 1))).toEqual(['dispose', 'dispose'])
+  })
+
+  it('R3: the second turn of one conversation reuses the same CLI process', async () => {
+    const cli = fakeCli('native-1')
+    sdk.query.mockImplementation((input: never) => cli.create(input))
+    const pool = createQoderSessionPool({ provider: 'qoder_cli', idleMs: 60_000 })
+    const adapter = createQoderAdapter('/home/test', { qoderSessions: pool })
+
+    const first = await adapter.run(runInput('run-1', 'first')).promise
+    expect(first.status).toBe('completed')
+    // The native id is what the App sends back as `resume` on the next turn.
+    const resumed = await adapter.run({ ...runInput('run-2', 'second'), resume: 'native-1' }).promise
+
+    expect(resumed.status).toBe('completed')
     expect(sdk.query).toHaveBeenCalledOnce()
     expect(cli.seen).toEqual(['first', 'second'])
-    expect(opened).toHaveLength(1)
-    expect(native.every((entry) => entry.endsWith(':native-1'))).toBe(true)
     await pool.disposeAll()
-    expect(released.map((entry) => entry.slice(entry.lastIndexOf(':') + 1))).toEqual(['dispose'])
+  })
+
+  it('R3: the second turn receives the permission request, not the finished first turn', async () => {
+    const asks: string[] = []
+    const cli = fakeCli('native-1', (turn, options) => {
+      if (turn !== 2) return
+      const canUseTool = options.canUseTool as ((tool: string, input: Record<string, unknown>, permission: unknown) => Promise<unknown>) | undefined
+      void canUseTool?.('Bash', { command: 'ls' }, { signal: new AbortController().signal, toolUseID: 'tool-2' })
+        .then((answer) => { asks.push(`answer:${JSON.stringify(answer)}`) },
+          (error: unknown) => { asks.push(`error:${String(error)}`) })
+    })
+    sdk.query.mockImplementation((input: never) => cli.create(input))
+    const pool = createQoderSessionPool({ provider: 'qoder_cli', idleMs: 60_000 })
+    const adapter = createQoderAdapter('/home/test', { qoderSessions: pool })
+
+    const firstAsks: string[] = []
+    const secondAsks: string[] = []
+    const requestUserInput = (asksInto: string[]) =>
+      async (input: { questions?: { question?: string }[] }) => {
+        asksInto.push(input.questions?.[0]?.question ?? 'asked')
+        return { behavior: 'allow' as const, updatedInput: {} }
+      }
+
+    await adapter.run({ ...runInput('run-1', 'first'), requestUserInput: requestUserInput(firstAsks) } as never).promise
+    await adapter.run({
+      ...runInput('run-2', 'second'), resume: 'native-1', requestUserInput: requestUserInput(secondAsks)
+    } as never).promise
+
+    // The session's permission hook is the current turn's, so the question goes to turn 2 only.
+    expect(secondAsks).toHaveLength(1)
+    expect(firstAsks).toHaveLength(0)
+    expect(sdk.query).toHaveBeenCalledOnce()
+    await pool.disposeAll()
   })
 
   it('opens a new process when the turn asks for different options', async () => {

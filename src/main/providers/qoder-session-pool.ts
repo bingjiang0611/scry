@@ -7,10 +7,23 @@ import {
   type SessionReleaseReason
 } from './session-pool-policy'
 
+/**
+ * R3: the session's SDK callbacks (permission hook, exit and pid reports, task control) belong to
+ * whichever turn is running now, not to the turn that opened the process.
+ */
+export interface QoderSessionTurnSlot {
+  /** Reassigned by each turn before it begins; the opener's closures read it. */
+  current: unknown
+  /** Owned by the session: the transport outlives one turn. */
+  transport?: unknown
+}
+
 /** A kept Qoder session, plus the per-turn state the SDK callbacks read. */
 export interface QoderSessionLease {
   readonly key: string
   readonly query: Query
+  /** The mutable per-turn slot shared by every turn of this session. */
+  readonly turn: QoderSessionTurnSlot
   beginTurn(): QoderTurnChannel
   /** Hands the next user message to the SDK; the session's prompt stream stays open for the next turn. */
   send(message: unknown): void
@@ -29,8 +42,15 @@ export interface QoderOpenedSession {
   dispose?: () => void
 }
 
-/** Creates the SDK query for a new session; the pool supplies the prompt stream and owns its reader. */
-export type QoderSessionOpener = (prompt: AsyncIterable<unknown>, signal: AbortSignal) => QoderOpenedSession
+/**
+ * Creates the SDK query for a new session; the pool supplies the prompt stream and owns its reader.
+ * The turn slot lets those closures reach the turn that is running now (R3).
+ */
+export type QoderSessionOpener = (
+  prompt: AsyncIterable<unknown>,
+  signal: AbortSignal,
+  turn: QoderSessionTurnSlot
+) => QoderOpenedSession
 
 export interface QoderSessionPoolOptions {
   provider: string
@@ -50,6 +70,7 @@ export interface QoderSessionPool {
 
 interface Entry {
   lease: QoderSessionLease
+  turn: QoderSessionTurnSlot
   session: QoderSession
   prompt: ReturnType<typeof createPromptStream>
   dispose: (() => void) | undefined
@@ -70,11 +91,16 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
   const cap = options.cap ?? SESSION_POOL_CAP
   const now = options.now ?? Date.now
   const entries = new Map<string, Entry>()
+  /** R3: native session id -> the key of the entry that reported it, so a later turn finds it. */
+  const nativeAliases = new Map<string, string>()
 
   const closeEntry = async (key: string, reason: SessionReleaseReason): Promise<void> => {
     const entry = entries.get(key)
     if (!entry) return
     entries.delete(key)
+    for (const [nativeId, keyOfAlias] of nativeAliases) {
+      if (keyOfAlias === key) nativeAliases.delete(nativeId)
+    }
     if (entry.idleTimer) clearTimeout(entry.idleTimer)
     entry.controller.abort()
     entry.prompt.close()
@@ -104,9 +130,20 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
     }
   }
 
+  const aliasTarget = (key: string): Entry | undefined => {
+    const match = /^native:([^|]+)\|(.*)$/.exec(key)
+    if (!match) return undefined
+    const aliasKey = nativeAliases.get(match[1]!)
+    if (!aliasKey) return undefined
+    const entry = entries.get(aliasKey)
+    if (!entry) { nativeAliases.delete(match[1]!); return undefined }
+    // Reuse only when the turn asks for the same options the session was opened with.
+    return entry.lease.key.endsWith(`|${match[2]}`) ? entry : undefined
+  }
+
   return {
     acquire(key, open) {
-      const existing = entries.get(key)
+      const existing = entries.get(key) ?? aliasTarget(key)
       if (existing && existing.idleTimer !== undefined) {
         if (existing.idleTimer) clearTimeout(existing.idleTimer)
         existing.idleTimer = undefined
@@ -115,9 +152,11 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
       }
       const controller = new AbortController()
       const prompt = createPromptStream()
-      const opened = open(prompt.stream, controller.signal)
+      const turn: QoderSessionTurnSlot = { current: undefined }
+      const opened = open(prompt.stream, controller.signal, turn)
       const session = createQoderSession(opened.query)
       const entry: Entry = {
+        turn,
         controller,
         prompt,
         dispose: opened.dispose,
@@ -127,9 +166,14 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
         lease: {
           key,
           query: opened.query,
+          turn,
           beginTurn: () => session.beginTurn(),
           send: (message) => prompt.push(message),
-          recordNativeSession: (nativeSessionId) => options.observer?.onNativeSessionId?.(key, nativeSessionId),
+          recordNativeSession: (nativeSessionId) => {
+            // R3: the alias is how the next turn of this conversation finds this process again.
+            nativeAliases.set(nativeSessionId, key)
+            options.observer?.onNativeSessionId?.(key, nativeSessionId)
+          },
           watchIdle: (listener) => session.watchIdle(listener),
           release: () => {
             entry.lastUsed = now()

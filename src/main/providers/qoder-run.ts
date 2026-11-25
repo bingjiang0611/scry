@@ -38,11 +38,26 @@ import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
 import { applyQoderLogFallback } from './qoder-log-fallback'
 import { settleQoderTurn } from './qoder-turn-settlement'
-import type { QoderSessionLease, QoderSessionPool } from './qoder-session-pool'
+import type { QoderSessionLease, QoderSessionPool, QoderSessionTurnSlot } from './qoder-session-pool'
 import type { QoderTurnChannel } from './qoder-session'
 import { newId } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
 import type { ProviderRunHandle, ProviderRunRequest, ProviderRunResult } from './types'
+
+/**
+ * R3: what the session's SDK closures need from the turn that is running now. Written into the
+ * session's slot before each turn, so a permission question, a pid report or an exit lands on the
+ * turn that owns them instead of the turn that happened to open the process.
+ */
+interface QoderTurnBindings {
+  canUseTool?: (
+    toolName: string,
+    input: Record<string, unknown>,
+    permission: never
+  ) => Promise<unknown>
+  onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
+  onPid?: (pid: number) => void
+}
 
 export interface QoderRunDependencies {
   homeDir: string
@@ -56,14 +71,23 @@ export interface QoderRunDependencies {
 }
 
 /**
- * Reuse is safe only when the next turn asks for exactly what the session was opened with. The key
- * therefore carries the continuation identity and every turn option that the SDK fixes at open time.
+ * R3: the identity part of the key names *this conversation*, never the workspace. `continuationKey`
+ * is Provider-level, so keying on it made two new conversations in one directory share the same
+ * `fresh` session — B's prompt landed in A's context. A fresh turn therefore carries its own run id,
+ * and a continued turn is keyed by the native session it resumes (the pool keeps the alias from the
+ * native id to the process that reported it).
+ */
+function qoderSessionIdentity(request: ProviderRunRequest): string {
+  return request.resume ? `native:${request.resume}` : `fresh:${request.runId}`
+}
+
+/**
+ * Reuse is safe only when the next turn asks for exactly what the session was opened with, so the
+ * rest of the key is every turn option the SDK fixes at open time.
  */
 function qoderSessionKey(request: ProviderRunRequest): string {
   return [
-    // Without a consumer-supplied identity, the conversation is still identified by where it runs.
-    request.expectedContinuationKey ?? `unverified:${request.cwd ?? ''}`,
-    request.resume ?? 'fresh',
+    qoderSessionIdentity(request),
     request.permissionMode ?? 'default',
     request.requestUserInput ? 'ask' : 'no_ask',
     request.model?.id ?? 'default',
@@ -211,6 +235,21 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     // The CLI consumes this stream as soon as the transport starts, so the
     // attempt observation must precede query(), not the transcript read.
     history.attempting(outgoingText)
+    // R3: everything the SDK keeps from the opening turn must be read through the session's slot, or
+    // the second turn's permission questions are answered by the finished first turn. Without a pool
+    // the run still owns a slot: one process, one turn, the same indirection.
+    const bindings: QoderTurnBindings = {
+      canUseTool: request.requestUserInput ? qoderCanUseTool(request, waitForUser) : undefined,
+      onExit: (code, signal) => {
+        if (stopped || streamSettled) return
+        exitTimer = setTimeout(() => {
+          rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
+        }, 1000)
+      },
+      onPid: () => undefined
+    }
+    let turnSlot: QoderSessionTurnSlot = { current: bindings }
+    const currentTurn = (): QoderTurnBindings | undefined => turnSlot.current as QoderTurnBindings | undefined
     const openQuery = (promptStream: AsyncIterable<SDKUserMessage>): Query => query({
       // Keep control-response stdin open while Qoder-owned Agents or Bash
       // tasks are active, including model-policy requests on notification turns.
@@ -218,15 +257,24 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       options: {
         transport: {
           create(options: QueryTransportCreateOptions) {
-            taskControl = new QoderTaskControlTransport(new ProcessTransport(options))
-            return taskControl
+            const transport = new QoderTaskControlTransport(new ProcessTransport(options))
+            turnSlot.transport = transport
+            taskControl = transport
+            return transport
           }
         },
         ...qoderOptions(
           request.cwd,
           request.resume,
-          (pid, identityPromise) => { qoderPid = pid; qoderIdentityPromise = identityPromise },
+          (pid, identityPromise) => {
+            qoderPid = pid
+            qoderIdentityPromise = identityPromise
+            currentTurn()?.onPid?.(pid)
+          },
           (code, signal) => {
+            // A turned-over session reports its exit to the turn that is live right now.
+            const live = currentTurn()
+            if (live?.onExit) { live.onExit(code, signal); return }
             if (stopped || streamSettled) return
             exitTimer = setTimeout(() => {
               rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
@@ -247,17 +295,30 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
               })
             }
           : {}),
-        ...(request.requestUserInput ? { canUseTool: qoderCanUseTool(request, waitForUser) } : {}),
+        // Always installed: the hook answers with whichever turn is running, so a later turn that
+        // asks for user input still reaches the SDK's permission path.
+        canUseTool: async (toolName: string, input: Record<string, unknown>, permission: never) => {
+          const live = currentTurn()
+          if (!live?.canUseTool) throw new Error('Qoder 权限请求没有可用的当前轮次')
+          return await live.canUseTool(toolName, input, permission)
+        },
         abortController: controller
       } as never
     })
     let turnChannel: QoderTurnChannel | undefined
     const sessions = deps.qoderSessions
     const lease = sessions
-      ? sessions.acquire(qoderSessionKey(request), (promptStream) => ({ query: openQuery(promptStream as AsyncIterable<SDKUserMessage>) }))
+      ? sessions.acquire(qoderSessionKey(request), (promptStream, _signal, slot) => {
+          turnSlot = slot
+          return { query: openQuery(promptStream as AsyncIterable<SDKUserMessage>) }
+        })
       : undefined
     if (lease) {
       liveLease = lease
+      turnSlot = lease.turn
+      // The transport belongs to the session, not to the turn that opened it.
+      taskControl = lease.turn.transport as QoderTaskControlTransport | undefined
+      lease.turn.current = bindings
       q = lease.query
       // The session's prompt stream stays open across turns; each turn contributes one user message.
       lease.send({
