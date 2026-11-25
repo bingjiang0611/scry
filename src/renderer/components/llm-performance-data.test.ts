@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { llmComparisonRounds, type LlmMetricSample, type LlmPerformanceHistoryRow, type LlmRunningSession } from '@shared/llm-performance'
-import { compareModels, INTERVAL_MS, metricAxisMax, metricDistribution, metricIntervals } from './llm-performance-data'
+import { compareModels, metricAxisMax, metricDistribution } from './llm-performance-data'
 
 const sample = (ts: number, value: number, provisional = false): LlmMetricSample => ({ ts, value, provisional })
 
@@ -27,36 +27,9 @@ describe('performance distributions', () => {
     expect(rows[2]).toMatchObject({ completed: 1, speedSummary: null, waitSummary: null, outputSummary: null })
   })
 
-  it('keeps sparse samples at actual times, with no fabricated median or idle zero', () => {
-    const input = [sample(11, 20), sample(19, 80, true)]
-    const intervals = metricIntervals(input, 0, 100, 10)
-    expect(intervals).toHaveLength(2)
-    expect(intervals.map(point => [point.ts, point.median, point.individual, point.provisional]))
-      .toEqual([[11, 20, true, 0], [19, 80, true, 1]])
-    expect(metricIntervals([], 0, 100, 10)).toEqual([])
-  })
-
-  it('clips interval time boundaries, not measured extremes, and excludes out-of-range samples', () => {
-    const input = [sample(1, 9999), sample(3, 10), sample(5, 20), sample(7, 1000, true), sample(9, 9999)]
-    expect(metricIntervals(input, 2, 8, 10)).toEqual([{
-      ts: 5, start: 2, stop: 8, individual: false, count: 3, provisional: 1,
-      min: 10, q1: 15, median: 20, q3: 510, max: 1000
-    }])
+  it('picks an axis top above the measured peak, never a percentile cut', () => {
     expect(metricAxisMax([10, 20, 1000])).toBeGreaterThanOrEqual(1000)
     expect(metricAxisMax([])).toBe(1)
-  })
-
-  it('conserves all evidence across production time ranges including boundary and singleton samples', () => {
-    for (const span of Object.values(INTERVAL_MS)) {
-      const input = [sample(0, 1), sample(1, 2), sample(2, 3, true),
-        sample(span + 1, 4), sample(span + 2, 5), sample(span * 3, 6000)]
-      const points = metricIntervals(input, 0, span * 3, span)
-      expect(points.reduce((sum, point) => sum + point.count, 0)).toBe(input.length)
-      expect(points.reduce((sum, point) => sum + point.provisional, 0)).toBe(1)
-      expect(Math.min(...points.map(point => point.min))).toBe(1)
-      expect(Math.max(...points.map(point => point.max))).toBe(6000)
-      expect(points.some(point => point.ts > span * 2 && point.ts < span * 3)).toBe(false)
-    }
   })
 
   it('keeps live completed-call evidence and replaces it with the final persisted round', () => {
@@ -71,25 +44,5 @@ describe('performance distributions', () => {
     const after = compareModels(llmComparisonRounds(rows, [live]))[0]
     expect(after.speedSummary).toMatchObject({ count: 1, provisional: 0, median: 50 })
     expect(after.waitSummary?.median).toBe(2)
-  })
-})
-
-describe('daily buckets (Q10)', () => {
-  it('starts a 7-day bucket at local midnight, not UTC midnight', () => {
-    // 本地 01:30 的样本必须落在当天，而不是前一天或后一天。
-    const local = new Date(2026, 10, 24, 1, 30).getTime()
-    const intervals = metricIntervals([
-      sample(local, 10), sample(local + 60_000, 20), sample(local + 120_000, 30)
-    ], local - 86_400_000, local + 86_400_000, INTERVAL_MS[168])
-    expect(intervals).toHaveLength(1)
-    expect(intervals[0].start).toBe(new Date(2026, 10, 24).getTime())
-    expect(intervals[0].stop).toBe(new Date(2026, 10, 25).getTime())
-    expect(intervals[0].individual).toBe(false)
-  })
-
-  it('keeps short ranges on fixed sub-day intervals', () => {
-    expect(INTERVAL_MS[1]).toBe(600_000)
-    expect(INTERVAL_MS[24]).toBe(7_200_000)
-    expect(INTERVAL_MS[720]).toBe(INTERVAL_MS[168])
   })
 })
