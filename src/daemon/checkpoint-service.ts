@@ -4,7 +4,7 @@ import { gitCommand } from '../core/turn-recorder/git-command'
 import { createCheckpointGit } from './checkpoint-git'
 import { isManagedWorktreePath } from '../main/app-store'
 import { applyRunRollback, recordRunCheckpoint, type CheckpointRecordResult, type CheckpointRestoreResult } from './checkpoint-recorder'
-import { pruneCheckpointRefs, type CheckpointGit } from './checkpoint-refs'
+import { checkpointSafetyRef, type CheckpointGit } from './checkpoint-refs'
 
 /**
  * R9: how many refs one worktree keeps. A checkpoint is a convenience, not a backup service, and an
@@ -46,23 +46,23 @@ export function createCheckpointService(deps: {
          ORDER BY COALESCE(settled_at, 0) DESC, rev_seq DESC`
       )
       .all(cwd) as Array<{ runId: string; ref: string }>
-    const dropped = await pruneCheckpointRefs(deps.git, { cwd, keep: rows.slice(0, maxCheckpoints).map((row) => row.ref) })
-    for (const ref of dropped) {
-      const run = rows.find((row) => row.ref === ref)
-      if (!run) continue
+    // Linked worktrees share their repository's ref namespace. Only prune refs owned by these rows.
+    for (const { runId, ref } of rows.slice(maxCheckpoints)) {
       try {
-        const payload = { runId: run.runId, ref }
+        await deps.git.deleteRef(cwd, ref)
+        await deps.git.deleteRef(cwd, checkpointSafetyRef(runId))
+        const payload = { runId, ref }
         sink.execute({
           type: 'run.checkpoint_forgotten',
-          commandId: `checkpoint-forgotten:${run.runId}`,
+          commandId: `checkpoint-forgotten:${runId}`,
           actor: 'system',
           scope: 'system',
           at: now(),
           payload,
           payloadSha256: sha256Hex(canonicalJson(payload))
         })
-      } catch {
-        // The ref is gone either way; a projection that cannot say so is not worth failing a run over.
+      } catch (error) {
+        deps.warn?.('checkpoint pruning failed', error)
       }
     }
   }

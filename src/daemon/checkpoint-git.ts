@@ -34,10 +34,6 @@ export function createCheckpointGit(options: CheckpointGitOptions): CheckpointGi
     async updateRef(cwd, ref, target) {
       await run(cwd, ['update-ref', ref, target])
     },
-    async listRefs(cwd, prefix) {
-      const output = await run(cwd, ['for-each-ref', '--format=%(refname)', prefix])
-      return output.split('\n').map((line) => line.trim()).filter(Boolean)
-    },
     async readRef(cwd, ref) {
       try {
         return (await run(cwd, ['rev-parse', '--verify', ref])).trim() || undefined

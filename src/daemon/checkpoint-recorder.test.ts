@@ -89,6 +89,8 @@ describe('checkpoint recorder', () => {
       await recordRunCheckpoint(handle, git, { runId: 'run-1', cwd }, 100)
       const refused = await applyRunRollback(handle, git, { runId: 'run-1', cwd, managed: false }, 200)
       expect(refused).toEqual({ status: 'unavailable', reason: 'checkpoint_unmanaged_worktree' })
+      expect(gitIn(cwd, ['for-each-ref', '--format=%(refname)', 'refs/scry/']).trim())
+        .toBe('refs/scry/checkpoints/run-1')
       expect(handle.getRun('run-1')?.lifecycle).toBe('settled')
       const missing = await applyRunRollback(handle, git, { runId: 'run-unknown', cwd, managed: true }, 200)
       expect(missing.status).toBe('unavailable')
@@ -163,6 +165,22 @@ describe('R9: checkpoints are bounded and never rewrite an unmanaged checkout', 
     } finally { handle.close() }
   })
 
+  it('does not prune another linked worktree’s checkpoint refs', async () => {
+    const cwd = repo()
+    const other = join(cwd, '..', `${cwd.split('/').at(-1)}-linked`)
+    dirs.push(other)
+    gitIn(cwd, ['worktree', 'add', '--detach', other, 'HEAD'])
+    const handle = sink()
+    try {
+      const service = createCheckpointService({ sink: () => handle, git, isManagedWorktree: () => true, maxCheckpoints: 1 })
+      for (const [runId, worktree] of [['run-1', other], ['run-2', cwd]]) {
+        settledRun(handle, runId, worktree)
+        expect(await service.capture({ runId, cwd: worktree })).toMatchObject({ status: 'captured' })
+      }
+      expect(gitIn(other, ['rev-parse', '--verify', 'refs/scry/checkpoints/run-1']).trim()).toMatch(/^[0-9a-f]{40,64}$/)
+    } finally { handle.close() }
+  })
+
   it('stores no untracked file and keeps a safety copy before a rollback', async () => {
     const cwd = repo()
     const handle = sink()
@@ -179,7 +197,7 @@ describe('R9: checkpoints are bounded and never rewrite an unmanaged checkout', 
       const restored = await applyRunRollback(handle, git, { runId: 'run-1', cwd, managed: true }, 200)
       expect(restored.status).toBe('restored')
       // The work that was about to be overwritten is recoverable from its own ref.
-      const safety = gitIn(cwd, ['rev-parse', '--verify', 'refs/scry/checkpoints/run-1-prelude']).trim()
+      const safety = gitIn(cwd, ['rev-parse', '--verify', 'refs/scry/checkpoint-safety/run-1']).trim()
       expect(gitIn(cwd, ['ls-tree', '-r', '--name-only', safety])).toContain('a.txt')
       expect(readFileSync(join(cwd, 'a.txt'), 'utf8')).toBe('one\n')
     } finally { handle.close() }

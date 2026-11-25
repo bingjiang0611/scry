@@ -12,8 +12,6 @@ export interface CheckpointGit {
   updateRef(cwd: string, ref: string, target: string): Promise<void>
   readRef(cwd: string, ref: string): Promise<string | undefined>
   deleteRef(cwd: string, ref: string): Promise<void>
-  /** Every checkpoint ref under a prefix, so retention can bound what capture leaves behind. */
-  listRefs(cwd: string, prefix: string): Promise<string[]>
   /** Restores worktree content from a tree. Destructive: callers gate this on a managed worktree. */
   restoreTree(cwd: string, tree: string): Promise<void>
 }
@@ -33,11 +31,17 @@ export function checkpointRef(runId: string): string | undefined {
   return RUN_ID.test(runId) ? `refs/scry/checkpoints/${runId}` : undefined
 }
 
+export function checkpointSafetyRef(runId: string): string {
+  return `refs/scry/checkpoint-safety/${runId}`
+}
+
 export async function captureCheckpoint(
   git: CheckpointGit,
-  input: { cwd: string; runId: string }
+  input: { cwd: string; runId: string; safety?: boolean }
 ): Promise<CheckpointCapture> {
-  const ref = checkpointRef(input.runId)
+  const ref = RUN_ID.test(input.runId)
+    ? (input.safety ? checkpointSafetyRef(input.runId) : checkpointRef(input.runId))
+    : undefined
   if (!ref) return { status: 'unavailable', reason: 'checkpoint_invalid_run_id' }
   let tree: string
   try {
@@ -73,27 +77,6 @@ export async function rollbackCheckpoint(
     return { status: 'unavailable', reason: 'checkpoint_restore_failed' }
   }
   return { status: 'restored', ref, tree }
-}
-
-const CHECKPOINT_PREFIX = 'refs/scry/checkpoints/'
-
-/**
- * R9: one worktree cannot keep every ref forever. The caller passes the refs it is allowed to keep
- * (the newest ones) and this drops the rest; the trees themselves stay until git prunes them.
- */
-export async function pruneCheckpointRefs(
-  git: CheckpointGit,
-  input: { cwd: string; keep: readonly string[] }
-): Promise<string[]> {
-  const keep = new Set(input.keep)
-  const refs = await git.listRefs(input.cwd, CHECKPOINT_PREFIX).catch(() => [] as string[])
-  const dropped: string[] = []
-  for (const ref of refs) {
-    if (keep.has(ref)) continue
-    await git.deleteRef(input.cwd, ref).catch(() => undefined)
-    dropped.push(ref)
-  }
-  return dropped
 }
 
 /** Drops the ref; the tree stays as long as git keeps it reachable from other objects. */
