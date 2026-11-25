@@ -279,6 +279,28 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
     dispatcher.dispose()
   })
 
+  // R6: the claim happens before `beforeDispatch` runs, so a throw there left the row `running` under a
+  // lease that no settle path knew about. The intent was never dispatched and never failed either.
+  it('R6: a throwing beforeDispatch returns the row instead of leaking its lease', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor, calls } = deferredExecutor()
+    const runId = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    const outbox = memoryOutbox([{ effectId: 'eff-boom', runId }])
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      executor,
+      outbox,
+      beforeDispatch: () => { throw new Error('authority_unavailable') }
+    })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-boom', 'retry:eff-boom'])
+    expect(calls).toEqual([])
+    expect(ledger.runState(runId)).toBe('recorded')
+    dispatcher.dispose()
+  })
+
   it('never scans the in-memory intent list once a durable outbox is wired', () => {
     const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
     const { executor } = deferredExecutor()

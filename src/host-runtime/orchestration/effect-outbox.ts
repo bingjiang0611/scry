@@ -3,6 +3,12 @@ import type Database from 'better-sqlite3'
 export const OUTBOX_MAX_ATTEMPTS = 5
 export const OUTBOX_BACKOFF_BASE_MS = 100
 export const OUTBOX_BACKOFF_CAP_MS = 30_000
+/**
+ * R6: a claim that has not been settled within this window belongs to an owner that is gone. The
+ * dispatcher settles a claim within milliseconds of starting the work, so a row that is still
+ * `running` after a minute was orphaned by a crash, and its session queue stayed blocked forever.
+ */
+export const OUTBOX_LEASE_MS = 60_000
 
 export interface ClaimedEffect {
   effectId: string
@@ -68,6 +74,17 @@ export function wakeDeferredEffects(db: Database.Database): number {
     .run().changes
 }
 
+/** R6: returns orphaned claims to the queue so a dead owner cannot block its session forever. */
+export function reclaimExpiredLeases(db: Database.Database, now: number): number {
+  return db
+    .prepare(
+      `UPDATE orch_outbox SET state = 'pending', claimed_at = NULL, lease_owner = NULL,
+         available_at = NULL, last_error = 'lease_expired'
+       WHERE state = 'running' AND claimed_at IS NOT NULL AND claimed_at <= ?`
+    )
+    .run(now - OUTBOX_LEASE_MS).changes
+}
+
 export interface ClaimResult {
   /** Rows past their pending TTL, surfaced so the caller can cancel their runs. */
   expired: Array<{ effectId: string; runId: string | null }>
@@ -86,6 +103,7 @@ export function claimNextEffect(input: {
   return db.transaction((): ClaimResult => {
     // Expiry is reported, not swallowed: the voided effect still owns a run nobody started.
     const expired = voidExpiredEffects(db, now)
+    reclaimExpiredLeases(db, now)
 
     const row = db
       .prepare(

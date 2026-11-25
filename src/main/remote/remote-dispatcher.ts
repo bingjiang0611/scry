@@ -256,7 +256,16 @@ export class RemoteDispatcher {
         detail = this.#ledger.intentDetail?.(ledgerRunId)
       } catch { detail = undefined }
       if (this.#beforeDispatch) {
-        const gate = this.#beforeDispatch(runId, detail)
+        // R6: the row is already claimed here. A throwing authority used to escape pump() and leave
+        // the claim `running` under a lease nothing would ever settle, so the intent vanished.
+        let gate: ReturnType<NonNullable<RemoteDispatcherDependencies['beforeDispatch']>>
+        try {
+          gate = this.#beforeDispatch(runId, detail)
+        } catch {
+          const retried = outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'before_dispatch_failed')
+          this.#scheduleRetry(retried.delayMs ?? 100)
+          continue
+        }
         if (!gate.ok) {
           if (gate.action === 'fail') {
             outbox.fail(effect.effectId, this.#leaseOwner, Date.now(), gate.reason)

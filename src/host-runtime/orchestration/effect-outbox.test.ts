@@ -9,7 +9,8 @@ import {
   failEffect,
   retryEffect,
   runEffectWorkerPass,
-  succeedEffect
+  succeedEffect,
+  OUTBOX_LEASE_MS
 } from './effect-outbox'
 
 function withSink(run: (sink: EventSink) => void): void {
@@ -177,3 +178,24 @@ it('R1: a retried effect waits out its backoff before it can block another sessi
   })
 })
 
+// R6: nothing reclaimed a row whose owner died mid-claim. It stayed `running` forever and, because a
+// session queue counts `running` rows, it blocked every later effect of that session.
+it('R6: reclaims a claimed effect whose lease expired and leaves a live lease alone', () => {
+  withSink((sink) => {
+    enqueue(sink, 'e1', { sessionKey: 'sess-a', causationSeq: 1 })
+    enqueue(sink, 'e2', { sessionKey: 'sess-b', causationSeq: 2 })
+    const db = sink.handle.db
+    expect(claimNextEffect({ db, owner: 'dead-worker', now: 1_000 }).effect?.effectId).toBe('e1')
+
+    // Still within the lease: the claim belongs to its owner and must not be stolen.
+    expect(claimNextEffect({ db, owner: 'other', now: 1_000 + OUTBOX_LEASE_MS - 1 }).effect?.effectId).toBe('e2')
+    expect(db.prepare("SELECT state, lease_owner FROM orch_outbox WHERE effect_id = 'e1'").get())
+      .toEqual({ state: 'running', lease_owner: 'dead-worker' })
+
+    // Past the lease: the row is claimable again, and the expired lease is recorded on the row.
+    const reclaimed = claimNextEffect({ db, owner: 'worker-b', now: 1_000 + OUTBOX_LEASE_MS + 1 }).effect
+    expect(reclaimed).toMatchObject({ effectId: 'e1', leaseOwner: 'worker-b', attempts: 2 })
+    expect(db.prepare("SELECT last_error FROM orch_outbox WHERE effect_id = 'e1'").get())
+      .toEqual({ last_error: 'lease_expired' })
+  })
+})
