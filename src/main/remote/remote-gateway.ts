@@ -115,6 +115,7 @@ export function scopedIntentId(peerCertSHA256: string, intentId: string): string
 export class RemoteGateway {
   #authority: DeviceAuthorizer
   #runMeta = new Map<string, { peerCertSHA256: string; grantScope: 'local' | 'remote' }>()
+  #ledgerIdForRun?: RemoteGatewayDependencies['ledgerIdForRun']
   #ledger: SessionLedger
   #projects?: RemoteProjectSource
   #directories?: RemoteDirectorySource
@@ -151,6 +152,7 @@ export class RemoteGateway {
     this.#historyVersion = deps.historyVersion
     this.#historyTurnsPage = deps.historyTurnsPage
     this.#output = deps.output
+    this.#ledgerIdForRun = deps.ledgerIdForRun
     this.#workspace = deps.workspace
     this.#fileDownloads = deps.fileDownloads
   }
@@ -232,13 +234,20 @@ export class RemoteGateway {
   }
 
   /** Scope of the peer that submitted this run, for policy that differs by scope. */
+  /** R5: the recorded meta is keyed by the ledger run id, the caller may hold the canonical one. */
+  #meta(runId: string): { peerCertSHA256: string; grantScope: 'local' | 'remote' } | undefined {
+    const direct = this.#runMeta.get(runId)
+    if (direct || !this.#ledgerIdForRun) return direct
+    try { return this.#runMeta.get(this.#ledgerIdForRun(runId)) } catch { return undefined }
+  }
+
   runScope(runId: string): 'local' | 'remote' {
-    return this.#runMeta.get(runId)?.grantScope ?? 'remote'
+    return this.#meta(runId)?.grantScope ?? 'remote'
   }
 
   /** Submitting peer cert and grant scope for live shadow observation (P4-1). */
   runMeta(runId: string): { peerCertSHA256?: string; grantScope?: 'local' | 'remote' } | undefined {
-    return this.#runMeta.get(runId)
+    return this.#meta(runId)
   }
 
   // Reconcile a submit whose receipt was lost. Scoped like submitIntent, so a

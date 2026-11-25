@@ -62,3 +62,27 @@ export function createLedgerIdForSubmit(
     return ledgerRunId
   }
 }
+
+/**
+ * R5: the reverse direction. A dispatch row carries the canonical run id, but the dispatcher's ledger
+ * is keyed by the v4 id `createLedgerIdForSubmit` minted. Without this the ledger finds no run and the
+ * dispatch fence looks like a conflict, which used to drop the intent.
+ */
+export function createLedgerIdForCanonical(db: Database.Database): (runId: string) => string {
+  const alias = db.prepare('SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?')
+  return (runId) => {
+    const row = alias.get(runId) as { ledger_run_id: string } | undefined
+    return row?.ledger_run_id ?? runId
+  }
+}
+
+/** Every run-id mapping the authority needs, built once against one connection. */
+export function createRunIdMappings(sink: EventSink, ledgerToCanonical: Map<string, string>) {
+  const db = sink.handle.db
+  const canonical = createCanonicalRunIds(sink, ledgerToCanonical)
+  return {
+    ...canonical,
+    ledgerIdForSubmit: createLedgerIdForSubmit(db, canonical.trackCanonical),
+    ledgerIdForCanonical: createLedgerIdForCanonical(db)
+  }
+}

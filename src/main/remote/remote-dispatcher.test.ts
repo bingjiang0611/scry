@@ -1,29 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { SessionLedger, type LedgerEvent, type LedgerStore } from './session-ledger'
-import { RemoteDispatcher, type RemoteExecutor, type RemoteExecutorInput } from './remote-dispatcher'
+import { SessionLedger, type LedgerEvent } from './session-ledger'
+import { RemoteDispatcher } from './remote-dispatcher'
 import { createRemoteRunBinding } from './remote-run-binding'
-
-class MemoryLedgerStore implements LedgerStore {
-  log: LedgerEvent[]
-  constructor(seed: LedgerEvent[] = []) { this.log = seed.map((e) => ({ ...e })) }
-  assertAvailable(): void {}
-  loadAll(): LedgerEvent[] { return this.log.map((e) => ({ ...e })) }
-  append(event: LedgerEvent): void { this.log.push({ ...event }) }
-}
-
-// A controllable executor whose completion the test resolves explicitly.
-function deferredExecutor() {
-  const calls: string[] = []
-  const gates = new Map<string, { resolve(): void; reject(e: Error): void; input: RemoteExecutorInput }>()
-  const executor: RemoteExecutor = {
-    execute(input) {
-      calls.push(input.runId)
-      return new Promise<void>((resolve, reject) => gates.set(input.runId, { resolve, reject, input }))
-    }
-  }
-  return { executor, calls, gates }
-}
+import { MemoryLedgerStore, deferredExecutor, memoryOutbox } from './remote-dispatcher.fixtures'
 
 const kinds = (ledger: SessionLedger) => ledger.since(0).events.map((e) => e.kind)
 
@@ -153,66 +133,6 @@ describe('RemoteDispatcher', () => {
 })
 
 // B1: dispatch order and attempts come from the durable outbox, not from scanning every intent.
-function memoryOutbox(seed: Array<{ effectId: string; runId: string | null; kind?: string; expiresAt?: number }>) {
-  const rows = seed.map((row) => ({
-    effectId: row.effectId,
-    kind: row.kind ?? 'provider.run.start',
-    runId: row.runId,
-    payload: JSON.stringify({ runId: row.runId }),
-    attempts: 0,
-    state: 'pending' as 'pending' | 'done' | 'failed' | 'voided',
-    expiresAt: row.expiresAt,
-    // R1: a settled-deferred row is invisible until its backoff elapses.
-    availableAt: undefined as number | undefined
-  }))
-  const settled: string[] = []
-  return {
-    rows,
-    settled,
-    claim(owner: string, now: number) {
-      void owner
-      const expired = rows.filter((r) => r.state === 'pending' && r.expiresAt !== undefined && r.expiresAt <= now)
-      for (const row of expired) row.state = 'voided'
-      const row = rows.find((r) => r.state === 'pending' && (r.expiresAt === undefined || r.expiresAt > now)
-        && (r.availableAt === undefined || r.availableAt <= now))
-      if (!row) return { expired: expired.map((r) => ({ effectId: r.effectId, runId: r.runId })) }
-      row.state = 'done'
-      row.attempts += 1
-      settled.push(`claim:${row.effectId}`)
-      return {
-        expired: expired.map((r) => ({ effectId: r.effectId, runId: r.runId })),
-        effect: { effectId: row.effectId, kind: row.kind, runId: row.runId, payload: row.payload, attempts: row.attempts }
-      }
-    },
-    succeed(effectId: string) {
-      settled.push(`succeed:${effectId}`)
-      return true
-    },
-    fail(effectId: string) {
-      settled.push(`fail:${effectId}`)
-      return true
-    },
-    retry(effectId: string) {
-      settled.push(`retry:${effectId}`)
-      const row = rows.find((r) => r.effectId === effectId)
-      if (row) {
-        row.state = 'pending'
-        row.availableAt = Date.now() + 100
-      }
-      return { status: 'retry' as const, delayMs: 100 }
-    },
-    defer(effectId: string, _owner: string, _reason: string, now: number, delayMs: number) {
-      settled.push(`defer:${effectId}`)
-      const row = rows.find((r) => r.effectId === effectId)
-      if (row) {
-        row.state = 'pending'
-        row.availableAt = now + delayMs
-      }
-      return true
-    }
-  }
-}
-
 describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
   it('claims only the durable outbox row and settles it once dispatched', async () => {
     const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
@@ -336,6 +256,26 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
     expect(outbox.settled.filter((entry) => entry === 'defer:eff-held')).toHaveLength(1)
     expect(outbox.settled).toContain('succeed:eff-free')
     gates.get(freeRun)!.resolve()
+    dispatcher.dispose()
+  })
+
+  // R5: the outbox row is committed before the submit finishes writing the ledger intent, so a pump in
+  // that window used to see "no such ledger run", read it as a fence conflict and drop the intent.
+  it('R5: an outbox row whose ledger intent is not written yet is retried, not dropped', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor, calls } = deferredExecutor()
+    const runId = randomUUID()
+    const outbox = memoryOutbox([{ effectId: 'eff-new', runId }])
+    const dispatcher = new RemoteDispatcher({ ledger, executor, outbox })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-new', 'retry:eff-new'])
+    expect(calls).toEqual([])
+    // The row is still claimable, so the dispatch happens once the intent is durably recorded.
+    ledger.recordIntent({ intentId: randomUUID(), runId })
+    outbox.rows[0]!.availableAt = undefined
+    expect(dispatcher.pump()).toEqual([runId])
+    expect(ledger.runState(runId)).toBe('dispatched')
     dispatcher.dispose()
   })
 

@@ -229,6 +229,12 @@ export interface RemoteGatewayDependencies {
   historyTurnsPage?: RemoteHistoryTurnsPageSource
   // Absent => the device sees an empty (honest) output page.
   output?: RemoteOutputReader
+  /**
+   * R5: run metadata is recorded under the ledger run id the App was given, while execution and the
+   * authority use the canonical id. Resolve before looking up the submitter's scope and peer; an
+   * unknown id resolves to itself, so the stricter default still applies.
+   */
+  ledgerIdForRun?(runId: string): string
 }
 
 export interface SubmitIntentInput {

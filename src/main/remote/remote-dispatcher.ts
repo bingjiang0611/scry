@@ -94,6 +94,12 @@ export interface RemoteDispatcherDependencies {
   /** P4-2 authoritative terminal settlement hook after executor finishes. */
   onSettled?(runId: string, lifecycle: TerminalRunLifecycle, detail?: string): void
   /**
+   * R5: the ledger is keyed by a v4 run id, which differs from the canonical id an outbox row carries.
+   * Every ledger read/write goes through this mapping; the executor and the authority keep the
+   * canonical id.
+   */
+  ledgerIdForRun?(runId: string): string
+  /**
    * C4: a turn that continues a session after a daemon restart is told which background work the
    * previous process cancelled. The hook returns the detail to execute, or the original one.
    */
@@ -110,6 +116,7 @@ export class RemoteDispatcher {
   #beforeDispatch?: RemoteDispatcherDependencies['beforeDispatch']
   #onSettled?: RemoteDispatcherDependencies['onSettled']
   #rewriteDetail?: RemoteDispatcherDependencies['rewriteDetail']
+  #ledgerIdForRun?: RemoteDispatcherDependencies['ledgerIdForRun']
   #inflight = new Set<string>()
   #retryTimer: ReturnType<typeof setTimeout> | null = null
   #disposed = false
@@ -123,6 +130,13 @@ export class RemoteDispatcher {
     this.#beforeDispatch = deps.beforeDispatch
     this.#onSettled = deps.onSettled
     this.#rewriteDetail = deps.rewriteDetail
+    this.#ledgerIdForRun = deps.ledgerIdForRun
+  }
+
+  /** The ledger's key for a canonical run id. Identity when no mapping is configured or readable. */
+  #ledgerKey(runId: string): string {
+    if (!this.#ledgerIdForRun) return runId
+    try { return this.#ledgerIdForRun(runId) } catch { return runId }
   }
 
   dispose(): void {
@@ -152,6 +166,11 @@ export class RemoteDispatcher {
     let state: string | undefined
     try { state = this.#ledger.runState(runId) } catch { return false }
     return state === 'dispatched' || state === 'settled' || state === 'failed' || state === 'cancelled'
+  }
+
+  /** Whether the ledger holds any state for the run at all (as opposed to refusing a transition). */
+  #ledgerKnows(runId: string): boolean {
+    try { return this.#ledger.runState(runId) !== undefined } catch { return false }
   }
 
   /** Clears backoffs so a "conditions changed" pump sees rows it deferred earlier. */
@@ -214,7 +233,7 @@ export class RemoteDispatcher {
         if (!row.runId) continue
         // The authority records the terminal cancellation (with evidence); the ledger mirrors it.
         if (this.#beforeDispatch) this.#beforeDispatch(row.runId, undefined)
-        try { this.#ledger.markCancelled(row.runId) } catch { /* already terminal */ }
+        try { this.#ledger.markCancelled(this.#ledgerKey(row.runId)) } catch { /* already terminal */ }
       }
       if (!effect) break
       if (effect.kind !== 'provider.run.start') {
@@ -231,9 +250,10 @@ export class RemoteDispatcher {
         outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'already_inflight')
         continue
       }
+      const ledgerRunId = this.#ledgerKey(runId)
       let detail: string | undefined
       try {
-        detail = this.#ledger.intentDetail?.(runId)
+        detail = this.#ledger.intentDetail?.(ledgerRunId)
       } catch { detail = undefined }
       if (this.#beforeDispatch) {
         const gate = this.#beforeDispatch(runId, detail)
@@ -241,8 +261,8 @@ export class RemoteDispatcher {
           if (gate.action === 'fail') {
             outbox.fail(effect.effectId, this.#leaseOwner, Date.now(), gate.reason)
             try {
-              if (gate.reason === 'pending_expired' || gate.reason === 'stop_requested') this.#ledger.markCancelled(runId)
-              else this.#ledger.markFailed(runId, gate.detail ?? gate.reason)
+              if (gate.reason === 'pending_expired' || gate.reason === 'stop_requested') this.#ledger.markCancelled(ledgerRunId)
+              else this.#ledger.markFailed(ledgerRunId, gate.detail ?? gate.reason)
             } catch { /* already terminal */ }
             continue
           }
@@ -259,9 +279,17 @@ export class RemoteDispatcher {
       // do) versus a ledger that thinks the run is still recorded while the authority admitted it —
       // the restart case (R2). Succeeding on that second case left the run in `dispatched` forever.
       try {
-        this.#ledger.markDispatched(runId)
+        this.#ledger.markDispatched(ledgerRunId)
       } catch {
-        if (this.#ledgerSettledOrDispatched(runId)) {
+        // R5: the outbox row is committed before the submit writes the ledger intent. A ledger that
+        // has never heard of this run is not a fence conflict — the submit is still landing — so the
+        // row goes back to pending instead of being failed and losing the intent.
+        if (!this.#ledgerKnows(ledgerRunId)) {
+          const retried = outbox.retry(effect.effectId, this.#leaseOwner, Date.now(), 'ledger_intent_pending')
+          this.#scheduleRetry(retried.delayMs ?? 100)
+          continue
+        }
+        if (this.#ledgerSettledOrDispatched(ledgerRunId)) {
           outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
           continue
         }
@@ -273,7 +301,7 @@ export class RemoteDispatcher {
       }
       this.#inflight.add(runId)
       started.push(runId)
-      this.#run(runId, detail)
+      this.#run(runId, detail, ledgerRunId)
       outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
     }
     return started
@@ -306,17 +334,17 @@ export class RemoteDispatcher {
     )
   }
 
-  #run(runId: string, detail?: string): void {
+  #run(runId: string, detail?: string, ledgerRunId = runId): void {
     const progress = (mark?: string): void => {
       // Best-effort progress: never fail execution because a marker could not
       // be recorded, but never fabricate one either.
-      try { this.#ledger.markProgress(runId, mark) } catch { /* run already terminal */ }
+      try { this.#ledger.markProgress(ledgerRunId, mark) } catch { /* run already terminal */ }
     }
     let outputCaptureFailed = false
     const markOutputCaptureFailed = (): void => {
       if (outputCaptureFailed) return
       outputCaptureFailed = true
-      try { this.#ledger.markProgress(runId, 'output_capture_failed') } catch { /* run already terminal */ }
+      try { this.#ledger.markProgress(ledgerRunId, 'output_capture_failed') } catch { /* run already terminal */ }
     }
     const output = (chunk: { kind: 'output' | 'reasoning' | 'tool' | 'tool_result'; text: string }): void => {
       // Output persistence must never fail the Agent, but the durable lifecycle must expose
@@ -340,17 +368,17 @@ export class RemoteDispatcher {
       pending = this.#executor.execute({ runId, detail: effectiveDetail, progress, output })
     } catch (error) {
       void flushOutput().finally(() => {
-        this.#settle(runId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096))
+        this.#settle(runId, ledgerRunId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096))
       })
       return
     }
     void Promise.resolve(pending).then(
-      async (outcome) => { await flushOutput(); this.#settle(runId, outcome ?? 'settled') },
-      async (error) => { await flushOutput(); this.#settle(runId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096)) }
+      async (outcome) => { await flushOutput(); this.#settle(runId, ledgerRunId, outcome ?? 'settled') },
+      async (error) => { await flushOutput(); this.#settle(runId, ledgerRunId, 'failed', String((error as Error)?.message ?? error).slice(0, 4096)) }
     )
   }
 
-  #settle(runId: string, lifecycle: TerminalRunLifecycle, detail?: string): void {
+  #settle(runId: string, ledgerRunId: string, lifecycle: TerminalRunLifecycle, detail?: string): void {
     this.#inflight.delete(runId)
     try {
       this.#onSettled?.(runId, lifecycle, detail)
@@ -358,8 +386,8 @@ export class RemoteDispatcher {
     try {
       // The v2 Desktop watch maps the H1 cancellation event to a failed run.
       // Keep the existing settlement and status progress marker on that wire.
-      if (lifecycle === 'failed') this.#ledger.markFailed(runId, detail)
-      else this.#ledger.markSettled(runId)
+      if (lifecycle === 'failed') this.#ledger.markFailed(ledgerRunId, detail)
+      else this.#ledger.markSettled(ledgerRunId)
     } catch { /* already terminal (e.g. cancelled by the host) */ }
   }
 

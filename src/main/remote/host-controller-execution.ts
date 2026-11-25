@@ -111,6 +111,8 @@ export function createExecution(input: ExecutionDeps): {
   const gateway = new RemoteGateway({
     authority: input.authority,
     ledger,
+    // R5: a canonical run id reaches the executor while the App holds the ledger run id.
+    ...(deps.orchestration ? { ledgerIdForRun: (runId: string) => deps.orchestration!.ledgerIdForRun(runId) } : {}),
     output,
     ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
     ...(deps.listDirectories ? { directories: { list: deps.listDirectories } } : {}),
@@ -210,6 +212,8 @@ export function createExecution(input: ExecutionDeps): {
       onSettled: (runId, lifecycle, detail) => {
         deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
       },
+      // R5: the outbox row carries the canonical id; the ledger is keyed by the v4 id minted for it.
+      ledgerIdForRun: (runId) => deps.orchestration!.ledgerIdForRun(runId),
       // B1/A4: stop and answer effects must reach completion from the durable queue, not only
       // from the in-memory request path, so a restart cannot lose them.
       effectExecutor: (effect) => {

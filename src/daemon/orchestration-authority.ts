@@ -31,7 +31,6 @@ import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchest
 import { createAuthorityRunTerminalHandler, terminalConversationWriteback } from './orchestration-run-terminal'
 import { createQuotaFailureHook } from './usage-limit-capture'
 import { takeRestartNoteForRun } from './restart-background-note'
-import { createLedgerIdForSubmit } from './orchestration-canonical-run-ids'
 import type { UsageLimitScheduler } from './usage-limit-scheduler'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
@@ -46,7 +45,7 @@ import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/reco
 import { ledgerLifecycleFor } from './orchestration-intent-status'
 import { TERMINAL_RUN_LIFECYCLES } from '../host-runtime/orchestration/run-transitions'
 import { sessionQueueBlocksDispatch } from './orchestration-dispatch-queue'
-import { createCanonicalRunIds } from './orchestration-canonical-run-ids'
+import { createRunIdMappings } from './orchestration-canonical-run-ids'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
 
@@ -198,9 +197,8 @@ function buildAuthorityRuntime<
   )
   let progressCounter = 0
 
-  const canonicalIds = createCanonicalRunIds(sink, ledgerToCanonical)
-  const { resolveCanonical, resolvePersistedCanonical, trackCanonical } = canonicalIds
-    const ledgerIdForSubmit = createLedgerIdForSubmit(db, trackCanonical)
+  const canonicalIds = createRunIdMappings(sink, ledgerToCanonical)
+  const { resolveCanonical, resolvePersistedCanonical, ledgerIdForSubmit, ledgerIdForCanonical } = canonicalIds
 
   const readSubmitReceipt = (peer: string, commandId: string) => {
     if (sink.isWriteIndeterminate()) throw new Error('orchestration_write_indeterminate')
@@ -215,6 +213,7 @@ function buildAuthorityRuntime<
     recordSessionMetadata: (input) => recordSessionMetadata(sink, input, Date.now()),
     currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: () => createAuthorityLedgerStore(sink),
+    ledgerIdForRun: ledgerIdForCanonical,
 
     submitAsync: async (input) => {
       const immediateDispatch = input.immediateDispatch

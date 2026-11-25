@@ -77,6 +77,11 @@ export interface OrchestrationAuthorityHooks {
   }): { status: 'recorded' | 'unavailable'; reason?: string }
   /** Rebuilds the transient dispatcher state from the durable log. */
   createLedgerStore(): LedgerStore
+  /**
+   * R5: maps a canonical run id back to the ledger run id the dispatcher's ledger is keyed by. A
+   * non-v4 id gets its own ledger id, so the two are not interchangeable.
+   */
+  ledgerIdForRun(runId: string): string
   /** B1: dispatch claims come from the durable outbox, not from in-memory bookkeeping. */
   outbox(): OrchestrationOutboxGate
   /** Authoritative async submit (durable >16 KiB body written BEFORE SQLite commit). */

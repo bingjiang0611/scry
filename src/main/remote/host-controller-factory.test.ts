@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createHostController, type HostControllerBinding } from './host-controller-factory'
+import { deviceKeyAndCSR } from './inner-mtls-lanes.fixtures'
 import { RunOutputFileStore } from './run-output-file'
 import { ProviderOperationGate } from '../provider-operation-gate'
 import type { IssuedPairingCertificate } from './pairing'
@@ -136,6 +137,31 @@ describe('createHostController (production persistence binding)', () => {
     expect(existsSync(join(dir, 'orchestration', 'orchestration.db'))).toBe(true)
     expect(existsSync(join(dir, 'ledger'))).toBe(false)
     expect(existsSync(join(dir, 'output'))).toBe(true)
+  })
+
+  // R5: the outbox row carries the canonical run id while the ledger is keyed by the v4 id
+  // `createLedgerIdForSubmit` minted for it, so a non-v4 canonical id found no ledger run. The pump
+  // read the throw as a fence conflict and failed the row: the intent was dropped without executing.
+  it('R5: dispatches a run whose canonical id is not a v4 uuid', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-host-r5-'))
+    dirs.push(dir)
+    const started: string[] = []
+    const binding = await factory(dir, async ({ runId }) => { started.push(runId) })
+    // The conversation marker is only carried by the App's own grant, so this needs a local grant.
+    const { csrPEM } = await deviceKeyAndCSR()
+    const local = (await binding.controller.authority.enrollLocal({ csrPEM, deviceLabel: 'Scry App' }, () => true))
+      .certificateSHA256
+
+    const detail = binding.routing({
+      prompt: 'legacy turn',
+      conversation: { conversationId: 'conv-r5', runId: 'legacy-turn-7' }
+    } as never)
+    const submit = await binding.controller.submitReceivedIntent(local, { intentId: randomUUID(), detail })
+    await binding.controller.idle()
+
+    expect(started).toEqual(['legacy-turn-7'])
+    expect(submit.runId).not.toBe('legacy-turn-7')
+    expect(binding.authority.sink.getRun('legacy-turn-7')?.lifecycle).toBe('settled')
   })
 
   it('replays persisted output pages after a controller restart', async () => {
