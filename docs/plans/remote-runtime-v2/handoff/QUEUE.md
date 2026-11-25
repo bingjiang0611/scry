@@ -41,3 +41,4 @@
 | W20 | 对齐 Orchestration V2：缺陷、持久化核心、ProviderSession、队列与谱系、检查点（一次做完） | 维护者本机单执行方 | main `a764f7d3` | P6 暂停至 W20 完成 | [tasks/W20-v2-alignment.md](tasks/W20-v2-alignment.md) |
 | W21 | 机器管理第一版：侧栏「机器」入口、连接管理并入、各机 CPU/内存/磁盘（与 W20 并行） | 维护者本机独立执行方 | main | 不碰 W20 的文件；推 `feat/machines-v1` | [tasks/W21-machines-v1.md](tasks/W21-machines-v1.md) |
 | W22 | 分析页：LLM 性能与成本合并为一页，修正统计口径与空值 | 维护者本机独立执行方 | main | 推 `feat/analytics-merge`；不碰 W20 文件 | [tasks/W22-analytics-merge.md](tasks/W22-analytics-merge.md) |
+| W20b | W20 核验返修：4 阻塞（outbox 队头阻塞、排队条目重启后丢失、Qoder 串话、Antigravity 杀进程）+ 10 应修 | W20 执行方 | W20（`3016f037`） | 修完才能合入 main | [tasks/W20b-review-fixes.md](tasks/W20b-review-fixes.md) |
