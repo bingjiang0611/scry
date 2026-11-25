@@ -63,6 +63,8 @@ export interface ChatViewProps {
   hostQueue?: HostQueueState
   /** D1: the release action for a held entry; absent means the panel stays read-only. */
   hostQueueRelease?: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
+  /** C4: the restart offer for this session and the press that continues it once. */
+  restartContinue?: import('../../hooks/useHostQueue').RestartContinueState
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string; title?: string; retry?: () => void; retrying?: boolean } | null
   /**
    * What an empty but selected conversation is. A side chat is a new conversation with a

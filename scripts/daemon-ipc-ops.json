@@ -271,6 +271,16 @@
         "local"
       ]
     },
+    "restartNote": {
+      "path": "controls",
+      "request": "{ op:'restartNote', method:'restartNote', args:[{ sessionId, providerId?, agentProfileId?, cwd? }] } | { op:'restartNote', method:'continueAfterRestart', args:[...same] }",
+      "response": "restartNote：该会话是否还有重启取消的后台任务待续做（未解析的会话报 resolved:false）；continueAfterRestart：提交一次 agent 轮次的结果或拒绝原因",
+      "authorize": "本机 grant；只读问询不写状态，继续只消耗宿主自己的重启提示，一次",
+      "why": "C4 重启提示的证据在宿主事件库，提交与派发也只能由宿主做",
+      "scopes": [
+        "local"
+      ]
+    },
     "hostQueue": {
       "path": "hostQueue",
       "request": "{ op:'hostQueue', method:'hostQueue', args: [sessionKey] }",

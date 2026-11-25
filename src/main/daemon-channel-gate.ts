@@ -11,6 +11,7 @@ import { MCP_LOCAL_OPS } from './daemon-local-ops/mcp'
 import { BILLING_LOCAL_OPS } from './daemon-local-ops/billing'
 import { PAIRING_LOCAL_OPS } from './daemon-local-ops/pairing'
 import { BACKGROUND_SERVICE_LOCAL_OPS } from './daemon-local-ops/background-service'
+import { HOST_AUTHORITY_LOCAL_OPS } from './daemon-local-ops/session-lifecycle'
 
 // The daemon owns runs, Providers, terminals and the App's userData (S3: the in-process
 // runtime is gone from Electron main). Every privileged channel the App registers is
@@ -78,7 +79,8 @@ export const DAEMON_LOCAL_OP_CHANNELS: DaemonLocalOpTable = {
   ...MCP_LOCAL_OPS,
   ...BILLING_LOCAL_OPS,
   ...PAIRING_LOCAL_OPS,
-  ...BACKGROUND_SERVICE_LOCAL_OPS
+  ...BACKGROUND_SERVICE_LOCAL_OPS,
+  ...HOST_AUTHORITY_LOCAL_OPS
 }
 
 /** Channels the daemon answers through an op it already serves paired devices (route `forward`). */

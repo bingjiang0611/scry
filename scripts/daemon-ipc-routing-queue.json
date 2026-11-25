@@ -24,6 +24,22 @@
       "method": "releaseQueuedRun",
       "path": "controls",
       "why": "D1 挂起的队列只能由宿主放行；是否可放行由权威判定"
+    },
+    {
+      "channel": "agent:restartNote",
+      "route": "new-op",
+      "op": "restartNote",
+      "method": "restartNote",
+      "why": "C4 重启提示存在宿主：App 只问有没有待续做的后台任务",
+      "path": "navigation"
+    },
+    {
+      "channel": "agent:continueAfterRestart",
+      "route": "new-op",
+      "op": "restartNote",
+      "method": "continueAfterRestart",
+      "why": "C4 显式继续由宿主提交并驱动派发；提示只能被消耗一次",
+      "path": "controls"
     }
   ]
 }

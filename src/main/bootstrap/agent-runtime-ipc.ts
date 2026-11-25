@@ -62,6 +62,13 @@ export function registerAgentRuntimeHandlers({
     if (typeof runId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) throw new Error('invalid_run_id')
     return await daemon.localOp({ op: 'checkpoints', method: 'releaseQueuedRun', args: [{ runId }], read: false })
   })
+  // C4: the restart offer is a host fact; the press is a host write that submits one agent turn.
+  handleTrusted('agent:restartNote', async (_e, request: unknown) => {
+    return await daemon.localOp({ op: 'restartNote', method: 'restartNote', args: [hostQueueRequest(request)], read: true })
+  })
+  handleTrusted('agent:continueAfterRestart', async (_e, request: unknown) => {
+    return await daemon.localOp({ op: 'restartNote', method: 'continueAfterRestart', args: [hostQueueRequest(request)], read: false })
+  })
   let detailOwner: IpcMainInvokeEvent['sender'] | undefined
   const clearDetailOwner = () => { detailOwner = undefined; daemon.watchDetail?.(null) }
   handleTrusted('agent:watchSessionDetail', (event, key: unknown): boolean => {

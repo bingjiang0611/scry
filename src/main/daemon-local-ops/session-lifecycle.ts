@@ -17,3 +17,14 @@ export const SESSION_LIFECYCLE_LOCAL_OPS: DaemonLocalOpTable = {
 }
 
 export const SESSION_LIFECYCLE_FORWARDS: DaemonForwardTable = {}
+
+// Host authority over the run the App is looking at (D1 queue, D5 rollback, C4 restart continue).
+// The daemon answers these and main forwards them; without an entry here the daemon replied
+// `unsupported_op` to a channel main had already forwarded.
+export const HOST_AUTHORITY_LOCAL_OPS: DaemonLocalOpTable = {
+  'agent:hostQueue': { op: 'hostQueue', method: 'hostQueue', read: true },
+  'agent:releaseQueuedRun': { op: 'checkpoints', method: 'releaseQueuedRun', read: false },
+  'agent:rollbackRun': { op: 'checkpoints', method: 'rollbackRun', read: false },
+  'agent:restartNote': { op: 'restartNote', method: 'restartNote', read: true },
+  'agent:continueAfterRestart': { op: 'restartNote', method: 'continueAfterRestart', read: false }
+}

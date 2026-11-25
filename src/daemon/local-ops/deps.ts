@@ -71,6 +71,8 @@ export interface DaemonLocalEndpointDeps {
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
   /** D1: the projection read, plus the one session lookup, so the App can show the host's queue. */
   orchestrationReader?: () => import('../../host-runtime/orchestration/native-session-lookup').SessionReader | undefined
+  /** C4: the explicit "继续" is an outbox write, so its handler needs the dispatcher's pump. */
+  pumpOrchestration?: () => void
   /** D5: checkpoint capture and rollback; the host owns the git side. */
   checkpoints?: import('../checkpoint-service').CheckpointService
   log?: (line: string) => void

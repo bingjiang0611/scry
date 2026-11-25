@@ -4,9 +4,9 @@ export type EffectKind =
   | 'provider.run.start'
   | 'provider.run.stop'
   | 'question.respond'
-  | 'catalog.writeback'
+  // D4: the conversation file is an export of the event log, so a metadata change writes back through
+  // the worker. No producer yet — see docs/plans/remote-runtime-v2/handoff/reports/W20.md (B1).
   | 'conversation.writeback'
-  | 'catalog.scan'
   | 'legacy.mirror'
 
 export type EffectPolicyClass = 'process_bound' | 'replayable'
@@ -22,9 +22,7 @@ export const ALL_EFFECT_KINDS: readonly EffectKind[] = [
   'provider.run.start',
   'provider.run.stop',
   'question.respond',
-  'catalog.writeback',
   'conversation.writeback',
-  'catalog.scan',
   'legacy.mirror'
 ]
 
@@ -33,9 +31,7 @@ export const EFFECT_POLICIES: Readonly<Record<EffectKind, EffectPolicySpec>> = {
   'provider.run.start': { policy: 'process_bound', onRestart: 'run_start_reconcile' },
   'provider.run.stop': { policy: 'process_bound', onRestart: 'void' },
   'question.respond': { policy: 'process_bound', onRestart: 'void' },
-  'catalog.writeback': { policy: 'replayable', onRestart: 'requeue' },
   'conversation.writeback': { policy: 'replayable', onRestart: 'requeue' },
-  'catalog.scan': { policy: 'replayable', onRestart: 'requeue' },
   'legacy.mirror': { policy: 'replayable', onRestart: 'requeue' }
 }
 

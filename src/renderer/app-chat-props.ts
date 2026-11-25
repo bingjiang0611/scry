@@ -40,6 +40,7 @@ export interface AppChatPropsContext {
   /** D1: what the host is holding for this session; undefined never mounts the panel. */
   hostQueue?: HostQueueState
   hostQueueRelease?: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
+  restartContinue?: import('./hooks/useHostQueue').RestartContinueState
   activeEvidenceGap: SessionEvidenceGap | null
   retryHistory?: () => void
   draftAttachments: DraftAttachment[]
@@ -88,7 +89,7 @@ export interface AppChatPropsContext {
 export function createAppChatProps(context: AppChatPropsContext): ComponentProps<typeof SessionChatView> {
   const { workspaceContext, workspaceSendLabel, workspaceBlockedReason, workspaceSetup, draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent,
     composerSubmitting, sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason,
-    providerCompatibilityIssue, sessionCacheVisible, hostQueue, hostQueueRelease, activeEvidenceGap, retryHistory, draftAttachments, queuedPrompts, steerCapability,
+    providerCompatibilityIssue, sessionCacheVisible, hostQueue, hostQueueRelease, restartContinue, activeEvidenceGap, retryHistory, draftAttachments, queuedPrompts, steerCapability,
     steerEvidenceByMessageId, editingQueuedPromptId, movedQueuedPromptId, slashOpen, slashLoading,
     slashCmds, slashReason, slashSel, focusedTurnRunId, chatNavigation, addPastedImages, addClipboardImage, pickSlash, send,
     stopRun, loadOlderTurns, historyOlderLoading, openTurnDiffReview, forkConversationTurn, openWorkspaceFile, selectChatAgent,
@@ -126,6 +127,7 @@ export function createAppChatProps(context: AppChatPropsContext): ComponentProps
     sessionCacheVisible,
     ...(hostQueue === undefined ? {} : { hostQueue }),
     ...(hostQueueRelease === undefined ? {} : { hostQueueRelease }),
+    ...(restartContinue === undefined ? {} : { restartContinue }),
     sessionEvidenceGap: activeEvidenceGap ? { ...activeEvidenceGap, retry: retryHistory,
       retrying: activeEvidenceGap.status === 'error' && sessionLoading } : null,
     busy: session.busy,

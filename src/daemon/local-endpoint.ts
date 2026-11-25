@@ -15,6 +15,7 @@ import { pairingLocalOps } from './local-ops/pairing'
 import { backgroundServiceLocalOps } from './local-ops/background-service'
 import { checkpointLocalOps } from './local-ops/checkpoints'
 import { hostQueueLocalOps, queueReleaseLocalOps } from './local-ops/host-queue'
+import { restartNoteLocalOps } from './local-ops/restart-note'
 
 export type { DaemonLocalEndpointDeps } from './local-ops/deps'
 
@@ -52,6 +53,7 @@ export function daemonLocalEndpoint(endpointDeps: DaemonLocalEndpointDeps): Loca
       ...checkpointLocalOps(deps),
       ...hostQueueLocalOps(deps),
       ...queueReleaseLocalOps(deps),
+      ...restartNoteLocalOps(deps),
       ...deps.terminal.localOps
     }),
     ...(deps.subscribe ? { subscribe: deps.subscribe } : {}),

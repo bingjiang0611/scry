@@ -116,6 +116,8 @@ const invokeChannels = {
   watchSessionDetail: 'agent:watchSessionDetail',
   activeRuns: 'agent:activeRuns',
   hostQueue: 'agent:hostQueue',
+  restartNote: 'agent:restartNote',
+  continueAfterRestart: 'agent:continueAfterRestart',
   rollbackRun: 'agent:rollbackRun',
   releaseQueuedRun: 'agent:releaseQueuedRun',
   focusedRunSnapshot: 'agent:focusedRunSnapshot',

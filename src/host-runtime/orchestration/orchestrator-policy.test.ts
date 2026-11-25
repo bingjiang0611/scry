@@ -85,9 +85,12 @@ describe('P4-0 transition tables & effect policy', () => {
     expect(getEffectPolicy('provider.run.start').policy).toBe('process_bound')
     expect(getEffectPolicy('provider.run.stop').policy).toBe('process_bound')
     expect(getEffectPolicy('question.respond').policy).toBe('process_bound')
-    expect(getEffectPolicy('catalog.writeback').policy).toBe('replayable')
     expect(getEffectPolicy('conversation.writeback').policy).toBe('replayable')
-    expect(getEffectPolicy('catalog.scan').policy).toBe('replayable')
+    // catalog.* was registered with no producer anywhere; the scan runs as a direct call, so the
+    // registrations went away instead of staying as dead configuration.
+    expect(() => getEffectPolicy('catalog.scan' as never)).toThrow(
+      expect.objectContaining({ code: 'orchestration_invalid_effect_kind' })
+    )
     expect(getEffectPolicy('legacy.mirror').policy).toBe('replayable')
     expect(() => getEffectPolicy('unknown.kind' as never)).toThrow(
       expect.objectContaining({ code: 'orchestration_invalid_effect_kind' })

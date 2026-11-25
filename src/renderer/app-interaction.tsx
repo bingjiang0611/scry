@@ -187,15 +187,14 @@ export function useAppInteraction(context: AppInteractionContext) {
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
   const retryHistory = retryHistoryAction(projects, activeSessionId, cwd, activeEvidenceGap?.status)
-  // D1: the queue is host state, so releasing a held entry asks again instead of editing the list here.
-  // D1: re-read when the projection moves, not only when the session changes.
-  const { state: hostQueue, release: hostQueueRelease } = useSessionHostQueueWithRelease({ sessionId: activeSessionId,
+  // D1/C4: queue and restart offer are host state; both re-read when the projection moves.
+  const { state: hostQueue, release: hostQueueRelease, restartContinue } = useSessionHostQueueWithRelease({ sessionId: activeSessionId,
     providerId: integrations.selectedId, cwd }, session.historyWindow?.projectionKey)
   const chatProps = createAppChatProps({
     workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
     sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
-    sessionCacheVisible, hostQueue, hostQueueRelease, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
+    sessionCacheVisible, hostQueue, hostQueueRelease, restartContinue, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
     retryHistory: retryHistory ? () => {
       const { row } = retryHistory
       void pickSession(retryHistory.cwd, row.sessionId, row.providerId, row.externalSessionId, row.runId, row.agentProfileId)

@@ -207,9 +207,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     mirrorSessionTranscript
   })
 
-  // Startup recovery owns unfinished recorder/outbox/conversation evidence. The
-  // daemon must finish it before exposing local.sock, otherwise a device can start
-  // a new run while the previous process is still being reconciled.
+  // Startup recovery owns unfinished recorder/outbox/conversation evidence and must finish
+  // before local.sock opens, or a device starts a run mid-reconcile.
   startupManagedRecovery = runStartupRecovery({
     userDataDir: options.userDataDir,
     recorderCli: daemonPrivateCliPath(options.resourcesPath),
@@ -290,6 +289,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       isPackaged: options.isPackaged,
       sourceControl, checkpoints, providerDiscovery,
       orchestrationReader: () => userDataAuthority,
+      pumpOrchestration: () => remoteHostService?.controller.pump(),
       executionTargetBridge: targetBridge.localHandlers,
       hostAdmin,
       links: sessionLinks,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { HostQueueRequest } from '../../shared/host-queue'
 import { hostQueueItems, hostQueueRequestFor, type HostQueueItem } from './host-queue-model'
 import { HOST_QUEUE_COPY } from '../constants/host-queue-copy'
+import { RESTART_NOTE_COPY } from '../constants/restart-note-copy'
 
 export type HostQueueState =
   /** The host answered: these are its entries, in its order. */
@@ -83,8 +84,64 @@ export function useQueuedRunRelease(onReleased: () => void): {
 }
 
 /**
- * D1: the queue for the session on screen plus the one action that can move a held entry. The host owns
- * the answer, so a release triggers a re-read rather than a local list edit.
+ * C4: the restart offer for the session on screen, and the press that continues it. The offer is the
+ * host's — it holds the events that say a run ended with cancelled background work — and the press
+ * consumes it once, so the panel can only ever send that instruction one time.
+ */
+export interface RestartContinueState {
+  offer: 'idle' | 'none' | 'pending' | 'unknown'
+  pressing: boolean
+  error: string | null
+  press: () => void
+}
+
+export function useRestartContinue(session: {
+  sessionId: string | null
+  providerId?: string | null
+  cwd?: string | null
+  agentProfileId?: string | null
+}, refreshKey: string | number | undefined = 0): RestartContinueState {
+  const [offer, setOffer] = useState<RestartContinueState['offer']>('idle')
+  const [pressing, setPressing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [pressed, setPressed] = useState(0)
+  const request = hostQueueRequestFor(session)
+  const key = `${refreshKey ?? ''}:${pressed}`
+  useEffect(() => {
+    if (!request) { setOffer('idle'); return }
+    let live = true
+    setError(null)
+    void window.scry.restartNote(request).then(
+      (answer) => { if (live) setOffer(!answer.resolved ? 'unknown' : answer.pending ? 'pending' : 'none') },
+      () => { if (live) setOffer('unknown') }
+    )
+    return () => { live = false }
+  }, [request?.sessionId, request?.providerId, request?.cwd, request?.agentProfileId, key])
+  const press = (): void => {
+    if (!request || pressing) return
+    setPressing(true)
+    setError(null)
+    void window.scry.continueAfterRestart(request).then(
+      (answer) => {
+        setPressing(false)
+        // Even a refusal means the offer moved on: the note was consumed, or the host said why not.
+        setOffer(answer.ok ? 'none' : 'unknown')
+        if (!answer.ok) {
+          setError(answer.reason === 'no_pending_note'
+            ? RESTART_NOTE_COPY.noPendingNote
+            : RESTART_NOTE_COPY.refused(answer.reason ?? ''))
+        }
+        setPressed((n) => n + 1)
+      },
+      (reason: unknown) => { setPressing(false); setError(errorText(reason)) }
+    )
+  }
+  return { offer, pressing, error, press }
+}
+
+/**
+ * D1/C4: the host's queue and the two actions that move it. Both answers are the host's, so each
+ * action asks again instead of editing a local list.
  */
 export function useSessionHostQueueWithRelease(session: {
   sessionId: string | null
@@ -93,12 +150,14 @@ export function useSessionHostQueueWithRelease(session: {
 }, refreshKey: string | number | undefined = 0): {
   state: HostQueueState
   release: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
+  restartContinue: RestartContinueState
 } {
   const [released, setReleased] = useState(0)
   // Both keys are opaque: the projection key changes, or a release bumps the counter.
   const state = useSessionHostQueue(session, `${refreshKey ?? ''}:${released}`)
   const release = useQueuedRunRelease(() => setReleased((n) => n + 1))
-  return { state, release }
+  const restartContinue = useRestartContinue(session, refreshKey)
+  return { state, release, restartContinue }
 }
 
 /** The wiring the App needs: the queue for whatever session is on screen. */
