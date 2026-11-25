@@ -40,6 +40,8 @@ export async function finalizeOpenTurn(
      * parsed from the transcript may be claimed, and no other turn's bytes may be adopted.
      */
     transcriptUnavailable?: string
+    /** Already verified from an exact Codex terminal row; do not reparse the capped window. */
+    terminalOnlyTranscript?: TranscriptRead
   } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
@@ -62,7 +64,7 @@ export async function finalizeOpenTurn(
       errors: false
     }
   }
-  let transcript: TranscriptRead = options.transcriptUnavailable
+  let transcript: TranscriptRead = options.terminalOnlyTranscript ?? (options.transcriptUnavailable
     ? unobservedTranscript
     : open.transcriptPath
       ? await stableTranscript(
@@ -82,12 +84,12 @@ export async function finalizeOpenTurn(
       : {
           ...unobservedTranscript,
           complete: true
-        }
+        })
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
   const unmatchedReason = options.transcriptUnavailable ?? unmatchedIdentityReason(open, options.forcedReason)
   let retainedWindow = false
-  if (transcript.identityMatched === false || options.transcriptUnavailable) {
+  if (!options.terminalOnlyTranscript && (transcript.identityMatched === false || options.transcriptUnavailable)) {
     // A prompt cancelled before model execution may never reach the native transcript, and a session
     // end can close that turn on lifecycle evidence alone. Ordinary turn ends keep waiting for
     // identity. Once giving up is decided, keep the rows this turn wrote: publishing hooks only
@@ -255,7 +257,8 @@ export async function finalizeOpenTurn(
       return disabled('raw transcript capture disabled by content policy')
     }
     if (!transcript.source) {
-      return unavailable(options.transcriptUnavailable ?? 'stable transcript bytes were not available for this turn')
+      return unavailable(options.transcriptUnavailable ?? options.terminalOnlyTranscript?.incompleteReasons?.join('; ') ??
+        'stable transcript bytes were not available for this turn')
     }
     const source = transcript.source
     if (Buffer.byteLength(source.content) !== source.endOffset - source.startOffset) {
