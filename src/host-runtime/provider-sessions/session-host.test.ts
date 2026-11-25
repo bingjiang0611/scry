@@ -176,3 +176,23 @@ it('reuses a session through the alias derived from the native id it just opened
   expect(host.size).toBe(0)
   expect(first.sessionId).toBe('native-a')
 })
+
+// R14 small issue: an alias is the same session under a second key. Counting both keys against the cap
+// made a host with two live sessions believe it held four and evict one to make room for the third.
+it('does not count an alias toward the session cap', async () => {
+  const host = new ProviderSessionHost<{ name: string }>({ now: () => 1_000, maxSessions: 2 })
+  const { open, closed } = fakeSessions()
+  await host.acquire('k1', () => open('a'))
+  expect(host.alias('k1', 'native-a')).toBe(true)
+  await host.settle('k1', { reusable: true })
+  await host.acquire('k2', () => open('b'))
+  expect(host.alias('k2', 'native-b')).toBe(true)
+  await host.settle('k2', { reusable: true })
+  expect(host.size).toBe(2)
+
+  const third = await host.acquire('k3', () => open('c'))
+  expect(third).toMatchObject({ sessionId: 'native-c', reused: false })
+  // Room came from the cap itself, not from closing a live session.
+  expect(closed).toEqual(['a'])
+  expect(host.size).toBe(2)
+})

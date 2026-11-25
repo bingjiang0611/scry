@@ -168,8 +168,14 @@ export function recoverOrchestrationOnStartup(
           updateOutbox.run('voided', null, null, now, row.effectId)
           cancelRun(run.runId, 'pending_expired')
           summary.cancelledPending += 1
-        } else {
+        } else if (run.lifecycle === 'recorded' || run.lifecycle === 'queued') {
+          // `recorded` and `queued` are the states a run is in before anything ran, so re-dispatching
+          // one is a first dispatch. Anything further along is reconciled by evidence below.
           summary.dispatchablePendingRunIds.push(run.runId)
+        } else {
+          // The review found this list carrying runs that were already admitted or dispatched: a
+          // pending outbox row is not proof that nothing ran. Their outcome comes from evidence below.
+          updateOutbox.run('done', row.leaseOwner, row.claimedAt, now, row.effectId)
         }
         continue
       }

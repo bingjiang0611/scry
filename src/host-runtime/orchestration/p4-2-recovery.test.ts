@@ -107,12 +107,12 @@ describe('P4-2 startup recovery and two-ledger reconciliation', () => {
 
         // B1: an immediate submit now enqueues `pending` (the worker claims it later), so a
         // restart before dispatch re-dispatches it instead of cancelling a run nobody started.
-        expect(recovery.dispatchablePendingRunIds).toEqual([
-          'r-pending-ok',
-          'r-claimed-nodisp',
-          'r-disp-unknown',
-          'r-disp-proven'
-        ])
+        // Only a run that was still waiting for dispatch may be re-dispatched. A run already
+        // admitted or dispatched is reconciled by its evidence below, not queued again.
+        // Only runs that never ran may be dispatched again. `r-disp-unknown` and `r-disp-proven` were
+        // already dispatched: the weakened assertion had listed them here, which would have dispatched
+        // a second turn for work that already happened.
+        expect(recovery.dispatchablePendingRunIds).toEqual(['r-pending-ok', 'r-claimed-nodisp'])
         expect(sink.getRun('r-pending-exp')?.lifecycle).toBe('cancelled')
         expect(sink.getRun('r-pending-rollback')?.lifecycle).toBe('cancelled')
         expect(sink.getRun('r-pending-conv')?.lifecycle).toBe('cancelled')

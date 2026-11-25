@@ -327,8 +327,10 @@ const ORCH_DDL_V8: readonly string[] = [
 /** B1: the outbox needs its own session key to enforce per-session FIFO without reading the log. */
 const ORCH_DDL_V9: readonly string[] = [
   'ALTER TABLE orch_outbox ADD COLUMN session_key TEXT',
+  // A malformed payload must not abort the migration: `json_extract` throws on invalid JSON, so the
+  // value is only read when the document parses and the run projection supplies the key otherwise.
   `UPDATE orch_outbox SET session_key = COALESCE(
-     json_extract(payload, '$.sessionKey'),
+     CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionKey') END,
      (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = orch_outbox.run_id)
    )`,
   'CREATE INDEX IF NOT EXISTS idx_orch_outbox_fifo ON orch_outbox(session_key, state, causation_seq, effect_id)'

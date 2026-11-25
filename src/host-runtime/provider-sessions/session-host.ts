@@ -75,7 +75,12 @@ export class ProviderSessionHost<T> {
   }
 
   get size(): number {
-    return this.#entries.size
+    return this.#liveSessions()
+  }
+
+  /** R14: an alias is the same process under a second key, so only distinct entries count. */
+  #liveSessions(): number {
+    return new Set(this.#entries.values()).size
   }
 
   /**
@@ -232,7 +237,7 @@ export class ProviderSessionHost<T> {
 
   /** Evicts least-recently-used idle sessions so a new session fits under the cap. */
   async #makeRoom(): Promise<void> {
-    while (this.#entries.size >= this.#maxSessions) {
+    while (this.#liveSessions() >= this.#maxSessions) {
       const idle = [...this.#entries.values()]
         .filter((entry) => !entry.busy && entry.backgroundTasks === 0)
         .sort((a, b) => a.lastUsedAt - b.lastUsedAt)[0]
