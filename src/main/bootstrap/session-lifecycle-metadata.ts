@@ -68,7 +68,7 @@ export function createSessionMetadataOps(deps: SessionMetadataDeps) {
     // retain the existing persist-first fence and stop its registered owner.
     const changed = await change()
     if (changed && meta) {
-      deps.recordSessionMetadata?.({
+      await deps.recordSessionMetadata?.({
         externalSessionId: ref.externalSessionId,
         providerId: ref.providerId,
         agentProfileId: ref.agentProfileId,

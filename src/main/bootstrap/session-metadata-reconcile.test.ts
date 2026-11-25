@@ -64,6 +64,31 @@ describe('R10: session metadata recording survives an unavailable authority', ()
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([])
   })
 
+  it('persists an undefined authority result before returning to the caller', async () => {
+    const file = tempFile()
+    const recorder = createSessionMetadataRecorder({ file, record: () => undefined })
+    await recorder.record(entry)
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([entry])
+  })
+
+  it('does not let a stale queued rename overwrite a newer rename', async () => {
+    const file = tempFile()
+    let available = false
+    const changes: PendingMetadataEntry['change'][] = []
+    const recorder = createSessionMetadataRecorder({ file, record: (input) => {
+      if (!available) return { status: 'unavailable' }
+      changes.push(input.change)
+      return { status: 'recorded' }
+    } })
+    await recorder.record(entry)
+    await recorder.settled()
+    available = true
+    const newest = { ...entry, change: { kind: 'rename' as const, title: '更新的名字' } }
+    await Promise.all([recorder.record(newest), recorder.reconcile()])
+    expect(changes.at(-1)).toEqual(newest.change)
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([])
+  })
+
   it('keeps an entry that still cannot be recorded at startup', async () => {
     const file = tempFile()
     writeFileSync(file, JSON.stringify([entry]))

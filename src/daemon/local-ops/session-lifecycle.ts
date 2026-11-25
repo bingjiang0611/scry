@@ -43,6 +43,7 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
     publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
     // D4: rename/pin/archive are recorded by the authority once the catalog write succeeded.
     recordSessionMetadata: (input) => deps.getOrchestrationAuthority?.()?.recordSessionMetadata?.(input),
+    warnSessionMetadata: (message, error) => deps.log?.(`${message}: ${String(error)}`),
     // The archived purge's real count, forwarded to the App's window as in process.
     publishDeleteProgress: (progress) => publishHint({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
   })

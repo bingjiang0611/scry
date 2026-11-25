@@ -61,6 +61,7 @@ export interface SessionLifecycleDependencies {
     change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
     actor: string
   }) => unknown
+  warnSessionMetadata?: (message: string, error: unknown) => void
   publishDataUpdated: (event: AgentDataUpdated) => void
   /** The real count of archived sessions handled so far, for the renderer to show in place. */
   publishDeleteProgress?: (progress: DeleteArchivedProgress) => void
@@ -79,6 +80,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
   // queued and replayed instead of turning the user's change into a failed call.
   const metadataRecorder = createSessionMetadataRecorder({
     file: join(appUserDataDir, 'session-metadata-pending.json'),
+    warn: deps.warnSessionMetadata,
     ...(deps.recordSessionMetadata ? { record: deps.recordSessionMetadata } : {})
   })
   // D4: the metadata operations and their event recording live in their own module.

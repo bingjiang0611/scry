@@ -23,18 +23,16 @@ export interface PendingMetadataEntry {
 
 export interface SessionMetadataRecorder {
   /** Never throws: the caller's change already happened. */
-  record(entry: PendingMetadataEntry): void
+  record(entry: PendingMetadataEntry): Promise<void>
   /** Waits for the queue write that a `record` call started. */
   settled(): Promise<void>
   /** Replays queued entries; returns how many were recorded and now left the queue. */
   reconcile(): Promise<number>
 }
 
-type RecordResult = unknown
-
 export function createSessionMetadataRecorder(deps: {
   file: string
-  record?: (entry: PendingMetadataEntry) => RecordResult
+  record?: (entry: PendingMetadataEntry) => unknown
   warn?: (message: string, error: unknown) => void
 }): SessionMetadataRecorder {
   const warn = deps.warn ?? (() => undefined)
@@ -51,36 +49,39 @@ export function createSessionMetadataRecorder(deps: {
         && typeof (row as PendingMetadataEntry).cwd === 'string'
         && typeof (row as PendingMetadataEntry).actor === 'string'
         && !!(row as PendingMetadataEntry).change)
-    } catch {
-      // A missing or unreadable queue means there is nothing to replay.
-      return []
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
     }
   }
 
   const write = async (entries: PendingMetadataEntry[]): Promise<void> => {
     const tmp = `${deps.file}.tmp`
     await mkdir(dirname(deps.file), { recursive: true })
-    await writeFile(tmp, JSON.stringify(entries), 'utf8')
+    await writeFile(tmp, JSON.stringify(entries), { encoding: 'utf8', mode: 0o600 })
     await rename(tmp, deps.file)
   }
 
-  /** The queue is append-only between reconciliations; two changes in flight must not lose one. */
-  const append = (entry: PendingMetadataEntry): Promise<void> => {
-    writing = writing.then(async () => {
-      const entries = await read()
-      entries.push(entry)
-      await write(entries)
-    }).catch((error: unknown) => warn('session metadata queue write failed', error))
-    return writing
+  const serialize = <T>(work: () => Promise<T>, fallback: T): Promise<T> => {
+    const pending = writing.then(work).catch((error: unknown) => {
+      warn('session metadata reconciliation queue failed', error)
+      return fallback
+    })
+    writing = pending.then(() => undefined)
+    return pending
   }
 
-  const attempt = (entry: PendingMetadataEntry): { recorded: boolean; reason?: string } => {
+  const key = (entry: PendingMetadataEntry): string => JSON.stringify([
+    entry.providerId, entry.agentProfileId, entry.cwd, entry.externalSessionId, entry.change.kind
+  ])
+
+  const attempt = async (entry: PendingMetadataEntry): Promise<{ recorded: boolean; reason?: string }> => {
     if (!deps.record) return { recorded: false, reason: 'orchestration_unavailable' }
     try {
-      const result = deps.record(entry)
-      const status = result && typeof result === 'object' ? (result as { status?: string }).status : undefined
-      if (status === undefined || status === 'recorded') return { recorded: true }
-      return { recorded: false, reason: (result as { reason?: string }).reason }
+      const result = await deps.record(entry)
+      const status = result && typeof result === 'object' ? (result as { status?: string; reason?: string }) : undefined
+      if (status?.status === 'recorded') return { recorded: true }
+      return { recorded: false, reason: status?.reason ?? 'orchestration_unavailable' }
     } catch (error) {
       warn('session metadata event failed', error)
       return { recorded: false, reason: 'metadata_record_failed' }
@@ -88,25 +89,26 @@ export function createSessionMetadataRecorder(deps: {
   }
 
   return {
-    record(entry) {
-      const outcome = attempt(entry)
-      if (outcome.recorded) return
-      warn('session metadata event queued for reconciliation', { reason: outcome.reason, change: entry.change })
-      void append(entry)
-    },
-    settled: () => writing,
-    async reconcile() {
-      await writing
+    record: (entry) => serialize(async () => {
       const entries = await read()
-      if (entries.length === 0) return 0
-      const remaining: PendingMetadataEntry[] = []
-      let recorded = 0
-      for (const entry of entries) {
-        if (attempt(entry).recorded) recorded += 1
-        else remaining.push(entry)
+      // Catalog state is last-write-wins per field. An older failed update must not replay over this one.
+      const remaining = entries.filter((queued) => key(queued) !== key(entry))
+      const outcome = await attempt(entry)
+      if (!outcome.recorded) {
+        warn('session metadata event queued for reconciliation', outcome.reason)
+        remaining.push(entry)
       }
-      await write(remaining).catch((error: unknown) => warn('session metadata queue write failed', error))
-      return recorded
-    }
+      if (!outcome.recorded || remaining.length !== entries.length) await write(remaining)
+    }, undefined),
+    settled: () => writing,
+    reconcile: () => serialize(async () => {
+      const entries = await read()
+      const remaining: PendingMetadataEntry[] = []
+      for (const entry of entries) {
+        if (!(await attempt(entry)).recorded) remaining.push(entry)
+      }
+      if (remaining.length !== entries.length) await write(remaining)
+      return entries.length - remaining.length
+    }, 0)
   }
 }
