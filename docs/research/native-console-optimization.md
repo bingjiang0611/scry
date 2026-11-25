@@ -417,15 +417,35 @@ claim is made.
   then reads through the stable end offset. If no trustworthy anchor is found it falls back to byte
   zero, so a large prompt or early tool event cannot disappear while a later terminal event remains.
 - Legacy open-turn state may still contain `transcriptStartOffset`; recovery intentionally recomputes
-  the anchor rather than trusting that heuristic. Snapshot identity checks before/after the read and
-  path inode checks still prevent a rotated or concurrently changed file from being called stable.
+  the anchor rather than trusting that heuristic, and `0` is never read as a real position. Since
+  0.2.89 an open turn records the transcript's actual byte length when it opens, `null` when the file
+  was not readable yet, and recovery backfills the located anchor only from a complete, untruncated
+  window. Snapshot identity checks before/after the read and path inode checks still prevent a
+  rotated or concurrently changed file from being called stable.
 - Focused regression covers a 33 MiB snapshot and a Claude JSONL prompt line larger than the old
   rewind budget, including exact Provider identity and assistant recovery.
-- This correctness-first path parses the selected turn window in recorder/CLI memory; a missing anchor
-  deliberately falls back to the full session. It is not an Electron renderer or IPC queue, but a
-  single very large turn can increase recovery latency and peak RSS. When measured size/latency becomes
-  material, replace it with a durable line index plus incremental parser state; do not restore a byte
-  tail that silently changes completeness.
+- Size and latency are now bounded rather than merely measured (0.2.89). The window is capped at
+  64 MiB and keeps the newest bytes; the backwards anchor scan stops after 64 MiB, keeps at most 4 MiB
+  of a pending line and starts 8 MiB before a turn's recorded start. A capped window is reported as
+  `sourceCompleteness: partial` with a fixed `incompleteReasons` sentence (kept/dropped bytes) and
+  `complete: false`, so a reader can tell an unread byte range apart from an empty turn; no byte tail
+  silently changes completeness. Same-reason read/parse failures now count toward the session failure
+  ledger instead of retrying identically on every pass. Measured on one 1.02 GB Codex rollout: the old
+  path read all 1,027,213,094 bytes and threw `ERR_STRING_TOO_LONG` on every pass (peak RSS ~1 GB);
+  the bounded path reads 67,371,008 bytes, returns 45 events with an explicit truncation reason and
+  peaks at 306 MB. A sparse 1 GiB transcript that used to cost 444 s CPU and 5.7-8.4 GB RSS now costs
+  0.30 s CPU and 168 MB. A 40 MiB turn whose anchor is inside the scan limit is unchanged (40,202,062
+  bytes scanned, `complete: true`), and its repeated growing passes drop from ~480 ms each to 30 ms.
+- Remaining limit: the window cap means a turn larger than 64 MiB can only be read in its newest part.
+  The streaming path is the follow-up, not a byte tail that hides the cut: a durable per-session line
+  index (offset, byte length, kind, turn id) written while the Provider writes, plus an incremental
+  JSONL parser that keeps the anchor and the current turn's parsed state across passes. Scope: new
+  index store with torn-tail repair and identity checks (comparable to the existing remote ledger
+  checkpoint work), per-Provider indexers for the four JSONL formats, a parser that can resume from a
+  (lineOffset, parserState) pair, and a migration that rebuilds missing indexes in the background. It
+  touches the recorder store, the four transcript parsers and every recovery pass, so it needs its own
+  change and a compatibility plan for sessions recorded before it. Until then, `partial` +
+  `incompleteReasons` is the honest answer for a capped window.
 
 ## Durable model and diff bodies
 
