@@ -1,10 +1,11 @@
 // Isolated comparison of persisted records, with a controlled clock for the 180 s grace period.
-// node scripts/recorder-qoder-stop-bench.mjs <baseline dist> <candidate dist>
+// node scripts/recorder-qoder-stop-bench.mjs <baseline dist> <candidate dist> [--wall]
 import assert from 'node:assert/strict'
 import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 
 const RealDate = Date
 const origin = Date.now()
@@ -14,12 +15,14 @@ class FixtureDate extends RealDate {
   static now() { return now }
 }
 
-const [baseline, candidate] = process.argv.slice(2)
+const [baseline, candidate, mode] = process.argv.slice(2)
+const realClock = mode === '--wall'
 assert(baseline && candidate, 'expected baseline and candidate recorder dist directories')
-for (const [build, dist] of [['baseline', baseline], ['candidate', candidate]]) {
+for (const [build, dist] of realClock ? [['candidate', candidate]] : [['baseline', baseline], ['candidate', candidate]]) {
   const load = name => import(pathToFileURL(resolve(dist, 'core/turn-recorder', `${name}.js`)))
   const { handleRecorderHook, recoverRecorder } = await load('recorder')
   const { listRecords } = await load('store')
+  const { listenRecorderDaemon } = await load('daemon-listen')
   for (const scenario of ['short_answer', 'interrupted_resend']) {
     const workspace = await mkdtemp(join(tmpdir(), 'scry-qoder-stop-bench-'))
     const dataRoot = join(workspace, '.scry')
@@ -38,13 +41,21 @@ for (const [build, dist] of [['baseline', baseline], ['candidate', candidate]]) 
     const start = id => hook('UserPromptSubmit', { request_set_id: `request-${id}`, prompt: `synthetic ${id}` })
     const stop = id => hook('Stop', { parent_request_set_id: `request-${id}`, stop_hook_active: false,
       last_assistant_message: 'synthetic answer', model: 'synthetic', parent_business_info: {} })
-    const sealed = async () => (await listRecords(dataRoot)).some(record =>
-      record.turnIndex === (scenario === 'short_answer' ? 1 : 2) && record.status === 'completed')
+    const sealed = async () => {
+      const record = (await listRecords(dataRoot)).find(r => r.turnIndex === (scenario === 'short_answer' ? 1 : 2))
+      if (!record) return false
+      assert.equal(record.status, 'completed')
+      assert.equal(record.providerTurnId, 'target')
+      assert.equal(record.assistant.value?.text, 'synthetic answer')
+      assert.equal(record.transcript?.status, 'available')
+      return true
+    }
+    let daemon
     try {
       now = origin
-      globalThis.Date = FixtureDate
+      if (!realClock) globalThis.Date = FixtureDate
       await writeFile(join(workspace, 'scry.config.json'), JSON.stringify({ schemaVersion: 1, enabled: true,
-        workspaceId: 'qoder-stop-bench', dataDir: '.scry', capture: { diff: false, toolOutput: 'summary' } }))
+        workspaceId: 'qoder-stop-bench', dataDir: '.scry', capture: { diff: false, toolOutput: 'full' } }))
       let oldStopStatus
       if (scenario === 'interrupted_resend') {
         await user('old', null)
@@ -66,6 +77,28 @@ for (const [build, dist] of [['baseline', baseline], ['candidate', candidate]]) 
       const startWall = performance.now()
       const hookStatus = (await stop('target')).status
       const hookWallMs = Math.round(performance.now() - startWall)
+      if (realClock) {
+        const pollAtMs = []
+        const millis = () => Math.round(performance.now() - startWall)
+        let changedAtMs
+        let committed = await sealed()
+        if (!committed) {
+          daemon = await listenRecorderDaemon({ workspace, env, recoveryProbe: () => { pollAtMs.push(millis()) } })
+          if (scenario === 'short_answer') {
+            await delay(1_000)
+            await user('target', null)
+            await reply('target')
+            changedAtMs = millis()
+          }
+          while (!committed && millis() < 25_000) {
+            committed = await sealed()
+            if (!committed) await delay(20)
+          }
+        }
+        assert(committed, `${build} ${scenario} did not commit`)
+        console.log(JSON.stringify({ build, scenario, oldStopStatus, hookStatus, hookWallMs, stopToCommitWallMs: millis(), changedAtMs, pollAtMs }))
+        continue
+      }
       let committedAt = await sealed() ? 0 : undefined
       for (let elapsed = 1_000; committedAt === undefined && elapsed <= 181_000; elapsed += 1_000) {
         now = arrivedAt + elapsed
@@ -80,6 +113,7 @@ for (const [build, dist] of [['baseline', baseline], ['candidate', candidate]]) 
       console.log(JSON.stringify({ build, scenario, oldStopStatus, hookStatus, hookWallMs, stopToCommitFixtureMs: committedAt }))
     } finally {
       globalThis.Date = RealDate
+      await daemon?.close()
       await rm(workspace, { recursive: true, force: true })
     }
   }
