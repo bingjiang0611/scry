@@ -4,10 +4,9 @@ import { join } from 'node:path'
 import { daemonLaunchEnvironment } from '../../daemon/supervisor'
 import { openDaemonLog } from '../../daemon/daemon-log'
 
-// Starting the background service from the App. The App does not run the daemon
-// itself and never owns its lifetime: it starts the supervisor, which owns restart
-// policy, and then only talks to the socket. Launching is the one place with a
-// packaged/dev difference, so it is resolved here instead of at each caller.
+// Direct launch starts the supervisor, not the daemon. The supervisor owns restart
+// policy; the App talks to the daemon over its socket. Resolve the packaged or
+// development supervisor entry here rather than at each caller.
 
 export interface DaemonLaunchTarget {
   executable: string

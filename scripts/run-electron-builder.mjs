@@ -82,7 +82,7 @@ try {
     verbatimSymlinks: true,
     filter: source => basename(source) !== 'default_app.asar' && source !== join(installedDist, 'version')
   })
-  // Packaging is not authorization to publish, even on CI's default branch.
+  // Keep packaging separate from publication (ADR 020).
   const result = spawnSync(builder, [...args, `--config.electronDist=${electronDist}`, '--publish', 'never'], { env, stdio: 'inherit' })
   if (result.error) throw result.error
   if (result.status !== 0) throw new Error(`electron-builder failed with exit ${result.status ?? 'unknown'}`)

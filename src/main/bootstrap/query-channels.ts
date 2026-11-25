@@ -12,11 +12,9 @@ import { readAuthorizedRecorderContentPage } from '../recorder-content-access'
 import type { ProviderRegistry } from '../providers/registry'
 import type { ChannelHandler, ChannelHandlers } from './startup-channels'
 
-// Read-only query channels that both Electron main and the daemon serve (B4-L4): main
-// registers them for the in-process App, the daemon answers them as local ops for an
-// App whose runs and userData it owns. One implementation per channel, so the two
-// answers cannot drift. No Electron values are used here: userData is passed in, and
-// the run list is whichever registry owns the runs in this process.
+// Shared read-only query handlers take userData and run state from their caller;
+// the daemon supplies its own stores and registry. Reusing the handlers does not
+// make results from different state sources interchangeable.
 
 /**
  * Usage totals (usage JSONL) and the SQLite ledger's analytics. Whatever the source

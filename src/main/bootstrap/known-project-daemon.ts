@@ -1,13 +1,10 @@
 import { isAbsolute } from 'node:path'
 import { callDaemonChannel } from '../daemon-channel-gate'
 
-// Daemon mode: the known projects (recent folders, project records, session cwds) are the
-// daemon's userData. The window selection (agent:setCwd) and the known-project file
-// channels stay in the App, which has the window and main's read-only file references,
-// but whether a directory is a known project is the daemon's answer, asked on every call
-// (workspaceSelection:setCwd: the daemon's resolveKnownProjectDirectory, persisting
-// nothing). Nothing here reads or caches the App's own copy of those stores, and a
-// daemon that cannot answer refuses the call.
+// The App owns window selection and file references; the daemon owns project records,
+// recent folders, and session directories. Resolve a named project via the daemon's
+// agent:setCwd operation without reading a local copy of those stores. Refusal leaves
+// selection unchanged; clearing a blank selection does not require a daemon call.
 
 /** Checks for a nonblank directory argument without validating the path. */
 export function namesDirectory(dir: unknown): dir is string {
