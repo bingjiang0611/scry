@@ -96,4 +96,42 @@ describe('Qoder kept session in the run path', () => {
     expect(sdk.query).toHaveBeenCalledTimes(2)
     await pool.disposeAll()
   })
+
+  it('C3: the answer ends the turn while a child runs, and the child wakes the session', async () => {
+    // One process: init, a backgrounded Bash receipt, the answer — then, after the run ended, the
+    // child's own report. The run must resolve at the answer, and the report must become a wake.
+    const wake = vi.fn()
+    let releaseChild: (() => void) | undefined
+    const childReported = new Promise<void>((resolve) => { releaseChild = resolve })
+    sdk.query.mockImplementation((input: { prompt: AsyncIterable<unknown> }) => ({
+      async *[Symbol.asyncIterator]() {
+        const iterator = (input.prompt as AsyncIterable<unknown>)[Symbol.asyncIterator]()
+        await iterator.next()
+        yield { type: 'system', subtype: 'init', session_id: 'native-1', mcp_servers: [] }
+        yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', id: 'bash-1', input: { run_in_background: true } }] } }
+        yield {
+          type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'bash-1', content: 'running' }] },
+          tool_use_result: { kind: 'backgrounded', taskId: 'child-1' }
+        }
+        yield { type: 'result', subtype: 'success', session_id: 'native-1', result: 'started' }
+        await childReported
+        yield { type: 'system', subtype: 'task_notification', task_id: 'child-1', status: 'completed' }
+        await iterator.next()
+      },
+      getContextUsage: vi.fn(async () => undefined)
+    }))
+    const pool = createQoderSessionPool({ provider: 'qoder_cli', idleMs: 60_000 })
+    const adapter = createQoderAdapter('/home/test', { qoderSessions: pool })
+
+    const run = await adapter.run({ ...runInput('run-bg', 'start it'), onBackgroundWake: wake } as never).promise
+    // The answer stands on its own: the run is over before the child reports anything.
+    if (run.status !== 'completed') console.log('RUNFAIL', JSON.stringify(run).slice(0, 600))
+    expect(run.status).toBe('completed')
+    expect(wake).not.toHaveBeenCalled()
+
+    releaseChild?.()
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1), { timeout: 2000 })
+    expect(wake.mock.calls[0][0]).toMatchObject({ taskIds: ['child-1'], reason: 'terminal', cwd: '/repo' })
+    await pool.disposeAll()
+  })
 })

@@ -18,6 +18,11 @@ export interface QoderTurnChannel extends AsyncIterable<Record<string, unknown>>
 
 export interface QoderSession {
   beginTurn(): QoderTurnChannel
+  /**
+   * C3: messages that arrive while no turn waits, so a settled turn's child can still be reported. The
+   * backlog keeps them for the next turn; watchers see the same messages and never consume the backlog.
+   */
+  watchIdle(listener: (message: Record<string, unknown>) => void): () => void
   /** The live query, for interrupt/model/permission control while a turn runs. */
   readonly query: Query
   close(): Promise<void>
@@ -46,10 +51,14 @@ export function createQoderSession(query: Query): QoderSession {
   let closed = false
   let failure: Error | undefined
 
+  const idleWatchers = new Set<(message: Record<string, unknown>) => void>()
   const deliver = (message: Record<string, unknown>): void => {
     const turn = active
     if (!turn) {
       backlog.push(message)
+      for (const watcher of [...idleWatchers]) {
+        try { watcher(message) } catch { /* a watcher never breaks the session's reader */ }
+      }
       return
     }
     turn.queue.push(message)
@@ -76,6 +85,10 @@ export function createQoderSession(query: Query): QoderSession {
   return {
     get query() { return query },
     get closed() { return closed },
+    watchIdle(listener) {
+      idleWatchers.add(listener)
+      return () => { idleWatchers.delete(listener) }
+    },
     beginTurn() {
       if (active && !active.ended) throw new QoderSessionBusyError()
       const turn = { queue: backlog.splice(0, backlog.length), wake: undefined as (() => void) | undefined, ended: false, reading: false }

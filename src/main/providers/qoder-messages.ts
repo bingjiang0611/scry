@@ -51,6 +51,8 @@ export class QoderBackgroundTasks {
 
   get pending(): boolean { return this.active.size > 0 }
   get tasks(): BackgroundTask[] { return [...this.active.values()].map((task) => ({ ...task })) }
+  /** C3: what a wake names, so the next turn knows which children it is following up. */
+  get pendingTaskIds(): string[] { return [...this.active.keys()].sort() }
   has(taskId: string): boolean { return this.active.has(taskId) }
   markStop(taskId: string, stopState: BackgroundTask['stopState']): void {
     const task = this.active.get(taskId)

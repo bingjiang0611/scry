@@ -99,4 +99,29 @@ describe('Qoder kept session', () => {
     turn.end()
     await session.close()
   })
+
+  it('C3: reports messages that arrive after the turn ended, and keeps them for the next turn', async () => {
+    const fake = fakeQuery()
+    const session = createQoderSession(fake.query)
+    const seen: unknown[] = []
+    const stop = session.watchIdle((message) => seen.push(message))
+
+    const turn = session.beginTurn()
+    fake.push({ type: 'result', subtype: 'success' })
+    expect(await collect(turn, 1)).toEqual([{ type: 'result', subtype: 'success' }])
+    // The answer ended the turn; the child's report arrives now, when no turn is waiting.
+    turn.end()
+    fake.push({ type: 'system', subtype: 'task_notification', task_id: 'child-1' })
+    await vi.waitFor(() => expect(seen).toEqual([{ type: 'system', subtype: 'task_notification', task_id: 'child-1' }]))
+
+    // The backlog is not consumed by watching: the next turn still receives the report in order.
+    const next = session.beginTurn()
+    expect(await collect(next, 1)).toEqual([{ type: 'system', subtype: 'task_notification', task_id: 'child-1' }])
+    next.end()
+    stop()
+    fake.push({ type: 'assistant' })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(seen).toHaveLength(1)
+    await session.close()
+  })
 })

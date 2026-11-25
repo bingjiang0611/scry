@@ -16,6 +16,8 @@ export interface QoderSessionLease {
   send(message: unknown): void
   /** The native session this CLI reported, so the observer can bind it to the key. */
   recordNativeSession(nativeSessionId: string): void
+  /** C3: messages that arrive after the turn ended — a settled turn's child still reports here. */
+  watchIdle(listener: (message: Record<string, unknown>) => void): () => void
   /** The turn ended; the session may now wait for its idle window. */
   release(): void
   close(): Promise<void>
@@ -128,6 +130,7 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
           beginTurn: () => session.beginTurn(),
           send: (message) => prompt.push(message),
           recordNativeSession: (nativeSessionId) => options.observer?.onNativeSessionId?.(key, nativeSessionId),
+          watchIdle: (listener) => session.watchIdle(listener),
           release: () => {
             entry.lastUsed = now()
             startIdle(key, entry)

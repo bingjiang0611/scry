@@ -1,3 +1,4 @@
+import { watchSettledQoderBackground } from './qoder-background-wake'
 import { randomUUID } from 'node:crypto'
 import {
   ProcessTransport,
@@ -35,7 +36,7 @@ import { qoderMcpSnapshot } from './qoder-mcp'
 import { qoderCanUseTool } from './qoder-run-permissions'
 import { applyQoderLogFallback } from './qoder-log-fallback'
 import { settleQoderTurn } from './qoder-turn-settlement'
-import type { QoderSessionPool } from './qoder-session-pool'
+import type { QoderSessionLease, QoderSessionPool } from './qoder-session-pool'
 import type { QoderTurnChannel } from './qoder-session'
 import { newId } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
@@ -104,6 +105,15 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   const terminalAgentCalls = new Set<string>()
   const backgroundTasks = new QoderBackgroundTasks()
   let taskControl: QoderTaskControlTransport | undefined
+  let settledWithBackground = false
+  let stopBackgroundWatch: (() => void) | undefined
+  // Registered before the turn ends: a fast child reports immediately afterwards.
+  const watchSettledBackground = (session: QoderSessionLease): void => {
+    stopBackgroundWatch = watchSettledQoderBackground({
+      session, tasks: backgroundTasks, taskIds: backgroundTasks.pendingTaskIds, cwd: request.cwd,
+      onWake: (wake) => request.onBackgroundWake?.(wake)
+    })
+  }
   const backgroundMonitor = new QoderBackgroundMonitor(backgroundTasks, () => !stopped && !streamSettled && taskControl?.canStopTask === true, (backgroundWork) => {
     request.emit({
       id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
@@ -315,10 +325,17 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
                   request.emit(event)
                 }
               }
-              // A launch result is not terminal while background work remains.
-              // Release only on the root result following the last notification.
               backgroundMonitor.observe(raw, hasPendingBackgroundWork())
-              if (raw.type === 'result' && !hasPendingBackgroundWork()) releaseProviderPrompt()
+              if (raw.type !== 'result') continue
+              // C3: with a kept session the answer ends the turn; its reader reports the child afterwards.
+              if (hasPendingBackgroundWork() && lease) {
+                settledWithBackground = true
+                watchSettledBackground(lease)
+                releaseProviderPrompt()
+                break
+              }
+              // Without a session nobody can report the child later, so the turn still waits for it.
+              if (!hasPendingBackgroundWork()) releaseProviderPrompt()
             }
           })(),
           unexpectedExit
@@ -337,6 +354,8 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       // publishing the final snapshot. Host interruption is not task evidence.
       backgroundMonitor.pause()
       releaseProviderPrompt()
+      // A turn that settled with a child keeps the watcher; one that settled whole has nothing to follow.
+      if (!settledWithBackground) stopBackgroundWatch?.()
       if (exitTimer) clearTimeout(exitTimer)
       if (lease) {
         // The turn is over; the session stays open for the next turn under the shared idle window.
@@ -364,6 +383,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     const settlement = await settleQoderTurn({
       request, history, backgroundTasks, backgroundMonitor, activeAgentCalls,
       settleUnreportedAgents, stopped, externalSessionId, forkBaseline,
+      backgroundWatched: settledWithBackground && stopBackgroundWatch !== undefined,
       submittedUserUuid, outgoingText, currentProviderTurnId
     })
     if (settlement.failed) providerStatus = 'failed'

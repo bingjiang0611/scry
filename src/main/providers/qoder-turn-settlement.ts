@@ -14,6 +14,8 @@ export interface QoderTurnSettlementInput {
   backgroundMonitor: QoderBackgroundMonitor
   activeAgentCalls: ReadonlySet<string>
   settleUnreportedAgents: (status: 'failed' | 'stopped', source: string) => void
+  /** C3: a settled turn kept its session and is watching the children it left behind. */
+  backgroundWatched?: boolean
   stopped: boolean
   externalSessionId: string | undefined
   /** Prompts already in the native transcript before this turn started. */
@@ -39,13 +41,24 @@ export async function settleQoderTurn(input: QoderTurnSettlementInput): Promise<
   const { request, backgroundTasks, history, stopped } = input
   let failed = false
   if (backgroundTasks.pending && !stopped) {
-    failed = true
-    request.emit({
-      id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
-      stage: 'runtime:background_unresolved',
-      text: 'Qoder 连接已结束，但后台任务未返回终态；任务完成情况未知，请先核验文件，勿直接重试写入。',
-      runtimeMetadata: { source: 'qoder_transport_ended', pendingTaskIds: backgroundTasks.tasks.map((task) => task.taskId) }
-    })
+    if (input.backgroundWatched) {
+      // The answer is the outcome; the child still reports through the session's reader, so this turn
+      // is not a transport failure. What it produces is unknown until that report arrives.
+      request.emit({
+        id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
+        stage: 'runtime:background_followup',
+        text: '后台任务仍在运行；它返回结果时会自动唤醒本会话。在那之前它的产出未知。',
+        runtimeMetadata: { source: 'qoder_answer_settled', pendingTaskIds: backgroundTasks.tasks.map((task) => task.taskId) }
+      })
+    } else {
+      failed = true
+      request.emit({
+        id: newId(), runId: request.runId, ts: new Date().toISOString(), kind: 'harness',
+        stage: 'runtime:background_unresolved',
+        text: 'Qoder 连接已结束，但后台任务未返回终态；任务完成情况未知，请先核验文件，勿直接重试写入。',
+        runtimeMetadata: { source: 'qoder_transport_ended', pendingTaskIds: backgroundTasks.tasks.map((task) => task.taskId) }
+      })
+    }
   }
   if (input.activeAgentCalls.size > 0) {
     if (stopped) {
