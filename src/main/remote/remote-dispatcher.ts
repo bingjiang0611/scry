@@ -119,6 +119,8 @@ export class RemoteDispatcher {
   #ledgerIdForRun?: RemoteDispatcherDependencies['ledgerIdForRun']
   #inflight = new Set<string>()
   #retryTimer: ReturnType<typeof setTimeout> | null = null
+  #retryAt = Infinity
+  #retryDeadlines = new Set<number>()
   #disposed = false
 
   constructor(deps: RemoteDispatcherDependencies) {
@@ -141,6 +143,7 @@ export class RemoteDispatcher {
 
   dispose(): void {
     this.#disposed = true
+    this.#retryDeadlines.clear()
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer)
       this.#retryTimer = null
@@ -149,16 +152,28 @@ export class RemoteDispatcher {
 
   #scheduleRetry(delayMs: number): void {
     if (this.#disposed) return
-    if (this.#retryTimer) {
-      clearTimeout(this.#retryTimer)
+    const at = Date.now() + Math.max(10, delayMs)
+    this.#retryDeadlines.add(at)
+    this.#armRetry(at)
+  }
+
+  #armRetry(at: number): void {
+    if (at >= this.#retryAt || this.#disposed) return
+    if (this.#retryTimer) clearTimeout(this.#retryTimer)
+    this.#retryAt = at
+    this.#retryTimer = setTimeout(() => {
       this.#retryTimer = null
-    }
-    const timer = setTimeout(() => {
-      this.#retryTimer = null
+      this.#retryAt = Infinity
+      const now = Date.now()
+      let next = Infinity
+      for (const due of this.#retryDeadlines) {
+        if (due <= now) this.#retryDeadlines.delete(due)
+        else next = Math.min(next, due)
+      }
+      this.#armRetry(next)
       if (!this.#disposed) this.pump()
-    }, Math.max(10, delayMs))
-    timer.unref?.()
-    this.#retryTimer = timer
+    }, Math.max(1, at - Date.now()))
+    this.#retryTimer.unref?.()
   }
 
   /** The ledger's own view of the run, read without mutating it. */
