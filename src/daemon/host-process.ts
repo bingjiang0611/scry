@@ -23,15 +23,12 @@ import { createHostRuntime } from '../host-runtime/host-runtime'
 import { remoteLanConfig } from '../main/remote/remote-lan-config'
 import type { RemoteHostService } from '../main/remote/remote-host-service'
 import { RunOutputWorkerStore } from '../main/remote/run-output-worker'
-import { openLocalChannel } from './local-channel'
 import { createDaemonConversationSend } from './conversation-send'
 import { daemonLocalEndpoint } from './local-endpoint'
 import { SUBSCRIBE_RETAINED_WINDOW_NOTICES } from '../shared/orchestration-subscribe'
 import type { AppHint } from './orchestration-authority-subscribe'
 import type { createForkOperations } from '../main/bootstrap/run-fork'
-import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { createDaemonTerminalService } from './terminal-service'
-import { localEnrollHandlers, openLocalEnrollSocket, openLocalEnrollmentStore } from './local-enrollment'
 import type { DaemonOrchestrationAuthority } from './orchestration-authority'
 import { bridgedWorkbenchShellInputs, createDaemonRemoteAssembly } from './host-process-assembly'
 import { authoritySubscribeDeps, createAuthorityDetailReader } from './orchestration-authority-subscribe'
@@ -41,7 +38,8 @@ import { attachHostProcessOrchestration, disposeProviderRegistryBounded } from '
 import type { DaemonSessionLinks } from './local-ops/deps'
 import { createAppExecutionTargetBridge } from './app-execution-target-bridge'
 import { HostAdminStore } from './host-admin-store'
-import { attachDaemonHostAdmin } from './host-admin-runtime'
+import { attachDaemonEndpoints } from './host-process-endpoints'
+import { remoteHostEnabled } from '../main/remote/remote-defaults'
 import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
@@ -332,39 +330,20 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
   // The App's own endpoint: same controller and TLS materials, marked as the local
   // transport so a locally enrolled grant cannot be replayed over the network.
   const identity = buildIdentity(options.appVersion)
-  const localHost = service.createLocalHost(identity, {
-    onPeerDisconnected: (fingerprint) => targetBridge.onPeerDisconnected(fingerprint),
-    activeRuns: () => pipeline.runs.unsettledStates().length,
-    isPackaged: options.isPackaged,
-    subscribe: 1
-  })
-  const channel = await openLocalChannel({
-    directory: options.daemonStateDirectory,
-    serve: (stream) => localHost.serve(stream)
-  })
   authority.startImport()
-  // Enrollment bootstraps the App's grant before it owns any certificate. The secret
-  // exists only while no local grant is live and is consumed by a single enrollment.
-  const enrollment = openLocalEnrollmentStore(options.daemonStateDirectory)
-  enrollment.ensure(service.hasActiveLocalGrant())
-  const enrollSocket = await openLocalEnrollSocket({
-    directory: options.daemonStateDirectory,
-    enroll: localEnrollHandlers(enrollment, {
-      enrollLocal: (input, consumeSecret) => service.enrollLocalDevice(input, consumeSecret)
-    }, service.caCertificatePEM, identity)
-  })
-  const adminSocket = await attachDaemonHostAdmin({
+  const { channel, enrollSocket, adminSocket, localHost } = await attachDaemonEndpoints({
     daemonStateDirectory: options.daemonStateDirectory,
-    identity,
     appVersion: options.appVersion,
     isPackaged: options.isPackaged,
-    hostAdmin,
-    remoteHost: () => remoteHostEnabled(process.env.SCRY_REMOTE_HOST, options.isPackaged) ? remoteHostService : null,
+    identity,
+    service,
+    targetBridge,
     activeRuns: () => pipeline.runs.unsettledStates().length,
+    hostAdmin,
+    remoteHostService: () => remoteHostService,
     orchestrationStatus: () => authority.status(),
     log
   })
-  log(`daemon.host-ready socket=${channel.socketPath} enroll=${enrollSocket.socketPath}${adminSocket ? ` admin=${adminSocket.socketPath}` : ''}`)
 
   let disposed = false
   return {
