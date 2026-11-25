@@ -105,7 +105,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   const terminalAgentCalls = new Set<string>()
   const backgroundTasks = new QoderBackgroundTasks()
   let taskControl: QoderTaskControlTransport | undefined
-  let settledWithBackground = false
+  // Only a turn that settled with a child creates a watcher, so its presence is the flag.
   let stopBackgroundWatch: (() => void) | undefined
   // Registered before the turn ends: a fast child reports immediately afterwards.
   const watchSettledBackground = (session: QoderSessionLease): void => {
@@ -329,7 +329,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
               if (raw.type !== 'result') continue
               // C3: with a kept session the answer ends the turn; its reader reports the child afterwards.
               if (hasPendingBackgroundWork() && lease) {
-                settledWithBackground = true
                 watchSettledBackground(lease)
                 releaseProviderPrompt()
                 break
@@ -354,8 +353,6 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       // publishing the final snapshot. Host interruption is not task evidence.
       backgroundMonitor.pause()
       releaseProviderPrompt()
-      // A turn that settled with a child keeps the watcher; one that settled whole has nothing to follow.
-      if (!settledWithBackground) stopBackgroundWatch?.()
       if (exitTimer) clearTimeout(exitTimer)
       if (lease) {
         // The turn is over; the session stays open for the next turn under the shared idle window.
@@ -383,7 +380,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     const settlement = await settleQoderTurn({
       request, history, backgroundTasks, backgroundMonitor, activeAgentCalls,
       settleUnreportedAgents, stopped, externalSessionId, forkBaseline,
-      backgroundWatched: settledWithBackground && stopBackgroundWatch !== undefined,
+      backgroundWatched: stopBackgroundWatch !== undefined,
       submittedUserUuid, outgoingText, currentProviderTurnId
     })
     if (settlement.failed) providerStatus = 'failed'
