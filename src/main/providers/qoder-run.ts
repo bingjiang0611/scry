@@ -222,11 +222,13 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     })
     let turnChannel: QoderTurnChannel | undefined
     const sessions = deps.qoderSessions
+    // Recorder hooks inherit the launch-time run ID and prompt hash; they cannot rebind per turn.
+    const singleUse = request.managedRecorderIdentity !== undefined
     const lease = sessions
       ? sessions.acquire(qoderSessionKey(request), (promptStream, _signal, slot) => {
           turnSlot = slot
           return { query: openQuery(promptStream as AsyncIterable<SDKUserMessage>) }
-        })
+        }, { singleUse })
       : undefined
     if (lease) {
       liveLease = lease
@@ -311,7 +313,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
               if (raw.type !== 'result') continue
               // C3: with a kept session the answer ends the turn; its reader reports the child afterwards.
               if (hasPendingBackgroundWork() && lease) {
-                watchSettledBackground(lease)
+                if (!singleUse) watchSettledBackground(lease)
                 releaseProviderPrompt()
                 break
               }
@@ -336,16 +338,11 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       backgroundMonitor.pause()
       releaseProviderPrompt()
       if (exitTimer) clearTimeout(exitTimer)
-      if (lease) {
-        // The turn is over; the session stays open for the next turn under the shared idle window.
-        // A turn that ended because the process went away cannot serve one (R12).
-        lease.release()
-      } else {
-        try {
-          await q.close()
-        } catch (error) {
-          if (!providerFailureSeen && terminalError == null) terminalError = error
-        }
+      try {
+        if (lease) await lease.release()
+        else await q.close()
+      } catch (error) {
+        if (!providerFailureSeen && terminalError == null) terminalError = error
       }
     }
     if (await applyQoderLogFallback({
@@ -378,7 +375,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       mcp: statuses ? qoderMcpSnapshot(statuses) : undefined
     }
     // A session-owned MCP config outlives the turn; only a per-turn launch is disposed here.
-  })().finally(() => { if (!deps.qoderSessions) mcpLaunch?.dispose() })
+  })().finally(() => { if (!deps.qoderSessions || request.managedRecorderIdentity) mcpLaunch?.dispose() })
   const interrupt = (): void => {
     stopped = true
     backgroundMonitor.pause()

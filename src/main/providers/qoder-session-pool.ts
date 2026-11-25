@@ -37,7 +37,7 @@ export interface QoderSessionLease {
    * The turn ended; the session may now wait for its idle window. `dead` says the process went away
    * during the turn, so it cannot serve another one (R12).
    */
-  release(options?: { dead?: boolean }): void
+  release(options?: { dead?: boolean }): void | Promise<void>
   /** The CLI reported the process gone: the next acquire must open a new one (R12). */
   markExited(): void
   close(): Promise<void>
@@ -68,8 +68,8 @@ export interface QoderSessionPoolOptions {
 }
 
 export interface QoderSessionPool {
-  /** `open` runs only when no live session holds the key; the key alone decides reuse. */
-  acquire(key: string, open: QoderSessionOpener): QoderSessionLease
+  /** Single-use sessions have live controls but never enter the idle pool. */
+  acquire(key: string, open: QoderSessionOpener, options?: { singleUse?: boolean }): QoderSessionLease
   /** Every live key, for a caller that must report what the pool holds. */
   keys(): string[]
   disposeAll(reason?: SessionReleaseReason): Promise<void>
@@ -191,8 +191,9 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
   }
 
   return {
-    acquire(key, open) {
-      const existing = reusable(entries.get(key)) ?? reusable([aliasTarget(key)].filter((row): row is Entry => !!row))
+    acquire(key, open, { singleUse } = {}) {
+      const existing = singleUse ? undefined :
+        reusable(entries.get(key)) ?? reusable([aliasTarget(key)].filter((row): row is Entry => !!row))
       if (existing && existing.idleTimer !== undefined) {
         if (existing.idleTimer) clearTimeout(existing.idleTimer)
         existing.idleTimer = undefined
@@ -222,13 +223,14 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
           send: (message) => prompt.push(message),
           recordNativeSession: (nativeSessionId) => {
             // R3: the alias is how the next turn of this conversation finds this process again.
-            nativeAliases.set(nativeSessionId, entry)
+            if (!singleUse) nativeAliases.set(nativeSessionId, entry)
             options.observer?.onNativeSessionId?.(key, nativeSessionId)
           },
           watchIdle: (listener) => session.watchIdle(listener),
           release: (releaseOptions) => {
             // R12: a session whose process died during the turn cannot serve the next one.
-            if (releaseOptions?.dead || entry.exited || session.closed) { void closeEntry(key, entry, 'crashed'); return }
+            if (releaseOptions?.dead || entry.exited || session.closed) return closeEntry(key, entry, 'crashed')
+            if (singleUse) return closeEntry(key, entry, 'dispose')
             entry.lastUsed = now()
             startIdle(key, entry)
           },

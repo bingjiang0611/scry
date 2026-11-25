@@ -157,6 +157,32 @@ describe('Qoder kept session in the run path', () => {
     }
   )
 
+  it('closes each of three recorder-bound turns of the same conversation without leaving idle processes', async () => {
+    const clis = Array.from({ length: 3 }, () => fakeCli())
+    let opened = 0
+    sdk.query.mockImplementation((input: never) => clis[opened++]!.create(input))
+    const pool = createQoderSessionPool({ provider: 'qoder_cli', idleMs: 20 * 60_000 })
+    const adapter = createQoderAdapter('/home/test', { qoderSessions: pool })
+    try {
+      for (let turn = 0; turn < 3; turn++) {
+        const runId = `recorded-${turn}`
+        const result = await adapter.run({
+          ...runInput(runId, `turn ${turn}`),
+          ...(turn > 0 ? { resume: 'native-1' } : {}),
+          managedRecorder: true,
+          managedRecorderIdentity: { runId, promptHash: String(turn).repeat(64) }
+        }).promise
+        expect(result).toMatchObject({ status: 'completed', externalSessionId: 'native-1' })
+        expect(sdk.query.mock.calls[turn]?.[0].options.env).toMatchObject({
+          SCRY_MANAGED_RUN_ID: runId, SCRY_MANAGED_PROMPT_HASH: String(turn).repeat(64)
+        })
+      }
+      expect(sdk.query).toHaveBeenCalledTimes(3)
+      expect(pool.keys()).toEqual([])
+      for (const cli of clis) expect(cli.close).toHaveBeenCalledOnce()
+    } finally { await pool.disposeAll() }
+  })
+
   it('opens a new process when the turn asks for different options', async () => {
     const cli = fakeCli()
     sdk.query.mockImplementation((input: never) => cli.create(input))
