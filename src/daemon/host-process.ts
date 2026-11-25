@@ -44,6 +44,7 @@ import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
 import { HostMetricsSampler, createHostMetricsSources } from './host-metrics'
+import { rememberPiCatalogPrices } from '../main/db-model-prices'
 
 export type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 
@@ -84,6 +85,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
   })
+  // 历史轮次的金额在启动时就用本机 Pi 目录的单价补上，不要求先跑一轮。
+  rememberPiCatalogPrices(workspace.homeDir)
   const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink, log)
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,

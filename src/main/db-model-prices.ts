@@ -2,6 +2,7 @@
 // 分析页在读取时用它给没有金额的轮次折算，不改写已有的账本行。
 import type Database from 'better-sqlite3'
 import { catalogPriceRows, type ModelPrice } from '../shared/model-price'
+import { readPiCatalogPrices } from './pi-price-catalog'
 import { MODEL_PRICE_VERSION_COLS } from './span-ledger-schema'
 import { db, invalidateQueryCaches } from './db-connection'
 
@@ -46,6 +47,11 @@ export function rememberCatalogPrices(prices: readonly ModelPrice[] | undefined)
   } catch (error) {
     console.warn('[scry] 模型目录价格未记录:', (error as Error)?.message)
   }
+}
+
+/** 启动时把本机 Pi 目录里的单价只读地记进价格表；历史轮次不必先跑一轮才有金额。 */
+export function rememberPiCatalogPrices(homeDir: string): void {
+  rememberCatalogPrices(readPiCatalogPrices(homeDir))
 }
 
 export { catalogPriceRows }
