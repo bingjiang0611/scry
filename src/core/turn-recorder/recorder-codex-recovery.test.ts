@@ -1,4 +1,4 @@
-import { appendFile, mkdtemp, open as openFile, rm, writeFile, rename } from 'node:fs/promises'
+import { appendFile, mkdtemp, open as openFile, readFile, rm, stat, writeFile, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
@@ -6,6 +6,7 @@ import { handleRecorderHook, recoverRecorder } from './recorder'
 import { resetTranscriptReadStats, transcriptReadStats, TRANSCRIPT_WINDOW_LIMIT_BYTES } from './recorder-transcript-io'
 import { resetTranscriptAnchorCache, resetTranscriptSnapshotCache } from './recorder-transcript-cache'
 import { listRecords, readHealth } from './store'
+import { recorderOpenPath, recorderSessionRoot } from './runtime-state'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -39,18 +40,19 @@ async function fixture() {
     payload: { session_id: 'fixture', turn_id: 'target', rollout_path: transcript, cwd: root, timestamp, prompt: 'fixture' }
   })
   expect(hook.status).toBe('started')
-  const poll = async () => {
+  const poll = async (incremental = true) => {
     resetTranscriptReadStats()
-    const result = await recoverRecorder(root, env, undefined, undefined, { incremental: true })
+    const result = await recoverRecorder(root, env, undefined, undefined, { incremental })
     return { ...result, ...transcriptReadStats() }
   }
-  return { transcript, dataRoot, timestamp, row, poll }
+  const openPath = recorderOpenPath(recorderSessionRoot(dataRoot, 'codex', 'fixture'))
+  return { transcript, dataRoot, timestamp, row, poll, openPath }
 }
 
 it('seals the exact orphan terminal with partial evidence, without adopting the next turn', async () => {
   const f = await fixture()
   await appendFile(f.transcript, f.row('task_complete') + f.row('task_started', 'neighbor') + f.row('task_complete', 'neighbor'))
-  expect(await f.poll()).toMatchObject({ recovered: 1, expired: 0 })
+  expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0, expired: 0 })
   const records = await listRecords(f.dataRoot)
   expect(records).toHaveLength(1)
   expect(records[0]).toMatchObject({
@@ -62,6 +64,33 @@ it('seals the exact orphan terminal with partial evidence, without adopting the 
   expect(records[0].diff.status).not.toBe('available')
   expect(await f.poll()).toMatchObject({ recovered: 0, bytesRead: 0, anchorBytesScanned: 0 })
   expect(await readHealth(f.dataRoot)).toMatchObject({ codexTruncatedSealed: 1 })
+})
+
+it('finishes cleanup rather than returning pending if the terminal-only record was already committed', async () => {
+  const f = await fixture()
+  const open = await readFile(f.openPath)
+  await appendFile(f.transcript, f.row('task_complete'))
+  expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0 })
+  const [record] = await listRecords(f.dataRoot)
+
+  // Model a crash after the record became durable but before open.json was removed.
+  await writeFile(f.openPath, open)
+  expect(await f.poll(false)).toMatchObject({ recovered: 1, pending: 0 })
+  await expect(stat(f.openPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await listRecords(f.dataRoot)).toEqual([record])
+  expect(await readHealth(f.dataRoot)).toMatchObject({ codexTruncatedSealed: 1 })
+})
+
+it('verifies an incremental resume when the witness edge bisects an emoji', async () => {
+  const f = await fixture()
+  // 65 UTF-16 code units: slicing the last 64 would start at the emoji's low surrogate.
+  await appendFile(f.transcript, '😀' + 'a'.repeat(62) + '\n')
+  expect(await f.poll()).toMatchObject({ recovered: 0, pending: 0 })
+  const delta = f.row('task_complete')
+  await appendFile(f.transcript, delta)
+  expect(await f.poll()).toMatchObject({
+    recovered: 1, pending: 0, bytesRead: Buffer.byteLength(delta) + 64, anchorBytesScanned: 0
+  })
 })
 
 it('persists a miss independently of parser caches, reads only the delta, and waits for a complete row', async () => {

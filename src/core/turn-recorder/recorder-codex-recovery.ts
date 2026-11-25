@@ -96,8 +96,13 @@ export async function rememberCodexTranscriptMiss(
   const fragment = Buffer.byteLength(content.slice(from))
   const discarding = fragment >= MAX_LINE_BYTES || (!content.length && source.startOffset === source.endOffset)
   const offset = source.endOffset - (discarding ? 0 : fragment)
-  const witness = Buffer.from(content.slice(Math.max(0, discarding ? content.length - WITNESS_BYTES : from - WITNESS_BYTES),
-    discarding ? content.length : from)).subarray(-WITNESS_BYTES)
+  const witnessEnd = discarding ? content.length : from
+  // Start the UTF-8 conversion at a whole code point, then take the suffix in bytes.
+  // Starting at a low surrogate would encode U+FFFD instead of the original file bytes.
+  let witnessStart = Math.max(0, witnessEnd - WITNESS_BYTES)
+  const first = content.charCodeAt(witnessStart)
+  if (witnessStart > 0 && first >= 0xdc00 && first <= 0xdfff) witnessStart--
+  const witness = Buffer.from(content.slice(witnessStart, witnessEnd)).subarray(-WITNESS_BYTES)
   // If no complete row survived or the retained bytes cannot supply a witness, still record the
   // cursor. Its first append will verify identity and keep skipping the already truncated row.
   const cursor: Cursor = {
