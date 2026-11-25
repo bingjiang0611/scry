@@ -33,8 +33,12 @@ function harness() {
     db: () => sink.handle.db, sink: () => sink, settings: () => ({ autoResume: true }),
     now: () => now, schedule: (_fn, ms) => { armed.push(ms); return {} }
   })
+  const terminalWriteback: string[] = []
   const handler = createAuthorityRunTerminalHandler({
-    engine: { recordProgress: vi.fn(), recordTerminal: vi.fn() },
+    engine: {
+      recordProgress: vi.fn(),
+      recordTerminal: (input: { runId: string }) => { terminalWriteback.push(input.runId) }
+    },
     liveRunMeta: () => undefined,
     resolveCanonical: (runId) => runId,
     schedule: () => {},
@@ -42,7 +46,7 @@ function harness() {
     releaseRun: () => {},
     onProviderFailure: createQuotaFailureHook(() => sink, () => scheduler, () => now)
   })
-  return { sink, runId: run.runId!, armed, scheduler, handler }
+  return { sink, runId: run.runId!, armed, scheduler, handler, terminalWriteback }
 }
 
 // C4: the daemon path end to end — a failed run whose text is a quota writes the pending resume and
@@ -84,6 +88,30 @@ describe('quota failure through the terminal handler', () => {
     } finally {
       h.scheduler.stop()
       h.sink.close()
+    }
+  })
+})
+
+// B1/D4: the conversation writeback is an outcome of the terminal record, so it must be asked for only
+// after that record exists — never for a run whose terminal was not written.
+describe('terminal writeback hook', () => {
+  it('asks for the conversation writeback exactly once, after the terminal is recorded', () => {
+    const h = harness()
+    const asked: string[] = []
+    const handler = createAuthorityRunTerminalHandler({
+      engine: { recordProgress: vi.fn(), recordTerminal: () => { asked.push('terminal') } },
+      liveRunMeta: () => undefined,
+      resolveCanonical: (runId) => runId,
+      schedule: () => {},
+      evidenceFor: () => ['provider'],
+      releaseRun: () => {},
+      onTerminalRecorded: (runId) => { asked.push(`writeback:${runId}`) }
+    })
+    try {
+      handler(h.runId, 'settled')
+      expect(asked).toEqual(['terminal', `writeback:${h.runId}`])
+    } finally {
+      h.scheduler.stop()
     }
   })
 })

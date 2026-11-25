@@ -28,7 +28,7 @@ import {
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
-import { createAuthorityRunTerminalHandler } from './orchestration-run-terminal'
+import { createAuthorityRunTerminalHandler, terminalConversationWriteback } from './orchestration-run-terminal'
 import { createQuotaFailureHook } from './usage-limit-capture'
 import { takeRestartNoteForRun } from './restart-background-note'
 import { createLedgerIdForSubmit } from './orchestration-canonical-run-ids'
@@ -285,8 +285,7 @@ function buildAuthorityRuntime<
     recoveredRunLifecycle: (runId) => {
       const run = sink.getRun(resolvePersistedCanonical(runId))
       if (!run) return undefined
-      // One list decides what "terminal" means. `rolled_back` is terminal for the orchestration log but
-      // has no H1 lifecycle, so the ledger keeps reporting it as cancelled — the old explicit behaviour.
+      // `rolled_back` is terminal for the log but has no H1 lifecycle: the ledger still says cancelled.
       if (run.lifecycle !== 'rolled_back' && TERMINAL_RUN_LIFECYCLES.has(run.lifecycle)) {
         return run.lifecycle as 'settled' | 'failed' | 'cancelled' | 'interrupted'
       }
@@ -381,6 +380,8 @@ function buildAuthorityRuntime<
         timer.unref?.()
       },
       evidenceFor: (step) => [step === 'cancelled' ? 'host.run_completion' : 'provider'],
+      // B1/D4: conclude this run's conversation turn now, not at the next restart.
+      onTerminalRecorded: terminalConversationWriteback({ sink: () => sink, conversationStore: options.conversationStore }),
       releaseRun: (canonicalRunId, dispatchRunId) => {
         const transcript = pendingTranscripts.get(canonicalRunId)
         pendingTranscripts.delete(canonicalRunId)

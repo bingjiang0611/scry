@@ -1,5 +1,5 @@
 import type { Evidence } from '../shared/turn-record-contracts'
-import type { RecorderTerminalEvidence } from '../host-runtime/orchestration/recovery'
+import { writeBackConversationRun, type RecorderTerminalEvidence } from '../host-runtime/orchestration/recovery'
 
 export interface TerminalSettlementWrites {
   /** `run.provider_settled`: the Provider process ended; recorder evidence may not exist yet. */
@@ -93,6 +93,11 @@ export interface AuthorityTerminalHandlerDeps {
    * lets the caller decide what it means; it never interprets Provider wording itself.
    */
   onProviderFailure?: (input: { runId: string; detail: string | undefined }) => void
+  /**
+   * B1/D4: the conversation turn this run belongs to is concluded here instead of at the next restart.
+   * Called once the terminal is recorded, so it never concludes a run that was not really over.
+   */
+  onTerminalRecorded?: (runId: string) => void
 }
 
 /** Wires the live-run terminal sequence for the daemon authority hooks. */
@@ -131,7 +136,7 @@ export function createAuthorityRunTerminalHandler(
             ...(evidence.outputSeq !== undefined ? { outputSeq: evidence.outputSeq } : {}),
             evidence: evidence.evidence
           }),
-        terminal: () =>
+        terminal: () => {
           deps.engine.recordTerminal({
             runId,
             step,
@@ -139,7 +144,23 @@ export function createAuthorityRunTerminalHandler(
             ...(detail ? { reason: detail } : {}),
             evidence: baseEvidence
           })
+          deps.onTerminalRecorded?.(runId)
+        }
       }
     })
+  }
+}
+
+/**
+ * D4/B1: concluding the conversation turn of a finished run. Exported as a factory so the authority's
+ * terminal wiring stays one line and the failure handling lives with the write.
+ */
+export function terminalConversationWriteback(input: {
+  sink: () => Parameters<typeof writeBackConversationRun>[0]['sink']
+  conversationStore: () => Parameters<typeof writeBackConversationRun>[0]['conversationStore']
+}): (runId: string) => void {
+  return (runId) => {
+    void writeBackConversationRun({ sink: input.sink(), conversationStore: input.conversationStore(), runId })
+      .catch((error) => { console.warn('[scry] conversation writeback failed:', error) })
   }
 }

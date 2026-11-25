@@ -319,6 +319,85 @@ export function recoverOrchestrationOnStartup(
   return summary
 }
 
+function boundSessionStatement(sink: EventSink): { get(runId: string): unknown } {
+  return sink.handle.db.prepare(
+    "SELECT payload FROM orch_event WHERE run_id = ? AND type = 'run.session_bound' ORDER BY seq DESC LIMIT 1"
+  ) as { get(runId: string): unknown }
+}
+
+/**
+ * One pending dispatched turn against its run. Shared by startup reconciliation and by the daemon's
+ * terminal writeback so a remotely started turn is not left pending until the next restart.
+ */
+async function writeBackConversationTurn(input: {
+  sink: EventSink
+  conversationStore: ConversationStore
+  conversation: { id: string; bindings: { id: string; nativeSessionId?: string | null }[] }
+  turn: { runId: string; bindingId: string }
+  stmtBoundSession: { get(runId: string): unknown }
+}): Promise<'not_sent' | 'written' | 'binding_conflict' | 'pending'> {
+  const { sink, conversationStore, conversation: conv, turn } = input
+  const orchTurn = sink.getTurnByRunId(turn.runId)
+  const orchRun = sink.getRun(turn.runId)
+  if (!orchTurn && !orchRun) {
+    await conversationStore.settle(conv.id, turn.runId, { status: 'not_sent', reason: 'orchestration_intent_absent' }, [])
+    return 'not_sent'
+  }
+  if (!orchRun || !TERMINAL_RUN_LIFECYCLES.has(orchRun.lifecycle)) return 'pending'
+  const boundRow = input.stmtBoundSession.get(turn.runId) as { payload: string } | undefined
+  const boundNative = boundRow
+    ? (JSON.parse(boundRow.payload) as { nativeSessionId?: string | null }).nativeSessionId ?? undefined
+    : undefined
+  const binding = conv.bindings.find((entry) => entry.id === turn.bindingId)
+  if (boundNative && binding?.nativeSessionId && binding.nativeSessionId !== boundNative) {
+    await conversationStore.settle(conv.id, turn.runId, { status: 'unknown', reason: 'conversation_binding_conflict' }, [])
+    return 'binding_conflict'
+  }
+  if (orchRun.lifecycle === 'settled') {
+    const resolvedNative = boundNative ?? binding?.nativeSessionId
+    if (!resolvedNative) {
+      // Decision G / evidence honesty: never fabricate a synthetic nativeSessionId (`orch:<runId>`).
+      await conversationStore.settle(conv.id, turn.runId, { status: 'unknown', reason: 'native_session_id_unavailable' }, [])
+      return 'written'
+    }
+    await conversationStore.settle(conv.id, turn.runId, {
+      status: 'accepted', nativeSessionId: resolvedNative, outcome: 'completed', nativeItems: []
+    }, [])
+    return 'written'
+  }
+  if (orchRun.lifecycle === 'cancelled' && orchTurn?.delivery === 'not_sent') {
+    await conversationStore.settle(conv.id, turn.runId, { status: 'not_sent', reason: orchRun.outcome?.omissionReason ?? 'cancelled' }, [])
+    return 'written'
+  }
+  await conversationStore.settle(conv.id, turn.runId, {
+    status: 'unknown', reason: orchRun.outcome?.omissionReason ?? 'host_restarted'
+  }, [])
+  return 'written'
+}
+
+/**
+ * The daemon's per-terminal writeback: the same conclusion startup reconciliation would draw, drawn as
+ * soon as the run reaches a terminal state. Idempotent — a turn that is no longer pending is skipped.
+ */
+export async function writeBackConversationRun(options: {
+  sink: EventSink
+  conversationStore: ConversationStore
+  runId: string
+}): Promise<'written' | 'not_sent' | 'binding_conflict' | 'none'> {
+  const ownership = await options.conversationStore.loadOwnership()
+  const stmtBoundSession = boundSessionStatement(options.sink)
+  for (const conv of ownership.values()) {
+    for (const turn of conv.turns) {
+      if (turn.origin !== 'dispatch' || turn.delivery.status !== 'pending' || turn.runId !== options.runId) continue
+      const written = await writeBackConversationTurn({
+        sink: options.sink, conversationStore: options.conversationStore, conversation: conv, turn, stmtBoundSession
+      })
+      return written === 'pending' ? 'none' : written
+    }
+  }
+  return 'none'
+}
+
 export interface TwoLedgerReconciliationSummary {
   markedNotSent: number
   writtenBack: number
@@ -341,89 +420,18 @@ export async function reconcileTwoLedgersOnStartup(options: {
     writtenBack: 0,
     bindingConflicts: 0
   }
-  const stmtBoundSession = sink.handle.db.prepare(
-    "SELECT payload FROM orch_event WHERE run_id = ? AND type = 'run.session_bound' ORDER BY seq DESC LIMIT 1"
-  )
+  const stmtBoundSession = boundSessionStatement(sink)
 
   const ownership = await conversationStore.loadOwnership()
   for (const conv of ownership.values()) {
     for (const turn of conv.turns) {
       if (turn.origin !== 'dispatch' || turn.delivery.status !== 'pending') continue
-      const orchTurn = sink.getTurnByRunId(turn.runId)
-      const orchRun = sink.getRun(turn.runId)
-
-      if (!orchTurn && !orchRun) {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'not_sent', reason: 'orchestration_intent_absent' },
-          []
-        )
-        summary.markedNotSent += 1
-        continue
-      }
-
-      if (!orchRun || !TERMINAL_RUN_LIFECYCLES.has(orchRun.lifecycle)) {
-        continue
-      }
-
-      const boundRow = stmtBoundSession.get(turn.runId) as { payload: string } | undefined
-      const boundNative = boundRow
-        ? (JSON.parse(boundRow.payload) as { nativeSessionId?: string | null }).nativeSessionId ?? undefined
-        : undefined
-      const binding = conv.bindings.find((b) => b.id === turn.bindingId)
-      if (boundNative && binding?.nativeSessionId && binding.nativeSessionId !== boundNative) {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'unknown', reason: 'conversation_binding_conflict' },
-          []
-        )
-        summary.bindingConflicts += 1
-        continue
-      }
-
-      if (orchRun.lifecycle === 'settled') {
-        const resolvedNative = boundNative ?? binding?.nativeSessionId
-        if (resolvedNative) {
-          await conversationStore.settle(
-            conv.id,
-            turn.runId,
-            {
-              status: 'accepted',
-              nativeSessionId: resolvedNative,
-              outcome: 'completed',
-              nativeItems: []
-            },
-            []
-          )
-        } else {
-          // Decision G / evidence honesty: never fabricate a synthetic nativeSessionId (`orch:<runId>`).
-          await conversationStore.settle(
-            conv.id,
-            turn.runId,
-            { status: 'unknown', reason: 'native_session_id_unavailable' },
-            []
-          )
-        }
-        summary.writtenBack += 1
-      } else if (orchRun.lifecycle === 'cancelled' && orchTurn?.delivery === 'not_sent') {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'not_sent', reason: orchRun.outcome?.omissionReason ?? 'cancelled' },
-          []
-        )
-        summary.writtenBack += 1
-      } else {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'unknown', reason: orchRun.outcome?.omissionReason ?? 'host_restarted' },
-          []
-        )
-        summary.writtenBack += 1
-      }
+      const written = await writeBackConversationTurn({
+        sink, conversationStore, conversation: conv, turn, stmtBoundSession
+      })
+      if (written === 'not_sent') summary.markedNotSent += 1
+      else if (written === 'written') summary.writtenBack += 1
+      else if (written === 'binding_conflict') summary.bindingConflicts += 1
     }
   }
   // Finish generic recovery for any remaining non-orchestration pending turns or pending forks.
