@@ -43,9 +43,12 @@ export const canonicalUsdCostWhere = (a = 'usage_ledger'): string =>
 const canonicalSessionUsdCostWhere = (a: string): string =>
   `(${a}.session_id IS NOT NULL AND ${canonicalCostWhere(a, 'b.session_id IS NOT NULL')} AND ${a}.cost_unit='usd')`
 
-// 0 Token 的记录是空记录：它不该成行、不该计入轮次，也不该被价格表算成 $0.00。
+// 明确报了全 0 的记录是空记录：它不该成行、不该计入轮次，也不该被价格表算成 $0.00。
+// 一列都没报的行（账单导入的成本行）保留为「量未知」，不能当成 0 丢掉。
+const USAGE_TOKEN_COLS = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens']
 export const USAGE_TOKENS_PRESENT_SQL = (a: string): string =>
-  `(COALESCE(${a}.input_tokens,0)+COALESCE(${a}.output_tokens,0)+COALESCE(${a}.cache_read_tokens,0)+COALESCE(${a}.cache_write_tokens,0)+COALESCE(${a}.reasoning_tokens,0))>0`
+  `(COALESCE(${USAGE_TOKEN_COLS.map((col) => `COALESCE(${a}.${col},0)`).join('+')},0)>0 OR ${USAGE_TOKEN_COLS
+    .map((col) => `${a}.${col} IS NULL`).join(' AND ')})`
 
 export const USAGE_ANALYTICS_TOKENS_SQL = `SELECT
   bucket_start tsStart, provider, model,
