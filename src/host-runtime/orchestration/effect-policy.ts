@@ -4,9 +4,9 @@ export type EffectKind =
   | 'provider.run.start'
   | 'provider.run.stop'
   | 'question.respond'
-  // D4: the conversation file is an export of the event log, so a metadata change writes back through
-  // the worker. No producer yet — see docs/plans/remote-runtime-v2/handoff/reports/W20.md (B1).
-  | 'conversation.writeback'
+  // The conversation turn of a finished run is concluded by the daemon on the terminal path and by
+  // startup reconciliation, not through this table: an effect kind with no producer is a claim, not a
+  // plan. See docs/plans/remote-runtime-v2/handoff/reports/W20-5.md.
   | 'legacy.mirror'
 
 export type EffectPolicyClass = 'process_bound' | 'replayable'
@@ -22,7 +22,6 @@ export const ALL_EFFECT_KINDS: readonly EffectKind[] = [
   'provider.run.start',
   'provider.run.stop',
   'question.respond',
-  'conversation.writeback',
   'legacy.mirror'
 ]
 
@@ -31,7 +30,6 @@ export const EFFECT_POLICIES: Readonly<Record<EffectKind, EffectPolicySpec>> = {
   'provider.run.start': { policy: 'process_bound', onRestart: 'run_start_reconcile' },
   'provider.run.stop': { policy: 'process_bound', onRestart: 'void' },
   'question.respond': { policy: 'process_bound', onRestart: 'void' },
-  'conversation.writeback': { policy: 'replayable', onRestart: 'requeue' },
   'legacy.mirror': { policy: 'replayable', onRestart: 'requeue' }
 }
 

@@ -85,9 +85,12 @@ describe('P4-0 transition tables & effect policy', () => {
     expect(getEffectPolicy('provider.run.start').policy).toBe('process_bound')
     expect(getEffectPolicy('provider.run.stop').policy).toBe('process_bound')
     expect(getEffectPolicy('question.respond').policy).toBe('process_bound')
-    expect(getEffectPolicy('conversation.writeback').policy).toBe('replayable')
-    // catalog.* was registered with no producer anywhere; the scan runs as a direct call, so the
-    // registrations went away instead of staying as dead configuration.
+    // conversation.writeback and catalog.* were registered with no producer: the conversation turn is
+    // concluded on the daemon's terminal path and by startup reconciliation, the scan runs as a direct
+    // call. Both registrations went away instead of staying as dead configuration.
+    expect(() => getEffectPolicy('conversation.writeback' as never)).toThrow(
+      expect.objectContaining({ code: 'orchestration_invalid_effect_kind' })
+    )
     expect(() => getEffectPolicy('catalog.scan' as never)).toThrow(
       expect.objectContaining({ code: 'orchestration_invalid_effect_kind' })
     )
