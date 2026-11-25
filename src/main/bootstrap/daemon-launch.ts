@@ -75,8 +75,7 @@ export function spawnDaemonSupervisor(input: {
       detached: true,
       windowsHide: true
     })
-    // A detached child outlives this process, so an error after a successful spawn
-    // belongs in the log, not in an unhandled exception.
+    // Consume the child error event; only stdout and stderr are redirected to the log.
     child.once('error', () => undefined)
     if (child.pid === undefined) return { status: 'failed', reason: 'daemon_spawn_failed' }
     child.unref()

@@ -49,7 +49,7 @@ export interface HostMetricsSources {
   pressureText(): Promise<string | null>
   /** sysctl vm.swapusage on macOS; Linux reads swap from memoryText. */
   swapText(): Promise<string | null>
-  /** `ps` table text; null when it failed or timed out. */
+  /** `ps` stdout, including partial output; null when the command fails without output. */
   processTable(): Promise<string | null>
   diskRoots(): Array<{ role: HostDiskRole; path: string }>
   statfs(path: string): { totalBytes: number; freeBytes: number } | null
@@ -309,7 +309,6 @@ function runCommand(file: string, args: string[], options: HostMetricsCommandOpt
       timeout: options.timeoutMs, maxBuffer: options.maxBytes, encoding: 'utf8',
       env: { ...process.env, ...options.env }
     }, (error, stdout) => {
-      // A timeout and a missing executable both mean "not read this time": null.
       if (error && !stdout) return resolve(null)
       resolve(stdout)
     })

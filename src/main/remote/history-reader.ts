@@ -148,8 +148,7 @@ async function sessionDisplay(args: HistoryContext, parts: string[], active: boo
   return build
 }
 
-// Read only the requested archive window. Claude retains the desktop's native
-// transcript/archive merge authority; its host-side parse is not constant-time.
+// Return one page. Session reconciliation and the unscoped Claude merge may read beyond it.
 export async function readRemoteHistoryTurnsPage(
   args: HistoryContext, request: PageRequest, active: ActiveReader
 ): Promise<RemoteHistoryTurnsPage> {

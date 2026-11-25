@@ -79,7 +79,6 @@ export class TextSpool {
     await this.write(file, chunk, bytes)
   }
 
-  /** Resident bytes allowed for this spool: its own bound, plus the shared allowance. */
   private capacity(): number {
     return this.budget === undefined ? this.memoryBytes : Math.min(this.memoryBytes, this.budget.available + this.charged)
   }
