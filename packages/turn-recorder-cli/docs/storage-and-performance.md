@@ -105,8 +105,31 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 
 - 恢复轮、健康统计、`staleOpenTurns` 列表和“是否还有 open turn”的判断都逐会话隔离。一个会话目录里出现非目录项（Finder 写的 `.DS_Store`、被文件占位的 `turns/`）或权限不足，只跳过这一个会话，其余会话照常处理，整轮不再是全有或全无。
 - 只有“这个条目不是可读会话”的错误（`ENOTDIR`/`ENOENT`/`EACCES`/`EPERM`/`ELOOP`/`ENAMETOOLONG`）按可跳过处理。轮次内部的读错误（例如事件 `stat` 的 `EIO`）仍然直接失败：它可能改变结论，不能变成一次安静的跳过。
-- 同一个会话连续 3 次失败后进入 suspended：不再每轮重试，改为每小时重探一次。转入时 `recorder.log` 留一行 `WARN session suspended after N failed passes`，`health.json` 的 `suspendedSessions` 和 `scry status` 都会报出来。暂停只影响重试，不删标记、不改 `open.json`、不丢弃证据。
+- 同一个会话连续 3 次失败后进入 suspended：不再每轮重试，改为每小时重探一次。转入时 `recorder.log` 留一行 `WARN session suspended after N failed passes`（0.2.89 起同一原因连续失败写 `... after N identical failed passes`），`health.json` 的 `suspendedSessions` 和 `scry status` 都会报出来。暂停只影响重试，不删标记、不改 `open.json`、不丢弃证据。0.2.89 起计数范围从“会话不可读”扩到任意转录读取/解析失败，并按会话与轮次分开记账：整轮 pass 正常完成才清，单条记录可读不会清掉另一条轮次的失败。
 - 一次成功收尾会清掉该会话的失败记录，瞬时故障不会累积成 suspended。记录写在 `.scry/session-failures.json`（和 `health.json` 同级），是报告，不是事实源；删掉它只会让下一轮重新计数。
+
+### 0.2.89：超大转录不再整份读入，同因失败不再每轮重试
+
+0.2.89 起，transcript 的读取和定位都有字节上限；超过上限是一次带原因的截断，而不是一次会重试的异常。
+
+- **窗口上限 64 MiB。** `readTranscriptWindow` 最多读 64 MiB（`TRANSCRIPT_WINDOW_LIMIT_BYTES`）。超限时只保留最新的 64 MiB，丢掉起点处的残缺行，其余照常解析。返回值带 `truncated` 和 `truncation: { reason: 'window_limit', requestedBytes, keptBytes, droppedBytes }`。
+- **截断会进入记录，不静默。** 解析快照标 `complete: false`，原因写明保留和丢弃的大小。启用原始转录采集且能确认字节范围时，记录的 `transcript` 段标 `partial`，带 `value.sourceCompleteness: "partial"` 和 `omissionReason`。读取方看到的是“这一段没读到”，不是“这一轮什么都没发生”。
+- **锚点扫描也有上限。** 每次反向扫描最多回看 64 MiB；先用开轮位置前 8 MiB 作下界。如果没找到且放宽下界能扩大搜索范围，再不带该提示扫一次（仍限最近 64 MiB）。这能兼容 inbox replay 时读到较晚的文件长度。两次均未找到才回退 byte 0，读取仍有窗口上限。
+- **定位时跳过超过 4 MiB 的行，不跳过窗口解析中的同一行。** 2026-11-25 本机对 Claude、Qoder、Codex 转录（包括现有压缩归档）只读统计：超限行分别为 0、0、332，目标锚点类型均为 0。最长行分别为 9,219、3,400,461、75,616,120 字节（不含换行）。这是保留 4 MiB 定位上限的样本依据，不是格式保证；`health.json` 的 `oversizedTranscriptAnchorLines` 累计此工作区跳过的次数（未写入即尚未记到，复扫可能再计）。若出现相关漏定位，改用分块累积整行，将单行上限提升到窗口上限。
+- **Codex 的锚点缓存只复用轮次边界。** 同一个 `task_started` 轮次在后续 pass 里直接复用已定位的起点，只补扫新增字节。`user_message` 行只是反向扫描的提示，不会被当成新的轮次起点，否则窗口会从提问行开始、丢掉 `task_started`。
+- **有持续性证据才暂停。** 可读会话的轮次恢复，必须同因连续失败至少 3 次，且首末失败相隔至少 5 分钟，才改为每小时重探。daemon 巡检间隔 1–15 秒，5 分钟能覆盖多个巡检周期，避免几秒内的失败触发一小时暂停。`EMFILE` / `ENFILE` / `ENOSPC` / `EAGAIN` / `EBUSY` / `EIO` 仍可诊断，但不计入暂停；原有不可用条目的跳过及重探规则不变。暂停写 WARN，并在 `health.json` 的 `suspendedSessions` 和 `scry status` 中可见，不动 `open.json` 或证据。
+- **`transcriptStartOffset` 记真实位置。** 轮次打开时记录当时 transcript 的字节长度；转录文件在轮次开始后才出现（或读不到）时记 `null` = 未知，不再用 `0` 冒充“从头开始”。这个值只是定位提示，不证明 Provider 从这个字节开始写本轮；恢复时找到的解析锚点不回填。
+
+改动前后的实测数字（同一台机器、同一份 transcript，`stableTranscript` 单次调用）：
+
+| 场景 | 0.2.88（旧） | 0.2.89 |
+|---|---|---|
+| 真实 Codex rollout 1.02 GB，轮次身份不可定位（窗口只能从 byte 0 起） | 读 1,027,213,094 字节，抛 `ERR_STRING_TOO_LONG`，无快照；maxRSS 0.8–1.0 GB | 读 67,371,008 字节，45 个事件 + 明确截断原因，`complete: false`；maxRSS 306 MB |
+| 稀疏 1 GiB 转录（首部有真实行，其余为空洞），带 prompt hash 但无 turn id | 扫描 1,073,741,824 字节、CPU 444 秒、maxRSS 5.7–8.4 GB，最后仍抛 `ERR_STRING_TOO_LONG` | 扫描 67,108,864 字节、CPU 0.30 秒、maxRSS 168 MB，返回带原因的 partial 快照 |
+| 40 MiB 会话，锚点在 38 MiB 处（正常大轮次） | 扫描 40,202,062 字节 / 493 ms，`complete: true` | 扫描 40,202,062 字节 / 489 ms，`complete: true`（无回退） |
+| 同一 40 MiB 会话连续 3 个 pass，每轮追加 1 行 | 每轮重扫 40.2 MB：493 / 482 / 471 ms | 首轮 489 ms，其后 30 / 30 ms（只扫新增的 577 / 676 字节） |
+
+已知限制：截断窗口里的证据只覆盖尾部 64 MiB；需要整轮完整正文时，仍然要等长期方案（持久行索引 + 增量解析器），见 `docs/research/native-console-optimization.md`。上限是常量，不按 Provider 或工作区配置；调整前应先测完整 turn-start，而不是只看单次读取耗时。
 
 ### 0.2.88：多仓库工作区的位置信息不再时有时无
 

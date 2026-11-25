@@ -120,7 +120,8 @@ export interface RecorderOpenTurnState {
   managedPromptHash?: string
   startFingerprint: string
   transcriptPath?: string
-  transcriptStartOffset?: number
+  /** Byte where this turn's rows begin; `null` when the recorder could not read it. Never a guess. */
+  transcriptStartOffset?: number | null
   piTranscriptAnchor?: import('./recorder-contracts.js').PiTranscriptAnchor
   providerTurnId?: string
   /** Qoder hook identity; it must be mapped to a native promptId before use. */
@@ -320,8 +321,9 @@ export async function reconcileAttentionIndex(dataRoot: string): Promise<MarkedS
             }
           })
         }
-        // Readable again: whatever it failed on before was transient after all.
-        await clearSessionFailure(dataRoot, provider, sessionKey, { present: key in failures })
+        // Readable again: whatever it failed to enumerate before was transient after all. A failure
+        // inside the turn is not this scan's to clear.
+        await clearSessionFailure(dataRoot, provider, sessionKey, { present: key in failures, scope: 'session' })
       } catch (error) {
         // One unreadable session must not starve the rebuild for every other one; readiness waits.
         // A read error inside a turn is not an unreadable entry, and still stops the scan here.
