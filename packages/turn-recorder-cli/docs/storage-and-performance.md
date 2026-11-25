@@ -51,10 +51,14 @@
 以下字段由包含本次可靠性改动的 CLI 写出；历史 record 不回填，缺少字段不能当作零。
 
 - `diff.discovery.requestedRoots`：本轮发现并请求采集的目录清单，数组长度是该清单的数量，不是磁盘上的全部仓库数，也不保证每个目录已解析出有效 Git root。仅在发现阶段有证据时出现。
-- `diff.discovery.maxDepth` 与 `depthLimitedDirectories`：本轮使用的深度上限、因该上限未继续下探的目录数。后者不是“漏掉的仓库数”。默认深度仍为 2，上限 5；排除目录及目录符号链接仍不下探。
+- `diff.discovery.maxDepth` 与 `depthLimitedDirectories`：本轮使用的深度上限、因该上限未继续下探的目录数。后者不是“漏掉的仓库数”。默认深度仍为 2，上限 5；排除目录及目录符号链接仍不下探。只有 `capture.sessions: "opt-in"` 下已显式认领的会话，才把深度范围内真实 `repos/` 目录的直接链接作为仓库挂载候选。
 - `diff.discovery.worktreeDiscovery`：所有者或结果触及上限、Git 查询失败时出现；`incomplete: true` 不代表工作区没有其他 worktree。查询最多 32 个已发现仓库，按排序分批、每批最多 4 个 Git 进程；每个所有者最多接纳 128 条工作区内结果，Git 查询共享 5 秒预算。越界和排除目录不进入采集范围。超过上限时应先将关键仓库作为独立 workspace；扩大预算前须测量完整 turn-start，而不是仅看目录扫描时间。
 - `diff.value[]`：逐项查看 `status`（`captured` / `timeout` / `failed` / `unavailable`）及可用的 `reason`。`requestedRoot` 是已知请求目录；`repoRoot` 只在 Git 解析到它时提供。不同仓库即使同时结束也保留独立结果。
 - 深度边界只作为 `discovery` 元数据保留，不单独改变 diff 的 status/quality 或增加 `omissionReason`。`available` 表示已纳入清单的快照可用，不证明磁盘上所有仓库都已采集。真实缺失证据仍按原规则降级并写原因；恢复时无法可信归因 diff，仍为 `unavailable`，不补造快照、耗时或成功状态。没有 `diff.value` 不等于发现了零个仓库。
+
+仓库挂载只接纳当前用户拥有的 Git 工作树根。解析后的目标必须位于工作区、用户主目录或系统临时目录之下；不接受排除路径、断链或循环，不递归枚举链接目标，也不通过挂载探查兄弟 worktree。最多考虑 32 个直接链接；Git 根验证用普通 worktree 探查剩余的名额，与它共享 32 个 Git 查询、4 并发和 5 秒截止时间。真实路径去重后建基线，提交、分支和远端来自真实仓库；普通工作区及 `doctor` 不启用此扩展。若宿主需要其他路径布局，应先定义显式挂载范围，而不是扩大默认搜索。
+
+如果某个仓库的比较结果为空，但其基线晚于已观测到的、指向该仓库的写入工具开场，记录将该仓库标为 `unavailable`（`baseline_after_write`）。文件列表为空表示缺乏可信比较，不表示“0 个改动”。这一判定不靠猜测任意 Shell 的目标。
 
 `doctor` 的 `repositories.depth` 只额外查看 depth+1 一层，最多探测 32 个边界目录、128 个目录项。仅在实际发现 `.git` 时 warn、列出路径并提示调整 `repositories.maxDepth` / `repositories.exclude`。没有发现时 pass；即使探测不完整也不告警，但 detail 会明确说明上限或不可读，不能把 pass 当作已确认没有更深仓库。不会自动扩大采集范围。
 

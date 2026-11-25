@@ -13,6 +13,7 @@ import type { RecorderEnablement } from './config.js'
 import { terminalStatus, type RecorderHookResult, type TranscriptRead, resolveModelIdentity } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
+import { observePendingQoderTranscript, PENDING_QODER_TRANSCRIPT_REASON } from './pending-qoder-transcript.js'
 import { captureTurnInitializationIssue, degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { unmatchedIdentityReason } from './recorder-transcript-background.js'
 import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
@@ -64,6 +65,8 @@ export async function finalizeOpenTurn(
       errors: false
     }
   }
+  await observePendingQoderTranscript(open)
+  const pendingTranscript = !!open.pendingQoderTranscriptPath && !open.transcriptPath
   let transcript: TranscriptRead = options.terminalOnlyTranscript ?? (options.transcriptUnavailable
     ? unobservedTranscript
     : open.transcriptPath
@@ -83,7 +86,8 @@ export async function finalizeOpenTurn(
         )
       : {
           ...unobservedTranscript,
-          complete: true
+          complete: !pendingTranscript,
+          ...(pendingTranscript ? { incompleteReasons: [PENDING_QODER_TRANSCRIPT_REASON] } : {})
         })
   if (!transcript.stable && !options.allowUnstableTranscript) return { status: 'pending', reason: 'transcript is still changing' }
   let identityUnmatched = false
@@ -143,7 +147,7 @@ export async function finalizeOpenTurn(
   })
   const collected = discardDiff
     ? { diffs: [] as TurnDiffSnapshot[], frozen: undefined }
-    : await collectTurnDiffs({ enablement, open, mergedEvents, worktreeDiffs, frozen })
+    : await collectTurnDiffs({ enablement, open, mergedEvents, hookEvents: storedEvents, worktreeDiffs, frozen })
   const diffs = collected.diffs
   const sealedFrozen = collected.frozen
   const diffEvents: TraceEvent[] = diffs.map((turnDiff, index) => ({
@@ -252,7 +256,8 @@ export async function finalizeOpenTurn(
   }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
   const transcriptEvidence: NonNullable<TurnEvidence['transcript']> = await (async (): Promise<NonNullable<TurnEvidence['transcript']>> => {
-    if (!open.transcriptPath) return unavailable('provider transcript path was not observable')
+    if (!open.transcriptPath) return unavailable(pendingTranscript
+      ? PENDING_QODER_TRANSCRIPT_REASON : 'provider transcript path was not observable')
     if (!enablement.config.capture.prompt || !enablement.config.capture.assistant || !isFullToolContentPolicy(contentPolicy)) {
       return disabled('raw transcript capture disabled by content policy')
     }

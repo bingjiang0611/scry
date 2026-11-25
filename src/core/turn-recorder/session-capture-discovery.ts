@@ -64,8 +64,9 @@ export function editedAbsolutePaths(payload: Record<string, unknown>): string[] 
     if (typeof value === 'string' && isAbsolute(value)) result.push(value)
   }
   if (typeof raw === 'string') result.push(...serializedPaths(raw))
-  const patch = typeof toolInput.command === 'string' ? toolInput.command
-    : typeof raw === 'string' ? raw : undefined
+  const patch = typeof toolInput.patch === 'string' ? toolInput.patch
+    : typeof toolInput.command === 'string' ? toolInput.command
+      : typeof raw === 'string' ? raw : undefined
   if (patch) {
     for (const line of patch.split(/\r?\n/)) {
       const match = /^\*\*\* (?:Add|Update|Delete) File:\s*(.+?)\s*$/.exec(line)

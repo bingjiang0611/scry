@@ -21,6 +21,7 @@ import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexI
 import { CLOSING_TURN_EXPIRED_REASON, closingTurnStalled } from './recorder-closing-window.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
+import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
 import { CODEX_TRUNCATED_RECOVERY_REASON, rememberCodexTranscriptMiss, resumeCodexTranscriptMiss } from './recorder-codex-recovery.js'
 
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
@@ -286,6 +287,7 @@ export async function recoverRecorder(
             // nothing has been failing to finalize, so it must not be reported as an expiry.
             const wasAlreadyClosing = open.status === 'closing'
             if (open.status === 'open') {
+              await observePendingQoderTranscript(open)
               const resumed = await resumeCodexTranscriptMiss(item.sessionDir, open)
               const transcript = resumed?.read ?? (open.transcriptPath
                 ? await stableTranscript(

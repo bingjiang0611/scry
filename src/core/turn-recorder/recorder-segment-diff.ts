@@ -1,3 +1,4 @@
+import { qualifyEmptyRepositoryDiffs } from './late-repository-baseline.js'
 import { readdir, rm, rmdir } from 'node:fs/promises'
 import { delimiter, dirname, join } from 'node:path'
 import type { TraceEvent, TurnDiffSnapshot } from '../../shared/trace.js'
@@ -78,19 +79,21 @@ export async function collectTurnDiffs(args: {
   enablement: Extract<RecorderEnablement, { enabled: true }>
   open: RecorderOpenTurnState
   mergedEvents: TraceEvent[]
+  hookEvents: TraceEvent[]
   worktreeDiffs: Promise<TurnDiffSnapshot[]>
   frozen: FrozenDiffCollector | undefined
 }): Promise<{ diffs: TurnDiffSnapshot[]; frozen: RecorderFrozenDiff[] | undefined }> {
   const { enablement, open, frozen } = args
-  const diffs = limitTurnDiffPatchBytes(await persistTurnDiffContent(
-    enablement.dataRoot,
-    [
-      ...(open.terminalDiffs
-        ? open.terminalDiffs.map(({ repository, snapshot }) => ({ ...snapshot, requestedRoot: repository }))
-        : await liveTurnDiffs(enablement, open, args.mergedEvents, frozen)),
-      ...await args.worktreeDiffs
-    ]
-  ))
+  const snapshots = [
+    ...(open.terminalDiffs
+      ? open.terminalDiffs.map(({ repository, snapshot }) => ({ ...snapshot, requestedRoot: repository }))
+      : await liveTurnDiffs(enablement, open, args.mergedEvents, frozen)),
+    ...await args.worktreeDiffs
+  ]
+  const qualified = await qualifyEmptyRepositoryDiffs(enablement.workspaceRoot, snapshots, [
+    ...args.hookEvents, ...args.mergedEvents
+  ])
+  const diffs = limitTurnDiffPatchBytes(await persistTurnDiffContent(enablement.dataRoot, qualified))
   // Durable before the record is committed: a recovery that re-finalizes this generation must keep
   // the boundary the record was committed with, not re-read a later workspace and leave the gap
   // between the two unassigned.

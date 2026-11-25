@@ -22,6 +22,7 @@ function detail(result: WorkspaceDiffState): string {
     deadline: 'Git 采集超时',
     git_error: 'Git 采集失败',
     no_baseline: '缺少 Git 比较基线',
+    baseline_after_write: 'Git 基线晚于写入开始，无法确认改动',
     request_failed: '无法读取工作区改动',
     workspace_limit: '工作区改动超出只读统计上限',
     workspace_attributes: 'Git 属性或换行转换不支持只读统计，无法准确统计',

@@ -15,6 +15,7 @@
 ## 按会话采集：初始化中断与重复 start
 
 - 新 claim 只在基线初始化和控制状态持久化完成后返回 `started`。遇到未完成初始化的旧 open，拒绝认领，不重新制作历史基线。
+- Qoder 的 `UserPromptSubmit` 可在转录落盘前完成 claim 和 Git 基线。只接受 hook 与 claim 同报的绝对路径、能解析到现存目录的父路径，以及确实不存在的文件项。会话和宿主标识仍须匹配；文件尚不存在不算已取得转录证据。后续 hook 或恢复只在原路径出现普通文件时才读取，仍使用原有轮次匹配；其他路径或符号链接不能替换它。收尾时还没出现则明确标转录不可用。
 - 已开启的同一 `captureId` 再次 start 返回 `already_started`。如果当前轮次仍为 `initialization=pending`，ACK 的 `warning` 写明 `capture baseline initialization was interrupted; the current turn diff is unavailable`。这只确认会话采集仍开启，不证明当前轮次有完整基线；排除路径仍按并集合并。
 - 该轮经 Stop 或恢复封箱时，已开启的 diff 采集标为 `unavailable`，`omissionReason` 写明基线初始化被中断。后续工具发现的迟到基线也不能补齐先前缺口，不发布为 `available` 或“没有改动”。其他可观测记录仍正常保存。
 - 封箱后，同一会话的下一轮重新初始化基线并继续采集，不把中断状态延续到后续轮次。显式关闭 diff 采集的配置仍记为 `disabled`。

@@ -1,6 +1,7 @@
 import { lstat, opendir, readFile, readdir, realpath } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { gitCommand, TURN_DIFF_BEGIN_DEADLINE_MS } from './git-command.js'
+import { discoverRepositoryMounts } from './repository-mounts.js'
 
 export interface RecorderConfig {
   schemaVersion: 1
@@ -326,7 +327,8 @@ export function repositoryDiscoveryStats(): { worktreeCommands: number } {
 export async function discoverRepositories(
   root: string,
   config: RecorderConfig,
-  probeNextDepth = false
+  probeNextDepth = false,
+  explicitCapture = false
 ): Promise<RepositoryDiscovery> {
   const repositories = new Set<string>()
   const maxDepth = config.repositories.maxDepth ?? 2
@@ -337,6 +339,8 @@ export async function discoverRepositories(
   const excluded = captureExcludedNames(config)
   let depthLimitedDirectories = 0
   const frontier: string[] = []
+  const mountLinks: string[] = []
+  const mountRoot = explicitCapture && config.capture.sessions === 'opt-in' ? join(root, 'repos') : undefined
   const walk = async (dir: string, depth: number): Promise<void> => {
     if (depth > maxDepth) {
       depthLimitedDirectories++
@@ -349,6 +353,10 @@ export async function discoverRepositories(
       entries = await readdir(dir, { withFileTypes: true })
     } catch {
       return
+    }
+    if (dir === mountRoot) {
+      mountLinks.push(...entries.filter(entry => entry.isSymbolicLink() && !excluded.has(entry.name))
+        .map(entry => entry.name).sort().slice(0, WORKTREE_DISCOVERY_MAX_REPOSITORIES).map(name => join(dir, name)))
     }
     await Promise.all(entries.map(async (entry) => {
       if (!entry.isDirectory() || entry.isSymbolicLink() || excluded.has(entry.name)) return
@@ -392,6 +400,13 @@ export async function discoverRepositories(
     repositoryByIdentity.set(identity, candidate)
     discoveredWorktrees++
   }
+  // Mount verification shares the existing discovery deadline and Git slots. Do not use
+  // external mounts as worktree discovery owners or recurse through their contents.
+  for (const mount of await discoverRepositoryMounts({
+    links: mountLinks, workspaceRoot, excluded, known: repositoryByIdentity,
+    slots: WORKTREE_DISCOVERY_MAX_REPOSITORIES - probed.length,
+    concurrency: WORKTREE_DISCOVERY_MAX_CONCURRENCY, deadline
+  })) repositoryByIdentity.set(mount, mount)
   const worktreeTruncated = skippedRepositories > 0 || linked.some(result => result.truncated)
   const result: RepositoryDiscovery = {
     repositories: [...repositoryByIdentity.values()].sort(), maxDepth, depthLimitedDirectories,
