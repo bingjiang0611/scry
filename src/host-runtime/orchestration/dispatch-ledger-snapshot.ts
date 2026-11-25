@@ -27,7 +27,9 @@ function normalizeUuid(raw: string | null | undefined, fallbackSeed: string): st
 }
 
 function dispatchLifecycle(lifecycle: string): RunLifecycle {
-  if (lifecycle === 'recorded') return 'recorded'
+  // R2: a queued entry is waiting for its slot, not cancelled. Mapping it to `cancelled` made the
+  // restart's dispatch fence throw, so the row was succeeded without ever executing.
+  if (lifecycle === 'recorded' || lifecycle === 'queued') return 'recorded'
   if (lifecycle === 'admitted' || lifecycle === 'dispatched') return 'dispatched'
   if (lifecycle === 'settled') return 'settled'
   if (lifecycle === 'failed') return 'failed'

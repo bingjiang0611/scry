@@ -147,6 +147,13 @@ export class RemoteDispatcher {
     this.#retryTimer = timer
   }
 
+  /** The ledger's own view of the run, read without mutating it. */
+  #ledgerSettledOrDispatched(runId: string): boolean {
+    let state: string | undefined
+    try { state = this.#ledger.runState(runId) } catch { return false }
+    return state === 'dispatched' || state === 'settled' || state === 'failed' || state === 'cancelled'
+  }
+
   /** Clears backoffs so a "conditions changed" pump sees rows it deferred earlier. */
   wake(): void {
     this.#outbox?.wake?.()
@@ -247,11 +254,21 @@ export class RemoteDispatcher {
           continue
         }
       }
-      // The durable ledger transition is the second fence: if it fails, another dispatch won.
+      // The durable ledger transition is the second fence. It only throws when this ledger refuses
+      // the transition, so the reason decides the outcome: another dispatch already won (nothing to
+      // do) versus a ledger that thinks the run is still recorded while the authority admitted it —
+      // the restart case (R2). Succeeding on that second case left the run in `dispatched` forever.
       try {
         this.#ledger.markDispatched(runId)
       } catch {
-        outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
+        if (this.#ledgerSettledOrDispatched(runId)) {
+          outbox.succeed(effect.effectId, this.#leaseOwner, Date.now())
+          continue
+        }
+        // The authority already wrote `admitted_and_dispatched`; make the run terminal instead of
+        // leaving a dispatch nobody will execute.
+        try { this.#onSettled?.(runId, 'failed', 'dispatch_fence_conflict') } catch { /* recorded below */ }
+        outbox.fail(effect.effectId, this.#leaseOwner, Date.now(), 'dispatch_fence_conflict')
         continue
       }
       this.#inflight.add(runId)

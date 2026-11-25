@@ -355,6 +355,45 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
   })
 })
 
+// R2: a ledger that refuses the dispatch fence must not be read as "someone else dispatched it".
+describe('RemoteDispatcher dispatch fence conflict', () => {
+  it('R2: a refused fence with a recorded run records a terminal instead of succeeding', () => {
+    const lines: string[] = []
+    const ledger = {
+      runState: () => 'recorded',
+      markDispatched: () => { throw new Error('ledger_refused') },
+      intentDetail: () => JSON.stringify({ providerId: 'codex', cwd: '/w', prompt: 'queued' }),
+      recordedIntents: () => []
+    } as unknown as SessionLedger
+    const outbox = memoryOutbox([{ effectId: 'eff-queued', runId: randomUUID() }])
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      executor: { execute: () => Promise.resolve() },
+      outbox,
+      onSettled: (runId, lifecycle, detail) => { lines.push(`${runId}:${lifecycle}:${detail}`) }
+    })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-queued', 'fail:eff-queued'])
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/:failed:dispatch_fence_conflict$/)
+  })
+
+  it('R2: a refused fence for a run the ledger already dispatched stays a silent success', () => {
+    const ledger = {
+      runState: () => 'dispatched',
+      markDispatched: () => { throw new Error('already_dispatched') },
+      intentDetail: () => JSON.stringify({ providerId: 'codex', cwd: '/w', prompt: 'queued' }),
+      recordedIntents: () => []
+    } as unknown as SessionLedger
+    const outbox = memoryOutbox([{ effectId: 'eff-queued', runId: randomUUID() }])
+    const dispatcher = new RemoteDispatcher({ ledger, executor: { execute: () => Promise.resolve() }, outbox })
+
+    expect(dispatcher.pump()).toEqual([])
+    expect(outbox.settled).toEqual(['claim:eff-queued', 'succeed:eff-queued'])
+  })
+})
+
 // C4: the restart note belongs to exactly one turn of a session. The dispatcher asks for the rewrite
 // before executing, so the executor sees the note once and the next turn does not.
 describe('RemoteDispatcher restart note', () => {
