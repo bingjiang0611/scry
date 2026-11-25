@@ -28,7 +28,11 @@ export function recordTranscriptAnchorBytes(bytes: number): void {
   transcriptAnchorBytesScanned += bytes
 }
 
-function sameTranscriptIdentity(left: TranscriptSnapshotIdentity, right: TranscriptSnapshotIdentity): boolean {
+export function recordTranscriptBytes(bytes: number): void {
+  transcriptBytesRead += bytes
+}
+
+export function sameTranscriptIdentity(left: TranscriptSnapshotIdentity, right: TranscriptSnapshotIdentity): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
 }

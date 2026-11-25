@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { TraceEvent } from '../../shared/trace.js'
@@ -25,6 +25,7 @@ export interface CaptureClaimIdentity {
   userText?: string
   providerTurnId?: string
   baselineAt?: string
+  pendingQoderTranscriptPath?: string
 }
 import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 
@@ -83,7 +84,7 @@ export async function beginOpenTurn(
     : undefined
   const providerTurnId = claim?.providerTurnId ?? providerTurnIdOf(payload, provider)
   const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
-  const transcriptPath = transcriptPathOf(payload)
+  const transcriptPath = claim?.pendingQoderTranscriptPath ? undefined : transcriptPathOf(payload)
   const transcriptOffset = transcriptPath ? await transcriptStartOffsetAt(transcriptPath) : null
   const piTranscriptAnchor = provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
   const open: OpenTurnState = {
@@ -100,7 +101,8 @@ export async function beginOpenTurn(
     status: 'open',
     ...(capture ? { initialization: 'pending' as const } : {}),
     startedAt: claim?.startedAt ?? timestampOf(payload),
-    startFingerprint: capture ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
+    startFingerprint: capture && !claim?.pendingQoderTranscriptPath
+      ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
     ...(capture ? {
       capture: {
         protocol: capture.protocol,
@@ -119,6 +121,7 @@ export async function beginOpenTurn(
     ...(managedPromptHash ? { managedPromptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
     transcriptStartOffset: transcriptOffset,
+    ...(claim?.pendingQoderTranscriptPath ? { pendingQoderTranscriptPath: claim.pendingQoderTranscriptPath } : {}),
     ...(piTranscriptAnchor ? { piTranscriptAnchor } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(requestSetId ? { requestSetId } : {}),
@@ -143,13 +146,24 @@ export async function beginOpenTurn(
     })
   } else if (!managedByScry && !continuation && enablement.config.capture.diff) {
     const captureDir = segmentCaptureDir(root, generation)
-    const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config)
+    const discovery = await discoverRepositories(enablement.workspaceRoot, enablement.config, false, !!capture)
     open.repositoryDiscovery = {
       maxDepth: discovery.maxDepth,
       depthLimitedDirectories: discovery.depthLimitedDirectories,
       ...(discovery.worktreeDiscovery ? { worktreeDiscovery: discovery.worktreeDiscovery } : {})
     }
-    const repositories = [...new Set([...discovery.repositories, ...(session.captureRepositories ?? [])])]
+    const known = session.captureRepositories ?? []
+    const repositories = [...new Set([...discovery.repositories, ...known])]
+    if (capture && enablement.config.capture.sessions === 'opt-in' && known.length) {
+      const unique = new Set<string>()
+      const identities = await Promise.all(repositories.map(path => realpath(path).catch(() => path)))
+      repositories.splice(0, repositories.length, ...repositories.filter((_, index) => {
+        const identity = identities[index]
+        if (unique.has(identity)) return false
+        unique.add(identity)
+        return true
+      }))
+    }
     open.captures = await Promise.all(repositories.map(async (repository) => ({
       repository,
       capture: await beginGitTurnDiff(repository, 5_000, captureDir, [enablement.dataRoot])
@@ -191,7 +205,8 @@ export async function beginCaptureTurn(
   transcriptPath: string,
   payload: Record<string, unknown>,
   ancestryFromPid?: number,
-  claimedHostChain?: import('./host-process.js').HostProcess[]
+  claimedHostChain?: import('./host-process.js').HostProcess[],
+  pendingTranscriptPath?: string
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<OpenTurnState>(openPath(root))
@@ -212,7 +227,7 @@ export async function beginCaptureTurn(
     }
     return readJson<OpenTurnState>(openPath(root)).then((value) => value ?? open)
   }
-  const transcript = await stableTranscript(
+  const transcript = pendingTranscriptPath ? null : await stableTranscript(
     transcriptPath,
     `${provider}:${sessionId}:capture`,
     provider,
@@ -225,12 +240,16 @@ export async function beginCaptureTurn(
   ).catch(() => null)
   const resolved = ancestryFromPid ? await hostProcessChain(ancestryFromPid) : []
   const host = resolved.length ? resolved : claimedHostChain
-  return beginOpenTurn(enablement, provider, sessionId, 'CaptureStart', payload, false, false, undefined, context, {
+  const event = pendingTranscriptPath ? 'UserPromptSubmit' : 'CaptureStart'
+  const opened = await beginOpenTurn(enablement, provider, sessionId, event, payload, false, false, undefined, context, {
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
     ...(transcript?.userText ? { userText: transcript.userText } : {}),
     ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
-    baselineAt: new Date().toISOString()
+    baselineAt: new Date().toISOString(),
+    ...(pendingTranscriptPath ? { pendingQoderTranscriptPath: pendingTranscriptPath } : {})
   }, undefined, host?.length ? host : undefined)
+  if (pendingTranscriptPath) await storeLifecycleEvent(enablement, opened, event, payload)
+  return opened
 }
 
 function credibleAt(value: string | undefined, startedMs: number, ceilingMs: number): string | undefined {
@@ -361,7 +380,7 @@ export async function storeLifecycleEvent(
     open.piTranscriptAnchor = { ...open.piTranscriptAnchor, ...piTranscriptAnchor }
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
-  if (transcriptPath && transcriptPath !== open.transcriptPath) {
+  if (!open.pendingQoderTranscriptPath && transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
     // The path can appear after this turn opened. The turn's own rows are somewhere earlier in that
     // file and the recorder cannot prove where, so this is `null` (unknown), not `0` (from the top).

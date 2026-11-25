@@ -69,10 +69,26 @@ extension RemoteRunStore {
       (lifecycle == .settled || lifecycle == .failed || lifecycle == .cancelled)
   }
 
+  /// D1: the host also reports the queue slot and hold. They are stored apart from the lifecycle so a
+  /// stale slot can never resurrect a run the host already dispatched.
+  func apply(runQueue queue: G0Transport.RunQueueSnapshot, generation: Int, identity: SessionIdentity) {
+    guard isCurrent(generation, identity: identity) else { return }
+    if let state = queue.state { apply(runState: state, generation: generation, identity: identity) }
+    guard isCurrent(generation, identity: identity) else { return }
+    if lifecycle == .queued {
+      queuePosition = queue.queuePosition
+      queueHeld = queue.queueHeld ?? false
+    } else {
+      queuePosition = nil
+      queueHeld = false
+    }
+  }
+
   func apply(runState state: String, generation: Int, identity: SessionIdentity) {
     guard isCurrent(generation, identity: identity) else { return }
     switch state {
-    case "recorded": if lifecycle == .unknown || lifecycle == .submitting { lifecycle = .recorded }
+    case "queued": if lifecycle == .unknown { lifecycle = .queued }
+    case "recorded": if lifecycle == .unknown || lifecycle == .submitting || lifecycle == .queued { lifecycle = .recorded }
     case "dispatched": if lifecycle != .running { lifecycle = .dispatched }
     // The host projects an interrupted Provider result as `settled`; keep the
     // more specific cancelled lifecycle already read from the settled marker.

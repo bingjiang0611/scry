@@ -81,6 +81,7 @@ async function startRecorderDaemon(
   let recoveryDelayMs = recoveryPollMs
   let recoveryScheduleGeneration = 0
   let closing: Promise<void> | undefined
+  let summaryWarmup: Promise<unknown> | undefined
   let activityGeneration = 0
 
   const runRecovery = (): Promise<{ recovered: number; pending: number }> => {
@@ -294,6 +295,7 @@ async function startRecorderDaemon(
       server.close(() => resolvePromise())
     }).then(async () => {
       await recoveryInFlight
+      await summaryWarmup
       await Promise.all(deliveryInFlight)
     }).finally(async () => {
       const currentOwner = await readJson<DaemonOwner>(markerPath)
@@ -325,7 +327,7 @@ async function startRecorderDaemon(
     throw error
   }
   await pruneStaleTemps(enablement.dataRoot).catch(() => undefined)
-  void listRecordSummaries(enablement.dataRoot).catch(() => undefined)
+  if (!closing) summaryWarmup = listRecordSummaries(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)
   return { socketPath, closed, close }

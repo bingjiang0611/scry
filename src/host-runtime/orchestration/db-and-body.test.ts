@@ -66,7 +66,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
         const meta = new Map(metaRows.map((r) => [r.key, r.value]))
         expect(meta.get('log_id')).toMatch(/^[0-9a-f-]{36}$/i)
         expect(meta.get('pruned_through')).toBe('0')
-        expect(meta.get('projection_schema_version')).toBe('4')
+        expect(meta.get('projection_schema_version')).toBe('6')
         expect(meta.get('legacy_ledger_seq')).toBe('0')
         expect(meta.has('legacy_catalog_sha256')).toBe(true)
 
@@ -127,7 +127,7 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
 
       const upgraded = openOrchestrationDatabase({ userDataDir: userData })
       try {
-        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(6)
+        expect(upgraded.db.pragma('user_version', { simple: true })).toBe(ORCHESTRATION_SCHEMA_VERSION)
         const oldRow = upgraded.db
           .prepare('SELECT output_seq, app_run_id FROM orch_p_run WHERE run_id = ?')
           .get('old-v1-run')
@@ -151,6 +151,31 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
     })
   })
 
+  // R14 small issue: a hand-written or corrupted outbox payload made `json_extract` throw while the V9
+  // migration was backfilling `session_key`, so the whole daemon refused to start.
+  it('completes the V9 session_key backfill when one outbox payload is not valid JSON', () => {
+    const Database = require('better-sqlite3') as typeof import('better-sqlite3')
+    const db = new Database(':memory:')
+    try {
+      migrateOrchestrationDatabase(db, [ORCH_DDL_V1])
+      db.exec(`
+        INSERT INTO orch_p_run (run_id, owner_actor, scope, origin, lifecycle, intent_seq, rev_seq, session_key)
+          VALUES ('run-bad', 'system', 'remote', 'remote', 'recorded', 1, 1, 'sess-known');
+      `)
+      db.prepare(
+        `INSERT INTO orch_outbox (effect_id, kind, state, run_id, causation_seq, payload, policy, attempts)
+         VALUES ('eff-bad', 'provider.run.start', 'pending', 'run-bad', 1, '{not json', 'at_least_once', 0)`
+      ).run()
+      expect(() => migrateOrchestrationDatabase(db)).not.toThrow()
+      expect(db.pragma('user_version', { simple: true })).toBe(ORCHESTRATION_SCHEMA_VERSION)
+      // The row keeps the session key from its run projection; only the JSON column was unusable.
+      expect(db.prepare("SELECT session_key FROM orch_outbox WHERE effect_id = 'eff-bad'").pluck().get())
+        .toBe('sess-known')
+    } finally {
+      db.close()
+    }
+  })
+
   it('upgrades a populated V2 catalog without changing its session key, revision or event cursor', () => {
     const Database = require('better-sqlite3') as typeof import('better-sqlite3')
     const db = new Database(':memory:')
@@ -163,12 +188,12 @@ describe('P4-0 orchestration.db migrations, permissions, and locking', () => {
           VALUES ('old', '/tmp/工作区', 10, 42, '旧标题');
       `)
       migrateOrchestrationDatabase(db)
-      expect(db.pragma('user_version', { simple: true })).toBe(6)
+      expect(db.pragma('user_version', { simple: true })).toBe(ORCHESTRATION_SCHEMA_VERSION)
       expect(db.prepare('SELECT session_key, cwd, rev_seq, title, catalog FROM orch_p_session').get()).toEqual({
         session_key: 'old', cwd: '/tmp/工作区', rev_seq: 42, title: '旧标题', catalog: null
       })
       const meta = db.prepare('SELECT value FROM orch_meta WHERE key = ?').pluck()
-      expect(meta.get('projection_schema_version')).toBe('4')
+      expect(meta.get('projection_schema_version')).toBe('6')
       expect(meta.get('legacy_catalog_sha256')).toBe('')
       expect(meta.get('log_id')).toBe('before')
     } finally {

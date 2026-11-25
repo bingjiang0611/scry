@@ -4,6 +4,7 @@ import { REMOTE_SESSION_COPY } from '../constants/remote-copy'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AgentInputAttachment, AgentQuestionResponse } from '@shared/runtime'
 import { resolveTurnDiffReview, sessionNetDiffReview } from '../turn-diff'
+import { olderHistoryCursor } from '@shared/remote-history-cursor'
 import type { DesktopRemoteIntent } from '@shared/desktop-remote'
 import type { DetectedAgent } from '../env'
 import { attachmentsAfterSuccessfulSubmit, inputAttachments, type ComposerDraftAttachment } from '../composer-drafts'
@@ -211,17 +212,21 @@ export function useRemoteChatExecution(foundation: FoundationState, presentation
   }
   const olderRequest = useRef(0)
   const loadOlderHistory = async (): Promise<void> => {
-    if (!connected || !historyEvidence?.hasOlder || historyEvidence.before === undefined || !sessionId) return
+    // D6: prefer the host's detail cursor; the numeric offset is the older trace-archive path.
+    const cursor = olderHistoryCursor(historyEvidence)
+    if (!connected || !cursor || !sessionId) return
     if (historyOlderLoading) return
     setHistoryOlderLoading(true)
     const request = ++olderRequest.current
     const sequence = ++generation.current
     try {
-      const history = await api.history(connectionId, context, historyEvidence.before, historyEvidence.snapshot)
+      const history = cursor.detailCursor
+        ? await api.history(connectionId, context, undefined, undefined, cursor.detailCursor)
+        : await api.history(connectionId, context, cursor.before, cursor.snapshot)
       if (sequence !== generation.current) return
       setTurns((current) => [...historyTurns(history), ...current])
       setHistoryError(null)
-      setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot })
+      setHistoryEvidence({ status: history.status, reason: history.reason, hasOlder: history.hasOlder, before: history.before, snapshot: history.snapshot, detailCursor: history.detailCursor })
     } catch (reason) { if (sequence === generation.current) setHistoryError(errorText(reason)) }
     finally { if (request === olderRequest.current) setHistoryOlderLoading(false) }
   }

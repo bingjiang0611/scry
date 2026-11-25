@@ -36,7 +36,8 @@ export interface RunSubmitPayload {
   claimMode: 'immediate' | 'queued'
   leaseOwner?: string
   pendingTtlMs?: number
-  origin?: 'local' | 'remote' | 'system'
+  /** C3: `agent` marks a run the host started to wake the session after background work. */
+  origin?: 'local' | 'remote' | 'system' | 'agent'
   isConversationRun?: boolean
   shadowOnly?: boolean
   historicalBackfill?: boolean
@@ -60,6 +61,37 @@ export interface SessionStopSubtasksPayload {
   sessionKey: string
   reason?: string
   shadowOnly?: boolean
+}
+
+/** D5: the host records a captured checkpoint; the git ref is the evidence, this is the row. */
+export interface RunCheckpointPayload {
+  runId: string
+  ref: string
+  tree: string
+  sessionKey?: string | null
+  cwd?: string | null
+}
+
+/** R9: retention dropped this run's ref, so the run must stop claiming a checkpoint it no longer has. */
+export interface RunCheckpointForgottenPayload {
+  runId: string
+  ref: string
+}
+
+/**
+ * D1: release one held queue entry. The hold exists so a stop does not let the queue keep firing; the
+ * user has to say go once more, and this is that command.
+ */
+export interface RunReleaseQueuePayload {
+  runId: string
+  reason?: string
+}
+
+/** D5: a user asked to put the worktree back to a captured checkpoint. */
+export interface RunRollbackPayload {
+  runId: string
+  ref: string
+  reason?: string
 }
 
 export type EffectResultStep =
@@ -215,6 +247,10 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'run.submit'; payload: RunSubmitPayload })
   | (BaseCommand & { type: 'run.resolve_intent'; payload: RunResolveIntentPayload })
   | (BaseCommand & { type: 'run.stop'; payload: RunStopPayload })
+  | (BaseCommand & { type: 'run.checkpoint'; payload: RunCheckpointPayload })
+  | (BaseCommand & { type: 'run.checkpoint_forgotten'; payload: RunCheckpointForgottenPayload })
+  | (BaseCommand & { type: 'run.rollback'; payload: RunRollbackPayload })
+  | (BaseCommand & { type: 'run.release_queue'; payload: RunReleaseQueuePayload })
   | (BaseCommand & { type: 'session.stop_subtasks'; payload: SessionStopSubtasksPayload })
   | (BaseCommand & { type: 'run.effect_result'; payload: RunEffectResultPayload })
   | (BaseCommand & { type: 'turn.record_delivery'; payload: TurnRecordDeliveryPayload })

@@ -81,7 +81,7 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
   return {
     readDetail,
     ...createConversationProjectionAccess(getSink, log),
-    deleteNative(ref: AppSessionRef, runIds: ReadonlySet<string>): DeleteSessionOutcome {
+    deleteNative(ref: AppSessionRef, runIds: ReadonlySet<string>, actor?: string): DeleteSessionOutcome {
       const sink = getSink()
       if (!sink) return { status: 'not_present' }
       if (!sink.handle.db.open || sink.isWriteIndeterminate()) {
@@ -96,7 +96,8 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
       return sink.deleteSession({
         sessionKey,
         cwd: session?.cwd ?? ref.cwd,
-        actor: 'system',
+        // D4: a device delete names the device; a local delete keeps the host actor.
+        actor: actor ?? 'system',
         scope: 'system',
         at: Date.now(),
         unboundRunIds: [...runIds],
@@ -105,7 +106,7 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
       })
     },
 
-    deleteConversation(conversation: Conversation): DeleteSessionOutcome {
+    deleteConversation(conversation: Conversation, actor?: string): DeleteSessionOutcome {
       const sink = getSink()
       if (!sink) return { status: 'not_present' }
       if (!sink.handle.db.open || sink.isWriteIndeterminate()) {
@@ -125,7 +126,7 @@ export function createOrchestrationCatalogAccess(getSink: () => EventSink | unde
         .get(sessionKey, cwd)) {
         return { status: 'not_present' }
       }
-      return sink.deleteSession({ sessionKey, cwd, actor: 'system', scope: 'system', at: Date.now() })
+      return sink.deleteSession({ sessionKey, cwd, actor: actor ?? 'system', scope: 'system', at: Date.now() })
     },
 
     read(): AppSession[] | undefined {

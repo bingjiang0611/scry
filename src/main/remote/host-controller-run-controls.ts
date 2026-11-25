@@ -20,6 +20,8 @@ export interface RunControlDeps {
   ledger: SessionLedger
   gateway?: RemoteGateway
   orchestration?: OrchestrationAuthorityHooks
+  /** B1: stop and answer are queued effects, so the caller must pump the outbox after queuing. */
+  pump?: () => void
 }
 
 export interface AnswerInput { runId: string; answerId: string; response: AgentQuestionResponse }
@@ -38,7 +40,7 @@ export function answerRunQuestion(deps: RunControlDeps, peerCertSHA256: string, 
       if (!deps.macRuns!.answer(input.response)) throw new RemoteInteractionError('question_not_pending')
       return { status: 'answered' }
     }
-    return deps.interactions.answer(
+    const receipt = deps.interactions.answer(
       input.runId,
       {
         answerId: input.answerId,
@@ -53,11 +55,17 @@ export function answerRunQuestion(deps: RunControlDeps, peerCertSHA256: string, 
               runId: input.runId,
               questionId: validated.questionId,
               answerId: validated.answerId,
-              answerSha256: validated.answerSha256
+              answerSha256: validated.answerSha256,
+              response: input.response
             })
           }
         : undefined
     )
+    // R7: the answer is a queued effect, so it needs a pump — but only after the broker settled this
+    // question. Pumping from inside `beforeCommit` let the queued effect answer first and made the
+    // live answer look like `question_not_pending` to the device that had just answered.
+    if (receipt.status === 'answered') deps.pump?.()
+    return receipt
 }
 
 export function answerOwnerRunQuestion(deps: RunControlDeps, runId: string, response: AgentQuestionResponse): boolean {
@@ -88,6 +96,7 @@ export function stopRun(deps: RunControlDeps, peerCertSHA256: string, input: { r
           return true
         }
       })
+      if (res.status === 'requested') deps.pump?.()
       if (res.status === 'requested' && !deps.orchestration.isWriteIndeterminate()) {
         try { deps.ledger.markProgress(input.runId, JSON.stringify({ event: 'stop_requested' })) } catch { /* terminal */ }
       }

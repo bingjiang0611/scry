@@ -3,7 +3,7 @@ import { assertBoundedPayload, assertNoUsageNumbersInEvent } from './canonical-j
 import { getEffectPolicy, type EffectKind } from './effect-policy'
 import { scopedNativeSessionKey, type NativeSessionIdentity } from './native-session-lookup'
 import type { OrchestrationCommand, RunEffectResultPayload } from './orchestrator-commands'
-import { canTransitionRun } from './run-transitions'
+import { canTransitionRun, isTerminalRunLifecycle } from './run-transitions'
 import {
   isReservedEvidenceRef,
   OrchestrationStoreError,
@@ -28,11 +28,16 @@ export interface OrchestratorReadView {
   getSession(sessionKey: string): SessionProjectionRow | undefined
   getNativeSession?(identity: NativeSessionIdentity): SessionProjectionRow | undefined
   getTurnByRunId?(runId: string): TurnProjectionRow | undefined
+  getTurnByOrdinal?(sessionKey: string, ordinal: number): TurnProjectionRow | undefined
   getNextTurnOrdinal?(sessionKey: string): number
   getInteraction(runId: string, questionId: string): InteractionProjectionRow | undefined
   listNonTerminalChildRuns(parentRunId: string): RunProjectionRow[]
   listNonTerminalChildRunsBySession(sessionKey: string): RunProjectionRow[]
   hasActiveRunForSession(sessionKey: string): boolean
+  /** D1: next free queue slot for a session; 1-based so position 0 never means "first". */
+  nextQueuePosition?(sessionKey: string): number
+  /** D1: runs waiting in a session's queue, in release order. */
+  listQueuedRuns?(sessionKey: string): RunProjectionRow[]
   activeRunCount(): number
   maxActiveRuns(): number
   isProviderAuthenticating(provider: string, profile: string | null): boolean
@@ -329,7 +334,11 @@ export function decideRunEffectResult(
       return acceptDecision(cmd, [event], [], { runId: run.runId })
     }
     case 'finalized': {
-      if (run.lifecycle !== 'dispatched') return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      // A3: the trace archive can become durable after the run settled; `finalized` only adds
+      // archive evidence for the same run, so a terminal lifecycle is allowed.
+      if (run.lifecycle !== 'dispatched' && !isTerminalRunLifecycle(run.lifecycle)) {
+        return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      }
       events.push(
         makeEvent(cmd, 0, {
           ...common,
@@ -441,3 +450,31 @@ export function isWithdrawableSession(session: SessionProjectionRow): boolean {
   return !session.catalog.preview && session.lastRunId === null && session.title === null &&
     session.pinnedAt === null && session.archivedAt === null && session.conversationId === null
 }
+/** D4: rename, pin and archive are decisions over an existing session, not new rows. */
+export function decideSessionMetadata(
+  cmd: Extract<OrchestrationCommand, {
+    type: 'session.rename' | 'session.pin' | 'session.unpin' | 'session.archive' | 'session.restore'
+  }>,
+  view: OrchestratorReadView
+): DecisionResult {
+  const existing = view.getSession(cmd.payload.sessionKey)
+  if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+  const type = cmd.type === 'session.rename' ? 'session.renamed' : SESSION_TOGGLE_EVENT[cmd.type]
+  const event = makeEvent(cmd, 0, {
+    type,
+    stream: `session:${existing.sessionKey}`,
+    sessionKey: existing.sessionKey,
+    cwd: existing.cwd,
+    payload: cmd.type === 'session.rename'
+      ? { sessionKey: existing.sessionKey, title: cmd.payload.title }
+      : { sessionKey: existing.sessionKey }
+  })
+  return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
+}
+
+const SESSION_TOGGLE_EVENT = {
+  'session.pin': 'session.pinned',
+  'session.unpin': 'session.unpinned',
+  'session.archive': 'session.archived',
+  'session.restore': 'session.restored'
+} as const

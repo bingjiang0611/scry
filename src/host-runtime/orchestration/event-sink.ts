@@ -10,9 +10,8 @@ import {
   type WalCheckpointSample
 } from './db'
 import { getEffectPolicy } from './effect-policy'
-import { findNativeSession } from './native-session-lookup'
 import {
-  deleteSessionInDb,
+  deleteSessionWithErasure,
   pruneEventsInDb,
   resumeBodyErasure,
   stopRunBypassingFenceInRegistry,
@@ -24,20 +23,23 @@ import {
 import {
   listAllEventsRaw,
   listAllOutboxRaw,
-  listNonTerminalChildRunsBySessionRaw,
-  listNonTerminalChildRunsRaw,
   readInteractionRaw,
   readNextTurnOrdinalRaw,
   readReceiptRaw,
   readRunRaw,
+  readSessionByConversation,
   readSessionRaw,
   readTurnByRunIdRaw,
   readTurnRaw
 } from './event-sink-queries'
+import { WalCheckpointController } from './wal-checkpoint-controller'
 import { prepareEventSinkStatements, type EventSinkStatements } from './event-sink-statements'
+import { createOrchestratorReadView } from './read-view'
+import { buildRollbackRejection, isFatalOrchestrationStoreError, isRetryableOrchestrationStoreError } from './store-fault'
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
 import { applyEventToProjection } from './projection'
 import {
+  LOCAL_USER_ACTOR,
   ORCHESTRATION_EVENT_TYPES,
   OrchestrationStoreError,
   type CommandReceiptRow,
@@ -76,11 +78,7 @@ export class EventSink {
   #writeIndeterminate = false
   #walModeEnforced = false
   #inBatchTransaction = false
-  #checkpointIntervalMs: number
-  #checkpointTimer: ReturnType<typeof setTimeout> | null = null
-  #checkpointCount = 0
-  #workerCheckpointActive = false
-  #onCheckpoint?: (sample: WalCheckpointSample) => void
+  #wal: WalCheckpointController
   #onCommit?: (seq: number) => void
   #sessionDeleteEpoch = new Map<string, number>()
   #stmts: EventSinkStatements
@@ -88,17 +86,20 @@ export class EventSink {
   private constructor(handle: OrchestrationDbHandle, options: EventSinkOptions) {
     this.handle = handle
     this.bodyStore = new BodyStore(handle.orchestrationDir)
-    this.#authorizedActors = new Set(['system', ...(options.authorizedActors ?? [])])
+    this.#authorizedActors = new Set(['system', LOCAL_USER_ACTOR, ...(options.authorizedActors ?? [])])
     this.#maxActiveRuns = options.maxActiveRuns ?? 8
     this.#isProviderAuthenticating = options.isProviderAuthenticating ?? (() => false)
-    this.#checkpointIntervalMs = options.checkpointIntervalMs ?? 500
+    this.#wal = new WalCheckpointController(
+      { handle, isFenced: () => this.#writeIndeterminate },
+      options.checkpointIntervalMs ?? 500
+    )
     this.#beforeCommitHook = options.beforeCommitHook
     this.#stmts = prepareEventSinkStatements(handle.db)
     this.#walModeEnforced = existsSync(`${handle.dbPath}-wal`)
   }
 
   setCheckpointObserver(observer: ((sample: WalCheckpointSample) => void) | undefined): void {
-    this.#onCheckpoint = observer
+    this.#wal.setObserver(observer)
   }
 
   setCommitObserver(observer: ((seq: number) => void) | undefined): void {
@@ -117,65 +118,19 @@ export class EventSink {
     }
   }
 
-  checkpointCount(): number { return this.#checkpointCount }
+  checkpointCount(): number { return this.#wal.count() }
 
   walFileBytes(): number { return this.handle.db.open ? this.handle.walFileBytes() : 0 }
 
-  setLockingMode(mode: 'normal' | 'exclusive'): void {
-    this.#workerCheckpointActive = mode === 'normal'
-    if (mode === 'normal' && this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
-    this.handle.setLockingMode(mode)
-  }
+  setLockingMode(mode: 'normal' | 'exclusive'): void { this.#wal.setLockingMode(mode) }
 
-  recordExternalCheckpoint(sample: WalCheckpointSample): void {
-    this.#checkpointCount += 1
-    this.#onCheckpoint?.(sample)
-  }
+  recordExternalCheckpoint(sample: WalCheckpointSample): void { this.#wal.recordExternal(sample) }
 
-  private scheduleIdleCheckpoint(): void {
-    if (this.#checkpointIntervalMs <= 0 || this.#writeIndeterminate || this.#workerCheckpointActive || this.#checkpointTimer) return
-    const timer = setTimeout(() => {
-      this.#checkpointTimer = null
-      this.checkpointPassive()
-    }, this.#checkpointIntervalMs)
-    timer.unref?.()
-    this.#checkpointTimer = timer
-  }
+  private scheduleIdleCheckpoint(): void { this.#wal.scheduleIdle() }
 
-  checkpointPassive(): WalCheckpointResult { return this.runCheckpoint('passive') }
-  checkpointTruncate(): WalCheckpointResult { return this.runCheckpoint('truncate') }
+  checkpointPassive(): WalCheckpointResult { return this.#wal.passive() }
 
-  private runCheckpoint(mode: 'passive' | 'truncate'): WalCheckpointResult {
-    if (this.#writeIndeterminate || !this.handle.db.open) {
-      return { busy: 0, log: 0, checkpointed: 0 }
-    }
-    if (this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
-    const walBytesBefore = this.handle.walFileBytes()
-    const started = performance.now()
-    try {
-      const result = mode === 'truncate' ? this.handle.checkpointTruncate() : this.handle.checkpointPassive()
-      const durationMs = Number((performance.now() - started).toFixed(2))
-      this.#checkpointCount += 1
-      this.#onCheckpoint?.({
-        mode,
-        durationMs,
-        walBytesBefore,
-        walBytesAfter: this.handle.walFileBytes(),
-        result,
-        executor: 'main',
-        threadId: 0
-      })
-      return result
-    } catch {
-      return { busy: 1, log: 0, checkpointed: 0 }
-    }
-  }
+  checkpointTruncate(): WalCheckpointResult { return this.#wal.truncate() }
 
   getSessionDeleteEpoch(sessionKey: string): number {
     return this.#sessionDeleteEpoch.get(sessionKey) ?? 0
@@ -201,6 +156,16 @@ export class EventSink {
     return this.#writeIndeterminate
   }
 
+  /**
+   * A2 (R13): a fatal store failure found outside a command path still has to stop writes. Retention
+   * prune and other maintenance passes call this so the fence is not limited to command handling.
+   */
+  fenceOnFatal(error: unknown): boolean {
+    if (!isFatalOrchestrationStoreError(error)) return false
+    this.#writeIndeterminate = true
+    return true
+  }
+
   authorizeActor(actor: string): void {
     this.#authorizedActors.add(actor)
   }
@@ -218,22 +183,13 @@ export class EventSink {
   }
 
   private createReadView(): OrchestratorReadView {
-    return {
-      isActorAuthorized: (actor) => actor.startsWith('effect:') || this.#authorizedActors.has(actor),
-      getReceipt: (commandId, actor) => readReceiptRaw(this.#stmts, commandId, actor),
-      getRun: (runId) => readRunRaw(this.#stmts, runId),
-      getSession: (sessionKey) => readSessionRaw(this.#stmts, sessionKey),
-      getNativeSession: (identity) => findNativeSession(this, identity),
-      getTurnByRunId: (runId) => readTurnByRunIdRaw(this.#stmts, runId),
-      getNextTurnOrdinal: (sessionKey) => readNextTurnOrdinalRaw(this.#stmts, sessionKey),
-      getInteraction: (runId, questionId) => readInteractionRaw(this.#stmts, runId, questionId),
-      listNonTerminalChildRuns: (parentRunId) => listNonTerminalChildRunsRaw(this.#stmts, parentRunId),
-      listNonTerminalChildRunsBySession: (sessionKey) => listNonTerminalChildRunsBySessionRaw(this.#stmts, sessionKey),
-      hasActiveRunForSession: (sessionKey) => Boolean(this.#stmts.hasActiveSessionRun.get(sessionKey)),
-      activeRunCount: () => (this.#stmts.activeRunCount.get() as { count: number }).count,
-      maxActiveRuns: () => this.#maxActiveRuns,
-      isProviderAuthenticating: (provider, profile) => this.#isProviderAuthenticating(provider, profile)
-    }
+    return createOrchestratorReadView({
+      stmts: this.#stmts,
+      authorizedActors: this.#authorizedActors,
+      maxActiveRuns: this.#maxActiveRuns,
+      isProviderAuthenticating: this.#isProviderAuthenticating,
+      nativeSessionSource: this
+    })
   }
 
   execute(command: OrchestrationCommand, txExtras?: EventSinkTxExtras): DecisionResult {
@@ -312,7 +268,52 @@ export class EventSink {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
         throw error
       }
+      if (!isFatalOrchestrationStoreError(error)) {
+        console.warn(
+          `[scry] orchestration batch rolled back: ${error instanceof Error ? error.message : String(error)}`
+        )
+        throw error
+      }
       this.tripFence(error)
+    }
+  }
+
+  /** A1: converts a rolled-back commit into one sticky rejection without fencing the store. */
+  private rejectAfterRollback(
+    decision: Extract<DecisionResult, { kind: 'accepted' | 'rejected' }>,
+    error: unknown
+  ): DecisionResult {
+    const { receipt, reason } = buildRollbackRejection({
+      base: decision.receipt,
+      error,
+      writeReceipt: (row) => {
+        this.handle.db
+          .transaction(() => {
+            this.#stmts.insertCommand.run(
+              row.commandId,
+              row.actor,
+              row.type,
+              row.payloadSha256,
+              row.acceptedAt,
+              row.status,
+              row.reason,
+              null,
+              null,
+              row.principal,
+              row.via,
+              row.actorRunId
+            )
+          })()
+      }
+    })
+    // A2: a fatal failure while persisting the receipt is a fence, and `buildRollbackRejection`
+    // rethrows it; this function is never reached with a fatal error, so there is nothing to re-check.
+    return {
+      kind: 'rejected',
+      reason,
+      sticky: true,
+      writeReceipt: Boolean(receipt),
+      ...(receipt ? { receipt } : {})
     }
   }
 
@@ -350,7 +351,15 @@ export class EventSink {
           )
           const seq = Number(info.lastInsertRowid)
           lastSeq = seq
+          if (pending.type === 'run.cancelled' && pending.runId) {
+            this.#stmts.voidQueuedStart.run(pending.at, pending.runId)
+          }
           applyEventToProjection(db, { ...pending, seq })
+          // B2: the projection applied position is recorded in the same transaction, so
+          // retention can never delete an event a projection has not consumed.
+          db.prepare("INSERT OR REPLACE INTO orch_meta (key, value) VALUES ('projection_applied_seq', ?)").run(
+            String(seq)
+          )
         }
 
         const causationSeq = lastSeq ?? 0
@@ -368,7 +377,10 @@ export class EventSink {
             effect.expiresAt,
             effect.leaseOwner,
             effect.claimedAt,
-            effect.state === 'done' ? decision.receipt.acceptedAt : null
+            effect.state === 'done' ? decision.receipt.acceptedAt : null,
+            typeof (effect.payload as { sessionKey?: unknown }).sessionKey === 'string'
+              ? (effect.payload as { sessionKey: string }).sessionKey
+              : null
           )
         }
       }
@@ -417,7 +429,14 @@ export class EventSink {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
         throw error
       }
-      this.tripFence(error)
+      // R8: the lock said nothing about this command, so it must not be recorded as refused.
+      if (isRetryableOrchestrationStoreError(error)) {
+        throw error instanceof OrchestrationStoreError
+          ? error
+          : new OrchestrationStoreError('orchestration_db_locked', error instanceof Error ? error.message : String(error))
+      }
+      if (isFatalOrchestrationStoreError(error)) this.tripFence(error)
+      return this.rejectAfterRollback(decision, error)
     }
   }
 
@@ -433,28 +452,25 @@ export class EventSink {
     if (this.#writeIndeterminate) {
       return { status: 'unavailable', error: 'orchestration_write_indeterminate' }
     }
-    try {
-      const { existed, redactedEvents } = deleteSessionInDb(
-        this.handle.db,
-        input,
-        this.#beforeCommitHook
-      )
-      if (existed) {
-        this.#sessionDeleteEpoch.set(input.sessionKey, (this.#sessionDeleteEpoch.get(input.sessionKey) ?? 0) + 1)
-        this.handle.enforceModes()
-        this.scheduleIdleCheckpoint()
-        this.#notifyCommitted()
-      }
-      const erased = resumeBodyErasure(this.handle.db, this.bodyStore, {
-        sessionKey: input.sessionKey, canWrite: () => !this.#writeIndeterminate
-      })
-      if (erased.error) return { status: 'unavailable', error: erased.error }
-      if (!existed && erased.completed === 0 && erased.deferred === 0) return { status: 'not_present' }
-      return { status: 'deleted', deletedBodies: erased.erased, redactedEvents }
-    } catch (error) {
-      this.#writeIndeterminate = true
-      return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
-    }
+    return deleteSessionWithErasure(
+      {
+        db: this.handle.db,
+        bodyStore: this.bodyStore,
+        isFenced: () => this.#writeIndeterminate,
+        onFenced: () => {
+          this.#writeIndeterminate = true
+        },
+        bumpDeleteEpoch: (sessionKey) =>
+          this.#sessionDeleteEpoch.set(sessionKey, (this.#sessionDeleteEpoch.get(sessionKey) ?? 0) + 1),
+        onCommitted: () => {
+          this.handle.enforceModes()
+          this.scheduleIdleCheckpoint()
+          this.#notifyCommitted()
+        },
+        beforeCommitHook: this.#beforeCommitHook
+      },
+      input
+    )
   }
 
   pruneEvents(options: { olderThanAt: number }): { deletedEvents: number; prunedThrough: number } {
@@ -506,6 +522,11 @@ export class EventSink {
     return readSessionRaw(this.#stmts, sessionKey)
   }
 
+  getSessionByConversation(conversationId: string): SessionProjectionRow | undefined {
+    this.assertDeterminate()
+    return readSessionByConversation(this.#stmts, conversationId)
+  }
+
   getTurn(sessionKey: string, ordinal: number): TurnProjectionRow | undefined {
     this.assertDeterminate()
     return readTurnRaw(this.handle.db, sessionKey, ordinal)
@@ -537,10 +558,7 @@ export class EventSink {
   }
 
   close(): void {
-    if (this.#checkpointTimer) {
-      clearTimeout(this.#checkpointTimer)
-      this.#checkpointTimer = null
-    }
+    this.#wal.dispose()
     this.handle.close({ skipCheckpoint: this.#writeIndeterminate })
   }
 }

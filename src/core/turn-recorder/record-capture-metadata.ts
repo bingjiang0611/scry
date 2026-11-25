@@ -28,6 +28,7 @@ export function applyCaptureBaselineCaveat(
   const lagMs = Number.isFinite(startedMs) && Number.isFinite(baselineMs) && baselineMs > startedMs
     ? baselineMs - startedMs
     : undefined
+  const discovery = evidence.diff.discovery
   evidence.diff = partial(
     diffs,
     evidence.diff.source,
@@ -36,6 +37,7 @@ export function applyCaptureBaselineCaveat(
     'exact',
     ['baseline_after_turn_start']
   )
+  if (discovery) evidence.diff.discovery = discovery
 }
 
 export function applyDiffExcludeEvidence(evidence: TurnEvidence): void {

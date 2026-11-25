@@ -38,11 +38,16 @@ export const sessionLifecycleLocalOps: DaemonLocalOpGroup = (deps) => {
       }
     },
     publishDataUpdated: (event) => publishHint({ kind: 'data', event }),
+    // D4: rename/pin/archive are recorded by the authority once the catalog write succeeded.
+    recordSessionMetadata: (input) => deps.getOrchestrationAuthority?.()?.recordSessionMetadata?.(input),
+    warnSessionMetadata: (message, error) => deps.log?.(`${message}: ${String(error)}`),
     publishDeleteProgress: (progress) => publishHint({ kind: 'window', channel: 'agent:deleteArchivedProgress', payload: progress })
   })
   deps.links.deleteOneSession = (request, options) => lifecycle.deleteOneSession(request as SessionDeletionRequest, options as Parameters<typeof lifecycle.deleteOneSession>[1])
   deps.links.sessionRefFromRequest = (value) => lifecycle.sessionRefFromRequest(value)
-  deps.links.changeLegacySessionMetadata = (ref, change) => lifecycle.changeLegacySessionMetadata(ref, change)
+  deps.links.changeLegacySessionMetadata = (ref, change, meta) => lifecycle.changeLegacySessionMetadata(ref, change, meta)
+  deps.links.reconcileSessionMetadata = lifecycle.reconcileSessionMetadata
+  void lifecycle.reconcileSessionMetadata()
   return {
     'agent:deleteSession': (request: unknown) => lifecycle.deleteOneSession(request as SessionDeletionRequest, { confirm: false, notifyFailure: false }),
     'agent:renameSession': (request: unknown, title: unknown) => lifecycle.renameSession(request, title),

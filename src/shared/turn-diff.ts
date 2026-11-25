@@ -17,7 +17,7 @@ export interface DiffFile {
 }
 
 export type TurnDiffStatus = 'captured' | 'unavailable' | 'timeout' | 'failed'
-export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error' | 'no_baseline'
+export type TurnDiffReason = 'not_git' | 'no_head' | 'deadline' | 'git_error' | 'no_baseline' | 'baseline_after_write'
 
 export type WorkspaceDiffResult = (
   | { status: 'captured'; files: DiffFile[] }
@@ -180,7 +180,7 @@ export function normalizeTurnDiffSnapshot(value: unknown): TurnDiffSnapshot | un
             : {}
     return [{ path: file.path, added, deleted, ...(change ? { change } : {}), ...(binary ? { binary: true } : {}), ...patchFields }]
   })
-  const reason = ['not_git', 'no_head', 'deadline', 'git_error', 'no_baseline'].includes(String(raw.reason))
+  const reason = ['not_git', 'no_head', 'deadline', 'git_error', 'no_baseline', 'baseline_after_write'].includes(String(raw.reason))
     ? (raw.reason as TurnDiffReason)
     : undefined
   const collectionRaw = raw.collection && typeof raw.collection === 'object'

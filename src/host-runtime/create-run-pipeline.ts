@@ -48,6 +48,8 @@ export interface RunPipelineInputs {
   remoteRunLedgerIds: Map<string, string>
   mirrorSessionTranscript: Parameters<typeof startRun>[2]['mirrorSessionTranscript']
   observeNativeTranscript?: Parameters<typeof startRun>[2]['observeNativeTranscript']
+  /** D5: checkpoint capture for a settled run; absent means this host keeps no checkpoints. */
+  captureCheckpoint?: Parameters<typeof startRun>[2]['captureCheckpoint']
   execution?: 'in-process' | 'daemon'
 }
 
@@ -83,7 +85,7 @@ export function createRunPipeline(inputs: RunPipelineInputs) {
         : {
           ...options,
           onWorkspaceProgress: (progress) => {
-            try { renderer.send('workspaceSelection:progress', progress) } catch {   }
+            try { renderer.send('workspaceSelection:progress', progress) } catch { }
           }
         }
       return workspaceStart(payload, workspaceOptions, {

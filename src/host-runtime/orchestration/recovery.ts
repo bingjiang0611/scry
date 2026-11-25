@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { TERMINAL_RUN_LIFECYCLES } from './run-transitions'
 import type { ConversationStore } from '../../main/conversation-store'
 import { canonicalJson, sha256Hex } from './canonical-json'
-import { getEffectPolicy } from './effect-policy'
+import { findEffectPolicy } from './effect-policy'
 import type { EventSink } from './event-sink'
 
 export interface RecorderTerminalEvidence {
@@ -29,6 +30,7 @@ export interface RecoverOrchestrationSummary {
   closedOpenQuestions: number
   voidedProcessBoundEffects: number
   requeuedReplayableEffects: number
+  failedUnknownEffects: number
 }
 
 export function recoverOrchestrationOnStartup(
@@ -46,7 +48,8 @@ export function recoverOrchestrationOnStartup(
     settledFromEvidence: 0,
     closedOpenQuestions: 0,
     voidedProcessBoundEffects: 0,
-    requeuedReplayableEffects: 0
+    requeuedReplayableEffects: 0,
+    failedUnknownEffects: 0
   }
 
   sink.runInBatchTransaction(() => {
@@ -61,6 +64,9 @@ export function recoverOrchestrationOnStartup(
       payloadSha256: sha256Hex(canonicalJson(startPayload))
     })
 
+    const failUnknown = db.prepare(
+      "UPDATE orch_outbox SET state = 'failed', lease_owner = NULL, claimed_at = NULL, completed_at = ?, last_error = ? WHERE effect_id = ?"
+    )
     const updateOutbox = db.prepare(
       'UPDATE orch_outbox SET state = ?, lease_owner = ?, claimed_at = ?, completed_at = ? WHERE effect_id = ?'
     )
@@ -99,7 +105,16 @@ export function recoverOrchestrationOnStartup(
 
     for (const row of sink.listOutbox()) {
       if (row.state !== 'pending' && row.state !== 'running') continue
-      const spec = getEffectPolicy(row.kind)
+      const spec = findEffectPolicy(row.kind)
+      if (!spec) {
+        // A4: unknown kind must not block startup. Park the row as failed with its kind recorded — and
+        // end the run it belonged to, because a non-terminal run keeps the whole session busy forever.
+        failUnknown.run(now, `unregistered_effect_kind:${row.kind}`, row.effectId)
+        const orphan = row.runId ? sink.getRun(row.runId) : undefined
+        if (orphan && !TERMINAL_RUN_LIFECYCLES.has(orphan.lifecycle)) cancelRun(row.runId!, 'unregistered_effect_kind')
+        summary.failedUnknownEffects += 1
+        continue
+      }
 
       if (spec.onRestart === 'void') {
         updateOutbox.run('voided', null, null, now, row.effectId)
@@ -120,7 +135,7 @@ export function recoverOrchestrationOnStartup(
         continue
       }
       const run = sink.getRun(row.runId)
-      if (!run || ['settled', 'failed', 'cancelled', 'interrupted'].includes(run.lifecycle)) {
+      if (!run || TERMINAL_RUN_LIFECYCLES.has(run.lifecycle)) {
         updateOutbox.run('done', row.leaseOwner, row.claimedAt, now, row.effectId)
         continue
       }
@@ -146,12 +161,25 @@ export function recoverOrchestrationOnStartup(
           updateOutbox.run('voided', null, null, now, row.effectId)
           cancelRun(run.runId, 'pending_expired')
           summary.cancelledPending += 1
-        } else {
+        } else if (run.lifecycle === 'recorded' || run.lifecycle === 'queued') {
+          // `recorded` and `queued` are the states a run is in before anything ran, so re-dispatching
+          // one is a first dispatch. Anything further along is reconciled by evidence below.
           summary.dispatchablePendingRunIds.push(run.runId)
+        } else {
+          // The review found this list carrying runs that were already admitted or dispatched: a
+          // pending outbox row is not proof that nothing ran. Their outcome comes from evidence below.
+          updateOutbox.run('done', row.leaseOwner, row.claimedAt, now, row.effectId)
         }
         continue
       }
 
+      if (run.lifecycle === 'queued') {
+        // D1: the process died between claiming a queue entry and deferring it. Marking the effect done
+        // would leave the run `queued` with nothing left to dispatch it — the session would never move.
+        updateOutbox.run('pending', null, null, null, row.effectId)
+        summary.requeuedReplayableEffects += 1
+        continue
+      }
       if (run.lifecycle === 'recorded') {
         insertEffectVoided.run(
           randomUUID(),
@@ -289,6 +317,84 @@ export function recoverOrchestrationOnStartup(
   return summary
 }
 
+function boundSessionStatement(sink: EventSink): { get(runId: string): unknown } {
+  return sink.handle.db.prepare(
+    "SELECT payload FROM orch_event WHERE run_id = ? AND type = 'run.session_bound' ORDER BY seq DESC LIMIT 1"
+  ) as { get(runId: string): unknown }
+}
+
+/**
+ * One pending dispatched turn against its run. Shared by startup reconciliation and by the daemon's
+ * terminal writeback so a remotely started turn is not left pending until the next restart.
+ */
+async function writeBackConversationTurn(input: {
+  sink: EventSink
+  conversationStore: ConversationStore
+  conversation: { id: string; bindings: { id: string; nativeSessionId?: string | null }[] }
+  turn: { runId: string; bindingId: string }
+  stmtBoundSession: { get(runId: string): unknown }
+}): Promise<'not_sent' | 'written' | 'binding_conflict' | 'pending'> {
+  const { sink, conversationStore, conversation: conv, turn } = input
+  const orchTurn = sink.getTurnByRunId(turn.runId)
+  const orchRun = sink.getRun(turn.runId)
+  if (!orchTurn && !orchRun) {
+    await conversationStore.settle(conv.id, turn.runId, { status: 'not_sent', reason: 'orchestration_intent_absent' }, [])
+    return 'not_sent'
+  }
+  if (!orchRun || !TERMINAL_RUN_LIFECYCLES.has(orchRun.lifecycle)) return 'pending'
+  const boundRow = input.stmtBoundSession.get(turn.runId) as { payload: string } | undefined
+  const boundNative = boundRow
+    ? (JSON.parse(boundRow.payload) as { nativeSessionId?: string | null }).nativeSessionId ?? undefined
+    : undefined
+  const binding = conv.bindings.find((entry) => entry.id === turn.bindingId)
+  if (boundNative && binding?.nativeSessionId && binding.nativeSessionId !== boundNative) {
+    await conversationStore.settle(conv.id, turn.runId, { status: 'unknown', reason: 'conversation_binding_conflict' }, [])
+    return 'binding_conflict'
+  }
+  if (orchRun.lifecycle === 'settled') {
+    const resolvedNative = boundNative ?? binding?.nativeSessionId
+    if (!resolvedNative) {
+      await conversationStore.settle(conv.id, turn.runId, { status: 'unknown', reason: 'native_session_id_unavailable' }, [])
+      return 'written'
+    }
+    await conversationStore.settle(conv.id, turn.runId, {
+      status: 'accepted', nativeSessionId: resolvedNative, outcome: 'completed', nativeItems: []
+    }, [])
+    return 'written'
+  }
+  if (orchRun.lifecycle === 'cancelled' && orchTurn?.delivery === 'not_sent') {
+    await conversationStore.settle(conv.id, turn.runId, { status: 'not_sent', reason: orchRun.outcome?.omissionReason ?? 'cancelled' }, [])
+    return 'written'
+  }
+  await conversationStore.settle(conv.id, turn.runId, {
+    status: 'unknown', reason: orchRun.outcome?.omissionReason ?? 'host_restarted'
+  }, [])
+  return 'written'
+}
+
+/**
+ * The daemon's per-terminal writeback: the same conclusion startup reconciliation would draw, drawn as
+ * soon as the run reaches a terminal state. Idempotent — a turn that is no longer pending is skipped.
+ */
+export async function writeBackConversationRun(options: {
+  sink: EventSink
+  conversationStore: ConversationStore
+  runId: string
+}): Promise<'written' | 'not_sent' | 'binding_conflict' | 'none'> {
+  const ownership = await options.conversationStore.loadOwnership()
+  const stmtBoundSession = boundSessionStatement(options.sink)
+  for (const conv of ownership.values()) {
+    for (const turn of conv.turns) {
+      if (turn.origin !== 'dispatch' || turn.delivery.status !== 'pending' || turn.runId !== options.runId) continue
+      const written = await writeBackConversationTurn({
+        sink: options.sink, conversationStore: options.conversationStore, conversation: conv, turn, stmtBoundSession
+      })
+      return written === 'pending' ? 'none' : written
+    }
+  }
+  return 'none'
+}
+
 export interface TwoLedgerReconciliationSummary {
   markedNotSent: number
   writtenBack: number
@@ -305,88 +411,18 @@ export async function reconcileTwoLedgersOnStartup(options: {
     writtenBack: 0,
     bindingConflicts: 0
   }
-  const stmtBoundSession = sink.handle.db.prepare(
-    "SELECT payload FROM orch_event WHERE run_id = ? AND type = 'run.session_bound' ORDER BY seq DESC LIMIT 1"
-  )
+  const stmtBoundSession = boundSessionStatement(sink)
 
   const ownership = await conversationStore.loadOwnership()
   for (const conv of ownership.values()) {
     for (const turn of conv.turns) {
       if (turn.origin !== 'dispatch' || turn.delivery.status !== 'pending') continue
-      const orchTurn = sink.getTurnByRunId(turn.runId)
-      const orchRun = sink.getRun(turn.runId)
-
-      if (!orchTurn && !orchRun) {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'not_sent', reason: 'orchestration_intent_absent' },
-          []
-        )
-        summary.markedNotSent += 1
-        continue
-      }
-
-      if (!orchRun || !['settled', 'failed', 'cancelled', 'interrupted'].includes(orchRun.lifecycle)) {
-        continue
-      }
-
-      const boundRow = stmtBoundSession.get(turn.runId) as { payload: string } | undefined
-      const boundNative = boundRow
-        ? (JSON.parse(boundRow.payload) as { nativeSessionId?: string | null }).nativeSessionId ?? undefined
-        : undefined
-      const binding = conv.bindings.find((b) => b.id === turn.bindingId)
-      if (boundNative && binding?.nativeSessionId && binding.nativeSessionId !== boundNative) {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'unknown', reason: 'conversation_binding_conflict' },
-          []
-        )
-        summary.bindingConflicts += 1
-        continue
-      }
-
-      if (orchRun.lifecycle === 'settled') {
-        const resolvedNative = boundNative ?? binding?.nativeSessionId
-        if (resolvedNative) {
-          await conversationStore.settle(
-            conv.id,
-            turn.runId,
-            {
-              status: 'accepted',
-              nativeSessionId: resolvedNative,
-              outcome: 'completed',
-              nativeItems: []
-            },
-            []
-          )
-        } else {
-          await conversationStore.settle(
-            conv.id,
-            turn.runId,
-            { status: 'unknown', reason: 'native_session_id_unavailable' },
-            []
-          )
-        }
-        summary.writtenBack += 1
-      } else if (orchRun.lifecycle === 'cancelled' && orchTurn?.delivery === 'not_sent') {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'not_sent', reason: orchRun.outcome?.omissionReason ?? 'cancelled' },
-          []
-        )
-        summary.writtenBack += 1
-      } else {
-        await conversationStore.settle(
-          conv.id,
-          turn.runId,
-          { status: 'unknown', reason: orchRun.outcome?.omissionReason ?? 'host_restarted' },
-          []
-        )
-        summary.writtenBack += 1
-      }
+      const written = await writeBackConversationTurn({
+        sink, conversationStore, conversation: conv, turn, stmtBoundSession
+      })
+      if (written === 'not_sent') summary.markedNotSent += 1
+      else if (written === 'written') summary.writtenBack += 1
+      else if (written === 'binding_conflict') summary.bindingConflicts += 1
     }
   }
   try {

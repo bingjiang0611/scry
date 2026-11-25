@@ -278,6 +278,8 @@ return {
     lease?.forceClose()
   },
   forceKillScope: 'shared_transport',
+  // A5：活动计数为 1 时 forceClose() 只回收本 run 的 server，可以自动发出。
+  exclusiveKillAvailable: () => lease?.isExclusive() === true,
   getExternalSessionId: () => externalSessionId,
   getProviderTurnId: () => providerTurnId,
   getRecordingFailure: () => recordingFailure,

@@ -369,6 +369,13 @@ export class SessionLedger {
     return pending
   }
 
+  /** Detail of a still-recorded intent, or undefined once it has left `recorded`. */
+  intentDetail(runId: string): string | undefined {
+    this.#assertDeterminate()
+    const entry = this.#runs.get(runId)
+    return entry?.lifecycle === 'recorded' ? entry.intentDetail : undefined
+  }
+
   dispatchedRuns(): string[] {
     this.#assertDeterminate()
     return [...this.#runs.values()].filter((entry) => entry.lifecycle === 'dispatched').map((entry) => entry.runId)

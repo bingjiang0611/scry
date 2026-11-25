@@ -19,12 +19,16 @@ export type TurnDeliveryState = 'pending' | 'accepted' | 'not_sent' | 'unknown'
 
 export type RunLifecycleState =
   | 'recorded'
+  /** D1: accepted while another run of the same session is live; position ordering decides release. */
+  | 'queued'
   | 'admitted'
   | 'dispatched'
   | 'settled'
   | 'failed'
   | 'cancelled'
   | 'interrupted'
+  /** D5: the worktree was restored to a checkpoint of an earlier state of this run. */
+  | 'rolled_back'
 
 export type H1RunLifecycle = 'recorded' | 'dispatched' | 'settled' | 'failed' | 'cancelled'
 
@@ -40,6 +44,9 @@ export interface SessionLineage {
 
 export type OrchestrationEventType =
   | 'run.intent_recorded'
+  | 'run.queued'
+  | 'run.queue_released'
+  | 'run.queue_held'
   | 'run.admitted'
   | 'run.dispatched'
   | 'run.session_bound'
@@ -55,6 +62,10 @@ export type OrchestrationEventType =
   | 'run.cancelled'
   | 'run.interrupted'
   | 'run.content_gap'
+  | 'run.rolled_back'
+  | 'checkpoint.captured'
+  | 'checkpoint.forgotten'
+  | 'checkpoint.rollback_requested'
   | 'session.created'
   | 'session.renamed'
   | 'session.pinned'
@@ -74,6 +85,9 @@ export type OrchestrationEventType =
 export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = [
   'run.intent_recorded',
   'run.admitted',
+  'run.queued',
+  'run.queue_held',
+  'run.queue_released',
   'run.dispatched',
   'run.session_bound',
   'run.stop_requested',
@@ -88,6 +102,10 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'run.cancelled',
   'run.interrupted',
   'run.content_gap',
+  'run.rolled_back',
+  'checkpoint.captured',
+  'checkpoint.forgotten',
+  'checkpoint.rollback_requested',
   'session.created',
   'session.renamed',
   'session.pinned',
@@ -251,6 +269,14 @@ export interface RunProjectionRow {
   outcome: Evidence<string> | null
   revSeq: number
   parentRunId: string | null
+  /** D1: 1-based slot while a run waits in its session's queue. */
+  queuePosition?: number | null
+  /** D1: a stop holds the queue entry until something explicitly releases it. */
+  queueHeld?: boolean
+  /** D5: the checkpoint ref captured at settlement, when one was captured. */
+  checkpointRef?: string | null
+  /** D5: set once the run's worktree content was rolled back. */
+  rolledBackAt?: number | null
 }
 
 export interface InteractionProjectionRow {
@@ -296,6 +322,8 @@ export type OrchestrationErrorCode =
   | 'orchestration_invalid_effect_kind'
   | 'orchestration_body_corrupt'
   | 'orchestration_usage_forbidden_in_event'
+  | 'orchestration_binding_conflict'
+  | 'orchestration_binding_ambiguous'
 
 export class OrchestrationStoreError extends Error {
   readonly code: OrchestrationErrorCode
@@ -309,6 +337,17 @@ export class OrchestrationStoreError extends Error {
 const PEER_ACTOR_RE = /^peer:[0-9a-f]{64}$/
 const EFFECT_ACTOR_RE = /^effect:[^\s]+$/
 
+/**
+ * R13: the local App's commands are the user's, not the host's. `system` is reserved for commands the
+ * host writes for itself (checkpoint, effect results, delivery), so a user action keeps its receipt.
+ */
+export const LOCAL_USER_ACTOR = 'user:local'
+
+/** Commands the host writes for itself; these receipts exist only to make the command idempotent. */
+export function isHostActor(actor: string): boolean {
+  return actor === 'system' || actor.startsWith('effect:')
+}
+
 export function isAgentActor(actor: string): boolean {
   return actor.startsWith('agent:')
 }
@@ -318,5 +357,6 @@ export function isPeerActor(actor: string): boolean {
 }
 
 export function isValidP4Actor(actor: string): boolean {
-  return actor === 'system' || PEER_ACTOR_RE.test(actor) || EFFECT_ACTOR_RE.test(actor)
+  // R13: the local App's commands are the local user's, not the host's `system` actor.
+  return actor === 'system' || actor === LOCAL_USER_ACTOR || PEER_ACTOR_RE.test(actor) || EFFECT_ACTOR_RE.test(actor)
 }

@@ -37,6 +37,12 @@ export interface StopLifecycleTarget {
    * 才真正建立，只有当时的事实能证明硬杀是否仅限于本 run。
    */
   forceKillScope: () => AgentForceKillScope | undefined
+  /**
+   * A5：共享 transport 在升级这一刻是否只被本 run 使用（活动计数为 1）。为 `true` 时
+   * forceKill 只会回收这一个 client/server，不会波及无关 run，因此可以自动发出；
+   * 未提供、返回 `false` 或抛错时按原规则 fail closed。
+   */
+  exclusiveKillAvailable?: () => boolean
 }
 
 export interface RunStopLifecycleOptions {
@@ -134,7 +140,7 @@ export class RunStopLifecycle {
     // 因此自动升级只在硬杀可证明为 run-scoped 时发出；否则诚实报告没有安全硬杀手段，
     // 绝不在 UI 上冒充 force_kill_requested。
     const scope = this.forceKillScope(target)
-    if (scope !== 'run_scoped') {
+    if (scope !== 'run_scoped' && !(scope === 'shared_transport' && this.isExclusive(target))) {
       this.advance(
         entry,
         'no_safe_force_kill',
@@ -149,6 +155,17 @@ export class RunStopLifecycle {
     }
     this.advance(entry, 'force_kill_requested', false)
     entry.cancel = this.schedule(() => this.reportUnsettled(target.runId), entry.state.window.forceKillMs)
+  }
+
+  /** A5：共享 transport 的活动计数为 1 时硬杀只回收本 run；探针抛错时同样 fail closed。 */
+  private isExclusive(target: StopLifecycleTarget): boolean {
+    if (!target.exclusiveKillAvailable) return false
+    try {
+      return target.exclusiveKillAvailable() === true
+    } catch (error) {
+      this.options.warn?.('stop exclusiveKillAvailable failed', target.runId, error)
+      return false
+    }
   }
 
   /** 读不到真实范围（adapter 抛错）时 fail closed：宁可不杀，也不能误杀其他 run。 */

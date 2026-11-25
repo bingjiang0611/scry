@@ -1,5 +1,5 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 6
-export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 4
+export const ORCHESTRATION_SCHEMA_VERSION = 14
+export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS orch_meta (
@@ -263,6 +263,146 @@ const ORCH_DDL_V6: readonly string[] = [
   "UPDATE orch_meta SET value = '4' WHERE key = 'projection_schema_version'"
 ]
 
+/**
+ * B3: native identity bindings and their tombstones move out of `orch_event`.
+ * `UNIQUE(provider, profile, cwd, native_id)` makes a second key impossible, and a binding is
+ * never reassigned after deletion, so a pruned event log can no longer resurrect a deleted session.
+ */
+const ORCH_DDL_V7: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_binding (
+    provider TEXT NOT NULL,
+    profile TEXT NOT NULL DEFAULT '',
+    cwd TEXT NOT NULL DEFAULT '',
+    native_id TEXT NOT NULL,
+    session_key TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    deleted_at INTEGER,
+    delete_epoch INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (provider, profile, cwd, native_id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_orch_binding_deleted ON orch_binding(deleted_at, session_key)`,
+  // Backfill from projections that already carry a catalog identity.
+  `INSERT OR IGNORE INTO orch_binding (provider, profile, cwd, native_id, session_key, created_at)
+   SELECT COALESCE(provider, 'legacy_unknown'), COALESCE(profile, ''), COALESCE(cwd, ''),
+          json_extract(catalog, '$.nativeSessionId'), session_key, ts
+   FROM orch_p_session
+   WHERE json_extract(catalog, '$.nativeSessionId') IS NOT NULL`,
+  // Backfill tombstones from retired sessions still present in the event log.
+  `UPDATE orch_binding SET deleted_at = (
+     SELECT MAX(retiring.at) FROM orch_event AS retiring
+     WHERE retiring.type IN ('session.deleted', 'session.withdrawn')
+       AND retiring.session_key = orch_binding.session_key
+   )
+   WHERE deleted_at IS NULL AND EXISTS (
+     SELECT 1 FROM orch_event AS retiring
+     WHERE retiring.type IN ('session.deleted', 'session.withdrawn')
+       AND retiring.session_key = orch_binding.session_key
+   )`,
+  "UPDATE orch_meta SET value = '5' WHERE key = 'projection_schema_version'"
+]
+
+/**
+ * B2: dispatch-ledger metadata was read back out of `run.intent_recorded` events, which made the
+ * event log a durable index that pruning could never touch. It now lives on the run projection.
+ */
+const ORCH_DDL_V8: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN intent_command_id TEXT',
+  'ALTER TABLE orch_p_run ADD COLUMN intent_at INTEGER',
+  'ALTER TABLE orch_p_run ADD COLUMN intent_detail_sha256 TEXT',
+  `UPDATE orch_p_run SET
+     intent_command_id = (SELECT command_id FROM orch_event WHERE type = 'run.intent_recorded' AND run_id = orch_p_run.run_id),
+     intent_at = (SELECT at FROM orch_event WHERE type = 'run.intent_recorded' AND run_id = orch_p_run.run_id),
+     intent_detail_sha256 = (
+       SELECT json_extract(payload, '$.intentDetailSha256') FROM orch_event
+       WHERE type = 'run.intent_recorded' AND run_id = orch_p_run.run_id
+         AND json_extract(payload, '$.intentDetailSha256') IS NOT NULL
+     )`,
+  "UPDATE orch_meta SET value = '6' WHERE key = 'projection_schema_version'"
+]
+
+/** B1: the outbox needs its own session key to enforce per-session FIFO without reading the log. */
+const ORCH_DDL_V9: readonly string[] = [
+  'ALTER TABLE orch_outbox ADD COLUMN session_key TEXT',
+  // A malformed payload must not abort the migration: `json_extract` throws on invalid JSON, so the
+  // value is only read when the document parses and the run projection supplies the key otherwise.
+  `UPDATE orch_outbox SET session_key = COALESCE(
+     CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sessionKey') END,
+     (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = orch_outbox.run_id)
+   )`,
+  'CREATE INDEX IF NOT EXISTS idx_orch_outbox_fifo ON orch_outbox(session_key, state, causation_seq, effect_id)'
+]
+
+/**
+ * C1: which Provider sessions are open, and why they were released. The App can only claim a
+ * session was reused or released if this row exists, so the reason is a stored fact rather than a
+ * log line. Rows are never pruned: one row per opened session is the audit trail.
+ */
+const ORCH_DDL_V10: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_provider_session (
+     key TEXT PRIMARY KEY,
+     provider TEXT NOT NULL,
+     session_key TEXT,
+     native_session_id TEXT,
+     opened_at INTEGER NOT NULL,
+     last_used_at INTEGER NOT NULL,
+     released_at INTEGER,
+     release_reason TEXT
+   )`,
+  'CREATE INDEX IF NOT EXISTS idx_orch_provider_session_released ON orch_provider_session(released_at)'
+]
+
+/**
+ * D1: the prompt queue lives on the host, not in a renderer's `useState`. Position and the held
+ * flag are projection columns so a restart or a second device reads the same queue.
+ */
+const ORCH_DDL_V11: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN queue_position INTEGER',
+  'ALTER TABLE orch_p_run ADD COLUMN queue_held INTEGER NOT NULL DEFAULT 0',
+  'CREATE INDEX IF NOT EXISTS idx_orch_p_run_queue ON orch_p_run(session_key, queue_held, queue_position)'
+]
+
+/**
+ * D5: checkpoints are git refs, so the host stores the ref name and the tree it points at, plus
+ * when a run was rolled back. The columns are projections of recorded events, never the evidence.
+ */
+const ORCH_DDL_V12: readonly string[] = [
+  'ALTER TABLE orch_p_run ADD COLUMN checkpoint_ref TEXT',
+  'ALTER TABLE orch_p_run ADD COLUMN rolled_back_at INTEGER'
+]
+
+/**
+ * C4: a usage limit the Provider named a reset time for becomes a pending item, so the resume is a
+ * stored fact rather than a timer that dies with the process. `resumed_at` records the one resume,
+ * and a null reset time means the item can never be resumed automatically.
+ */
+const ORCH_DDL_V13: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS orch_usage_limit (
+    session_key TEXT NOT NULL,
+    reset_at INTEGER,
+    provider TEXT NOT NULL,
+    profile TEXT,
+    cwd TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    source TEXT,
+    window TEXT,
+    recorded_at INTEGER NOT NULL,
+    resumed_at INTEGER,
+    PRIMARY KEY (session_key, recorded_at)
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_orch_usage_limit_due ON orch_usage_limit(resumed_at, reset_at)'
+]
+
+/**
+ * R1: when a claim may be retried. Without this column a deferred or retried row stays the global
+ * head of the queue, so it is claimed, deferred and reclaimed in a tight loop and every other
+ * session waits behind it.
+ */
+const ORCH_DDL_V14: readonly string[] = [
+  'ALTER TABLE orch_outbox ADD COLUMN available_at INTEGER',
+  'CREATE INDEX IF NOT EXISTS idx_orch_outbox_available ON orch_outbox(state, available_at)'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
-  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6
+  ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
+  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11, ORCH_DDL_V12, ORCH_DDL_V13, ORCH_DDL_V14
 ]

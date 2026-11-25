@@ -103,6 +103,14 @@ export class SourceControlService {
     register()
   }
 
+  async withCheckpointRollback<T>(cwd: string, restore: () => Promise<T>): Promise<T | undefined> {
+    const identity = await this.git.identity(cwd)
+    return this.exclusive(identity, async () => {
+      if (await this.busy(identity.commonDir, { kind: 'root', root: identity.root })) return undefined
+      return restore()
+    })
+  }
+
   private exclusive<T>(identity: GitIdentity, action: () => Promise<T>): Promise<T> {
     const previous = this.tails.get(identity.commonDir) ?? Promise.resolve()
     const result = previous.then(async () => {

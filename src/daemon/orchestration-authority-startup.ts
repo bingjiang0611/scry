@@ -14,6 +14,8 @@ import {
   type RecoverOrchestrationSummary
 } from '../host-runtime/orchestration/recovery'
 import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
+import { recordSessionLineage } from './orchestration-lineage'
+import { sideChatLineageInput } from './orchestration-side-chat-lineage'
 
 export const LEGACY_H1_IMPORT_COMPLETE = 'legacy_h1_import_complete'
 
@@ -126,6 +128,15 @@ export async function runAuthorityStartupSequence(options: {
       payload,
       payloadSha256: sha256Hex(canonicalJson(payload))
     })
+    // D3: a side chat has no identity before the Provider answers, so its lineage is recorded on
+    // the first delivered turn instead of at creation. An already-attached session is left alone.
+    if (info.delivery.status !== 'accepted') return
+    const nativeSessionId = info.delivery.nativeSessionId
+    if (sink.getSession(nativeSessionId)?.lineage) return
+    const lineageInput = sideChatLineageInput(info.conversation, nativeSessionId, {
+      parentSessionKeyOf: (conversationId) => sink.getSessionByConversation(conversationId)?.sessionKey
+    })
+    if (lineageInput) recordSessionLineage(sink, lineageInput, at)
   })
 
   const recovery = recoverOrchestrationOnStartup({

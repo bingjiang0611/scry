@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import type {
   LedgerSnapshot,
   LedgerSnapshotRun,
@@ -7,9 +6,9 @@ import type {
 } from '../../main/remote/session-ledger'
 import { h1DetailDigest } from './authority-dispatch'
 import type { EventSink } from './event-sink'
+import type { PreparedBody } from './types'
 
 const UUID_V4_LOWER = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-const SHA256_LOWER = /^[0-9a-f]{64}$/
 
 function toDeterministicUuidV4(seed: string): string {
   const bytes = Buffer.from(createHash('sha256').update(seed).digest().subarray(0, 16))
@@ -28,7 +27,9 @@ function normalizeUuid(raw: string | null | undefined, fallbackSeed: string): st
 }
 
 function dispatchLifecycle(lifecycle: string): RunLifecycle {
-  if (lifecycle === 'recorded') return 'recorded'
+  // R2: a queued entry is waiting for its slot, not cancelled. Mapping it to `cancelled` made the
+  // restart's dispatch fence throw, so the row was succeeded without ever executing.
+  if (lifecycle === 'recorded' || lifecycle === 'queued') return 'recorded'
   if (lifecycle === 'admitted' || lifecycle === 'dispatched') return 'dispatched'
   if (lifecycle === 'settled') return 'settled'
   if (lifecycle === 'failed') return 'failed'
@@ -44,19 +45,18 @@ interface RawRunRow {
   cwd: string | null
   prompt_preview: string | null
   body: string | null
+  start_payload: string | null
 }
 
 function readRecordedIntentDetail(sink: EventSink, row: RawRunRow): string | undefined {
-  if (row.body) {
-    try {
-      const desc = JSON.parse(row.body) as { storage?: string; inline?: string; sha256?: string }
-      if (desc.storage === 'inline' && typeof desc.inline === 'string') return desc.inline
-      if (desc.storage === 'external' && typeof desc.sha256 === 'string' && sink.bodyStore.hasExternalBody(desc.sha256)) {
-        return readFileSync(sink.bodyStore.externalPath(desc.sha256), 'utf8')
-      }
-    } catch {
-      // Fall back to synthesized routing envelope below.
-    }
+  // The event stores only the descriptor. The pending start holds the full inline body.
+  try {
+    const payload = row.start_payload ? JSON.parse(row.start_payload) as { body?: PreparedBody } : undefined
+    const body = payload?.body ?? (row.body ? JSON.parse(row.body) as PreparedBody : undefined)
+    if (body) return sink.bodyStore.readBody(body).toString('utf8')
+  } catch {
+    // Missing or corrupt exact input is not an invitation to dispatch the preview.
+    return undefined
   }
   return JSON.stringify({
     ...(row.provider ? { providerId: row.provider } : {}),
@@ -81,35 +81,36 @@ export function buildDispatchLedgerSnapshot(sink: EventSink): LedgerSnapshot {
     }
   }
 
-  const intentEvents = db
-    .prepare("SELECT seq, at, run_id, command_id, payload FROM orch_event WHERE type = 'run.intent_recorded' ORDER BY seq ASC")
-    .all() as Array<{ seq: number; at: number; run_id: string | null; command_id: string | null; payload: string }>
-  const intentMetaByRun = new Map<
-    string,
-    { seq: number; at: number; commandId: string | null; detailSha256?: string }
-  >()
-  for (const ev of intentEvents) {
-    if (!ev.run_id) continue
-    let detailSha256: string | undefined
-    try {
-      const parsed = JSON.parse(ev.payload) as { intentDetailSha256?: unknown }
-      if (typeof parsed.intentDetailSha256 === 'string' && SHA256_LOWER.test(parsed.intentDetailSha256)) {
-        detailSha256 = parsed.intentDetailSha256
-      }
-    } catch {
-      // Ignore malformed payload.
-    }
-    intentMetaByRun.set(ev.run_id, {
-      seq: Number(ev.seq),
-      at: Number(ev.at),
-      commandId: ev.command_id,
-      detailSha256
+  // B2: intent metadata is projected onto the run row, so pruning the event log cannot lose it.
+  const intentMetaByRun = new Map<string, { seq: number; at: number; commandId: string | null; detailSha256?: string }>()
+  for (const row of db
+    .prepare(
+      `SELECT run_id, intent_seq, intent_at, intent_command_id, intent_detail_sha256 FROM orch_p_run
+       WHERE intent_at IS NOT NULL`
+    )
+    .all() as Array<{
+    run_id: string
+    intent_seq: number
+    intent_at: number
+    intent_command_id: string | null
+    intent_detail_sha256: string | null
+  }>) {
+    intentMetaByRun.set(row.run_id, {
+      seq: Number(row.intent_seq),
+      at: Number(row.intent_at),
+      commandId: row.intent_command_id,
+      ...(row.intent_detail_sha256 ? { detailSha256: row.intent_detail_sha256 } : {})
     })
   }
 
   const runRows = db
     .prepare(
-      'SELECT run_id, lifecycle, intent_seq, provider, profile, cwd, prompt_preview, body FROM orch_p_run ORDER BY intent_seq ASC'
+      `SELECT r.run_id, r.lifecycle, r.intent_seq, r.provider, r.profile, r.cwd, r.prompt_preview, r.body,
+              CASE WHEN r.lifecycle IN ('recorded', 'queued') THEN (
+                SELECT o.payload FROM orch_outbox o WHERE o.run_id = r.run_id AND o.kind = 'provider.run.start'
+                AND o.state IN ('pending', 'running') ORDER BY o.causation_seq LIMIT 1
+              ) END AS start_payload
+       FROM orch_p_run r ORDER BY r.intent_seq ASC`
     )
     .all() as RawRunRow[]
 

@@ -73,9 +73,19 @@ export class HostController {
     this.#disposeExecution = wiring.dispose
   }
 
+  /**
+   * C4/W9: a writer with no request behind it still has to drive dispatch. These callers pump
+   * because something the queue was waiting on has changed, so the deferred rows get a fresh look.
+   */
+  pump(): void {
+    this.#dispatcher.wake()
+    this.#dispatcher.pump()
+  }
+
   // Startup only: reconcile orphaned dispatched runs and pump undispatched intents.
   recover(): void {
     recoverDispatchedLedgerRuns(this.#ledger, this.#injected.orchestration)
+    this.#dispatcher.wake()
     this.#dispatcher.pump()
   }
 
@@ -213,7 +223,8 @@ export class HostController {
       canHostMetrics: d.readHostMetrics !== undefined,
       workspace: this.#workspace, sessionAction: d.sessionAction, sessionFork: d.sessionFork, sessionDelete: d.sessionDelete,
       isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(d.macRuns ? { macRuns: d.macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: d.macRuns,
-      interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch
+      interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch,
+      pump: () => { this.#dispatcher?.pump() }
     }
   }
 

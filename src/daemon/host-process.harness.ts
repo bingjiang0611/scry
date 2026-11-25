@@ -27,7 +27,7 @@ export interface TestDaemon {
 const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1', ELECTRON_ENABLE_LOGGING: '1' }
 const DEBUG_PORT = '--remote-debugging-port=0'
 
-export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log' | 'orchestrationBeforeCommitHook'> & {
+export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log' | 'orchestrationBeforeCommitHook' | 'orchestrationPauseBackfill'> & {
   root?: string
   device?: TestDaemon['device']
 } = {}): Promise<TestDaemon> {

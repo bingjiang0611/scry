@@ -77,6 +77,11 @@ export class PiBackgroundWork {
     return this.observed ? this.snapshot(now) : undefined
   }
 
+  /** C3: the tasks still running when the answer's run ended; the host wakes the session for them. */
+  get pendingTaskIds(): string[] {
+    return [...this.tasks.values()].map(task => task.taskId).sort()
+  }
+
   end(now = Date.now()): BackgroundWork | undefined {
     if (!this.observed) return undefined
     return { ...this.snapshot(now), phase: 'inactive', tasks: this.unconfirmed() }

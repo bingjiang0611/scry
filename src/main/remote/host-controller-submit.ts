@@ -48,7 +48,11 @@ export function submitIntent(deps: SubmitDeps, peerCertSHA256: string, input: { 
   return recordIntent(deps, peerCertSHA256, input)
 }
 
-export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input: { intentId: string; detail?: string; knownLogId?: string }): Promise<SubmitResult> {
+export async function submitReceivedIntent(
+  deps: SubmitDeps,
+  peer: string,
+  input: { intentId: string; detail?: string; knownLogId?: string; claimMode?: 'immediate' | 'queued' }
+): Promise<SubmitResult> {
   deps.authorizeDevice(peer)
   assertExpectedLog(deps.orchestration, input.knownLogId)
   const { detail, referenced } = stampAttachmentPeer(peer, input.detail)
@@ -71,16 +75,17 @@ export async function submitReceivedIntent(deps: SubmitDeps, peer: string, input
       grantScope: deps.gateway.grantScope(peer),
       scopedIntentId: scoped,
       detail,
+      ...(input.claimMode ? { claimMode: input.claimMode } : {}),
       ...(deps.immediateDispatch ? { immediateDispatch: deps.immediateDispatch } : {})
+    }, (runId) => {
+      try {
+        deps.gateway.submitIntent(peer, { ...input, detail, runId })
+      } catch (error) {
+        try { deps.orchestration!.compensateSubmitFailure(runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
+        throw error
+      }
     })
-    if (auth.status === 'duplicate') return auth
-    try {
-      deps.gateway.submitIntent(peer, { ...input, detail, runId: auth.runId })
-    } catch (error) {
-      try { deps.orchestration.compensateSubmitFailure(auth.runId, 'submit_side_effect_failed') } catch { /* preserve original error */ }
-      throw error
-    }
-    deps.dispatcher.pump()
+    if (auth.status === 'recorded') deps.dispatcher.pump()
     return auth
   }
   return recordIntent(deps, peer, { ...input, detail })

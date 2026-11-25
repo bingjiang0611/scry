@@ -8,10 +8,12 @@ import { machinesApi } from './machines'
 import type { GitDiffScope, WorkspaceDiffSnapshotResult } from '../shared/workspace-diff'
 import type { DiffCommitPage, DiffCommitPageRequest, DiffCommitSnapshot, DiffCommitSnapshotRequest } from '../shared/diff-history'
 import type { SourceControlApi } from '../shared/source-control'
+import { createSourceControlBridge } from './source-control-bridge'
 import type { WorkspaceSelectionApi } from '../shared/workspace-selection'
 import type { ConversationSummary } from '../shared/conversation-api'
 import type { BackgroundTaskStopResult } from '../shared/background-work'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
+import type { HostQueueAnswer, HostQueueRequest } from '../shared/host-queue'
 import type { RecorderContentPage, RecorderContentPageRequest } from '../shared/tool-content'
 import type {
   ActiveRun,
@@ -131,21 +133,7 @@ export type ParsedTurn = LoadedSessionTurn
 export type { SessionHistoryPage, SessionHistoryPageRequest }
 export type { TraceBacklogState, TraceBatchReceipt }
 
-const sourceControl: SourceControlApi = {
-  read: cwd => ipcRenderer.invoke('sourceControl:read', cwd),
-  diff: request => ipcRenderer.invoke('sourceControl:diff', request),
-  mutate: request => ipcRenderer.invoke('sourceControl:mutate', request),
-  operations: request => ipcRenderer.invoke('sourceControl:operations', request),
-  reconcile: request => ipcRenderer.invoke('sourceControl:reconcile', request),
-  acknowledge: request => ipcRenderer.invoke('sourceControl:acknowledge', request),
-  cancel: request => ipcRenderer.invoke('sourceControl:cancel', request),
-  pullRequests: request => ipcRenderer.invoke('sourceControl:pullRequests', request),
-  pullRequest: request => ipcRenderer.invoke('sourceControl:pullRequest', request),
-  saveCommitDraft: request => ipcRenderer.invoke('sourceControl:saveCommitDraft', request),
-  loadCommitDraft: request => ipcRenderer.invoke('sourceControl:loadCommitDraft', request),
-  saveDraft: request => ipcRenderer.invoke('sourceControl:saveDraft', request),
-  loadDraft: request => ipcRenderer.invoke('sourceControl:loadDraft', request)
-}
+const sourceControl: SourceControlApi = createSourceControlBridge(ipcRenderer)
 
 const api = {
   rendererReady: (): void => ipcRenderer.send('app:rendererReady'),
@@ -198,6 +186,17 @@ const api = {
   terminalRecordingDelete: (id: string): Promise<true> => ipcRenderer.invoke('terminal:recordingDelete', { id }),
   setCwd: (dir: string | null, clearIfMissing?: boolean): Promise<string | null> =>
     ipcRenderer.invoke('agent:setCwd', ...(clearIfMissing ? [dir, true] : [dir])),
+  // D1: the host's queue for one session, in the order it will dispatch them.
+  hostQueue: (request: HostQueueRequest): Promise<HostQueueAnswer> => ipcRenderer.invoke('agent:hostQueue', request),
+  // D5: rewrite a run's worktree back to its checkpoint. The host decides what may be reset.
+  rollbackRun: (runId: string): Promise<unknown> => ipcRenderer.invoke('agent:rollbackRun', { runId }),
+  // C4: whether a restart left background work to continue, and the press that continues it once.
+  restartNote: (request: HostQueueRequest): Promise<{ resolved: boolean; pending: boolean }> =>
+    ipcRenderer.invoke('agent:restartNote', request),
+  continueAfterRestart: (request: HostQueueRequest): Promise<{ ok: boolean; reason?: string }> =>
+    ipcRenderer.invoke('agent:continueAfterRestart', request),
+  // D1: say "go" for one held queue entry; the host decides whether it may move.
+  releaseQueuedRun: (runId: string): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('agent:releaseQueuedRun', runId),
   newSession: (context: ProviderContext): Promise<boolean> => ipcRenderer.invoke('agent:newSession', context),
   forkSession: (request: AgentForkSessionRequest): Promise<AgentForkSessionResult> => ipcRenderer.invoke('agent:forkSession', request),
   invalidateProviderContext: (context: ProviderContext): Promise<true> => ipcRenderer.invoke('agent:invalidateProviderContext', context),

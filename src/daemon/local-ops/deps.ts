@@ -47,17 +47,42 @@ export interface DaemonLocalEndpointDeps {
   // P8 host metrics: the daemon's own sampler, local scope (may carry the PID).
   hostMetrics?: () => Promise<import('../../shared/host-metrics').HostMetricsSnapshot>
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
+  /** D4: the authority records metadata changes; it is attached after the local ops are built. */
+  getOrchestrationAuthority?: () => {
+    recordSessionMetadata?: (input: {
+      externalSessionId: string
+      providerId: string
+      agentProfileId?: string | undefined
+      cwd: string
+      change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+      actor: string
+    }) => unknown
+  } | undefined
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
+  /** D1: the projection read, plus the one session lookup, so the App can show the host's queue. */
+  orchestrationReader?: () => import('../../host-runtime/orchestration/native-session-lookup').SessionReader | undefined
+  /** C4: the explicit "继续" is an outbox write, so its handler needs the dispatcher's pump. */
+  pumpOrchestration?: () => void
+  /** D5: checkpoint capture and rollback; the host owns the git side. */
+  checkpoints?: import('../checkpoint-service').CheckpointService
   log?: (line: string) => void
 }
 
 export interface DaemonSessionLinks {
+  reconcileSessionMetadata?: () => Promise<number>
   deleteNativeProjection?: import('../../main/bootstrap/session-lifecycle').SessionLifecycleDependencies['deleteNativeProjection']
   deleteConversationProjection?: import('../../main/bootstrap/conversation').ConversationTableDependencies['deleteConversationProjection']
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   sessionRefFromRequest?: (value: unknown) => import('../../main/app-store').AppSessionRef | null
-  changeLegacySessionMetadata?: (ref: import('../../main/app-store').AppSessionRef, change: () => boolean) => Promise<boolean>
+  changeLegacySessionMetadata?: (
+    ref: import('../../main/app-store').AppSessionRef,
+    change: () => boolean,
+    meta?: {
+      change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+      actor: string
+    }
+  ) => Promise<boolean>
   prepareConversationDeletion?: (conversation: Conversation) => Promise<ConversationDeletionPreview>
   sideChatCascade?: SideChatCascade
 }

@@ -122,7 +122,12 @@ describe('HostController (composition root)', () => {
     await expect(controller.sessionAction(CERT, { context: { ...context, cwd: '/other' }, action: { kind: 'pin', pinned: true } })).rejects.toThrow('not authorized')
     expect(sessionAction).not.toHaveBeenCalled()
     await expect(controller.sessionAction(CERT, { context, action: { kind: 'pin', pinned: true } })).resolves.toBe(true)
-    expect(sessionAction).toHaveBeenCalledExactlyOnceWith({ cwd: AUTHORIZED, providerId: 'claude', externalSessionId: 'session-1' }, { kind: 'pin', pinned: true }, expect.any(Function))
+    expect(sessionAction).toHaveBeenCalledExactlyOnceWith(
+      { cwd: AUTHORIZED, providerId: 'claude', externalSessionId: 'session-1' },
+      { kind: 'pin', pinned: true },
+      expect.any(Function),
+      `peer:${CERT}`
+    )
   })
 
   it.each(['device', 'workspace'] as const)('rejects %s revocation during metadata recovery before the write', async (revoked) => {

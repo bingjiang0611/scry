@@ -34,7 +34,7 @@ import {
   antigravityScanRoots
 } from './antigravity-mcp-paths'
 import { ANTIGRAVITY_PERMISSION_OPTIONS } from './antigravity-permissions'
-import { formatAntigravityUnauthenticatedError } from './antigravity-run'
+import { formatAntigravityUnauthenticatedError } from './antigravity-auth-error'
 
 const CATALOG_TTL_MS = 5 * 60_000
 const PROBE_EXIT_GRACE_MS = 2_000

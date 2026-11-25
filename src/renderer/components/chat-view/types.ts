@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from 'react'
+import type { HostQueueState } from '../../hooks/useHostQueue'
 import type { TraceEvent, SlashCmd, TurnDiffSnapshot } from '@shared/trace'
 import type {
   AgentModelRef,
@@ -57,6 +58,12 @@ export interface ChatViewProps {
   sessionLoading?: boolean
   transcriptPending?: boolean
   sessionCacheVisible?: boolean
+  /** D1: the host's queue for this session; the composer shows it above its own queue. */
+  hostQueue?: HostQueueState
+  /** D1: the release action for a held entry; absent means the panel stays read-only. */
+  hostQueueRelease?: { releasingRunId: string | null; releaseError: string | null; release: (runId: string) => void }
+  /** C4: the restart offer for this session and the press that continues it once. */
+  restartContinue?: import('../../hooks/useHostQueue').RestartContinueState
   sessionEvidenceGap?: { status: 'unavailable' | 'empty' | 'error'; detail: string; title?: string; retry?: () => void; retrying?: boolean } | null
   emptyState?: { title: string; detail: string; status?: 'new-side-chat' | 'pending-first-send' } | null
   busy: boolean

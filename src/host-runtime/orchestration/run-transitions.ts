@@ -1,4 +1,8 @@
 import { RUN_LIFECYCLE_NEXT } from '../../main/remote/session-ledger'
+import {
+  TERMINAL_RUN_LIFECYCLE_NAMES,
+  TERMINAL_RUN_LIFECYCLE_SQL as TERMINAL_RUN_LIFECYCLE_SQL_SHARED
+} from '../../shared/orchestration-subscribe'
 import type { H1RunLifecycle, RunLifecycleState } from './types'
 
 export const H1_RUN_NEXT: Readonly<Record<H1RunLifecycle, readonly H1RunLifecycle[]>> = RUN_LIFECYCLE_NEXT
@@ -9,20 +13,28 @@ export function canTransitionH1Run(from: H1RunLifecycle, to: H1RunLifecycle): bo
 
 export const ORCH_RUN_NEXT: Readonly<Record<RunLifecycleState, readonly RunLifecycleState[]>> = {
   recorded: ['admitted', 'dispatched', 'cancelled', 'failed'],
+  // D1: a queued run becomes dispatchable once the session's live run reaches a terminal state.
+  queued: ['admitted', 'dispatched', 'cancelled', 'failed'],
   admitted: ['dispatched', 'cancelled', 'failed'],
   dispatched: ['settled', 'failed', 'cancelled', 'interrupted'],
-  settled: [],
+  // D5: a settled run may be rolled back; nothing leaves `rolled_back`.
+  settled: ['rolled_back'],
   failed: [],
   cancelled: [],
-  interrupted: []
+  interrupted: [],
+  rolled_back: []
 }
 
-export const TERMINAL_RUN_LIFECYCLES: ReadonlySet<RunLifecycleState> = new Set([
-  'settled',
-  'failed',
-  'cancelled',
-  'interrupted'
-])
+export const TERMINAL_RUN_LIFECYCLES: ReadonlySet<RunLifecycleState> = new Set(
+  TERMINAL_RUN_LIFECYCLE_NAMES as RunLifecycleState[]
+)
+
+/**
+ * The same terminal set as a SQL literal list. Every query that asks "is this run still active?" must
+ * use it: a lifecycle added to the set but forgotten in one query leaves a run that can never be
+ * dispatched past, which is how `rolled_back` wedged a session.
+ */
+export const TERMINAL_LIFECYCLE_SQL = TERMINAL_RUN_LIFECYCLE_SQL_SHARED
 
 export function canTransitionRun(from: RunLifecycleState, to: RunLifecycleState): boolean {
   return ORCH_RUN_NEXT[from].includes(to)

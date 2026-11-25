@@ -69,7 +69,7 @@
 ## 2.6 Effect worker 与结果命令
 
 - worker 的结果（Provider 已结束、trace 已归档、记录已写）不直接改表，作为系统命令回到 Orchestrator，保持单写者。
-- 结果命令的 id 是确定的：`effect:<effectId>:<step>`（`step` 如 `admitted`、`dispatched`、`provider_settled`、`finalized`）。重复投递得到同一回执，不重复产生事件。
+- 结果命令的 id 是确定的，**以代码为准**：`effect:p4-<runId>:<step>[:<suffix>]`（`step` 如 `admitted`、`dispatched`、`provider_settled`、`finalized`；`suffix` 区分同一 step 的多个来源，见 `authority-commands.ts:162`、`:220`、`authority-engine.ts:282`）。早期稿写的 `effect:<effectId>:<step>` 没有落地，也不该再改：回执按 commandId 去重，已发出的回执必须保持原样才能重放一致。重复投递得到同一回执，不重复产生事件。
 - `run.admitted` 是 effect 的结果，不是决策。准入的权威仍在 `RunRegistry` 与闸门（`admitRun`，`context-admission.ts:77`）。
 - **副作用已完成、结果未提交就崩溃**：重启恢复先查 recorder 提交日志与归档（`runStartupRecovery`，`bootstrap/startup-recovery.ts:18-76`，由 `host-process.ts:218-226` 等待）。能证明的提交 `run.provider_settled` / `run.finalized`，证据引用与质量标记原样；不能证明的记 `unavailable`。
 
