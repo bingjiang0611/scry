@@ -1,4 +1,5 @@
 import { billingProviderForUpstream } from '../shared/billing'
+import { estimatedCostFromPrice, type ModelPrice } from '../shared/model-price'
 import type {
   BillingConfidence,
   BillingCostSource,
@@ -22,18 +23,8 @@ export {
 } from './billing-ledger-admin'
 export { providerRawUsageObjectToRow, usageLedgerObjectToRow, type BillingLedgerRows } from './billing-ledger-rows'
 
-export interface LocalModelPriceVersion {
-  id: string
+export interface LocalModelPriceVersion extends ModelPrice {
   provider: BillingProvider
-  model: string
-  currency: string
-  inputPerMillion?: number | null
-  outputPerMillion?: number | null
-  cacheReadPerMillion?: number | null
-  cacheWritePerMillion?: number | null
-  reasoningPerMillion?: number | null
-  effectiveFrom: number
-  effectiveTo?: number | null
 }
 
 function runtimeLedgerMetadata(args: {
@@ -197,23 +188,9 @@ function estimateRows(rows: UsageLedgerObject[], prices: LocalModelPriceVersion[
     const price = prices
       .filter((item) => item.provider === row.provider && item.model === row.model && item.effectiveFrom <= at && (item.effectiveTo == null || item.effectiveTo > at))
       .sort((a, b) => b.effectiveFrom - a.effectiveFrom)[0]
-    if (!price || price.currency.toUpperCase() !== 'USD') return row
-    const input = row.inputTokens ?? 0
-    const output = row.outputTokens ?? 0
-    const cacheRead = row.cacheReadTokens ?? 0
-    const cacheWrite = row.cacheWriteTokens ?? 0
-    const reasoning = row.reasoningTokens ?? 0
-    if (input + output + cacheRead + cacheWrite + reasoning === 0 || price.inputPerMillion == null || price.outputPerMillion == null) return row
-    const includedCacheWrite = row.provider === 'openai' || row.provider === 'codex' ? cacheWrite : 0
-    const uncachedInput = row.provider === 'anthropic' || row.provider === 'antigravity' ? input : Math.max(0, input - cacheRead - includedCacheWrite)
-    const normalOutput = price.reasoningPerMillion == null ? output : Math.max(0, output - reasoning)
-    const cost = (
-      uncachedInput * price.inputPerMillion +
-      cacheRead * (price.cacheReadPerMillion ?? price.inputPerMillion) +
-      cacheWrite * (price.cacheWritePerMillion ?? price.inputPerMillion) +
-      normalOutput * price.outputPerMillion +
-      (price.reasoningPerMillion == null ? 0 : reasoning * price.reasoningPerMillion)
-    ) / 1_000_000
+    if (!price) return row
+    const cost = estimatedCostFromPrice({ ...row, provider: row.provider }, price)
+    if (cost == null) return row
     return {
       ...row,
       sourceKind: 'sdk_estimate',

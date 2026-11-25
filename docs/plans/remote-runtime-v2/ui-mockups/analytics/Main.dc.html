@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>分析 · LLM 性能</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#141416}
+a{color:#8ab4ff}a:hover{color:#b3ceff}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="display: flex; flex-wrap: wrap; min-height: 1180px; background: #141416; color: #e8e8ea; font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; font-size: 14px">
+
+<nav aria-label="侧栏" style="flex: 1 1 240px; max-width: 260px; box-sizing: border-box; background: #18181b; border-right: 1px solid #2a2a2f; padding: 16px 12px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; align-items: center; gap: 8px; padding: 4px 8px 12px">
+<div style="width: 22px; height: 22px; border-custom-gateway: 6px; background: #e8e8ea"></div>
+<span style="font-weight: 700; font-size: 15px">Scry</span>
+</div>
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-custom-gateway: 8px; color: #c9c9cf; text-decoration: none; font-size: 13px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 5h16v11H8l-4 4z"></path></svg>会话</a>
+<a href="#" aria-current="page" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-custom-gateway: 8px; background: #26262c; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: 600">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"></path></svg>分析</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-custom-gateway: 8px; color: #c9c9cf; text-decoration: none; font-size: 13px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>机器</a>
+<p style="margin: 10px 10px 0; font-size: 12px; color: #9a9aa3; line-height: 1.5">原来的「LLM 性能」入口并入「分析」，不再单独占一行。</p>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; padding: 28px 36px 48px; display: flex; flex-direction: column; gap: 22px; max-width: 1180px">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 700">分析</h1>
+<div role="tablist" aria-label="分析视图" style="display: flex; gap: 20px; align-self: stretch; align-items: flex-end">
+<a role="tab" aria-selected="true" href="#" style="padding: 8px 0 9px; border-bottom: 2px solid #e8e8ea; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none">LLM 性能</a>
+<a role="tab" aria-selected="false" href="Cost.dc.html" style="padding: 8px 0 9px; border-bottom: 2px solid transparent; color: #a1a1aa; font-size: 14px; text-decoration: none">成本与用量</a>
+</div>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #c9c9cf">Agent
+<select style="height: 34px; border-custom-gateway: 8px; border: 1px solid #2e2e33; background: #1f1f23; color: #e8e8ea; padding: 0 10px; font-size: 13px; font-family: inherit"><option>全部</option><option>Pi</option><option>Claude</option><option>Codex</option><option>Qoder</option></select></label>
+<div role="group" aria-label="时间范围" style="display: flex; gap: 2px; background: #1d1d21; border: 1px solid #2c2c31; border-custom-gateway: 8px; padding: 2px">
+<button style="height: 30px; padding: 0 12px; border-custom-gateway: 6px; border: none; background: transparent; color: #c9c9cf; font-size: 13px; cursor: pointer">1 小时</button>
+<button aria-pressed="true" style="height: 30px; padding: 0 12px; border-custom-gateway: 6px; border: none; background: #2c2c33; color: #ffffff; font-size: 13px; font-weight: 600; cursor: pointer">24 小时</button>
+<button style="height: 30px; padding: 0 12px; border-custom-gateway: 6px; border: none; background: transparent; color: #c9c9cf; font-size: 13px; cursor: pointer">7 天</button>
+<button style="height: 30px; padding: 0 12px; border-custom-gateway: 6px; border: none; background: transparent; color: #c9c9cf; font-size: 13px; cursor: pointer">30 天</button>
+</div>
+</div>
+</header>
+
+<div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 12px">
+<sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+<div style="background: #1b1b1f; border: 0.5px solid rgba(255,255,255,0.09); border-custom-gateway: 14px; corner-shape: superellipse(1.25); box-shadow: 0 1px 1px rgba(0,0,0,0.16), 0 3px 3px rgba(0,0,0,0.16), 0 6px 6px rgba(0,0,0,0.14), 0 12px 12px rgba(0,0,0,0.12), inset 0 0.5px 0 rgba(255,255,255,0.05); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; color: #a1a1aa">{{t.label}}</span>
+<span style="{{t.valueStyle}}">{{t.value}}</span>
+<span style="font-size: 12px; color: #a1a1aa">{{t.sub}}</span>
+</div>
+</sc-for>
+</div>
+
+<section aria-labelledby="cmp-h" style="background: #1b1b1f; border: 0.5px solid rgba(255,255,255,0.09); border-custom-gateway: 14px; corner-shape: superellipse(1.25); box-shadow: 0 1px 1px rgba(0,0,0,0.16), 0 3px 3px rgba(0,0,0,0.16), 0 6px 6px rgba(0,0,0,0.14), 0 12px 12px rgba(0,0,0,0.12), inset 0 0.5px 0 rgba(255,255,255,0.05); padding: 18px 20px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 14px">
+<h2 id="cmp-h" style="margin: 0; font-size: 15px; font-weight: 600">模型对比</h2>
+<span style="font-size: 12px; color: #a1a1aa">数值都是中位数</span>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 860px; border-collapse: collapse; font-size: 13px">
+<thead>
+<tr style="color: #a1a1aa; text-align: left">
+<th scope="col" style="font-weight: 500; padding: 10px 8px 10px 0">模型 · Agent</th>
+<th scope="col" style="font-weight: 500; padding: 10px 8px; text-align: right">轮次</th>
+<th scope="col" style="font-weight: 500; padding: 10px 8px; width: 240px">输出速度分布（token/秒）</th>
+<th scope="col" style="font-weight: 500; padding: 10px 8px; text-align: right">输出速度<br><span style="font-weight: 400">token/秒</span></th>
+<th scope="col" style="font-weight: 500; padding: 10px 8px; text-align: right">首 token<br><span style="font-weight: 400">秒</span></th>
+<th scope="col" style="font-weight: 500; padding: 10px 0 10px 8px; text-align: right">首段回复<br><span style="font-weight: 400">秒</span></th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{models}}" as="m" hint-placeholder-count="4">
+<tr style="{{m.rowStyle}}">
+<td style="padding: 12px 8px 12px 0">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="{{m.dot}}"></span>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<span style="font-weight: 600">{{m.model}}</span>
+<span style="font-size: 12px; color: #a1a1aa">{{m.agent}}</span>
+</div>
+</div>
+</td>
+<td style="padding: 12px 8px; text-align: right; font-variant-numeric: tabular-nums">
+<div>{{m.turns}}</div>
+</td>
+<td style="padding: 12px 8px">
+<div aria-hidden="true" style="position: relative; height: 18px; border-bottom: 1px solid #2c2c32">
+<sc-if value="{{m.box}}" hint-placeholder-val="{{ true }}">
+<div style="{{m.whisker}}"></div><div style="{{m.boxStyle}}"></div><div style="{{m.medianStyle}}"></div>
+</sc-if>
+<sc-for list="{{m.ticks}}" as="k" hint-placeholder-count="2"><div style="{{k.style}}"></div></sc-for>
+</div>
+</td>
+<td style="padding: 12px 8px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600">{{m.tps}}</td>
+<td style="padding: 12px 8px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600">{{m.ttft}}</td>
+<td style="padding: 12px 0 12px 8px; text-align: right; font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600">{{m.wait}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="display: flex; justify-content: space-between; color: #8e8e97; font-size: 11px; font-variant-numeric: tabular-nums; padding: 0 0 4px; width: 240px; margin-left: 330px" aria-hidden="true"><span>0</span><span>25</span><span>50</span></div>
+</section>
+
+<section aria-labelledby="trend-h" style="background: #1b1b1f; border: 0.5px solid rgba(255,255,255,0.09); border-custom-gateway: 14px; corner-shape: superellipse(1.25); box-shadow: 0 1px 1px rgba(0,0,0,0.16), 0 3px 3px rgba(0,0,0,0.16), 0 6px 6px rgba(0,0,0,0.14), 0 12px 12px rgba(0,0,0,0.12), inset 0 0.5px 0 rgba(255,255,255,0.05); padding: 18px 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px">
+<span aria-hidden="true" style="width: 9px; height: 9px; border-custom-gateway: 50%; background: #6ea8ff"></span>
+<h2 id="trend-h" style="margin: 0; font-size: 15px; font-weight: 600">model-a · Pi</h2>
+<span style="font-size: 12px; color: #a1a1aa">12 轮 · 每点一轮</span>
+<div role="tablist" aria-label="指标" style="margin-left: auto; display: flex; gap: 2px; background: #18181b; border: 1px solid #2c2c31; border-custom-gateway: 8px; padding: 2px">
+<button role="tab" aria-selected="true" style="height: 28px; padding: 0 10px; border-custom-gateway: 6px; border: none; background: #2c2c33; color: #ffffff; font-size: 12px; font-weight: 600; cursor: pointer">输出速度</button>
+<button role="tab" aria-selected="false" style="height: 28px; padding: 0 10px; border-custom-gateway: 6px; border: none; background: transparent; color: #c9c9cf; font-size: 12px; cursor: pointer">首 token</button>
+<button role="tab" aria-selected="false" style="height: 28px; padding: 0 10px; border-custom-gateway: 6px; border: none; background: transparent; color: #c9c9cf; font-size: 12px; cursor: pointer">首段回复</button>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 0 8px">
+<div style="display: flex; flex-direction: column; justify-content: space-between; height: 200px; font-size: 11px; color: #8e8e97; text-align: right; font-variant-numeric: tabular-nums" aria-hidden="true"><span>40</span><span>20</span><span>0</span></div>
+<div role="img" aria-label="model-a 输出速度：每轮一点" style="position: relative; height: 200px; border-left: 1px solid #2c2c32; border-bottom: 1px solid #2c2c32">
+<div style="position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed #2a2a30"></div>
+<sc-for list="{{points}}" as="p" hint-placeholder-count="12"><div style="{{p.style}}"></div></sc-for>
+</div>
+<div></div>
+<div style="display: flex; justify-content: space-between; font-size: 11px; color: #8e8e97; padding-top: 6px; font-variant-numeric: tabular-nums" aria-hidden="true"><span>昨天 10:00</span><span>16:00</span><span>22:00</span><span>今天 04:00</span><span>10:00</span></div>
+</div>
+</section>
+
+<details style="font-size: 12px; color: #a1a1aa; line-height: 1.7">
+<summary style="cursor: pointer; color: #c9c9cf">指标口径</summary>
+<p style="margin: 8px 0 0">输出速度 = 输出 token ÷ 生成时间（从首个 token 到结束，不含首 token 之前的等待）。首 token = 从请求发出到第一个 token。首段回复 = 从发送到界面出现第一段文字，包含工具执行和等待你批准的时间。只统计在 Scry 内发起的轮次。</p>
+</details>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const x = (v) => (v / 50 * 100).toFixed(1) + '%';
+    const dot = (c) => 'width: 9px; height: 9px; border-custom-gateway: 50%; flex: none; background: ' + c;
+    const tick = (v, c) => ({ style: 'position: absolute; top: 3px; left: ' + x(v) + '; width: 2px; height: 12px; border-custom-gateway: 1px; background: ' + c });
+    const big = 'font-size: 34px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums';
+    const small = 'font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums';
+    const strong = 'font-size: 15px; font-weight: 600';
+    const row = (sel) => sel ? 'border-top: 0.5px solid rgba(255,255,255,0.07); background: #23232a' : 'border-top: 0.5px solid rgba(255,255,255,0.07)';
+    const box = (lo, q1, med, q3, hi, c) => ({
+      box: true, ticks: [],
+      whisker: 'position: absolute; top: 8px; height: 2px; left: ' + x(lo) + '; width: calc(' + x(hi) + ' - ' + x(lo) + '); background: ' + c + '; opacity: .6',
+      boxStyle: 'position: absolute; top: 4px; height: 10px; border-custom-gateway: 3px; left: ' + x(q1) + '; width: calc(' + x(q3) + ' - ' + x(q1) + '); background: ' + c + '; opacity: .45',
+      medianStyle: 'position: absolute; top: 1px; height: 16px; width: 2px; left: ' + x(med) + '; background: ' + c
+    });
+    const raw = (vals, c) => ({ box: false, whisker: '', boxStyle: '', medianStyle: '', ticks: vals.map((v) => tick(v, c)) });
+    const pts = [[8, 31], [14, 25.5], [18, 24.8], [30, 15.2], [31, 18.7], [32, 13.9], [33, 14.6], [34, 16.9], [36, 8.4], [47, 30.9], [96, 22.8], [97, 10.1]];
+    return {
+      tiles: [
+        { label: '输出速度', value: '19.4 token/秒', sub: '中位数', valueStyle: big },
+        { label: '首 token', value: '3.6 秒', sub: '中位数', valueStyle: small },
+        { label: '首段回复', value: '24.1 秒', sub: '中位数', valueStyle: small },
+        { label: '轮次', value: '16', sub: '24 小时内', valueStyle: small }
+      ],
+      models: [
+        Object.assign({ model: 'model-a', agent: 'Pi · openai-codex', dot: dot('#6ea8ff'), rowStyle: row(true), turns: '12', failed: '',
+          tps: '16.9', ttft: '3.6', wait: '29.9' }, box(8.4, 14.2, 16.9, 25.2, 31, '#6ea8ff')),
+        Object.assign({ model: 'model-b', agent: 'Claude · cc-switch', dot: dot('#e0a46b'), rowStyle: row(false), turns: '2', failed: '',
+          tps: '41.1', ttft: '', wait: '8.0' }, raw([38.2, 44], '#e0a46b')),
+        Object.assign({ model: 'model-c', agent: 'Pi · openai-codex', dot: dot('#c58af0'), rowStyle: row(false), turns: '2', failed: '',
+          tps: '39.7', ttft: '4.3', wait: '11.3' }, raw([33.5, 45.9], '#c58af0')),
+        Object.assign({ model: 'model-d', agent: 'Pi · custom-gateway', dot: dot('#5fc8a8'), rowStyle: row(false), turns: '2', failed: '',
+          tps: '26.9', ttft: '3.6', wait: '1386.2' }, raw([26.4, 27.4], '#5fc8a8'))
+      ],
+      points: pts.map(([t, v]) => ({ style: 'position: absolute; width: 8px; height: 8px; border-custom-gateway: 50%; background: #6ea8ff; transform: translate(-50%, 50%); left: ' + t + '%; bottom: ' + (v / 40 * 100).toFixed(1) + '%' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

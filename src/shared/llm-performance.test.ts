@@ -98,15 +98,31 @@ describe('LLM comparison rounds', () => {
     ])
   })
 
-  it('keeps provisional local waiting with unknown model, but persisted failure wins', () => {
+  it('drops the placeholder model prefixes and unmodelled failed rounds (Q7)', () => {
+    const selected = row(1000, { model: '所选：model-a' })
+    const unknown = row(2000, { model: '未知模型' })
+    const failedUnknown = row(3000, { model: '未知模型', failed: true })
+    const rounds = llmComparisonRounds([selected, unknown, failedUnknown])
+    expect(rounds).toEqual([expect.objectContaining({ model: 'model-a', state: 'completed' })])
+    expect(JSON.stringify(rounds)).not.toContain('所选：')
+    expect(JSON.stringify(rounds)).not.toContain('未知模型')
+  })
+
+  it('treats the old multi-model marker as no model at all (Q11)', () => {
+    // 旧记录里核实到多个模型时会写「多模型」；它不是一个模型，读取时不能变成一行。
+    const multi = row(1000, { model: '多模型' })
+    expect(llmComparisonRounds([multi])).toEqual([])
+  })
+
+  it('only shows provisional rounds once a model is observed, and persisted failure wins', () => {
     const sessions = summarizeRunningLlmSessions([
       { ...run('1000', { firstOutputWaitMs: 900 }), providerId: 'antigravity' },
       run('missing', { model: 'm' }),
       run('terminal', { state: 'complete', model: 'm', apiTokensPerSecond: 60, firstTokenMs: 900 }),
       run('call', { model: 'm', apiTokensPerSecond: 40, firstTokenMs: 1200 })
     ]).sessions
+    // 还没有观测到模型的一轮没有行可归：表里不能出现只写 Agent 名的「模型」行（Q1/Q7）。
     expect(llmComparisonRounds([], sessions)).toEqual([
-      { ts: 0, providerId: 'antigravity', state: 'running', metrics: { firstOutput: .9 } },
       { ts: 0, model: 'm', state: 'running', metrics: { speed: 40, firstToken: 1.2 } }
     ])
     expect(llmComparisonRounds([row(1000, { providerId: 'antigravity', failed: true })], sessions)).toEqual([

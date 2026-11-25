@@ -1,10 +1,9 @@
 import type { AppShellProps } from '../app-shell-types'
-import { LlmPerformancePanel } from './LlmPerformancePanel'
 import { CapabilitiesModal, SettingsModal } from './Modals'
 
 type AppShellModalsProps = Pick<
   AppShellProps,
-  | 'cwd' | 'integrations' | 'showLlmPerformance' | 'setShowLlmPerformance'
+  | 'cwd' | 'integrations'
   | 'showSkills' | 'showMcp' | 'openSkills' | 'openMcp' | 'setShowSkills' | 'setShowMcp'
   | 'settingsTab' | 'setSettingsTab' | 'theme' | 'changeTheme'
   | 'setArchiveUndo' | 'workspace' | 'openMachines'
@@ -12,13 +11,12 @@ type AppShellModalsProps = Pick<
 
 export function AppShellModals(props: AppShellModalsProps): JSX.Element {
   const {
-    cwd, integrations, showLlmPerformance, setShowLlmPerformance,
+    cwd, integrations,
     showSkills, showMcp, openSkills, openMcp, setShowSkills, setShowMcp,
     settingsTab, setSettingsTab, theme, changeTheme, setArchiveUndo, workspace, openMachines
   } = props
   return (
     <>
-      {showLlmPerformance && <LlmPerformancePanel open onClose={() => setShowLlmPerformance(false)} />}
       {(showSkills || showMcp) && (
         <CapabilitiesModal
           key={`${integrations.selectedProviderId}:${cwd ?? ''}`}
@@ -39,7 +37,7 @@ export function AppShellModals(props: AppShellModalsProps): JSX.Element {
           onTestMcp={integrations.testMcp}
           onReauthenticateMcp={integrations.reauthenticateMcp}
           onRefreshMcp={integrations.pullMcpLive}
-          onClose={() => { setShowSkills(false); setShowMcp(false); setShowLlmPerformance(false) }}
+          onClose={() => { setShowSkills(false); setShowMcp(false) }}
         />
       )}
       {settingsTab !== null && (

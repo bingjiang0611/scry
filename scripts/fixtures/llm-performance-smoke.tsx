@@ -8,7 +8,7 @@ import type { TraceEvent } from '../../src/shared/trace'
 import { summarizeRunningLlmSessions, type LlmPerformanceHistoryRow } from '../../src/shared/llm-performance'
 import '../../src/renderer/styles.css'
 import '../../src/renderer/motion.css'
-import '../../src/renderer/analytics-evidence.css'
+import '../../src/renderer/analytics-page.css'
 import '../../src/renderer/inventory-evidence.css'
 import '../../src/renderer/session-evidence.css'
 import '../../src/renderer/codex-alignment.css'
@@ -19,6 +19,33 @@ document.documentElement.dataset.platform = 'macos'
 const traceListeners = new Set<(events: TraceEvent[]) => void>()
 const doneListeners = new Set<(event: { runId: string }) => void>()
 const rows: LlmPerformanceHistoryRow[] = []
+// The merged page opens on LLM performance; the ledger side only needs a ready, empty snapshot.
+const emptyAggregate = {
+  inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null,
+  costUsd: null, turns: 0, usageRows: 0, inputKnownRows: 0, outputKnownRows: 0, cacheReadKnownRows: 0,
+  cacheWriteKnownRows: 0, reasoningKnownRows: 0, tokenKnownRows: 0, costKnownRows: 0,
+  exactCostRows: 0, providerReportedCostRows: 0, estimatedCostRows: 0, inferredCostRows: 0
+}
+const days = Array.from({ length: 7 }, (_, index) => {
+  const date = new Date(Date.now() - (6 - index) * 86_400_000)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+})
+// Two Agents with a trivial ledger row so the shared Agent filter and cost tab have real options.
+const tiny = { ...emptyAggregate, inputTokens: 10, outputTokens: 2, turns: 1, usageRows: 1, inputKnownRows: 1, outputKnownRows: 1, tokenKnownRows: 1 }
+const emptyAnalytics = {
+  status: 'ready' as const, rangeDays: 7 as const, fromDay: days[0], toDay: days.at(-1)!, observedAt: Date.now(), days,
+  totals: { ...tiny, turns: 2 },
+  byDay: days.map((day, index) => ({ day, ...(index === days.length - 1 ? { ...tiny, turns: 2 } : emptyAggregate) })),
+  dailyByProvider: [],
+  dailyByAgent: days.map((day, index) => ({ day, agent: index === days.length - 1 ? 'antigravity' as const : 'pi' as const,
+    ...(index === days.length - 1 ? tiny : emptyAggregate) })),
+  byProvider: [],
+  byAgent: [{ agent: 'pi' as const, ...tiny }, { agent: 'antigravity' as const, ...tiny }],
+  byModel: [
+    { agent: 'pi' as const, provider: 'codex' as const, gateway: 'openai-codex', model: 'fixture-model', ...tiny },
+    { agent: 'antigravity' as const, provider: 'antigravity' as const, gateway: undefined, model: 'model-agy', ...tiny }
+  ]
+}
 // Seeded history: two models with measured speed (only fast-model has first-token evidence),
 // plus rounds that must never draw speed or wait.
 const historyRow = (runId: string, minutesAgo: number, model: string, speed: number | undefined, failed = false, firstTokenMs?: number): LlmPerformanceHistoryRow => ({
@@ -29,7 +56,7 @@ const historyRow = (runId: string, minutesAgo: number, model: string, speed: num
 })
 for (const [index, minutesAgo] of [30, 40, 50, 60, 70].entries()) rows.push(historyRow(`fast-${index}`, minutesAgo, 'fast-model', 60 + index, false, 1000 + index * 500))
 for (const [index, minutesAgo] of [35, 45, 55].entries()) rows.push(historyRow(`slow-${index}`, minutesAgo, 'slow-model', 20 + index))
-const agy = historyRow('agy', 38, '所选：gemini', undefined)
+const agy = historyRow('agy', 38, 'model-agy', undefined)
 rows.push(historyRow('failed-fast', 42, 'fast-model', 999, true, 99_000), historyRow('unmeasured', 44, 'unmeasured-model', undefined), {
   ...agy, providerId: 'antigravity', performance: { ...agy.performance, firstOutputWaitMs: 14000, outputTokens: 40 }
 })
@@ -67,6 +94,8 @@ const noopSubscribe = () => () => {}
 const agents = [{ id: 'claude', name: 'Claude Code', path: '/fixture/claude', bin: 'claude', health: { state: 'ready', transport: 'sdk' } }]
 Object.defineProperty(window, 'scry', { value: {
   setLegacyDiffPreviewDemand: async () => true,
+  usageAnalytics: async (rangeDays: 1 | 7 | 30 | 90) => ({ ...emptyAnalytics, rangeDays, fromDay: days[0], toDay: days.at(-1)! }),
+  usageCredits: async (rangeDays: 1 | 7 | 30 | 90) => ({ ...emptyAnalytics, rangeDays, fromDay: days[0], toDay: days.at(-1)! }),
   workspaceSelection: unavailableWorkspaceSelection,
   activeRun: async () => null, activeRuns: async () => [],
   onDataUpdated: subscribe(dataListeners),
@@ -135,6 +164,7 @@ for (const [id, action] of Object.entries({
   },
   'performance-empty': () => { registry.get('waiting')!.state.done = true },
   'performance-history-error': () => { failHistory = true },
+  'performance-refresh': () => { dataListeners.forEach(listener => listener({ runId: 'first', kind: 'turn_recorded' })) },
   'performance-summary-error': () => { failSummary = true }
 
 })) {

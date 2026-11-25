@@ -1,30 +1,12 @@
 // 用量口径：cache token 是否计入输入由 Provider 决定；缺字段的轮次不能被算成 0。
 import type { TraceEvent } from '@shared/trace'
+import { tokenCacheAccounting as classifyTokenCache, usageTokenTotal, type TokenCacheAccounting } from '@shared/token-accounting'
 
-export type TokenCacheAccounting = 'separate' | 'input_includes_cache'
+export type { TokenCacheAccounting }
+export { usageTokenTotal }
 
 export function tokenCacheAccounting(e: Pick<TraceEvent, 'providerId' | 'runtimeProvider' | 'billingProvider'> | undefined): TokenCacheAccounting {
-  if (e?.providerId === 'antigravity' || e?.runtimeProvider === 'antigravity_acp') return 'separate'
-  if (e?.providerId === 'opencode' || e?.runtimeProvider === 'opencode_server') return 'separate'
-  if (
-    e?.providerId === 'codex' ||
-    e?.runtimeProvider === 'codex_cli' ||
-    e?.billingProvider === 'codex' ||
-    e?.billingProvider === 'openai'
-  ) {
-    return 'input_includes_cache'
-  }
-  return 'separate'
-}
-
-export function usageTokenTotal(
-  input = 0,
-  output = 0,
-  cacheRead = 0,
-  cacheCreation = 0,
-  accounting: TokenCacheAccounting = 'separate'
-): number {
-  return input + output + (accounting === 'separate' ? cacheRead + cacheCreation : 0)
+  return classifyTokenCache(e)
 }
 
 export function resultTokenTotal(e: TraceEvent | undefined): number {

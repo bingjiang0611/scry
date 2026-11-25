@@ -20,57 +20,53 @@ async function exercise() {
     const observer = new MutationObserver(() => {
       if (predicate()) { clearTimeout(timer); observer.disconnect(); resolve() }
     })
-    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('DOM condition timed out')) }, 5000)
+    const timer = setTimeout(() => { observer.disconnect(); reject(new Error('DOM condition timed out: ' + document.body.innerText.slice(0, 800))) }, 5000)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true })
   })
-  await waitFor(() => document.querySelector('.usage-cost-card > strong')?.textContent === '$1.41')
-  check(document.querySelector('.usage-cost-card > strong').textContent === '$1.41', 'Qoder and official API equivalents missing from total')
-  const qoderRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'Qoder')
-  check(qoderRow.querySelector('.usage-provider-main > strong').textContent === '$0.15', 'Pi/native Qoder Credits not converted to USD')
-  check(document.querySelector('.usage-table-wrap').textContent.includes('claude-opus-5'), 'Managed custom-provider Claude usage missing')
-  const customRow = [...document.querySelectorAll('.usage-provider-row')].find((row) => row.querySelector('b').textContent === 'cc-switch')
-  check(customRow?.querySelector('.usage-provider-main > strong').textContent === '<$0.01', 'Missing official Claude API estimate')
-  // 没有价格证据的模型仍列出：金额为“—”，不隐藏在明细之外。
-  const unpricedRow = [...document.querySelectorAll('.usage-table-wrap tbody tr')].find((row) => row.textContent.includes('unpriced-model'))
-  check(unpricedRow && unpricedRow.children[1].textContent === '—', 'Unpriced model row lost its unknown-cost placeholder')
-  check(document.querySelector('.usage-table-wrap [title*="官方 API 标准价换算"]'), 'Estimate provenance is missing')
-  check(qoderRow.querySelector('strong').title.includes('15.41 Credits') && qoderRow.querySelector('strong').title.includes('已知下界'), 'Missing partial credit evidence')
-  check(!document.querySelector('.usage-overview').textContent.includes('Credits'), 'Removed Credits line is visible')
-  check(!document.querySelector('.usage-footnote'), 'Removed explanation entry is visible')
-  // 数值下方允许且只允许一行“已知下界”提示，其余说明仍留在 title 里。
-  const metricNotes = [...document.querySelectorAll('.usage-metrics small')]
-  check(document.querySelectorAll('.usage-metrics dt').length === 5
-    && metricNotes.every((node) => node.classList.contains('usage-metric-note') && node.textContent.includes('已知下界')), 'Metric hierarchy differs from approved design')
-  // 成本未知的 Provider 行保留，金额为“—”，不能写成 0 或凭空消失。
-  const providerAmounts = [...document.querySelectorAll('.usage-provider-main > strong')].map((node) => node.textContent)
-  check(providerAmounts.every((text) => text === '—' || text.startsWith('$') || text.startsWith('<')), 'Provider amount left its evidence form')
-  const groupButton = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
-  groupButton('明细维度', '日期').click()
-  await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('日期'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('$1.41'), 'Day breakdown lost API/Qoder equivalents')
-  // 日期明细里未知成本写“—”，不编造 0；已知成本仍保留金额。
-  const dayCosts = [...document.querySelectorAll('.usage-table-wrap tbody tr')].map((row) => row.children[1].textContent)
-  check(dayCosts.every((text) => text === '—' || text.startsWith('$') || text.startsWith('<')), 'Day breakdown fabricated a cost value')
-  groupButton('明细维度', '模型').click()
-  await waitFor(() => document.querySelector('.usage-table-wrap thead').textContent.includes('模型'))
-  check(document.querySelector('.usage-table-wrap').textContent.includes('$0.15'), 'Model breakdown lost Qoder USD equivalent')
-  groupButton('趋势指标', 'Token').click()
-  await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('Token'))
-  // 单日观测不再伪造连线，只留数据点；两种标记都算可见。
-  const customSeries = document.querySelector('.usage-chart-line.is-cc-switch, .usage-chart-point.is-cc-switch')
-  check(customSeries && getComputedStyle(customSeries).stroke !== 'none', 'Custom provider token series invisible')
-  groupButton('趋势指标', '成本').click()
-  await waitFor(() => document.querySelector('.usage-chart').getAttribute('aria-label').includes('成本'))
-  check(document.querySelector('.usage-chart .is-qoder'), 'Qoder USD equivalent missing from cost chart')
-  groupButton('分析时间范围', '30 天').click()
-  await waitFor(() => document.querySelector('#fixture-status').dataset.range === '30')
-  document.querySelector('[aria-label="刷新分析数据"]').click()
-  await waitFor(() => document.querySelector('#fixture-status').dataset.refreshes === '1')
-  for (const node of document.querySelectorAll('.usage-provider-main')) {
-    check(node.scrollWidth <= node.clientWidth + 1, 'Provider amount overflows')
+  const tab = (label) => [...document.querySelectorAll('.analytics-tabs [role="tab"]')].find((node) => node.textContent === label)
+  const group = (label, value) => [...document.querySelectorAll(`[aria-label="${label}"] button`)].find((button) => button.textContent === value)
+  const rowOf = (name) => [...document.querySelectorAll('.analytics-table.is-agents tbody tr')]
+    .find((row) => row.querySelector('.analytics-name')?.textContent === name)
+  await waitFor(() => document.querySelector('.analytics-page') != null)
+  check(!document.querySelector('.llm-perf-modal'), 'The removed performance modal is still reachable')
+  check(tab('LLM 性能')?.getAttribute('aria-selected') === 'true', 'Performance is not the default tab')
+  tab('成本与用量').click()
+  await waitFor(() => document.querySelector('.analytics-tile.is-hero .analytics-tile-value')?.textContent === '$1.41')
+  check(document.querySelector('.analytics-tile.is-hero .analytics-tile-value').textContent === '$1.41', 'Qoder and official API equivalents missing from total')
+  check(document.querySelector('.analytics-note.is-basis').textContent === '金额按 API 价格折算。', 'Cost basis sentence is missing')
+  const qoderRow = rowOf('Qoder')
+  check(qoderRow?.className.includes('is-agent'), 'Qoder is not an Agent row')
+  check(qoderRow.querySelector('.is-strong').textContent === '$0.15', 'Pi/native Qoder Credits not converted to USD: ' + qoderRow.textContent)
+  check(document.querySelector('.analytics-table.is-agents').textContent.includes('claude-opus-5'), 'Managed custom-provider Claude usage missing')
+  // 网关是模型行的副标题，不再单独成一个 Provider 行。
+  const customRow = [...document.querySelectorAll('.analytics-table.is-agents tbody tr')]
+    .find((row) => row.querySelector('.analytics-sub')?.textContent === 'cc-switch')
+  check(customRow?.className.includes('is-model'), 'Gateway is not a model subtitle')
+  check(customRow.querySelector('.is-strong').textContent === '<$0.01', 'Missing official Claude API estimate')
+  // 没有价格证据的模型仍列出：成本格留空并注明未定价，不写「—」也不写 $0.00。
+  const unpricedRow = [...document.querySelectorAll('.analytics-table.is-agents tbody tr')].find((row) => row.textContent.includes('unpriced-model'))
+  check(unpricedRow && unpricedRow.querySelectorAll('td')[2].textContent === '查不到这个模型的价格', 'Unpriced model row lost its blank cost cell: ' + (unpricedRow?.textContent ?? ''))
+  check(unpricedRow.textContent.includes('查不到这个模型的价格'), 'Unpriced model row lost its explanation')
+  check(document.querySelector('.analytics-table.is-agents [title*="官方 API 标准价换算"]'), 'Estimate provenance is missing')
+  check(qoderRow.querySelector('.is-strong').title.includes('15.41 Credits') && qoderRow.querySelector('.is-strong').title.includes('已知下界'), 'Missing partial credit evidence')
+  check(!document.querySelector('.analytics-page').textContent.includes('—'), 'A placeholder dash is still visible')
+  check(!document.querySelector('.analytics-page').textContent.includes('所选：'), 'The removed model selection label is still visible')
+  group('度量', 'Token').click()
+  await waitFor(() => document.querySelector('.analytics-chart svg')?.getAttribute('aria-label') === '每日 Token')
+  check([...document.querySelectorAll('.analytics-axis-unit')].some((node) => node.textContent === 'Token'), 'Token chart lost its axis unit')
+  group('度量', '成本').click()
+  await waitFor(() => document.querySelector('.analytics-chart svg')?.getAttribute('aria-label') === '每日成本')
+  group('时间范围', '90 天').click()
+  await waitFor(() => document.querySelector('#fixture-status').dataset.range === '90')
+  check(group('时间范围', '90 天').getAttribute('aria-pressed') === 'true', 'Range did not follow the click')
+  tab('LLM 性能').click()
+  await waitFor(() => tab('LLM 性能').getAttribute('aria-selected') === 'true')
+  check(tab('成本与用量').getAttribute('aria-selected') === 'false', 'Tabs are not mutually exclusive')
+  for (const node of document.querySelectorAll('.analytics-row .is-strong, .analytics-tile-value')) {
+    check(node.scrollWidth <= node.clientWidth + 1, 'Amount overflows its cell')
   }
-  return { sqliteAndArchiveProjection: true, piQoderMetering: true, customClaude: true, customSeriesVisible: true, replaySupersedesRepair: true,
-    usdEquivalent: true, dayAndModel: true, chartSwitch: true, refresh: true, range: true }
+  return { sqliteAndArchiveProjection: true, piQoderMetering: true, customClaude: true, gatewaySubtitle: true,
+    usdEquivalent: true, agentAndModel: true, chartSwitch: true, tabs: true, range: true, noDashes: true }
 }
 
 try {
@@ -188,10 +184,17 @@ try {
       if (!recordTurn({ runId: 'measured-zero', sessionId, cwd, userText: 'zero fixture', providerId: 'claude',
         runtimeProvider: 'claude_sdk', billingProvider: 'anthropic',
         items: [{ id: 'zero-result', runId: 'measured-zero', kind: 'harness', stage: 'result', ts: zeroDate.toISOString(), tokensIn: 0, tokensOut: 0, costUsd: 0 }] })) throw new Error('Zero fixture write failed')
+      // 三天前只放一轮查不到价格的模型：那天的 Agent 值必须是「无价格」，不能写成 0。
+      const unpricedDate = new Date()
+      unpricedDate.setDate(unpricedDate.getDate() - 3)
+      if (!recordTurn({ runId: 'unpriced-day', sessionId: piSession, cwd, userText: 'unpriced fixture', providerId: 'pi', runtimeProvider: 'pi_rpc',
+        items: [{ id: 'unpriced-day-result', runId: 'unpriced-day', kind: 'harness', stage: 'result', ts: unpricedDate.toISOString(),
+          runtimeProvider: 'pi_rpc', modelUsage: [{ model: 'unpriced-model', upstreamProvider: 'cc-switch', inputTokens: 100, outputTokens: 20 }] }] })) throw new Error('Unpriced fixture write failed')
       analytics = await usageAnalyticsWithCreditsQuery(7)
       const win = new BrowserWindow({ enableLargerThanScreen: true, width: 1100, height: 850, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))
       win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      win.webContents.on('console-message', (event) => { if (event.level === 'error') console.error('Renderer:', event.message) })
       await win.loadFile(join(root, 'index.html'))
       await win.webContents.executeJavaScript('window.setCreditsFixture(' + JSON.stringify(analytics) + ')')
       const result = await win.webContents.executeJavaScript(${JSON.stringify(`(${exercise.toString()})()`)})

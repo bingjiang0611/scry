@@ -23,7 +23,6 @@ export interface AppSidebarActionsContext {
   removeProject: (project: ProjectMeta) => Promise<void>
   undoArchive: () => Promise<void>
   changeView: (view: AppView) => boolean
-  openLlmPerformance: () => void
   openSkills: () => void
   openMcp: () => void
   openMetaPrompts: () => void
@@ -33,7 +32,7 @@ export interface AppSidebarActionsContext {
 export function useAppSidebarActions(context: AppSidebarActionsContext) {
   const { startNewConversation, openRemoteLocation, remoteQueueStore, view, remoteTarget, remoteAdoptedSession, pickSession,
     togglePinSession, archiveSession, renameSession, newConversationInProject, pickConversation, toggleProjectPin, renameProject,
-    removeProject, undoArchive, changeView, openLlmPerformance, openSkills, openMcp, openMetaPrompts, setSettingsTab } = context
+    removeProject, undoArchive, changeView, openSkills, openMcp, openMetaPrompts, setSettingsTab } = context
 
   const sidebarActions = {
     onNewChat: useEventCallback(startNewConversation),
@@ -62,7 +61,6 @@ export function useAppSidebarActions(context: AppSidebarActionsContext) {
     onUndoArchive: useEventCallback(undoArchive),
     onAnalytics: useEventCallback(() => changeView('analytics')),
     onMachines: useEventCallback(() => changeView('machines')),
-    onLlmPerformance: useEventCallback(openLlmPerformance),
     onSkills: useEventCallback(openSkills),
     onMcp: useEventCallback(openMcp),
     onMetaPrompts: useEventCallback(openMetaPrompts),

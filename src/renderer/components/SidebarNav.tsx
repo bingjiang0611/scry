@@ -5,7 +5,6 @@ export interface SidebarNavProps {
   analyticsActive?: boolean
   onMachines?: () => void
   machinesActive?: boolean
-  onLlmPerformance?: () => void
   onSkills?: () => void
   onMcp?: () => void
   onMetaPrompts?: () => void
@@ -15,9 +14,9 @@ export interface SidebarNavProps {
 // 侧栏顶部的顶层入口。只在宿主订阅了对应动作时出现，当前页用 aria-current 标出。
 export function SidebarNav({
   onAnalytics, analyticsActive = false, onMachines, machinesActive = false,
-  onLlmPerformance, onSkills, onMcp, onMetaPrompts, metaPromptsActive = false
+  onSkills, onMcp, onMetaPrompts, metaPromptsActive = false
 }: SidebarNavProps): JSX.Element | null {
-  if (!(onAnalytics || onLlmPerformance || onSkills || onMcp || onMetaPrompts || onMachines)) return null
+  if (!(onAnalytics || onSkills || onMcp || onMetaPrompts || onMachines)) return null
   return (
     <nav className="sb-nav" aria-label="主要视图">
       {onAnalytics && (
@@ -30,11 +29,6 @@ export function SidebarNav({
         <button type="button" className={`sb-navitem ${machinesActive ? 'active' : ''}`}
           aria-current={machinesActive ? 'page' : undefined} onClick={onMachines}>
           <Icon name="server" /> 机器
-        </button>
-      )}
-      {onLlmPerformance && (
-        <button type="button" className="sb-navitem" onClick={onLlmPerformance} title="LLM 性能" aria-haspopup="dialog">
-          <Icon name="chart" /> LLM 性能
         </button>
       )}
       {onSkills && (

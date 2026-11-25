@@ -50,7 +50,7 @@ export async function exerciseStructure(contents) {
       runId: turns[0]?.getAttribute('data-run-id'),
       turnText: turns[0]?.textContent ?? '',
       text: transcript?.textContent ?? '',
-      analytics: !!document.querySelector('.usage-page'),
+      analytics: !!document.querySelector('.analytics-page'),
       locked: document.querySelector('button.send')?.disabled === true && [...document.querySelectorAll('.turn-branch-btn')].every(node => node.disabled)
     };
   }), { once: true })`)
@@ -80,7 +80,7 @@ export async function exerciseStructure(contents) {
   const entryCount = `window.structureEntries.filter(animation => animation.id === 'scry-structure').length`
   await control('update-a')
   await click(`document.querySelector('.sb-nav .sb-navitem')`)
-  await wait(`document.querySelector('.usage-page') && ${entries}.length === 0`)
+  await wait(`document.querySelector('.analytics-page') && ${entries}.length === 0`)
   await read(`window.structureEntries = []`)
   await click(row('cache-a'))
   await pending('cache-a')
@@ -121,7 +121,7 @@ export async function exerciseStructure(contents) {
     await wait(`${entry}?.effect.getTiming().duration === 150`)
     check(await read(`${entry}.effect.getKeyframes().every(frame => (!frame.transform || frame.transform === 'none') && frame.width == null && frame.height == null)`), 'Reduced entry is not opacity-only')
     await wait(`${entries}.length === 0`)
-    check(await read(`document.querySelector('.usage-page') != null && window.nativeCaptureCalls === 0`), 'Latest navigation failed or used native capture')
+    check(await read(`document.querySelector('.analytics-page') != null && window.nativeCaptureCalls === 0`), 'Latest navigation failed or used native capture')
   } finally {
     await contents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [
       { name: 'prefers-reduced-motion', value: 'no-preference' }, { name: 'forced-colors', value: 'none' }

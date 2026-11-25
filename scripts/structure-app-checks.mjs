@@ -57,10 +57,18 @@ export async function exerciseStructureApp(cdp, evaluate, options = {}) {
     await waitForNativeModalEntrance(cdp, evaluate, '.settings-modal')
     await capture(`${theme}-settings`)
     closeTimes.push({ theme, modal: 'settings', ...await verifyNativeModalExit(cdp, evaluate, '.settings-modal', '.sb-settings') })
+    // 分析是页面而不是弹窗：走视图切换，检查页面过渡和侧栏入口状态。
+    await click('.sb-navitem:nth-of-type(1)')
+    await wait(`document.querySelector('.analytics-page') != null`)
+    check(await evaluate(`document.querySelector('.sb-navitem:nth-of-type(1)').getAttribute('aria-current') === 'page'`), 'Analytics page is not marked current')
+    check(await evaluate(`document.querySelector('.llm-perf-modal, .sb-navitem[title="LLM 性能"]') == null`), 'The removed performance modal is still reachable')
+    check(await evaluate(`document.querySelectorAll('.analytics-tabs [role="tab"]').length === 2 && document.querySelector('.analytics-tabs [role="tab"]').getAttribute('aria-selected') === 'true'`), 'Analytics tabs are missing')
+    await capture(`${theme}-analytics`)
+    await click('.sb-navitem[title="会话"]')
+    await wait(`document.querySelector('.analytics-page') == null`)
     for (const [title, selector, name] of [
       ['Skills', '.capabilities-modal--skills', 'skills'],
-      ['MCP', '.capabilities-modal--mcp', 'mcp'],
-      ['LLM 性能', '.llm-perf-modal', 'llm-performance']
+      ['MCP', '.capabilities-modal--mcp', 'mcp']
     ]) {
       const trigger = `.sb-navitem[title="${title}"]`
       await click(trigger)

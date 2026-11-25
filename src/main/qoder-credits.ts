@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { readPiCreditRequests } from './pi-credit-reader'
 import { PI_CREDIT_COPY } from '../shared/constants/pi-credit-copy'
 import type { QoderCreditEvidence, UsageAnalytics, UsageAnalyticsAggregate } from '../shared/trace'
+import type { UsageAnalyticsDailyAgentRow, UsageAnalyticsDailyProviderRow } from '../shared/trace-usage'
 import { QODER_USD_PER_CREDIT } from '../shared/qoder-pricing'
 import { dedupeCreditRequests, isCreditUsageEvidence, type CreditRequest } from '../shared/credit-usage'
 import { qoderCreditRequests, type CreditTurn } from '../shared/qoder-credit-requests'
@@ -219,6 +220,13 @@ function aggregateCredits(rows: QoderCreditRow[]): QoderCreditEvidence | undefin
   return result
 }
 
+const emptyAggregate = (): UsageAnalyticsAggregate => ({
+  inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null,
+  costUsd: null, turns: 0, usageRows: 0, inputKnownRows: 0, outputKnownRows: 0, cacheReadKnownRows: 0,
+  cacheWriteKnownRows: 0, reasoningKnownRows: 0, tokenKnownRows: 0, costKnownRows: 0,
+  exactCostRows: 0, providerReportedCostRows: 0, estimatedCostRows: 0, inferredCostRows: 0
+})
+
 export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow[]): UsageAnalytics {
   // A refresh starts from the bare SQLite snapshot. Do not project an already
   // enriched snapshot twice, including mixed canonical-USD/Credits sessions.
@@ -250,16 +258,37 @@ export function withQoderCredits(analytics: UsageAnalytics, rows: QoderCreditRow
   }
   const byProvider = analytics.byProvider.map((row) => row.provider === 'qoder' ? enrich(row, evidence) : row)
   const projectedQoder = byProvider.find((row) => row.provider === 'qoder')
+  const creditsOn = (day: string) => aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === day))
+  // Q12：只有 Credits、没有账本记录的日期也要补一个点，否则曲线会漏掉这天。
+  const qoderDay = (day: string): UsageAnalyticsDailyProviderRow | undefined => {
+    const existing = analytics.dailyByProvider.find((row) => row.provider === 'qoder' && row.day === day)
+    if (existing) return enrich(existing, creditsOn(day))
+    const credits = creditsOn(day)
+    if (credits?.credits == null) return undefined
+    const amount = aggregateCredits(convertible.filter((item) => dayOf(item.tsStart) === day))?.credits
+    if (amount == null) return undefined
+    return enrich({ day, provider: 'qoder', ...emptyAggregate() }, credits)
+  }
+  const dailyByProvider = [...analytics.dailyByProvider.filter((row) => row.provider !== 'qoder'),
+    ...analytics.days.flatMap((day) => qoderDay(day) ?? [])]
+    .sort((a, b) => a.day.localeCompare(b.day) || a.provider.localeCompare(b.provider))
+  const dailyByAgent = [...analytics.dailyByAgent.filter((row) => row.agent !== 'qoder'),
+    ...analytics.days.flatMap((day): UsageAnalyticsDailyAgentRow[] => {
+      const row = dailyByProvider.find((entry) => entry.provider === 'qoder' && entry.day === day)
+      return row ? [{ ...row, agent: 'qoder' }] : []
+    })]
+    .sort((a, b) => a.day.localeCompare(b.day) || a.agent.localeCompare(b.agent))
   return {
     ...analytics,
     totals: enrich(analytics.totals, evidence),
     byProvider,
+    byAgent: analytics.byAgent.map((row) => row.agent === 'qoder' ? enrich(row, evidence) : row),
     // Credits are attributed to a Provider/turn, not to an auto-routed model.
     byModel: convert && evidence?.credits != null && projectedQoder
       ? [...analytics.byModel.filter((row) => row.provider !== 'qoder'), projectedQoder]
       : analytics.byModel,
-    byDay: analytics.byDay.map((row) => enrich(row, aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === row.day)))),
-    dailyByProvider: analytics.dailyByProvider.map((row) => row.provider === 'qoder'
-      ? enrich(row, aggregateCredits(scoped.filter((item) => dayOf(item.tsStart) === row.day))) : row)
+    byDay: analytics.byDay.map((row) => enrich(row, creditsOn(row.day))),
+    dailyByProvider,
+    dailyByAgent
   }
 }
