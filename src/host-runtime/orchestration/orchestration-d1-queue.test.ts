@@ -150,3 +150,25 @@ it('D1: a queued run is not voided by the pending TTL', () => {
     rmSync(userData, { recursive: true, force: true })
   }
 })
+
+it('D1: two waiting entries do not block each other — the head dispatches, the tail keeps waiting', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'scry-d1-two-queued-'))
+  const sink = EventSink.open({ userDataDir: dir, checkpointIntervalMs: 0, authorizedActors: [PEER_A] })
+  try {
+    sink.execute(submit({ commandId: 'c1', runId: 'run-head', claimMode: 'queued', at: 1_700_000_000_000 }))
+    sink.execute(submit({ commandId: 'c2', runId: 'run-tail', claimMode: 'queued', at: 1_700_000_000_001 }))
+    // Nothing is running yet: waiting behind another *waiting* entry is not a reason to defer, or the
+    // session can never start anything. Order is kept by the outbox's own same-session FIFO.
+    expect(sessionQueueBlocksDispatch(sink, 'run-head')).toBe(false)
+
+    sink.execute(effect('c-dispatch', 'run-head', 'dispatched', 1_700_000_000_010))
+    // Now the head is live, so the tail must wait for it.
+    expect(sink.getRun('run-head')?.lifecycle).toBe('dispatched')
+    expect(sessionQueueBlocksDispatch(sink, 'run-tail')).toBe(true)
+
+    sink.execute(effect('c-settle', 'run-head', 'settled', 1_700_000_000_100))
+    expect(sessionQueueBlocksDispatch(sink, 'run-tail')).toBe(false)
+  } finally {
+    sink.close()
+  }
+})

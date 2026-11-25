@@ -15,7 +15,9 @@ import type { ProviderAdapter, ProviderSessionCapabilities } from './types'
  * reported as steered.
  */
 export const PROVIDER_SESSION_CAPABILITIES: Record<string, ProviderSessionCapabilities> = {
-  claude: { persistentProcess: true, nativeSteer: false, onlineModelSwitch: true, permissionModeInLaunchFlags: false },
+  // No Claude session is kept: each turn starts a CLI, so there is nothing to switch online either.
+  // (C1 的 Claude 常驻会话按用户决定延后；表里说什么，运行就得是什么。)
+  claude: { persistentProcess: false, nativeSteer: false, onlineModelSwitch: false, permissionModeInLaunchFlags: false },
   qoder: { persistentProcess: true, nativeSteer: true, onlineModelSwitch: true, permissionModeInLaunchFlags: false },
   codex: { persistentProcess: true, nativeSteer: true, onlineModelSwitch: false, permissionModeInLaunchFlags: false },
   opencode: { persistentProcess: true, nativeSteer: false, onlineModelSwitch: false, permissionModeInLaunchFlags: false },

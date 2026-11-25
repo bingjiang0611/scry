@@ -113,8 +113,11 @@ export function recoverOrchestrationOnStartup(
       if (row.state !== 'pending' && row.state !== 'running') continue
       const spec = findEffectPolicy(row.kind)
       if (!spec) {
-        // A4: unknown kind must not block startup. Park the row as failed with its kind recorded.
+        // A4: unknown kind must not block startup. Park the row as failed with its kind recorded — and
+        // end the run it belonged to, because a non-terminal run keeps the whole session busy forever.
         failUnknown.run(now, `unregistered_effect_kind:${row.kind}`, row.effectId)
+        const orphan = row.runId ? sink.getRun(row.runId) : undefined
+        if (orphan && !TERMINAL_RUN_LIFECYCLES.has(orphan.lifecycle)) cancelRun(row.runId!, 'unregistered_effect_kind')
         summary.failedUnknownEffects += 1
         continue
       }

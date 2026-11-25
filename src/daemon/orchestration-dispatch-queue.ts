@@ -15,6 +15,9 @@ export function sessionQueueBlocksDispatch(sink: EventSink, runId: string): bool
       `SELECT 1 FROM orch_p_run
        WHERE session_key = ? AND run_id <> ?
          AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}
+         -- A waiting entry is not a live run: counting it would make two queued entries block each
+         -- other forever, and nobody could ever dispatch. Their order is the outbox's same-session FIFO.
+         AND lifecycle <> 'queued'
        LIMIT 1`
     )
     .get(run.sessionKey, runId)

@@ -38,4 +38,11 @@ it('C2: native steer is declared only where a run really admits mid-turn input',
   // groups must change its run, not just this table.
   expect(Object.fromEntries(Object.entries(PROVIDER_SESSION_CAPABILITIES).map(([id, value]) => [id, value.nativeSteer])))
     .toEqual({ claude: false, qoder: true, codex: true, opencode: false, pi: true, antigravity: false })
+  // A kept process is a promise about a session nobody keeps: Claude turns each start a CLI until C1's
+  // Claude session exists, so it says false. An online model switch is a separate promise — Codex keeps a
+  // process but has to resume a thread for a new model, and Pi keeps one without switching in place.
+  expect(Object.fromEntries(Object.entries(PROVIDER_SESSION_CAPABILITIES).map(([id, value]) => [id, value.persistentProcess])))
+    .toEqual({ claude: false, qoder: true, codex: true, opencode: true, pi: true, antigravity: true })
+  expect(Object.fromEntries(Object.entries(PROVIDER_SESSION_CAPABILITIES).map(([id, value]) => [id, value.onlineModelSwitch])))
+    .toEqual({ claude: false, qoder: true, codex: false, opencode: false, pi: false, antigravity: true })
 })
