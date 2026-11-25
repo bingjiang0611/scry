@@ -52,6 +52,24 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   // 没有首 token 计时的轮次只能按整段时长算（100 ÷ 5 秒 = 20.0），不能凭空扣除等待。
   const completed = await read(`(() => { const node = Array.from(${rows}).find(row => row.textContent.includes('fixture-model')); return { speed: node.querySelectorAll('td.is-num.is-strong')[0].textContent } })()`)
   if (!(Number(completed.speed) >= 20)) throw new Error('Completed round lost its measured speed: ' + completed.speed)
+  // 趋势图每轮一个点，但仍要能用键盘逐个查看，Esc 收起读数（沿用旧图表的键盘断言）。
+  const trend = await read(`(() => { const svg = document.querySelector('.analytics-trend svg'); if (!svg) return { points: 0 }; svg.focus({ preventScroll: true }); return { points: svg.querySelectorAll('.analytics-point').length, focused: document.activeElement === svg } })()`)
+  if (trend.points < 2 || !trend.focused) throw new Error('Trend chart cannot be focused: ' + JSON.stringify(trend))
+  const tipText = () => read(`document.querySelector('.analytics-tip')?.textContent ?? ''`)
+  const press = async keyCode => {
+    contents.sendInputEvent({ type: 'keyDown', keyCode })
+    contents.sendInputEvent({ type: 'keyUp', keyCode })
+    await read('new Promise(resolve => requestAnimationFrame(resolve))')
+  }
+  const firstTip = await tipText()
+  if (!/\d/.test(firstTip)) throw new Error('Trend keyboard readout missing: ' + firstTip)
+  await press('End')
+  const lastTip = await tipText()
+  if (lastTip === firstTip || !/\d/.test(lastTip)) throw new Error('Trend End key lost the last round: ' + lastTip)
+  await press('Home')
+  if (await tipText() !== firstTip) throw new Error('Trend Home key did not return to the first round')
+  await press('Escape')
+  if (await tipText() !== '') throw new Error('Trend Escape left the readout open')
   // 停止的一轮替换暂计样本：没有成功轮次的模型不成行。
   await click('#performance-stop')
   await wait(`${liveRow} == null`)
@@ -99,5 +117,5 @@ export async function exerciseLlmPerformanceFinish(contents, win, screenshot, na
   await click('.sb-navitem:nth-of-type(2)')
   await wait(`document.querySelector('.analytics-page') == null`)
   if (await read(`${fixtureState}.dataListeners !== ${baselineListeners}`)) throw new Error('Leaving the page retained a subscription')
-  return { assertions: ['merged page with performance as the default tab', 'no data rows or cells without evidence', 'real medians and blank missing cells', 'failed rounds never draw performance', 'per-round trend with metric switch', 'provisional samples retained and pooled per Agent', 'output speed excludes the first-token wait', 'stopped rounds leave no row', 'data errors keep readable copy', 'visibility subscription and range/agent retention', 'tabs keep the Agent filter and only reuse a shared range', 'dark/light AA contrast and narrow layout'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)' }
+  return { assertions: ['merged page with performance as the default tab', 'no data rows or cells without evidence', 'real medians and blank missing cells', 'failed rounds never draw performance', 'per-round trend with metric switch and keyboard readout', 'provisional samples retained and pooled per Agent', 'output speed excludes the first-token wait', 'stopped rounds leave no row', 'data errors keep readable copy', 'visibility subscription and range/agent retention', 'tabs keep the Agent filter and only reuse a shared range', 'dark/light AA contrast and narrow layout'], nativeVisibility: nativeVisibility ? 'passed' : 'not-run (visibility event simulated)' }
 }

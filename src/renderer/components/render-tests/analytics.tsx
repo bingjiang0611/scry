@@ -37,7 +37,9 @@ describe('AnalyticsView 渲染：成本与用量', () => {
 
   it('展示标题、两个标签、共用的 Agent 与时间范围筛选', () => {
     const html = render()
-    expect(html).toContain('<h1 class="analytics-title">分析</h1>')
+    expect(html).toContain('<h1 class="analytics-title" id="analytics-title">分析</h1>')
+    // 页面用这个标题当可访问名，冒烟也按它断言。
+    expect(html).toContain('aria-labelledby="analytics-title"')
     expect(html).toContain('role="tablist" aria-label="分析视图"')
     expect(html).toContain('>LLM 性能</button>')
     expect(html).toContain('<button type="button" role="tab" aria-selected="true" tabindex="0">成本与用量</button>')

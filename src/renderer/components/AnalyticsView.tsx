@@ -49,10 +49,10 @@ export function AnalyticsView({ analytics, rangeDays, loading, creditsPending = 
   const options = agentOptions(analytics, AGENTS)
   const stale = analytics != null && analytics.rangeDays !== rangeDays
   const targetRange = tab === 'performance' ? perfCopy.ranges[hours] : copy.costRanges[rangeDays]
-  return <main className="analytics-page" aria-busy={loading}>
+  return <main className="analytics-page" aria-busy={loading} aria-labelledby="analytics-title">
     <div className="analytics-shell">
       <header className="analytics-header">
-        <h1 className="analytics-title">{copy.title}</h1>
+        <h1 className="analytics-title" id="analytics-title">{copy.title}</h1>
         <Tabs className="analytics-tabs" label={copy.tabsLabel} value={tab} onChange={setTab}
           items={[{ value: 'performance', label: copy.tabs.performance }, { value: 'cost', label: copy.tabs.cost }]} />
         <div className="analytics-filters">

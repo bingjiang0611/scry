@@ -49,12 +49,16 @@ export async function exerciseProductionPerformance(smokeContext) {
         if (view && view.querySelector('.analytics-tabs [aria-selected="true"]')?.textContent === 'LLM 性能'
           && view.querySelector('#analytics-comparison h2')?.textContent === '模型对比'
           && view.querySelector('.analytics-empty')?.textContent.includes('这段时间没有在 Scry 里运行'))
-          return { defaultTab: 'LLM 性能', labelled: !!view.getAttribute('class') }
+          // 页面要有可访问名：aria-labelledby 必须指向页面里真实的标题元素。
+          const named = view.getAttribute('aria-labelledby')
+          const title = named ? document.getElementById(named) : null
+          if (!title || !title.textContent.trim()) throw new Error('Analytics page lost its accessible name')
+          return { defaultTab: 'LLM 性能', labelled: title.textContent.trim() }
         await new Promise(requestAnimationFrame)
       }
       throw new Error('Production analytics page did not load real IPC history: ' + (document.querySelector('.analytics-page')?.textContent ?? document.body.innerText).slice(0, 600))
     })()`)
-    assert.deepEqual(page, { defaultTab: 'LLM 性能', labelled: true })
+    assert.deepEqual(page, { defaultTab: 'LLM 性能', labelled: '分析' })
     const terminal = await evaluate(`(async () => {
       for (const runId of ${JSON.stringify(measurement.runIds)}) await window.scry.stop(runId)
       const deadline = Date.now() + 10_000

@@ -184,6 +184,12 @@ try {
       if (!recordTurn({ runId: 'measured-zero', sessionId, cwd, userText: 'zero fixture', providerId: 'claude',
         runtimeProvider: 'claude_sdk', billingProvider: 'anthropic',
         items: [{ id: 'zero-result', runId: 'measured-zero', kind: 'harness', stage: 'result', ts: zeroDate.toISOString(), tokensIn: 0, tokensOut: 0, costUsd: 0 }] })) throw new Error('Zero fixture write failed')
+      // 三天前只放一轮查不到价格的模型：那天的 Agent 值必须是「无价格」，不能写成 0。
+      const unpricedDate = new Date()
+      unpricedDate.setDate(unpricedDate.getDate() - 3)
+      if (!recordTurn({ runId: 'unpriced-day', sessionId: piSession, cwd, userText: 'unpriced fixture', providerId: 'pi', runtimeProvider: 'pi_rpc',
+        items: [{ id: 'unpriced-day-result', runId: 'unpriced-day', kind: 'harness', stage: 'result', ts: unpricedDate.toISOString(),
+          runtimeProvider: 'pi_rpc', modelUsage: [{ model: 'unpriced-model', upstreamProvider: 'cc-switch', inputTokens: 100, outputTokens: 20 }] }] })) throw new Error('Unpriced fixture write failed')
       analytics = await usageAnalyticsWithCreditsQuery(7)
       const win = new BrowserWindow({ enableLargerThanScreen: true, width: 1100, height: 850, show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
       win.webContents.session.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !details.url.startsWith('file:') }))

@@ -70,7 +70,18 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
   await hoverDay(data.days.length - 3, data.days.length)
   let detail = await readout()
   check(detail?.text.startsWith(day(data.days.at(-3))), 'Pointer hover did not select the hovered day')
-  check(/：/.test(detail.text) && /(\$|无价格)/.test(detail.text), 'Readout lost its values')
+  check(/：/.test(detail.text), 'Readout lost its values')
+  // 测到的 0 与拿不到价格是两回事：没有活动的日子画 0，全是未定价轮次的日子写「无价格」。
+  const idle = data.days.length - 2
+  await hoverDay(idle, data.days.length)
+  const idleText = (await readout()).text
+  check(/Pi \$0(\.00)?/.test(idleText), 'An idle day stopped plotting 0: ' + idleText)
+  const unpriced = data.days.length - 4
+  await hoverDay(unpriced, data.days.length)
+  const unpricedText = (await readout()).text
+  check(/Pi 无价格/.test(unpricedText), 'An unpriced-only day was written as a number: ' + unpricedText)
+  await hoverDay(data.days.length - 3, data.days.length)
+  detail = await readout()
   check(detail.contained, 'Readout overflows the chart')
   await key('Right')
   detail = await readout()
