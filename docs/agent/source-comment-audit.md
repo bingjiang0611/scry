@@ -1,6 +1,6 @@
 # Source-comment audit coverage
 
-**Status: in progress.** [PR #143](https://github.com/bingjiang0611/scry/pull/143) is the cleanup branch. The goal is a disposition for each first-party source comment, not a zero-comment repository. The Git ratchet only covers `src/cli/`, `src/shared/`, and `src/core/turn-recorder/`.
+**Status: source-comment review complete for the pinned scope; separate validation remains.** [PR #143](https://github.com/bingjiang0611/scry/pull/143) is the cleanup branch. The goal is a disposition for each first-party source comment, not a zero-comment repository. The Git ratchet only covers `src/cli/`, `src/shared/`, and `src/core/turn-recorder/`.
 
 ## Verified slices
 
@@ -189,4 +189,6 @@ The fixture-byte pass restored comments inside six directly serialized smoke fun
 
 The 29-path shell/config comparison includes 27 first-party paths and two documentation-tree `.gitignore` files. All match `c6c615be` by path, mode and blob. `scripts/setup-scry-workspace.test.sh` has no prose comments: the first shebang belongs to the test and the quoted one belongs to the generated stub. Both remain intact; `sh -n` passed. The other two ignore files do not count as first-party source.
 
-Finish by reconciling the remaining historical coverage against the current tree and grouping separate validation work. Group related findings so that a single rationale or evidence gap gets one ADR or issue, not one per comment. Track behavior fixes outside this PR: [#194](https://github.com/bingjiang0611/scry/issues/194) for Recorder suspension evidence, [#195](https://github.com/bingjiang0611/scry/issues/195) for the cancellation oracle, and [#197](https://github.com/bingjiang0611/scry/issues/197) for overlapping metrics sampling. Mark a slice complete only after its tokens have a contextual disposition, and refresh the slice if upstream changes it.
+The [current-tree reconciliation](source-comment-audit-a45e9540.md) covers 2,718 first-party JS/TS paths at `a45e9540` and the explicit non-JS/TS cohorts. The remaining context checks resulted in three source-comment corrections; no assertion or runtime change. Relative to `e3355f86`, `src/` has 1,126 changed files, 6,439 fewer lexical JS/TS comment tokens, and 8,772 fewer total lines. These are realized changes to `src/`, not an estimate of further removable prose or an all-language count.
+
+Group separate validation work by evidence contract, not per comment. Track behavior fixes outside this PR: [#194](https://github.com/bingjiang0611/scry/issues/194) for Recorder suspension evidence, [#195](https://github.com/bingjiang0611/scry/issues/195) for the cancellation oracle, and [#197](https://github.com/bingjiang0611/scry/issues/197) for overlapping metrics sampling. Refresh the affected slices if upstream changes them. CI readiness is a separate decision and must be checked against the exact PR head.

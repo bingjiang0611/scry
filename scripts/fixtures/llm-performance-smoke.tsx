@@ -45,8 +45,8 @@ const emptyAnalytics = {
     { agent: 'antigravity' as const, provider: 'antigravity' as const, gateway: undefined, model: 'model-agy', ...tiny }
   ]
 }
-// Seeded history: two models with measured speed (only fast-model has first-token evidence),
-// plus rounds that must never draw speed or wait.
+// Synthetic history supplies speed for two models and first-token evidence for fast-model.
+// Failed and unmeasured rows exercise suppression of metric values.
 const historyRow = (runId: string, minutesAgo: number, model: string, speed: number | undefined, failed = false, firstTokenMs?: number): LlmPerformanceHistoryRow => ({
   runId, ts: new Date(Date.now() - minutesAgo * 60_000).toISOString(), providerId: 'pi', model, networkLabel: '', failed,
   performance: { state: 'complete', observedAt: new Date().toISOString(), networkLabel: '', streamCharacters: 0, recentOutput: [], windowMs: 3000,

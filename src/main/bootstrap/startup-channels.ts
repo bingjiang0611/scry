@@ -81,9 +81,9 @@ export function providerDetectionChannelHandlers(deps: {
   } satisfies ChannelHandlers
 }
 
-/** Run controls for one Provider context, queued with that Provider's auth operations. */
 import { rememberCatalogPrices } from '../db-model-prices'
 
+/** Run controls for one Provider context, queued with that Provider's auth operations. */
 export function providerControlChannelHandlers(deps: {
   providerRegistry: Pick<ProviderRegistry, 'runControls'>
   withProviderOperation: <T>(providerId: ProviderContext['providerId'], operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
