@@ -108,15 +108,15 @@ describe('LLM comparison rounds', () => {
     expect(JSON.stringify(rounds)).not.toContain('未知模型')
   })
 
-  it('keeps provisional local waiting with unknown model, but persisted failure wins', () => {
+  it('only shows provisional rounds once a model is observed, and persisted failure wins', () => {
     const sessions = summarizeRunningLlmSessions([
       { ...run('1000', { firstOutputWaitMs: 900 }), providerId: 'antigravity' },
       run('missing', { model: 'm' }),
       run('terminal', { state: 'complete', model: 'm', apiTokensPerSecond: 60, firstTokenMs: 900 }),
       run('call', { model: 'm', apiTokensPerSecond: 40, firstTokenMs: 1200 })
     ]).sessions
+    // 还没有观测到模型的一轮没有行可归：表里不能出现只写 Agent 名的「模型」行（Q1/Q7）。
     expect(llmComparisonRounds([], sessions)).toEqual([
-      { ts: 0, providerId: 'antigravity', state: 'running', metrics: { firstOutput: .9 } },
       { ts: 0, model: 'm', state: 'running', metrics: { speed: 40, firstToken: 1.2 } }
     ])
     expect(llmComparisonRounds([row(1000, { providerId: 'antigravity', failed: true })], sessions)).toEqual([

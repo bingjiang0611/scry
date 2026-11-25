@@ -67,9 +67,9 @@ export function AnalyticsPerformanceTab({ analytics, hours, agent, onShowRange }
       title={data.history ? perfCopy.previousHistory : perfCopy.historyError}
       actions={[{ label: perfCopy.readAgain, icon: 'refresh', busy: data.historyRetrying, onClick: data.retryHistory }]} />}
 
-    <section className="analytics-card" aria-labelledby="analytics-comparison">
+    <section className="analytics-card" id="analytics-comparison" aria-labelledby="analytics-comparison-heading">
       <div className="analytics-card-head">
-        <h2 id="analytics-comparison">{perfCopy.comparison}</h2>
+        <h2 id="analytics-comparison-heading">{perfCopy.comparison}</h2>
         <span className="analytics-card-note">{perfCopy.comparisonNote}</span>
       </div>
       {loading && <div className="analytics-loading" aria-busy="true"><DelayedSkeletonRows loading rows={4} meta rowHeight={52} label={perfCopy.reading} /></div>}

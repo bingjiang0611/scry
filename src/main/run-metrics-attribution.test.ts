@@ -57,13 +57,19 @@ describe('LLM 性能记录的模型归属', () => {
     expect(rows).toMatchObject([{ model: 'model-observed', failed: true }])
   })
 
-  it('失败且没有观测到模型时不记录、不成行', async () => {
-    const rows = await persist([terminal(performance()), result()], { failed: true, requestedModel: 'model-requested' })
-    expect(rows).toEqual([])
+  it('失败且没有观测到模型时保留证据，但不带模型', async () => {
+    const rows = await persist([terminal(performance({ firstOutputWaitMs: 800 })), result()],
+      { failed: true, requestedModel: 'model-requested' })
+    // Q7 管的是统计和成行：样本留下，行里没有模型，读出来不进对比表。
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ failed: true, performance: { firstOutputWaitMs: 800 } })
+    expect(rows[0].model).toBeUndefined()
   })
 
   it('不再写「所选：」和「未知模型」占位', async () => {
     const rows = await persist([terminal(performance()), result()], { requestedModel: 'model-requested' })
-    expect(rows).toEqual([])
+    expect(rows).toHaveLength(1)
+    expect(JSON.stringify(rows)).not.toContain('所选：')
+    expect(JSON.stringify(rows)).not.toContain('未知模型')
   })
 })

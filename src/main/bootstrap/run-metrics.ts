@@ -38,14 +38,13 @@ export function createLlmPerformanceRecorder(deps: {
     const transcriptModel = deps.providerId === 'antigravity' && !failed && !result?.modelUsage?.length && !result?.contextModel
       ? await observeAntigravityTranscriptModel({ sessionId: externalSessionId, startedAt, result, outputTokens: performance.outputTokens })
       : undefined
-    // 一轮里调用了多个模型时，归到输出 Token 最多的那个（Q11）。失败轮次只用
-    // 这一轮实际观测到的模型；都没有就不记录，这一轮不计入任何统计（Q7）。
+    // 一轮里调用了多个模型时，归到输出 Token 最多的那个（Q11）。没有观测到模型的
+    // 轮次照样留下证据，但不带模型：统计和成行都在读取时丢掉（Q7）。
     const model = attributedModel(result, performance, transcriptModel)
-    if (!model) return
     try {
       await appendLlmPerformance(deps.userDataDir, { cwd: deps.catalogCwd, externalSessionId }, {
         runId: deps.runId, ts: performance.observedAt, providerId: deps.providerId, agentProfileId: deps.agentProfileId,
-        model,
+        ...(model ? { model } : {}),
         ...(transcriptModel ? { modelSource: 'antigravity_transcript' as const } : {}),
         upstreamProvider: result?.modelUsage?.length === 1 ? result.modelUsage[0].upstreamProvider : result?.upstreamProvider,
         networkLabel: deps.request.networkLabel ?? '', failed: failed || result?.isError === true,

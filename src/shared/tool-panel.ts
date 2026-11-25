@@ -218,9 +218,10 @@ export function shapeLlmPanel(history: LlmPerformanceHistory, running: LlmPerfor
         }))
       },
       history: {
-        rows: rows.slice(0, TOOL_PANEL_HISTORY_ROWS).map(row => ({
+        // 没有观测到模型的轮次没有行可归，手机端也不列（Q7）。
+        rows: rows.filter(row => row.model).slice(0, TOOL_PANEL_HISTORY_ROWS).map(row => ({
           ts: row.ts,
-          model: row.model,
+          model: row.model!,
           providerId: String(row.providerId),
           speed: row.performance?.apiTokensPerSecond ?? null,
           firstTokenMs: row.performance?.firstTokenMs ?? null,

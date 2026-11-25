@@ -128,7 +128,7 @@ export interface LlmPerformanceHistoryRow {
   ts: string
   providerId: ProviderId
   agentProfileId?: string
-  model: string
+  model?: string
   modelSource?: 'antigravity_transcript'
   upstreamProvider?: string
   networkLabel: string
@@ -201,9 +201,10 @@ export function llmComparisonRounds(rows: readonly LlmPerformanceHistoryRow[], s
     const ts = Date.parse(session.observedAt)
     if (!Number.isFinite(ts)) continue
     const metrics = comparisonMetrics(session.tokensPerSecond, session.firstTokenMs, session.firstOutputWaitMs)
-    // 进行中的一轮还没有模型时保持原样：它没有被持久化，也没有可归的行。
-    if (Object.keys(metrics).length) {
-      rounds.push({ ts, providerId: session.providerId, model: observedModelName(session.model), state: 'running', metrics })
+    // 进行中的一轮也要先有观测到的模型才成行：只有 Agent 名的「模型」行会把厂商当成模型（Q1/Q7）。
+    const model = observedModelName(session.model)
+    if (model && Object.keys(metrics).length) {
+      rounds.push({ ts, providerId: session.providerId, model, state: 'running', metrics })
     }
   }
   return rounds
