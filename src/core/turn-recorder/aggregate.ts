@@ -12,6 +12,7 @@ import { aggregateHooks, isRecorderHook } from './aggregate-hooks.js'
 import { captureOmissionReasons, joinOmissionReasons } from './aggregate-capture.js'
 import { usageFrom } from './aggregate-usage.js'
 import {
+  USAGE_BASELINE_MISSING_REASON,
   available,
   partial,
   unavailable,
@@ -259,6 +260,9 @@ export function aggregateTurnEvidence(args: {
       ? [{ message: outputSummary(event.output ?? event.text) ?? `${event.tool ?? event.stage} failed`, source: event.stage, toolUseId: event.toolUseId }]
       : []
   )
+  const usageBaselineMissing = args.events.some((event) =>
+    event.kind === 'harness' && event.stage === 'usage_baseline_missing'
+  )
   const usage = usageFrom(args.events)
   const modelTiming = deriveModelTiming(args.events)
   const errorCaptureReason = joinOmissionReasons(captureOmissionReasons(args.events, ['error']))
@@ -367,13 +371,19 @@ export function aggregateTurnEvidence(args: {
               'inferred'
             )
           : available(hooks, [source]),
-    usage: !observable.usage
-      ? unavailable('provider usage was not observable', [source])
-      : usage
-        ? usage.credits || providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
-          ? partial(usage, [source], 'one or more usage counters have partial coverage; inspect credits and context provenance', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
-          : available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
-        : unavailable('no authoritative usage event was captured', [source]),
+    // Checked before `observable.usage`: the provider did report cumulative usage, it just cannot be
+    // attributed to this turn, so the generic "not observable" sentence would be wrong here. A
+    // separately reported result event stays authoritative when one exists. Only the fixed sentence
+    // is written: no `omissionCode`, because servers and older readers only accept the diff codes.
+    usage: usageBaselineMissing && !usage
+      ? unavailable(USAGE_BASELINE_MISSING_REASON, [source])
+      : !observable.usage
+        ? unavailable('provider usage was not observable', [source])
+        : usage
+          ? usage.credits || providerUsageResultEvents(args.events).some((event) => event.runtimeMetadata?.usageComplete === false)
+            ? partial(usage, [source], 'one or more usage counters have partial coverage; inspect credits and context provenance', usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+            : available(usage, [source], usage.contextTokens != null ? usage.contextUsageQuality ?? 'inferred' : 'exact')
+          : unavailable('no authoritative usage event was captured', [source]),
     compactions: available(compactions, [source]),
     ...(modelTiming
       ? {

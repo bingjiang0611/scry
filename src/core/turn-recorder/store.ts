@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { type ToolContentRef } from '../../shared/tool-content.js'
 import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn-record.js'
+import { unwritableOmissionCodes } from '../../shared/turn-evidence-validation.js'
 import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
@@ -17,7 +18,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, type C
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.86'
+export const RECORDER_VERSION = '0.2.87'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -67,6 +68,13 @@ export async function commitRecord(
     if (!validation.ok) {
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
       throw new Error(`refusing to commit invalid turn record: ${detail}`)
+    }
+    // Readers tolerate codes this build knows nothing about so a newer record stays readable. Writing
+    // is narrower than reading: a code enters `WRITABLE_OMISSION_CODES` only after every reader that
+    // can open this store ships a tolerant version, so this build never writes one they would reject.
+    const unwritableCodes = unwritableOmissionCodes(record)
+    if (unwritableCodes.length > 0) {
+      throw new Error(`refusing to commit a record with codes this version must not write: ${unwritableCodes.join(', ')}`)
     }
     await reserveSequence(dataRoot, sequence)
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`

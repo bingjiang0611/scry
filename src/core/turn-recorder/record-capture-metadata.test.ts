@@ -49,22 +49,25 @@ describe('diff omission codes', () => {
     expect(isEvidence(state.diff)).toBe(true)
   })
 
-  it('an unknown code is rejected instead of being read as a cause', () => {
-    expect(isEvidence({
+  it('tolerates an unfamiliar code instead of rejecting the record, and still rejects a broken list', () => {
+    // A record written by a newer recorder must stay readable: one unknown code would otherwise
+    // invalidate every other section of the record. Readers keep the code as written.
+    const unknown = {
       status: 'partial',
       quality: 'exact',
       source: ['git'],
       value: [],
       omissionReason: 'why',
       omissionCodes: ['invented_code']
-    })).toBe(false)
-    expect(isEvidence({
-      status: 'partial',
-      quality: 'exact',
-      source: ['git'],
-      value: [],
-      omissionReason: 'why',
-      omissionCodes: ['diff_exclude', 'diff_exclude']
-    })).toBe(false)
+    }
+    expect(isEvidence(unknown)).toBe(true)
+    expect((unknown as { omissionCodes: string[] }).omissionCodes).toEqual(['invented_code'])
+    for (const broken of [
+      { ...unknown, omissionCodes: ['diff_exclude', 'diff_exclude'] },
+      { ...unknown, omissionCodes: [] },
+      { ...unknown, omissionCodes: [''] },
+      { ...unknown, omissionCodes: [7] },
+      { ...unknown, omissionCodes: Array.from({ length: 17 }, (_, index) => `code_${index}`) }
+    ]) expect(isEvidence(broken)).toBe(false)
   })
 })

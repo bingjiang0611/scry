@@ -40,6 +40,25 @@ function record(): Record<string, unknown> {
 }
 
 describe('AgentTurnRecord strict schema-v1 validation', () => {
+  it('keeps a record with an unfamiliar omission code valid and preserves the code as written', () => {
+    const future = record()
+    future.usage = {
+      status: 'unavailable',
+      quality: 'unavailable',
+      source: ['provider_transcript+lifecycle_hooks'],
+      omissionReason: 'a newer recorder explained this gap with a code this build does not know',
+      omissionCodes: ['some_future_code']
+    }
+    expect(isAgentTurnRecord(future)).toBe(true)
+    const validation = validateAgentTurnRecord(future)
+    expect(validation.ok).toBe(true)
+    if (validation.ok) expect(validation.record.usage.omissionCodes).toEqual(['some_future_code'])
+    // The list itself still has to be a bounded, unique set of non-empty strings.
+    for (const codes of [[], ['a', 'a'], [''], [7], Array.from({ length: 17 }, (_, index) => `code_${index}`)]) {
+      expect(isAgentTurnRecord({ ...future, usage: { ...(future.usage as object), omissionCodes: codes } })).toBe(false)
+    }
+  })
+
   it('keeps legacy root prompts valid while validating supplemental Steer status and image identity', () => {
     const steer = { messageId: 'message-1', prompt: 'supplement', status: 'unknown', message: 'native response unconfirmed', attachments: [{ name: 'screen.png', mimeType: 'image/png', size: 9, sha256: `sha256:${'a'.repeat(64)}` }] }
     const withSteer = (value: unknown) => ({ ...record(), user: { status: 'available', quality: 'exact', source: ['scry_provider_adapter'], value: { text: 'original', steers: [value] } } })

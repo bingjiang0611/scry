@@ -1,6 +1,47 @@
-import { DIFF_OMISSION_CODES, type TurnRepositoryDiscovery, type Evidence, type TurnModelTimingLane, type TurnModelCallTiming, type TurnModelTiming, type TurnModelSegment, type TurnTranscriptSource, type TurnCompaction } from './turn-record-contracts.js'
+import { type TurnRepositoryDiscovery, type Evidence, type TurnModelTimingLane, type TurnModelCallTiming, type TurnModelTiming, type TurnModelSegment, type TurnTranscriptSource, type TurnCompaction } from './turn-record-contracts.js'
 import { isToolContentRef } from './tool-content.js'
+import { WRITABLE_OMISSION_CODES } from './turn-record-contracts.js'
 
+/**
+ * Readers accept a bounded list of codes without checking it against this build's enum: a record
+ * written by a newer recorder is evidence, not a parse error, and rejecting the whole record throws
+ * away every other section with it.
+ */
+const OMISSION_CODE_LIMIT = 16
+
+/**
+ * Every record position that carries an evidence envelope, in the order `validateAgentTurnRecord`
+ * checks them. Codes live only inside these envelopes, so the write guard walks exactly this list
+ * instead of the whole record: bounded by construction, with no depth or node budget that could stop
+ * early and silently pass a code it never reached.
+ */
+export const EVIDENCE_SECTIONS = [
+  'user', 'assistant', 'tools', 'skills', 'mcps', 'hooks', 'usage', 'files', 'diff',
+  'dangerousOperations', 'errors', 'compactions', 'modelSegments', 'modelTiming',
+  'transcript', 'interventions', 'termination'
+] as const
+
+/**
+ * Write-side guard for the commit funnel. Section builders are typed with `OmissionCode`, which also
+ * covers codes this build must not write yet, and a record can reach `commitRecord` as parsed JSON
+ * (managed handoff). Returns every code outside `WRITABLE_OMISSION_CODES`; a non-empty result refuses
+ * the commit. Misplaced code lists (not directly on an evidence envelope) are left to the validator.
+ */
+export function unwritableOmissionCodes(record: unknown): string[] {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return []
+  const raw = record as Record<string, unknown>
+  const found = new Set<string>()
+  for (const section of EVIDENCE_SECTIONS) {
+    const envelope = raw[section]
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) continue
+    const codes = (envelope as Record<string, unknown>).omissionCodes
+    if (!Array.isArray(codes)) continue
+    for (const code of codes) {
+      if (typeof code !== 'string' || !(WRITABLE_OMISSION_CODES as readonly string[]).includes(code)) found.add(String(code))
+    }
+  }
+  return [...found]
+}
 
 export function isEvidence(value: unknown): value is Evidence<unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
@@ -10,9 +51,9 @@ export function isEvidence(value: unknown): value is Evidence<unknown> {
   if (!Array.isArray(raw.source) || !raw.source.every((source) => typeof source === 'string' && source.length > 0)) return false
   if (raw.omissionReason !== undefined && (typeof raw.omissionReason !== 'string' || raw.omissionReason.length === 0)) return false
   if (raw.omissionCodes !== undefined && (!Array.isArray(raw.omissionCodes) ||
-      raw.omissionCodes.length === 0 || raw.omissionCodes.length > DIFF_OMISSION_CODES.length ||
+      raw.omissionCodes.length === 0 || raw.omissionCodes.length > OMISSION_CODE_LIMIT ||
       new Set(raw.omissionCodes).size !== raw.omissionCodes.length ||
-      !raw.omissionCodes.every((code) => (DIFF_OMISSION_CODES as readonly unknown[]).includes(code)))) return false
+      !raw.omissionCodes.every((code) => typeof code === 'string' && code.length > 0))) return false
   if (raw.status === 'available') return raw.value !== undefined && raw.quality !== 'unavailable' && raw.source.length > 0
   if (raw.status === 'partial') return raw.value !== undefined && raw.quality !== 'unavailable' && typeof raw.omissionReason === 'string' && raw.source.length > 0
   return raw.quality === 'unavailable'
