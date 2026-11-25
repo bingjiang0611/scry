@@ -313,7 +313,9 @@ rl.on('line', async (line) => {
       send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'resume unsupported' } })
       return
     }
-    const sessionId = msg.params?.sessionId ?? scenario.sessionId ?? 'sess-fake-1'
+    // A fixture that serves two concurrent conversations must not hand out one shared native id.
+    const sessionId = msg.params?.sessionId ?? scenario.sessionId
+      ?? (scenario.sessionIdPerProcess ? `sess-fake-${process.pid}` : 'sess-fake-1')
     if (msg.method === 'session/load' && Array.isArray(scenario.loadReplay)) {
       for (const replay of scenario.loadReplay) {
         send({ jsonrpc: '2.0', method: 'session/update', params: { sessionId, update: replay } })

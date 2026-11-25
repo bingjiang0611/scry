@@ -3,11 +3,10 @@ import type { AgentQuestionResponse } from '../../shared/runtime'
 import { maskSecrets } from '../../shared/trace'
 import { explicitlyAllowedProviderEnvKeys } from '../provider-environment'
 import { shellEnv } from '../claude-locate'
-import { sha256Hex } from '../../host-runtime/orchestration/canonical-json'
 import {
   ProviderSessionHost
 } from '../../host-runtime/provider-sessions/session-host'
-import { environmentFingerprint, providerSessionKey } from '../../host-runtime/provider-sessions/session-key'
+import { antigravitySessionKey } from './antigravity-session-key'
 import { AcpClient, AcpRpcError, type AcpJsonRpcId } from './acp-client'
 import { formatAntigravityUnauthenticatedError } from './antigravity-auth-error'
 import { AntigravityEventTranslator } from './antigravity-events'
@@ -87,7 +86,7 @@ export function runAntigravity(
   let sessionKey: string | undefined
   let session: AntigravityProcessSession | undefined
   let idleTimedOut = false
-  let sessionKeyParts: Parameters<typeof providerSessionKey>[0] | undefined
+  let sessionKeyParts: ReturnType<typeof antigravitySessionKey>['parts'] | undefined
   const pendingPermissions = new Map<string, PendingPermission>()
   const queueAbort = new AbortController()
 
@@ -212,17 +211,14 @@ export function runAntigravity(
       // stays a per-run process, exactly as before.
 
       if (deps.sessions) {
-        sessionKeyParts = {
-          sessionBinding: cwd,
-          continuationKey: request.resume ?? 'fresh',
-          mcpFingerprint: sha256Hex(JSON.stringify(mcpPrepared.mcpServers)),
-          permissionMode,
-          environmentFingerprint: environmentFingerprint(baseEnv)
-        }
-        const key = providerSessionKey(sessionKeyParts)
-        sessionKey = key
+        const sessionIdentity = antigravitySessionKey({
+          cwd, runId: request.runId, ...(request.resume ? { resume: request.resume } : {}),
+          mcp: mcpPrepared.mcpServers, permissionMode, ...(baseEnv ? { baseEnv } : {})
+        })
+        sessionKey = sessionIdentity.key
+        sessionKeyParts = sessionIdentity.parts
         const acquired = await deps.sessions.acquire(
-          key,
+          sessionKey,
           async () => {
             const opened = await spawnSession()
             return { value: opened, sessionId: opened.sessionId ?? '', close: () => opened.close() }
@@ -357,7 +353,10 @@ export function runAntigravity(
       if (deps.sessions && sessionKey && sessionKeyParts) {
         deps.sessions.noteNativeSessionId(sessionKey, sid)
         if (request.resume === undefined) {
-          deps.sessions.alias(sessionKey, providerSessionKey({ ...sessionKeyParts, continuationKey: sid }))
+          deps.sessions.alias(sessionKey, antigravitySessionKey({
+            cwd, runId: request.runId, resume: sid, mcp: mcpPrepared.mcpServers, permissionMode,
+            ...(baseEnv ? { baseEnv } : {})
+          }).key)
         }
       }
       request.onExternalSessionId?.(sid)

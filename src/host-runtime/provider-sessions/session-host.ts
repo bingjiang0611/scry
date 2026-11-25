@@ -60,6 +60,8 @@ export class ProviderSessionHost<T> {
   readonly #onOpened?: (record: { key: string; provider: string; at: number }) => void
   readonly #onNativeSessionId?: (record: { key: string; provider: string; nativeSessionId: string; at: number }) => void
   readonly #onReleased?: (record: { key: string; provider: string; reason: ProviderSessionReleaseReason; at: number }) => void
+  /** R4: turns waiting for a busy session, per key. They are woken when it settles or closes. */
+  readonly #waiters = new Map<string, Array<() => void>>()
 
   constructor(options: ProviderSessionHostOptions = {}) {
     this.#idleMs = Math.min(30 * 60_000, Math.max(15 * 60_000, options.idleMs ?? DEFAULT_IDLE_MS))
@@ -76,22 +78,29 @@ export class ProviderSessionHost<T> {
     return this.#entries.size
   }
 
-  /** Reuses a live session for `key`, or opens one. Concurrent acquire for one key is serialized. */
+  /**
+   * Reuses a live session for `key`, or opens one. A busy session is waited for, never closed:
+   * closing it would kill a turn another conversation is still running (R4).
+   */
   async acquire(
     key: string,
     open: () => Promise<{ value: T; sessionId: string; close: () => Promise<void> | void; closed?: boolean }>,
     isClosed?: (entry: { value: T; sessionId: string }) => boolean
   ): Promise<{ value: T; sessionId: string; reused: boolean }> {
-    const existing = this.#entries.get(key)
-    if (existing) {
-      if (existing.busy || (isClosed?.(existing) ?? false)) {
-        await this.release(key, isClosed?.(existing) ? 'error' : 'replaced')
-      } else {
+    let existing = this.#entries.get(key)
+    while (existing) {
+      if (isClosed?.(existing) ?? false) {
+        await this.release(key, 'error')
+        break
+      }
+      if (!existing.busy) {
         existing.busy = true
         existing.lastUsedAt = this.#now()
         this.#clearIdle(existing)
         return { value: existing.value, sessionId: existing.sessionId, reused: true }
       }
+      await this.#waitForIdle(key)
+      existing = this.#entries.get(key)
     }
     await this.#makeRoom()
     const opened = await open()
@@ -127,6 +136,7 @@ export class ProviderSessionHost<T> {
     const entry = this.#entries.get(key)
     if (!entry) return
     entry.busy = false
+    this.#wakeWaiters(key)
     entry.lastUsedAt = this.#now()
     if (options.keepForBackground) {
       entry.backgroundTasks = Math.max(1, entry.backgroundTasks)
@@ -163,6 +173,22 @@ export class ProviderSessionHost<T> {
     })
   }
 
+  /** R4: resolves when the entry stops being busy, or when it is released. */
+  #waitForIdle(key: string): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const list = this.#waiters.get(key) ?? []
+      list.push(resolve)
+      this.#waiters.set(key, list)
+    })
+  }
+
+  #wakeWaiters(key: string): void {
+    const list = this.#waiters.get(key)
+    if (!list) return
+    this.#waiters.delete(key)
+    for (const resolve of list) resolve()
+  }
+
   async release(key: string, reason: ProviderSessionReleaseReason): Promise<void> {
     const entry = this.#entries.get(key)
     if (!entry) return
@@ -172,6 +198,7 @@ export class ProviderSessionHost<T> {
     }
     this.#clearIdle(entry)
     this.#onReleased?.({ key, provider: this.#provider, reason, at: this.#now() })
+    this.#wakeWaiters(key)
     try {
       await entry.close()
     } catch {

@@ -15,13 +15,13 @@ function makeTempDir(prefix: string): string {
   return dir
 }
 
-function installFakeAgy(): { dir: string; binPath: string } {
+function installFakeAgy(extraScenario: Record<string, unknown> = {}): { dir: string; binPath: string } {
   const dir = makeTempDir('scry-agy-reuse-')
   const binPath = join(dir, 'fake-agy')
   const source = readFileSync(FAKE_FIXTURE_SOURCE, 'utf8').replace(/^#!.*\n/, `#!${process.execPath}\n`)
   writeFileSync(binPath, source, { mode: 0o755 })
   chmodSync(binPath, 0o755)
-  writeFileSync(join(dir, 'scenario.json'), JSON.stringify({ recordSpawns: true }), 'utf8')
+  writeFileSync(join(dir, 'scenario.json'), JSON.stringify({ recordSpawns: true, ...extraScenario }), 'utf8')
   return { dir, binPath }
 }
 
@@ -139,6 +139,49 @@ it('C1: a crashed Provider process is rebuilt for the next turn of the same sess
     { homeDir, sessions: host }
   ).promise
   expect(second.status).toBe('completed')
+  expect(spawnCount(dir)).toBe(2)
+  await host.closeAll()
+})
+
+// R4: two new conversations in one project asked for the same session key, and the second acquire
+// closed the first conversation's ACP process while its turn was still running.
+it('R4: two new conversations in one project both finish', async () => {
+  const { dir, binPath } = installFakeAgy({
+    sessionIdPerProcess: true,
+    // Hold each turn open so both conversations are genuinely in flight at the same time.
+    promptSteps: [{ type: 'sleep', ms: 600 }, { type: 'text', text: 'hello from fake agy' }]
+  })
+  process.env.SCRY_AGY_PATH = binPath
+  const openedKeys: string[] = []
+  // Start the second conversation only once the first has registered its live session, which is the
+  // state the old code "resolved" by closing it.
+  let firstSessionOpen: () => void = () => {}
+  const firstOpened = new Promise<void>((resolve) => { firstSessionOpen = resolve })
+  const host = new ProviderSessionHost<AntigravityProcessSession>({
+    maxSessions: 4,
+    onOpened: (record) => {
+      openedKeys.push(record.key)
+      firstSessionOpen()
+    }
+  })
+  const homeDir = makeTempDir('scry-home-concurrent-')
+  const cwd = makeTempDir('scry-ws-concurrent-')
+
+  const run = (runId: string, prompt: string) => runAntigravity(
+    { runId, prompt, cwd, attachments: [], permissionMode: 'default', emit: () => undefined },
+    { homeDir, sessions: host }
+  ).promise
+  const firstRun = run('r4-a', 'first conversation')
+  await firstOpened
+  const secondRun = run('r4-b', 'second conversation')
+  const [first, second] = await Promise.all([firstRun, secondRun])
+
+  expect(first.status).toBe('completed')
+  expect(second.status).toBe('completed')
+  expect(first.externalSessionId).toBeTruthy()
+  expect(second.externalSessionId).toBeTruthy()
+  expect(first.externalSessionId).not.toBe(second.externalSessionId)
+  expect(openedKeys).toHaveLength(2)
   expect(spawnCount(dir)).toBe(2)
   await host.closeAll()
 })

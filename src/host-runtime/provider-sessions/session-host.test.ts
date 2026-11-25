@@ -115,6 +115,26 @@ it('releases an idle session after the idle window', async () => {
   }
 })
 
+// R4: two conversations can want the same key at the same time. The host used to close the live
+// process to make room, so the first conversation died mid-turn.
+it('R4: a concurrent acquire for a busy key never closes the live session', async () => {
+  const host = new ProviderSessionHost<{ name: string }>({ now: () => 1_000, maxSessions: 4 })
+  const { open, closed, counts } = fakeSessions()
+  const first = await host.acquire('k1', () => open('a'))
+  expect(first.reused).toBe(false)
+
+  const secondPromise = host.acquire('k1', () => open('b'))
+  // The live session is still the first one: nothing was closed to make room.
+  expect(closed).toEqual([])
+  await host.settle('k1', { reusable: true })
+  const second = await secondPromise
+  // Once the turn ended the entry is idle, so the second turn reuses it instead of a second spawn.
+  expect(second).toMatchObject({ sessionId: 'native-a', reused: true })
+  expect(counts.b).toBeUndefined()
+  expect(closed).toEqual([])
+  await host.closeAll()
+})
+
 it('derives a stable key that changes with every identity part', () => {
   const base = {
     sessionBinding: 's1',
