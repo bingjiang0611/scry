@@ -106,9 +106,16 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 
 ## Follow-up grouping
 
-- **Recorder and session evidence:** separate predicate results, actual recovery reads, and UI publication. A fixture that collects events does not prove production delivery or reload behavior.
-- **Timing and packaged validation:** distinguish observed readiness from expired waiting, layout and version checks from freshness, and repeated reads from proof of index reuse. Preserve the benchmark record without claiming unmeasured latency.
-- **Host and Provider checks:** distinguish test fixture setup from independently asserted cleanup, output attribution, or identity.
-- **Metrics and remote history:** separate local cache and sampling behavior, the contents of a page, and when text was actually delivered. Keep existing trust and redaction requirements in place pending defensive review.
+The 31 evidence tokens were reviewed against callers and assertions at `690953433`. These are internal review IDs, not issue numbers. The table records the disposition; it does not claim that any additional behavior was reproduced or fixed.
 
-See [issue #192](https://github.com/bingjiang0611/scry/issues/192) for spool short writes and [issue #197](https://github.com/bingjiang0611/scry/issues/197) for overlapping metrics sampling. This comment pass did not change either behavior.
+| Review IDs | Tokens | Disposition |
+|---|---:|---|
+| 8, 31, 42, 111, 117, 204–205 | 7 | Corrected test prose. The fixtures establish eligibility after deferral, selected acknowledgement and publication paths, changed-content rejection, and liveness at the asserted checkpoints. They do not establish post-deadline reads, end-to-end renderer delivery, or unobserved process transitions. Assertions stayed unchanged. |
+| 200 | 1 | Already tracked by [#197](https://github.com/bingjiang0611/scry/issues/197). Cache reuse alone does not establish the sampling floor or concurrent behavior. |
+| 81–82, 85 | 3 | Separate smoke validation: bind artifact evidence to the intended commit, and compare a run-scoped expected output marker across the renderer and worker. Layout and version checks, and nonempty output, are narrower evidence. |
+| 92–94, 96–98, 101–104 | 10 | Separate benchmark validation: distinguish observed readiness from an elapsed wait budget, then measure bind latency under controlled App lifetime and daemon history. Existing samples are not a regression verdict. |
+| 166 | 1 | No index-reuse claim from repeated page reads. Add a fresh-reader test only if persisted index reuse is an acceptance requirement. |
+| 18, 120, 124–125 | 4 | Separate test validation: define the launch paths covered by a stop hold, assert that invalid input is rejected before dispatch, and define the trace timing observation separately from delivery. |
+| 87–88, 118, 160, 172 | 5 | Retain existing safeguards and route any additional validation through a private defensive review. No security failure was reproduced or reported publicly by this pass. |
+
+The six source files in the prose batch match after comment removal, including emitted JS and tool directives. Thirty distinct focused tests passed. The standalone ratchet timed out under host load; the same `addedProse` predicate passed on all 288 scoped changed files against `e3355f86` using a batched Git read. No live smoke or benchmark ran.

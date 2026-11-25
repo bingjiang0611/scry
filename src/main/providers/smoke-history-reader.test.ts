@@ -73,7 +73,7 @@ describe('smoke history reader', () => {
 
   it('fails when the served text has the right length but the wrong bytes', async () => {
     const correct = ['first body ✓', 'middle body', 'last body 🚀']
-    // Same character count, different content: a length-only check would pass this.
+    // Serve different content and check that the frozen hash rejects it.
     const { connection, readsFile } = await reader(index => correct[index].replace(/./gsu, 'x'))
     await expect(readFrozenHistory(connection, 'run-1', readsFile))
       .rejects.toThrow('does not match the frozen hash')

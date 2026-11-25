@@ -866,11 +866,8 @@ describe('会话净 diff 端到端（真实 git 仓库）', () => {
   }, 35_000)
 })
 
-// 终态 enrichment 的 IPC 门控回归：index.ts 在 finalizeTurnDiff / finalizeSessionDiff 落
-// turn_diff / session_diff 之前就把 runState.done 翻成 true，那一刻 isFocused 已是 false。
-// 用 isFocused 门控发布 → 终态归档里有 captured diff，但当前 renderer 一条都收不到，
-// Diff / 纵览会一直空到下一次 reload。这里用真实 RunRegistry + RunDiffPreviewer + 两侧
-// trace 合并/派生代码复现 main→renderer 的完整发布路径。
+// 终态 diff 不能因 run 已完成而被运行中焦点门控挡住。这里使用真实 registry、
+// previewer 和 trace 派生，但发布由 fixture 捕获，不验证实际 IPC 投递或重载。
 describe('终态 diff enrichment 的 renderer 发布门控', () => {
   const snap = (added: number, path = '/repo/a.ts'): TurnDiffSnapshot => ({
     version: 1, status: 'captured', files: [{ path, added, deleted: 0 }],

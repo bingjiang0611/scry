@@ -96,7 +96,6 @@ it('defers a quiet session it already judged unresolved, and looks again once th
   expect(await pass(root)).toBe(0)
   await expect(deferQuietSession(dataRoot, 'qoder', sessionDir)).resolves.toBe(true)
 
-  // The wait is bounded: an hour later the same pass reads the transcript again.
   await expect(deferQuietSession(dataRoot, 'qoder', sessionDir, Date.now() + SESSION_REVISIT_MS + MINUTE)).resolves.toBe(false)
 })
 

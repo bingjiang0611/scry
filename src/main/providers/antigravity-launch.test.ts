@@ -196,7 +196,7 @@ describe('A3: Antigravity 启动、环境清洗、版本门禁与独立进程组
     temps.push(dir)
     const pidFile = join(dir, 'detached-grandchild.pid')
     // Root ignores SIGTERM and spawns an intermediate child (which exits on SIGTERM) that spawns a detached grandchild (which ignores SIGTERM).
-    // After SIGTERM: root is STILL alive, intermediate exits -> grandchild is reparented to PID 1 (detached from root tree).
+    // The assertions check liveness before and after cleanup, not intermediate parentage.
     const script = `
       const { spawn } = require('node:child_process');
       const { writeFileSync } = require('node:fs');

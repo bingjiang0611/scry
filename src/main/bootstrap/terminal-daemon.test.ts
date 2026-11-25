@@ -51,7 +51,7 @@ describe('terminal in daemon mode, window side', () => {
       await expect(w.channel(name)({}, { id: 'terminal-1', ownershipEpoch: 1 }), name).rejects.toThrow('终端窗口已关闭')
     }
     expect(w.forwarder).not.toHaveBeenCalled()
-    // ready/ack/active/recordings never asked about the window in main either.
+    // The acknowledgement still forwards when the window cannot receive output.
     await w.channel('terminal:ack')({}, { id: 'terminal-1', ownershipEpoch: 1, bytes: 10 })
     expect(w.forwarder).toHaveBeenCalledTimes(1)
   })
