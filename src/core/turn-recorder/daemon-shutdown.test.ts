@@ -4,6 +4,38 @@ import { basename, join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { listenRecorderDaemon, sendRecorderDaemonHook } from './daemon'
 import * as recorder from './recorder'
+import * as store from './store'
+
+it('close waits for the background summary warmup before releasing the workspace', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'scry-daemon-warmup-'))
+  const env = { SCRY_RECORDER_SOCKET: join(tmpdir(), `${basename(root)}.sock`) }
+  await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+    schemaVersion: 1, enabled: true, workspaceId: 'warmup-fixture', capture: { diff: false }
+  }))
+  let releaseWarmup!: () => void
+  const warmup = new Promise<void>(resolve => { releaseWarmup = resolve })
+  const summaries = vi.spyOn(store, 'listRecordSummaries').mockImplementation(async () => {
+    await warmup
+    return []
+  })
+  const daemon = await listenRecorderDaemon({ workspace: root, env, idleMs: 5_000 })
+  try {
+    expect(summaries).toHaveBeenCalledOnce()
+    let closeFinished = false
+    const closing = daemon.close().then(() => { closeFinished = true })
+    await daemon.closed
+    await expect(vi.waitFor(() => { expect(closeFinished).toBe(true) }, { timeout: 100, interval: 10 }))
+      .rejects.toThrow()
+    releaseWarmup()
+    await closing
+    expect(closeFinished).toBe(true)
+  } finally {
+    releaseWarmup()
+    await daemon.close()
+    summaries.mockRestore()
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('close waits for background hook delivery before releasing the workspace', async () => {
   const root = await mkdtemp(join(tmpdir(), 'scry-daemon-stop-'))

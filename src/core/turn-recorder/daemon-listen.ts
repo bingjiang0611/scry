@@ -92,6 +92,7 @@ async function startRecorderDaemon(
   let recoveryDelayMs = recoveryPollMs
   let recoveryScheduleGeneration = 0
   let closing: Promise<void> | undefined
+  let summaryWarmup: Promise<unknown> | undefined
   let activityGeneration = 0
 
   const runRecovery = (): Promise<{ recovered: number; pending: number }> => {
@@ -318,6 +319,7 @@ async function startRecorderDaemon(
       server.close(() => resolvePromise())
     }).then(async () => {
       await recoveryInFlight
+      await summaryWarmup
       // HTTP responses can finish before delivery; shutdown must not release a workspace still in use.
       await Promise.all(deliveryInFlight)
     }).finally(async () => {
@@ -360,7 +362,7 @@ async function startRecorderDaemon(
   // Warm the derived record summary before the first hook needs it: a cold rebuild costs one full
   // pass over the store, and a hook that met it would pay that on its own synchronous path. Started
   // here, once per daemon, it runs beside the socket instead of inside an event.
-  void listRecordSummaries(enablement.dataRoot).catch(() => undefined)
+  if (!closing) summaryWarmup = listRecordSummaries(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)
   return { socketPath, closed, close }
