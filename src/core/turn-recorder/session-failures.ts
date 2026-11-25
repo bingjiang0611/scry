@@ -3,7 +3,6 @@ import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic } from './io.js'
 
 export const SESSION_FAILURE_SUSPEND_AFTER = 3
-// The daemon polls every 1–15 seconds. A five-minute streak spans many polls, not one burst.
 export const TURN_FAILURE_MIN_AGE_MS = 5 * 60_000
 const TRANSIENT_SYSTEM_CODES = new Set(['EMFILE', 'ENFILE', 'ENOSPC', 'EAGAIN', 'EBUSY', 'EIO'])
 export const SESSION_FAILURE_RETRY_MS = 60 * 60 * 1_000
@@ -73,16 +72,6 @@ export function suspendedSessionKeys(ledger: SessionFailureLedger, now = Date.no
   return keys
 }
 
-/**
- * Count one failed pass for a session. Turn scope additionally requires a sustained streak.
- * A repeat after an hourly re-probe restarts the pause without another suspension log.
- *
- * Only the same failure counts twice. A pass that fails differently has learned something new
- * (a different file, a lock that was not there before), so the streak restarts: the ledger suspends a
- * reason, never a session with changing reasons. Read errors inside a turn are recorded here too —
- * an `ERR_STRING_TOO_LONG` on the same window cannot turn into evidence by being retried every pass —
- * but the suspension still only skips recovery passes and never closes, drops or rewrites a turn.
- */
 export async function noteSessionFailure(
   dataRoot: string,
   provider: ProviderId,

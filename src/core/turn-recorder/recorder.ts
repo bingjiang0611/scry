@@ -324,9 +324,6 @@ export async function recoverRecorder(
         if (!isLockTimeout(error)) {
           await updateHealth(enablement.dataRoot, { lastError: { at: new Date().toISOString(), message } }).catch(() => undefined)
           // A busy peer is not a broken session: it clears itself as soon as the lock is released.
-          // Everything else is counted, and the ledger suspends only a failure that repeated
-          // identically — a read or parse failure that reproduces is not going to differ next pass,
-          // and retrying it every pass is what kept one oversized transcript at ~45% CPU.
           await noteSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), error, 'turn').catch(() => undefined)
         }
         await appendRotatingLog(
@@ -335,7 +332,6 @@ export async function recoverRecorder(
         ).catch(() => undefined)
       }
       if (!failed) {
-        // This pass finished, so an earlier failure did not repeat: the streak is over.
         await clearSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), {
           present: sessionFailureKey(item.provider, basename(item.sessionDir)) in failures
         }).catch(() => undefined)

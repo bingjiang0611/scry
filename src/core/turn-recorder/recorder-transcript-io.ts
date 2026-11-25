@@ -33,15 +33,6 @@ function sameTranscriptIdentity(left: TranscriptSnapshotIdentity, right: Transcr
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
 }
 
-/**
- * How many bytes one turn window may materialise as a string.
- *
- * Every caller turns the window into a `string`, and a JavaScript string cannot exceed ~536 MiB of
- * UTF-8. A window larger than that used to be allocated in full and then throw
- * `ERR_STRING_TOO_LONG`, so the same turn failed the same way on every pass. 64 MiB is far inside
- * that limit, still larger than a plausible single turn (the 33 MiB turn the suite already covers),
- * and small enough that the worst case a cap can reach is a predictable allocation.
- */
 export const TRANSCRIPT_WINDOW_LIMIT_BYTES = 64 * 1024 * 1024
 
 /**

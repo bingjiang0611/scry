@@ -133,12 +133,6 @@ interface AnchorCacheEntry extends AnchorScan {
 const ANCHOR_CACHE_LIMIT = 32
 const anchorCache = new Map<string, AnchorCacheEntry>()
 
-/**
- * Bytes one backwards anchor scan may read before it gives up and lets the caller fall back to a
- * bounded window. A scan is re-run for every pass that has no reusable cached anchor, so an
- * unbounded scan turns one big session into permanent load: the observed one walked 76 MiB per
- * pass. The floor also starts at the turn's recorded start offset when it has one.
- */
 export const TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES = 64 * 1024 * 1024
 
 /**
@@ -149,11 +143,6 @@ export const TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES = 64 * 1024 * 1024
  */
 export const TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES = 4 * 1024 * 1024
 
-/**
- * How far before a turn's recorded start its anchor line may sit. A provider writes the prompt row
- * and then the hook fires, or the reverse; both orders put the anchor inside this distance. That is
- * what lets a later pass start at the turn instead of at the session.
- */
 export const TRANSCRIPT_ANCHOR_LOOKBACK_BYTES = 8 * 1024 * 1024
 
 export function resetTranscriptAnchorCache(): void {
@@ -345,8 +334,6 @@ async function transcriptAnchorOffset(
 ): Promise<AnchorScan> {
   const handle = await openTranscriptRead(path)
   const chunkBytes = 1024 * 1024
-  // Bounded both ways: never below the caller's floor, never more than one scan limit back. Without
-  // the limit a session that never matches costs the whole file on every pass.
   const lowest = Math.max(0, Math.min(Math.max(0, floor), endOffset), endOffset - TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES)
   let scannedTo = 0
   let cursor = endOffset
