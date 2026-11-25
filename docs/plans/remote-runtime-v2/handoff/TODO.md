@@ -48,7 +48,7 @@
 ## 记录器移出 App（维护者 2026-11-25 定方向）
 
 - [ ] **W23**：把轮次记录器移出 App，见 [P10](../P10-recorder-out-of-app.md) 和 [W23 任务单](tasks/W23-recorder-out-of-app.md)。等 PR #205（Qoder Stop 归属）合进 main 后开工。原计划的「记录器按会话取身份」取消，Qoder 进程复用并入 W23。
-- [ ] **W23 的发布顺序**（P10 §6）：记录器发版（含遗留托管轮次的过期规则）→ CodeLens 发版（`SCRY_CLI_PATH` 不存在时退回自带记录器，并升级自带记录器）→ App 发版，发版说明写明两者的最低版本。
-- [ ] **P10 §9 来源标记**：要不要给 App 启动的会话加 `client=scry-app`，维护者待定，推荐加。
+- [ ] **W23 的顺序**（P10 §6）：A 段的记录器 PR 由评审方读过 → 维护者合入并发布记录器 → 通知 agent 做 B 段（App 侧）→ App 发版。CodeLens 那两项（指定路径不存在时退回、名单加 `scry-app`）不阻塞 App。
+- [ ] **有空再做**：验证服务端接受 `client=scry-app`，并核对 0.2.84 及以后的读取端不会判整条记录非法（P10 §9）。通过之后，记录器再把这个值放进上传内容。
 - [ ] **W24**：CLI 迁到独立仓库，补上 `exports` 契约、深层路径的兼容别名和消费方测试（trade-telemetry 现在用的是 `dist/cli/*.js` 和 `dist/core/turn-recorder/commit-environment.js`），并解决记录器对 `src/main/normalize`、`src/main/danger` 的反向依赖。需要维护者先建好仓库。
 - [ ] **W23 合并后**：三台 Mac 只在这时升级一次，和上面「真机与部署」里的升级、mac2 签名、机器页对照一起做。
