@@ -254,6 +254,11 @@
   border-top: 0;
 }
 
+/* 设计稿：模型行紧贴所属 Agent，不画线；只用一条细线分开各个 Agent。 */
+.analytics-table tbody tr.is-model {
+  border-top: 0;
+}
+
 .analytics-table .analytics-row.is-agent > th,
 .analytics-table .analytics-row.is-agent > td {
   padding-top: var(--space-4);
