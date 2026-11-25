@@ -21,6 +21,7 @@ import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexI
 import { CLOSING_TURN_EXPIRED_REASON, closingTurnStalled } from './recorder-closing-window.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
+import { CODEX_TRUNCATED_RECOVERY_REASON, rememberCodexTranscriptMiss, resumeCodexTranscriptMiss } from './recorder-codex-recovery.js'
 
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
 export { OPEN_TURN_EXPIRY_MS, resolveModelIdentity, subagentScopedPayload } from './recorder-contracts.js'
@@ -231,6 +232,8 @@ export async function recoverRecorder(
   let pending = 0
   let expired = 0
   let managedPresent = false
+  let codexTruncatedUnchanged = 0
+  let codexTruncatedSealed = 0
   try {
     const { sessions, failures } = await recoverySessions(enablement.dataRoot, scope, options.incremental)
     for (const item of sessions) {
@@ -283,7 +286,8 @@ export async function recoverRecorder(
             // nothing has been failing to finalize, so it must not be reported as an expiry.
             const wasAlreadyClosing = open.status === 'closing'
             if (open.status === 'open') {
-              const transcript = open.transcriptPath
+              const resumed = await resumeCodexTranscriptMiss(item.sessionDir, open)
+              const transcript = resumed?.read ?? (open.transcriptPath
                 ? await stableTranscript(
                     open.transcriptPath,
                     `${open.provider}:${open.sessionId}:${open.generation}`,
@@ -298,7 +302,28 @@ export async function recoverRecorder(
                     undefined,
                     enablement.dataRoot
                   )
-                : undefined
+                : undefined)
+              if (resumed?.unchanged) codexTruncatedUnchanged++
+              const capped = resumed?.read ?? (transcript && await rememberCodexTranscriptMiss(
+                enablement.dataRoot, item.sessionDir, open, transcript
+              ))
+              if (capped?.terminalStatus && capped.completedAt) {
+                // An exact terminal proves the turn ended, but not its missing body or Git baseline.
+                // Keep this as an open-turn retry until commit succeeds; the durable cursor holds proof.
+                open.closingAt = capped.completedAt
+                open.endReason = 'provider_terminal'
+                const finalized = await finalizeOpenTurn(enablement, open, { timestamp: capped.completedAt }, capped.terminalStatus, {
+                  forcedReason: capped.incompleteReasons?.join('; ') ?? CODEX_TRUNCATED_RECOVERY_REASON,
+                  terminalOnlyTranscript: capped
+                })
+                if (finalized.status === 'committed') {
+                  codexTruncatedSealed++
+                  await appendRotatingLog(join(enablement.dataRoot, 'logs', 'recorder.log'),
+                    `${new Date().toISOString()} INFO Codex truncated turn sealed: generation=${open.generation}`
+                  ).catch(() => undefined)
+                }
+                return finalized
+              }
               if (transcript?.terminalStatus && transcript.completedAt && transcript.identityMatched !== false) {
                 open.status = 'closing'
                 open.closingAt = transcript.completedAt
@@ -324,7 +349,8 @@ export async function recoverRecorder(
                 forcedExpiry = true
                 return finalizeOpenTurn(enablement, open, { timestamp: stale.at }, stale.status, {
                   allowUnstableTranscript: true,
-                  forcedReason: stale.reason
+                  forcedReason: stale.reason,
+                  ...(capped ? { transcriptUnavailable: [...(capped.incompleteReasons ?? []), stale.reason].join('; ') } : {})
                 })
               }
             }
@@ -417,7 +443,11 @@ export async function recoverRecorder(
     }
     await updateHealth(enablement.dataRoot, {
       ...(await pendingHealth(enablement.dataRoot)),
-      ...(recovered ? { increment: { recoveredRecords: recovered } } : {})
+      increment: {
+        recoveredRecords: recovered,
+        ...(codexTruncatedUnchanged ? { codexTruncatedUnchanged } : {}),
+        ...(codexTruncatedSealed ? { codexTruncatedSealed } : {})
+      }
     })
     return { recovered, pending, expired }
   } finally {
