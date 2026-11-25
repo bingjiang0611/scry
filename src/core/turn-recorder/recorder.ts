@@ -12,7 +12,7 @@ import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, updateHealth, safeKey } from './store.js'
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, recorderPendingHealth, recorderQuarantinedOpenTurns, reconcileAttentionIndex, releaseStaleAttention, recorderSessionRoot, type RecorderOpenTurnState as OpenTurnState, HOOK_LOCK_WAIT_MS, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { attentionIndexPresent, markedSessions } from './attention.js'
-import { clearSessionFailure, isUnusableSessionError, noteSessionFailure, readSessionFailures, sessionFailureKey, suspendedSessionKeys, type SessionFailureLedger } from './session-failures.js'
+import { clearSessionFailure, noteSessionFailure, readSessionFailures, sessionFailureKey, suspendedSessionKeys, type SessionFailureLedger } from './session-failures.js'
 import { deferQuietSession, recordSessionVisit } from './session-visit.js'
 import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, DEFERRED_TERMINAL_GRACE_MS, OPEN_TURN_EXPIRY_MS, sessionIdOf, providerTurnIdOf, type RecorderHookInput, type RecorderHookResult, type RecorderRecoveryProbe, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked, isLockTimeout, replayQueuedHooks } from './recorder-hook-locked.js'
@@ -207,6 +207,7 @@ export async function recoverRecorder(
         await deferQuietSession(enablement.dataRoot, item.provider, item.sessionDir)) continue
       let settled = false
       let managedTurn = false
+      let failed = false
       try {
         if ((await recorderInboxEntries(item.sessionDir)).length) {
           const sessionKey = basename(item.sessionDir)
@@ -251,7 +252,9 @@ export async function recoverRecorder(
                     open.requestSetId,
                     open.sessionId,
                     enablement.workspaceRoot,
-                    open.piTranscriptAnchor
+                    open.piTranscriptAnchor,
+                    undefined,
+                    enablement.dataRoot
                   )
                 : undefined
               if (transcript?.terminalStatus && transcript.completedAt && transcript.identityMatched !== false) {
@@ -315,19 +318,27 @@ export async function recoverRecorder(
           }).catch(() => undefined)
         }
       } catch (error) {
+        failed = true
         pending++
         const message = `recovery ${item.provider}/${basename(item.sessionDir)}: ${error instanceof Error ? error.message : String(error)}`
         if (!isLockTimeout(error)) {
           await updateHealth(enablement.dataRoot, { lastError: { at: new Date().toISOString(), message } }).catch(() => undefined)
           // A busy peer is not a broken session: it clears itself as soon as the lock is released.
-          if (isUnusableSessionError(error)) {
-            await noteSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), error).catch(() => undefined)
-          }
+          // Everything else is counted, and the ledger suspends only a failure that repeated
+          // identically — a read or parse failure that reproduces is not going to differ next pass,
+          // and retrying it every pass is what kept one oversized transcript at ~45% CPU.
+          await noteSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), error, 'turn').catch(() => undefined)
         }
         await appendRotatingLog(
           join(enablement.dataRoot, 'logs', 'recorder.log'),
           `${new Date().toISOString()} ${isLockTimeout(error) ? 'WARN' : 'ERROR'} ${message}`
         ).catch(() => undefined)
+      }
+      if (!failed) {
+        // This pass finished, so an earlier failure did not repeat: the streak is over.
+        await clearSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), {
+          present: sessionFailureKey(item.provider, basename(item.sessionDir)) in failures
+        }).catch(() => undefined)
       }
       await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
       if (options.incremental === true) {

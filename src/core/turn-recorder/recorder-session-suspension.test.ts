@@ -109,7 +109,7 @@ describe('a session that repeats the same failure stops being retried', () => {
     expect(await readFile(join(dir, 'turns'), 'utf8')).toBe('a file where the quarantine directory belongs')
     expect(await readFile(join(f.dataRoot, 'runtime', 'attention', `codex__${BROKEN}`), 'utf8')).toBe('')
     const log = await readFile(join(f.dataRoot, 'logs', 'recorder.log'), 'utf8')
-    expect(log.match(/WARN session suspended after 3 failed passes/g)).toHaveLength(1)
+    expect(log.match(/WARN session suspended after 3 identical failed passes/g)).toHaveLength(1)
   })
 
   it('retries a suspended session once the hourly window has passed', async () => {

@@ -11,7 +11,7 @@ import { parseCodexRollout } from './recorder-codex-rollout.js'
 import type { CodexUsageBaseline } from './recorder-codex-usage.js'
 import { qoderSidecarEvents } from './recorder-qoder-sidecars.js'
 import { type CodexRolloutIdentity, type ParsedTranscriptTurn, type TranscriptRead, overlapsTurn, BACKGROUND_WAKE_PROVIDERS } from './recorder-contracts.js'
-import { readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { describeTranscriptTruncation, readTranscriptWindow, transcriptIdentity, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 import { parsePiTranscript } from './recorder-pi-transcript.js'
 
 
@@ -186,9 +186,15 @@ export async function parseTranscriptSnapshot(args: {
   cwd?: string
   piTranscriptAnchor?: import('./recorder-contracts.js').PiTranscriptAnchor
   identity?: TranscriptSnapshotIdentity
+  /** Test seam: the production cap is `TRANSCRIPT_WINDOW_LIMIT_BYTES`. */
+  windowLimitBytes?: number
 }): Promise<TranscriptRead> {
-  const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset, args.identity)
+  const snapshot = await readTranscriptWindow(args.path, args.endOffset, args.startOffset, args.identity, args.windowLimitBytes)
   const stable = args.stable && snapshot.consistent
+  // A capped read is a fact about this record, not a silent loss: every provider path below names
+  // it, and `sourceCompleteness` says `partial` so a reader can tell an unread byte range apart
+  // from a turn that produced nothing.
+  const windowReasons = snapshot.truncation ? [describeTranscriptTruncation(snapshot.truncation)] : []
   const source = snapshot.consistent && snapshot.identity ? {
     content: snapshot.content,
     sourcePath: args.path,
@@ -212,6 +218,7 @@ export async function parseTranscriptSnapshot(args: {
       ...parsed,
       stable,
       ...(source ? { source } : {}),
+      ...(windowReasons.length ? { incompleteReasons: windowReasons } : {}),
       complete: stable && !snapshot.truncated && parsed.complete === true
     }
   }
@@ -263,6 +270,7 @@ export async function parseTranscriptSnapshot(args: {
       observed: parsed.recognized,
       ...(identityMatched != null ? { identityMatched } : {}),
       ...(turn?.providerTurnId ? { providerTurnId: turn.providerTurnId } : {}),
+      ...(windowReasons.length ? { incompleteReasons: windowReasons } : {}),
       complete: stable && !snapshot.truncated && enriched.complete,
       ...(turn?.terminalStatus ? { terminalStatus: turn.terminalStatus } : {}),
       ...(turn?.completedAt ? { completedAt: turn.completedAt } : {}),
@@ -309,7 +317,7 @@ export async function parseTranscriptSnapshot(args: {
   const events = [...turn?.items ?? []]
   let qoderSidecarsComplete = true
   let qoderSidecarObservable: TranscriptRead['observable'] | undefined
-  const incompleteReasons: string[] = []
+  const incompleteReasons: string[] = [...windowReasons]
   if (args.provider === 'qoder' && turn) {
     const parsed = qoderCreditRequests(snapshot.content, args.providerTurnId || args.requestSetId ? [{
       runId: args.runId, providerTurnId: args.providerTurnId, requestSetId: args.requestSetId
