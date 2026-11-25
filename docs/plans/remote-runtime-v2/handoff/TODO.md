@@ -38,3 +38,9 @@
 
 - [ ] **Claude 常驻会话**（V2 对齐 C1 的 Claude 部分，连同 C5 空闲压缩、C3(c) Claude 后台任务停止）：W20 期间执行机没有安装 claude，无法验证，所以先跳过。等有一台装了 claude 的机器再单独做：用流式输入的 `query()`，配合 `setModel`、`setPermissionMode` 和会话池；做完后用真实 Provider 测首 token，和改动前对比。
 - [ ] **B1 遗留的两个 kind**：`conversation.writeback` 跟 D4 一起实现，由 worker 把事件写回会话文件。`catalog.*` 如果到时还没有生产者，就从 effect-policy 里删掉。
+
+## W20 合入后（#204，2026-11-25）
+
+- [ ] **Qoder 复用与记录器**：App 默认开着 managed recorder，记录器身份在启动 CLI 时以环境变量按轮注入（`SCRY_MANAGED_RUN_ID` / `SCRY_MANAGED_PROMPT_HASH`），所以 Qoder 每轮新起进程、不复用。要用上常驻会话的提速，需要让记录器能按会话拿身份，或者在同一进程内切换身份。
+- [ ] **Qoder 第二轮首段文字重测**：当日额度用完，没测成。额度恢复后在同一个临时 HOME 重测，分别测记录器开和关两种情况。
+- [ ] **C 组剩余项**：C3(a) Pi/Qoder 的轮次结算语义；C2 按 Provider 逐个验证原生 steer；C4 的「用户开启」目前只有环境变量，要补一个界面开关。
