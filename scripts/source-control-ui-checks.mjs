@@ -159,7 +159,6 @@ export async function exerciseSourceControlApp(cdp, evaluate, { workspace, remot
     await wait(`document.activeElement?.getAttribute('title') === 'pre-staged.txt'`)
   }
 
-  // Explicit unstage is still available and preserves the file.
   await click(visible('[aria-label="取消暂存 reversible.txt"]'))
   await wait(`Boolean(${button('确认执行', '.modal')})`)
   await click(button('确认执行', '.modal'))

@@ -42,7 +42,6 @@ export function createRemoteConnections({ remoteAttention, publishSubscription }
     return safeStorage
   }
   function requireDesktopRemoteClient(): DesktopRemoteClient {
-    // Existing credentials and every persisted write still require secure storage.
     desktopRemoteClient ??= new DesktopRemoteClient({
       directory: join(app.getPath('userData'), 'desktop-connections'),
       encrypt: (value) => requireDesktopSecureStorage().encryptString(value),

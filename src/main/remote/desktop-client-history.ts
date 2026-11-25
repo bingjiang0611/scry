@@ -90,7 +90,6 @@ export abstract class DesktopRemoteClientHistory extends DesktopRemoteClientCata
     first: Record<string, unknown>,
     error: 'invalid_history_response' | 'invalid_trace_response'
   ): Promise<Record<string, unknown>> {
-    // The same page validation the App's own daemon trace read uses.
     return assembleByteChunks(first, (chunk) => this.desktop(connectionIdValue, { ...query, chunk }), () => fail(error))
   }
 

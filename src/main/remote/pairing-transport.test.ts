@@ -82,12 +82,9 @@ describe('PairingTransport (device-facing pairing prove/status)', () => {
     // The fingerprint came from the verified TLS peer cert, matching the CSR key.
     expect(proved.publicKeySHA256).toBe(expected.publicKeySHA256)
 
-    // Status over a fresh connection reflects the same pending state.
     const status = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: 'req-2', operation: 'pair.status', pairingId: pair.pairingId, secret: pair.secret })
     expect(status.kind).toBe('pair.pending')
 
-    // Local confirmation (Mac UI) grants the device; a re-prove then returns the
-    // granted certificate over the same wire.
     const grant = await controller.authority.confirmLocal(pair.pairingId, proved.publicKeySHA256)
     expect(grant.deviceId).toMatch(/[0-9a-f-]{36}/)
     const granted = await call(addr, caPEM, device.certPEM, device.keyPEM, { protocolMajor: 1, requestId: 'req-3', operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'My iPhone' })
@@ -100,7 +97,7 @@ describe('PairingTransport (device-facing pairing prove/status)', () => {
   it('refuses a client cert whose key does not match the CSR (no JSON-asserted key)', async () => {
     const { controller, addr, caPEM } = await harness()
     const device = await deviceMaterials()
-    const other = await deviceMaterials() // different keypair -> different cert
+    const other = await deviceMaterials()
     const pair = await controller.authority.begin()
     // Present `other`'s cert (TLS proves the OTHER key) but send `device`'s CSR.
     const reply = await call(addr, caPEM, other.certPEM, other.keyPEM, { protocolMajor: 1, requestId: 'req-1', operation: 'pair.prove', pairingId: pair.pairingId, secret: pair.secret, csrPEM: device.csrPEM, deviceLabel: 'x' })

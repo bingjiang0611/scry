@@ -23,7 +23,6 @@ export type TerminalRuntimeDependencies = TerminalRuntimeTarget & {
   recordingWorkerUrl: URL
   getCurrentCwd: () => string | undefined
   getHomeDir: () => string
-  /** Tests: a fake PTY, the recording in this process, and a fixed shell environment. */
   pty?: TerminalPtyFactory
   inlineRecording?: boolean
   environment?: () => Promise<Record<string, string | undefined>>

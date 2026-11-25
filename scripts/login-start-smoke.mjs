@@ -6,7 +6,7 @@
 // environment (no SHELL, no inherited user env), verifies handshake + daemon self-report
 // (launchedBy=service, supervisorPid, remoteConfig), and verifies SIGTERM lets the daemon
 // exit cleanly before the supervisor leaves with no lock/socket leftovers.
-//
+
 // Usage:
 //   npm run build && node scripts/login-start-smoke.mjs
 //   node scripts/login-start-smoke.mjs --app dist/mac-arm64/Scry.app/Contents/MacOS/Scry

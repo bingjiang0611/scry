@@ -48,8 +48,6 @@ describe('internal publish staging', () => {
 
   it('drops the lifecycle gate the staged copy cannot run', () => {
     const staged = internalManifest(publicManifest)
-    // The staged copy is published with --ignore-scripts, so a prepublishOnly hook there
-    // would advertise a check that never runs.
     expect(staged.scripts).toBeUndefined()
     const withOther = internalManifest({ ...publicManifest, scripts: { prepublishOnly: 'x', test: 'y' } })
     expect(withOther.scripts).toEqual({ test: 'y' })

@@ -88,8 +88,6 @@ export interface DesktopLaneCall {
   signal?: AbortSignal
 }
 
-// Groups one lane set per connection. `closeConnection` is called when the tunnel
-// goes away, so a stale channel is never reused on a new tunnel.
 export class DesktopLanes {
   readonly #connect: DesktopLaneConnector
   readonly #lanes = new Map<string, LaneState>()

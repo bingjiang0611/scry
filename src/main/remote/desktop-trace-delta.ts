@@ -16,7 +16,6 @@ const MAX_REVISIONS = 32
 const MAX_TRACKED_CHANGES = 50_000
 
 interface Revision { seq: number; count: number; changed: number[] }
-/** The projection generation this store last hashed for a run, if the input carried a stamp. */
 interface ProjectionHint {
   generation: object
   revision: number

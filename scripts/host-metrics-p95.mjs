@@ -1,5 +1,4 @@
 // 显式跑 P8 §4 的采样性能门限，并把结果写进证据目录。
-// 用法：node scripts/host-metrics-p95.mjs <output.json> [samples]
 import { spawnSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'

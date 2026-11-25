@@ -42,7 +42,6 @@ export function SettingsModal({
   onThemeChange: (theme: AppTheme) => void
   onClose: () => void
   onSessionsChanged: () => void
-  /** 远程访问整块已搬到侧栏「机器」；这里只留一行指引。 */
   onOpenMachines: () => void
   initialTab?: SettingsTab
 }) {

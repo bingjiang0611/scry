@@ -43,7 +43,6 @@ export async function commitAll(cwd, message = 'bench') {
   return (await git(['rev-parse', 'HEAD'], cwd)).trim()
 }
 
-/** Root directory for every temporary fixture of this run; removed by `cleanupTemp`. */
 export function makeTempRoot() {
   return mkdtempSync(join(tmpdir(), 'scry-recorder-engine-'))
 }
@@ -59,7 +58,7 @@ function findExecutable(name) {
     try {
       execFileSync('test', ['-x', candidate])
       return candidate
-    } catch { /* keep looking */ }
+    } catch { }
   }
   throw new Error(`cannot find ${name} on PATH`)
 }

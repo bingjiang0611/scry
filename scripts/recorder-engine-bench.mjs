@@ -127,7 +127,6 @@ async function stopTurn(root, sessionId, { transcript } = {}) {
 
 function dataRootOf(root) { return join(root, '.scry') }
 
-/** One turn: start hook, optional work, optional tool events, stop hook, record visibility. */
 async function runTurn(root, sessionId, options = {}) {
   const dataRoot = dataRootOf(root)
   const stages = []

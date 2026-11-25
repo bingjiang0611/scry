@@ -14,8 +14,6 @@ export interface WarmPoolOptions<V> {
   limit: number
   idleMs: number
   close(value: V): Promise<void> | void
-  // Whether the parked value can serve another read at all (e.g. a Provider
-  // process that did not fail or start closing).
   reusable(value: V): boolean
   // Environment equality decides reuse: a parked process started with different
   // auth, PATH or isolated-home inputs must not answer the next read.

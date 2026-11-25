@@ -95,12 +95,10 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
   // no history cache to invalidate: every page is the daemon's.
   handleTrusted('agent:setCwd', daemonSetCwdHandler({ getCurrentCwd, setCurrentCwd, invalidateSessionHistoryLoad: () => undefined }))
 
-  // The daemon resets the context it runs; the badge part stays here.
   viewNothingAfterDaemonNewSession(dockBadge, () => Boolean(getWindow()?.isFocused()))
   // The forwarded workspace channels stay bound to this window's selection; the daemon
   // checks the request against it.
   installWorkbenchWindowCwd(getCurrentCwd)
-  // The terminal runs in the daemon; this window names its workspace and its state.
   installTerminalDaemonWindow({ windowCwd: getCurrentCwd, rendererCanReceive, isShuttingDown })
 }
 

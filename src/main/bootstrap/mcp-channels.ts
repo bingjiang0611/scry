@@ -51,7 +51,6 @@ export function mcpChannelHandlers(deps: McpChannelDependencies) {
         )
       }
       if (!p.refresh) return providerRegistry.mcpSnapshot(p.context, false)
-      // the adapter honours the signal only where MCP_LIVE_CHECK_CANCEL allows.
       const key = liveCheckKey(p.context)
       const controller = new AbortController()
       const running = liveChecks.get(key) ?? new Set<AbortController>()

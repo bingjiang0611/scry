@@ -6,9 +6,6 @@ import type { ActiveRun } from '../../shared/trace'
 import type { AgentStartRequest } from '../../shared/runtime'
 import type { SubscribeActiveRunRow } from '../../shared/orchestration-subscribe'
 
-// The App's run controls in daemon mode. The registry is in the daemon, so these must
-// become frames - and an answer the App cannot read must be reported, never shown as
-// "sent".
 
 const run = (runId: string): ActiveRun => ({ runId, state: 'running', providerId: 'claude', cwd: '/w', items: [] } as unknown as ActiveRun)
 
