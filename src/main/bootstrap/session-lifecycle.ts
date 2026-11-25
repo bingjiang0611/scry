@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type { ProviderContext, ProviderId, SessionProviderId, DeleteSessionResult, DeleteArchivedSessionsResult, DeleteArchivedProgress } from '../../shared/provider'
 import type { AgentDataUpdated } from '../../shared/runtime'
 import type { Conversation } from '../../shared/conversation'
@@ -17,6 +18,7 @@ import { deleteOwnedSessionData } from '../session-deletion'
 import type { SideChatCascade } from './conversation-delete'
 import { createSessionSideChats } from './session-side-chats'
 import { createSessionMetadataOps, sessionRefFromRequest } from './session-lifecycle-metadata'
+import { createSessionMetadataRecorder } from './session-metadata-reconcile'
 import { archivedDeletionPrompt, sessionDeletionPrompt, untouchedDeletion } from './session-deletion-prompts'
 
 // Session delete, rename, pin, archive and archived purge, free of Electron so main and
@@ -73,6 +75,12 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
   const { getRuns, appSessionStore, conversationStore, contextAdmission, getStartupManagedRecovery, providerContextKey, providerSessionKey, deletingSessions, sessionDiffBaselines, sessionBaselineKey, recordingBlockedSessions, appUserDataDir, requestRunStop, prepareConversationDeletion, assertLegacyConversationWriteAllowed, sessionByContext, adoptingSessionKeys, dockBadge, publishDataUpdated, sideChatCascade } = deps
   const sessionSideChats = createSessionSideChats({ appSessionStore, sideChatCascade, notifyFailure: deps.notifyFailure })
   const { deleteNativeProjection } = deps
+  // R10: the catalog file is already written when the event is attempted, so a failed event is logged,
+  // queued and replayed instead of turning the user's change into a failed call.
+  const metadataRecorder = createSessionMetadataRecorder({
+    file: join(appUserDataDir, 'session-metadata-pending.json'),
+    ...(deps.recordSessionMetadata ? { record: deps.recordSessionMetadata } : {})
+  })
   // D4: the metadata operations and their event recording live in their own module.
   const { changeLegacySessionMetadata, renameSession, setSessionPinned, setSessionArchived } = createSessionMetadataOps({
     appSessionStore,
@@ -83,7 +91,7 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
     getRuns: () => ({ activeStates: () => getRuns().activeStates() }),
     requestRunStop,
     dockBadge,
-    ...(deps.recordSessionMetadata ? { recordSessionMetadata: deps.recordSessionMetadata } : {})
+    ...(deps.recordSessionMetadata ? { recordSessionMetadata: (input) => metadataRecorder.record(input) } : {})
   })
 
   // 删除一个历史会话。工作区 .scry/ 是独立 canonical evidence，明确保留。
@@ -313,6 +321,8 @@ export function createSessionLifecycle(deps: SessionLifecycleDependencies) {
 
   return {
     deleteOneSession, sessionRefFromRequest, changeLegacySessionMetadata,
-    renameSession, setSessionPinned, setSessionArchived, listArchivedSessions, deleteArchivedSessions
+    renameSession, setSessionPinned, setSessionArchived, listArchivedSessions, deleteArchivedSessions,
+    /** R10: replays metadata events the authority could not record when the user made the change. */
+    reconcileSessionMetadata: () => metadataRecorder.reconcile()
   }
 }
