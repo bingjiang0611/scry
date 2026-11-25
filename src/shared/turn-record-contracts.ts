@@ -33,6 +33,20 @@ export const USAGE_OMISSION_CODES = ['usage_baseline_missing'] as const
 
 export const OMISSION_CODES = [...DIFF_OMISSION_CODES, ...USAGE_OMISSION_CODES] as const
 
+/**
+ * Codes this build is allowed to write into a record. Knowing a code is not permission to write it:
+ * every reader that can open the same `.scry/records` has to tolerate it first, because a reader
+ * with an older whitelist rejects the whole record and its hook path parses every record.
+ *
+ * Removing a code from this set needs no coordination. Adding one needs all of these readers on a
+ * tolerant build first:
+ * - desktop-bundled CLI (`Scry.app/Contents/Resources/scry-cli`) ≥ 0.2.87, ships with the app;
+ * - CodeLens runtime recorder/uploader (`@ali/scry-turn-recorder`) ≥ 0.2.87, pinned by CodeLens;
+ * - standalone global CLI (`@ali/scry-turn-recorder` / `scry`) ≥ 0.2.87.
+ * `usage_baseline_missing` stays out of this set until then; `commitRecord` refuses it.
+ */
+export const WRITABLE_OMISSION_CODES = DIFF_OMISSION_CODES
+
 export type DiffOmissionCode = (typeof DIFF_OMISSION_CODES)[number]
 export type UsageOmissionCode = (typeof USAGE_OMISSION_CODES)[number]
 export type OmissionCode = (typeof OMISSION_CODES)[number]
