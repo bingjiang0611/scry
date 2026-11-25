@@ -134,4 +134,45 @@ describe('Qoder kept session in the run path', () => {
     expect(wake.mock.calls[0][0]).toMatchObject({ taskIds: ['child-1'], reason: 'terminal', cwd: '/repo' })
     await pool.disposeAll()
   })
+
+  it('C2: admits a steer on the live kept session, and refuses one after the turn ended', async () => {
+    const seen: string[] = []
+    let firstConsumed: () => void = () => {}
+    const sawFirst = new Promise<void>((resolve) => { firstConsumed = resolve })
+    sdk.query.mockImplementation((input: { prompt: AsyncIterable<{ message: { content: { text: string }[] } }> }) => ({
+      async *[Symbol.asyncIterator]() {
+        const iterator = input.prompt[Symbol.asyncIterator]()
+        const first = await iterator.next()
+        seen.push(first.value.message.content[0].text)
+        yield { type: 'system', subtype: 'init', session_id: 'native-1', mcp_servers: [] }
+        firstConsumed()
+        // The steer arrives on the same stream, mid-turn; the turn ends after it.
+        const second = await iterator.next()
+        seen.push(second.value.message.content[0].text)
+        yield { type: 'result', subtype: 'success', session_id: 'native-1' }
+      },
+      getContextUsage: vi.fn(async () => undefined)
+    }))
+    const stages: (string | undefined)[] = []
+    const pool = createQoderSessionPool({ provider: 'qoder_cli', idleMs: 60_000 })
+    const adapter = createQoderAdapter('/home/test', { qoderSessions: pool })
+
+    const handle = adapter.run({
+      ...runInput('run-steer', 'first'),
+      emit: (event: { stage?: string }) => stages.push(event.stage)
+    } as never)
+    await sawFirst
+    expect(stages).toContain('runtime:steer_capability')
+    // Live turn: the message is admitted into this session's input stream.
+    await expect(handle.steer?.({ messageId: 'msg-1', prompt: 'also check the test', attachments: [] }))
+      .resolves.toEqual({ status: 'accepted' })
+    const run = await handle.promise
+    expect(run.status).toBe('completed')
+    expect(seen).toEqual(['first', 'also check the test'])
+
+    // The turn is over: admitting more input would invent a turn nobody asked for.
+    await expect(handle.steer?.({ messageId: 'late', prompt: 'too late', attachments: [] }))
+      .resolves.toMatchObject({ status: 'unavailable' })
+    await pool.disposeAll()
+  })
 })

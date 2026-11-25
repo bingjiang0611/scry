@@ -1,4 +1,26 @@
 import type { Query } from '@qoder-ai/qoder-agent-sdk'
+import type { AgentSteerInput, AgentSteerResult } from '../../shared/runtime'
+
+/**
+ * C2: mid-turn input on the kept session. Qoder's input stream takes `priority: 'next'`, which it injects
+ * at the next safe boundary of the live turn, so the message joins this turn instead of waiting for the
+ * next one. `accepted` here means native admission — the SDK took the message and never refused it — not
+ * that the model has followed it.
+ */
+export function steerKeptQoderSession(
+  lease: { send(message: unknown): void },
+  input: AgentSteerInput
+): AgentSteerResult {
+  lease.send({
+    type: 'user',
+    parent_tool_use_id: null,
+    priority: 'next',
+    // Scry-owned identity, so the native transcript can be matched to the message the user sent.
+    uuid: input.messageId,
+    message: { role: 'user', content: [{ type: 'text', text: input.prompt }] }
+  })
+  return { status: 'accepted' }
+}
 
 /**
  * C1: one kept Qoder SDK query serves several turns.

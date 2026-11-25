@@ -1,4 +1,6 @@
 import { watchSettledQoderBackground } from './qoder-background-wake'
+import { qoderSteerCapability, steerQoderRun } from './qoder-steer'
+import { stopQoderBackgroundTask } from './qoder-background-work'
 import { randomUUID } from 'node:crypto'
 import {
   ProcessTransport,
@@ -105,6 +107,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   const terminalAgentCalls = new Set<string>()
   const backgroundTasks = new QoderBackgroundTasks()
   let taskControl: QoderTaskControlTransport | undefined
+  let liveLease: QoderSessionLease | undefined
   // Only a turn that settled with a child creates a watcher, so its presence is the flag.
   let stopBackgroundWatch: (() => void) | undefined
   // Registered before the turn ends: a fast child reports immediately afterwards.
@@ -254,6 +257,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       ? sessions.acquire(qoderSessionKey(request), (promptStream) => ({ query: openQuery(promptStream as AsyncIterable<SDKUserMessage>) }))
       : undefined
     if (lease) {
+      liveLease = lease
       q = lease.query
       // The session's prompt stream stays open across turns; each turn contributes one user message.
       lease.send({
@@ -267,6 +271,8 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
       const turn = lease.beginTurn()
       turnChannel = turn
       releaseProviderPrompt = () => turn.end()
+      // C2: the kept session takes mid-turn input, so steer is native here rather than a restart.
+      request.emit(qoderSteerCapability(request.runId, lease.key, newId(), new Date().toISOString()))
     } else {
       const prompt = livePrompt(outgoingText, submittedUserUuid)
       releaseProviderPrompt = prompt.release
@@ -405,20 +411,14 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   }
   return {
     promise,
-    stopBackgroundTask: async (taskId) => {
-      const task = backgroundTasks.tasks.find((task) => task.taskId === taskId)
-      if (stopped || streamSettled || !task || task.stopState) {
-        return { status: 'rejected', message: '该任务不属于当前活动轮次、已结束或已请求停止。' }
-      }
-      if (!taskControl?.canStopTask) return { status: 'unavailable', message: '当前 Qoder 版本不支持已验证的单任务停止，请使用停止本轮。' }
-      backgroundTasks.markStop(taskId, 'requested')
-      backgroundMonitor.refresh()
-      const result = await taskControl.stopTask(taskId)
-      backgroundTasks.markStop(taskId, result.status === 'unknown' ? 'unconfirmed' : result.status === 'requested' ? 'requested' : undefined)
-      backgroundMonitor.refresh()
-      return result
-    },
+    stopBackgroundTask: (taskId) => stopQoderBackgroundTask({
+      tasks: backgroundTasks, taskId, live: !stopped && !streamSettled,
+      canStop: taskControl?.canStopTask === true,
+      stopTask: (id) => taskControl!.stopTask(id),
+      refresh: () => backgroundMonitor.refresh()
+    }),
     interrupt,
+    steer: async (input) => steerQoderRun(liveLease, input, !streamSettled && !stopped),
     forceKill: () => signalProcessTree(qoderIdentityPromise, 'SIGKILL'),
     // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
     forceKillScope: 'run_scoped',
