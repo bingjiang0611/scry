@@ -153,7 +153,10 @@ export function registerSuite3(): void {
       workspace: root,
       payload: payload('late-terminal', { timestamp: undefined, tool_name: 'Read', tool_use_id: 'new-tool', tool_response: 'ok' })
     })
-    await handleRecorderHook({ provider, event: endEvent, workspace: root, payload: withoutTimestamp() })
+    // Qoder keeps the protection armed after tool activity; supply a provider timestamp for the real end.
+    const confirmed = provider === 'qoder'
+      ? payload('late-terminal', { timestamp: new Date().toISOString() }) : withoutTimestamp()
+    await handleRecorderHook({ provider, event: endEvent, workspace: root, payload: confirmed })
 
     const records = await listRecords(join(root, '.scry'))
     expect(records.map((record) => [record.turnIndex, record.status, record.tools.value?.length ?? 0])).toEqual([
@@ -174,7 +177,7 @@ export function registerSuite3(): void {
       payload: payload('q-duplicate-stop', { timestamp: '2026-07-19T12:00:31.000Z' })
     })
     const noTime = (extra: Record<string, unknown> = {}) => payload('q-duplicate-stop', { timestamp: undefined, ...extra })
-    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime({ prompt: 'second' }) })
+    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime({ prompt: 'second', promptId: 'native-second' }) })
     await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() }))
       .resolves.toMatchObject({ status: 'pending' })
     await handleRecorderHook({
@@ -185,7 +188,12 @@ export function registerSuite3(): void {
       provider: 'qoder', event: 'PostToolUse:Read', workspace: root,
       payload: noTime({ tool_name: 'Read', tool_use_id: 'second-tool', tool_response: 'ok' })
     })
-    await handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() })
+    // Tool activity revokes the candidate but does not make the next anonymous Stop identifiable.
+    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() }))
+      .resolves.toMatchObject({ status: 'pending' })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root, payload: noTime({ promptId: 'native-second' })
+    })
 
     expect((await listRecords(join(root, '.scry'))).map((record) => [record.turnIndex, record.status, record.tools.value?.length ?? 0])).toEqual([
       [1, 'completed', 0],

@@ -43,6 +43,8 @@ export async function finalizeOpenTurn(
     transcriptUnavailable?: string
     /** Already verified from an exact Codex terminal row; do not reparse the capped window. */
     terminalOnlyTranscript?: TranscriptRead
+    /** Stable, identity-checked Qoder snapshot used to resolve a Stop. */
+    verifiedQoderTranscript?: TranscriptRead
   } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
@@ -67,7 +69,7 @@ export async function finalizeOpenTurn(
   }
   await observePendingQoderTranscript(open)
   const pendingTranscript = !!open.pendingQoderTranscriptPath && !open.transcriptPath
-  let transcript: TranscriptRead = options.terminalOnlyTranscript ?? (options.transcriptUnavailable
+  let transcript: TranscriptRead = options.terminalOnlyTranscript ?? options.verifiedQoderTranscript ?? (options.transcriptUnavailable
     ? unobservedTranscript
     : open.transcriptPath
       ? await stableTranscript(

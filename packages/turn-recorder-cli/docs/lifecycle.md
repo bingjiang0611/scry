@@ -15,6 +15,7 @@
 ## 按会话采集：初始化中断与重复 start
 
 - 新 claim 只在基线初始化和控制状态持久化完成后返回 `started`。遇到未完成初始化的旧 open，拒绝认领，不重新制作历史基线。
+- 0.2.92 起，Qoder 的短轮次 Stop 可凭本轮原生 ID，或稳定转录中唯一归属本轮的最终回复解除暂缓。后者需要匹配 `promptId`（或唯一可映射的 `requestSetId`），并用助手消息身份或 `parentUuid` 链校验归属。若结果晚落盘，下一次看到证据的巡检可收尾；只有转录从文件首字节起就证明这是会话根 prompt 时，才允许无最终回复的 Stop 在下一次巡检收尾。首次认领、Stop 比工具事件晚到都不算证据。无法归属时保留原 180 秒宽限期，明确旧轮次的 Stop 不得刷新当前暂缓，后续活动可撤销它；未完成后台任务单独使用原宽限期。`recorder.log` 的 `qoder_stop_hold` 只记录原因、结果和等待毫秒数，不写内容、路径或会话 ID。
 - 0.2.91 起，Qoder 的 `UserPromptSubmit` 可在转录落盘前完成 claim 和 Git 基线。只接受 hook 与 claim 同报的绝对路径、能解析到现存目录的父路径，以及确实不存在的文件项。会话和宿主标识仍须匹配；文件尚不存在不算已取得转录证据。后续 hook 或恢复只在原路径出现普通文件时才读取，仍使用原有轮次匹配；其他路径或符号链接不能替换它。收尾时还没出现则明确标转录不可用。
 - 已开启的同一 `captureId` 再次 start 返回 `already_started`。如果当前轮次仍为 `initialization=pending`，ACK 的 `warning` 写明 `capture baseline initialization was interrupted; the current turn diff is unavailable`。这只确认会话采集仍开启，不证明当前轮次有完整基线；排除路径仍按并集合并。
 - 该轮经 Stop 或恢复封箱时，已开启的 diff 采集标为 `unavailable`，`omissionReason` 写明基线初始化被中断。后续工具发现的迟到基线也不能补齐先前缺口，不发布为 `available` 或“没有改动”。其他可观测记录仍正常保存。

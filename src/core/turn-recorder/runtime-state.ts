@@ -138,6 +138,7 @@ export interface RecorderOpenTurnState {
   host?: import('./host-process.js').HostProcess[]
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
+  deferredTerminalFirstAt?: string
   deferredTerminalEventId?: string
   /** Why this Stop is held rather than published, so recovery and health can name it. */
   deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks'

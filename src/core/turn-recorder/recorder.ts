@@ -22,6 +22,7 @@ import { CLOSING_TURN_EXPIRED_REASON, closingTurnStalled } from './recorder-clos
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
+import { logQoderStopHold, qoderStopEvidence, readQoderStopTranscript } from './qoder-stop-evidence.js'
 import { CODEX_TRUNCATED_RECOVERY_REASON, rememberCodexTranscriptMiss, resumeCodexTranscriptMiss } from './recorder-codex-recovery.js'
 
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
@@ -357,9 +358,23 @@ export async function recoverRecorder(
               }
             }
             if (open.status !== 'closing') return { status: 'idle' as const }
+            if (open.provider === 'qoder' && open.deferredTerminalAt) await observePendingQoderTranscript(open)
+            const qoderRead = open.deferredTerminalReason === 'stale_terminal' && open.deferredTerminalAt
+              ? await readQoderStopTranscript(enablement, open) : undefined
+            const background = (qoderRead?.pendingBackgroundTasks?.length ?? 0) > 0
+            if (background) {
+              await logQoderStopHold(enablement.dataRoot, open, 'background_detected')
+              open.deferredTerminalReason = 'pending_background_tasks'
+              open.deferredTerminalAt = new Date().toISOString()
+              open.deferredTerminalFirstAt = open.deferredTerminalAt
+              await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
+              await logQoderStopHold(enablement.dataRoot, open, 'deferred')
+            }
+            const proof = qoderRead && !background ? qoderStopEvidence(qoderRead, open) : undefined
+            const release = proof?.completedAt ? 'transcript_evidence' : proof?.first ? 'first_turn_poll' : undefined
             if (open.deferredTerminalAt) {
               const deferredAt = Date.parse(open.deferredTerminalAt)
-              if (Number.isFinite(deferredAt) && Date.now() - deferredAt < DEFERRED_TERMINAL_GRACE_MS) {
+              if (!release && Number.isFinite(deferredAt) && Date.now() - deferredAt < DEFERRED_TERMINAL_GRACE_MS) {
                 return { status: 'pending' as const, reason: 'unidentified terminal grace period is still active' }
               }
             }
@@ -370,7 +385,7 @@ export async function recoverRecorder(
             const closingExpired = wasAlreadyClosing &&
               await closingTurnStalled(openPath(item.sessionDir), expiryMs)
             if (closingExpired) forcedExpiry = true
-            return finalizeOpenTurn(
+            const finalized = await finalizeOpenTurn(
               enablement,
               open,
               { timestamp: open.closingAt ?? new Date().toISOString() },
@@ -380,9 +395,14 @@ export async function recoverRecorder(
               open.terminalFallbackStatus ?? 'completed',
               {
                 allowUnstableTranscript: true,
-                ...(closingExpired ? { forcedReason: CLOSING_TURN_EXPIRED_REASON } : {})
+                ...(closingExpired ? { forcedReason: CLOSING_TURN_EXPIRED_REASON } : {}),
+                ...(proof?.completedAt && qoderRead ? { verifiedQoderTranscript: { ...qoderRead, completedAt: proof.completedAt } } : {})
               }
             )
+            if (finalized.status === 'committed' || finalized.status === 'duplicate') {
+              await logQoderStopHold(enablement.dataRoot, open, release ?? 'grace_elapsed')
+            }
+            return finalized
           },
           { waitMs: SESSION_LOCK_WAIT_MS }
         )

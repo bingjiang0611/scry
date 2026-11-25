@@ -18,6 +18,7 @@ import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript } f
 import { snapshotSessionNetDiff } from './git.js'
 import { segmentFreeze } from './recorder-segment-diff.js'
 import { terminalSnapshot } from './git-capture.js'
+import { logQoderStopHold } from './qoder-stop-evidence.js'
 
 /**
  * Why a Stop was held instead of sealed. A held Stop is not published: it waits for the segment to
@@ -95,7 +96,9 @@ export async function holdSeal(
   open.deferredTerminalAt = new Date().toISOString()
   open.deferredTerminalEventId = eventId
   open.deferredTerminalReason = reason
+  open.deferredTerminalFirstAt = open.deferredTerminalAt
   await writeJsonAtomic(openPath(root), open)
+  await logQoderStopHold(enablement.dataRoot, open, 'deferred')
   return reason === 'pending_background_tasks'
     ? { status: 'pending', reason: 'background tasks launched by this turn have not reported; sealing after the silence window' }
     : { status: 'pending', reason: 'unidentified early terminal deferred for stale-event protection' }
