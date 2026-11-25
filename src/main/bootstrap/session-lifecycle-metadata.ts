@@ -2,6 +2,7 @@ import type { AppSessionRef, createAppSessionStore } from '../app-store'
 import type { ConversationStore } from '../conversation-store'
 import { isSessionProviderId } from '../app-store'
 import { archiveSessionAndStop } from '../session-archive'
+import { LOCAL_USER_ACTOR } from '../../host-runtime/orchestration/types'
 
 /**
  * D4: rename, pin and archive change the catalog file. The authority records the same change as
@@ -84,14 +85,14 @@ export function createSessionMetadataOps(deps: SessionMetadataDeps) {
     const ref = sessionRefFromRequest(p)
     if (!ref || typeof (p as AppSessionRef).cwd !== 'string') throw new Error('无效的会话重命名请求')
     return changeLegacySessionMetadata(ref, () => deps.appSessionStore().rename(ref, title),
-      typeof title === 'string' ? { change: { kind: 'rename', title }, actor: 'system' } : undefined)
+      typeof title === 'string' ? { change: { kind: 'rename', title }, actor: LOCAL_USER_ACTOR } : undefined)
   }
 
   const setSessionPinned = (p: unknown, pinned: unknown): Promise<boolean> | boolean => {
     const ref = sessionRefFromRequest(p)
     if (!ref || typeof pinned !== 'boolean') throw new Error('无效的置顶请求')
     return changeLegacySessionMetadata(ref, () => deps.appSessionStore().setPinned(ref, pinned),
-      typeof pinned === 'boolean' ? { change: { kind: 'pin', pinned }, actor: 'system' } : undefined)
+      typeof pinned === 'boolean' ? { change: { kind: 'pin', pinned }, actor: LOCAL_USER_ACTOR } : undefined)
   }
 
   const setSessionArchived = (p: unknown, archived: unknown): Promise<boolean> | boolean => {
@@ -101,7 +102,7 @@ export function createSessionMetadataOps(deps: SessionMetadataDeps) {
       ? archiveSessionAndStop(deps.appSessionStore(), ref, deps.getRuns().activeStates(), deps.requestRunStop,
         (key: string) => deps.dockBadge.remove(key))
       : deps.appSessionStore().setArchived(ref, false),
-      typeof archived === 'boolean' ? { change: { kind: 'archive', archived }, actor: 'system' } : undefined)
+      typeof archived === 'boolean' ? { change: { kind: 'archive', archived }, actor: LOCAL_USER_ACTOR } : undefined)
   }
 
   return { changeLegacySessionMetadata, renameSession, setSessionPinned, setSessionArchived }

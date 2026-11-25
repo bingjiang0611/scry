@@ -3,7 +3,7 @@ import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../ma
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
 import type { Evidence } from '../../shared/turn-record-contracts'
-import { OrchestrationStoreError } from './types'
+import { LOCAL_USER_ACTOR, OrchestrationStoreError } from './types'
 
 export function resolveIntentWithSink(options: {
   sink: EventSink
@@ -110,7 +110,8 @@ export function answerQuestionWithSink(options: {
     questionId: input.questionId,
     answerId: input.answerId,
     answerSha256: input.answerSha256,
-    answeredBy: actor.startsWith('peer:') ? actor : 'unavailable',
+    // R13: the local user answered it, so the receipt names them instead of 'unavailable'.
+    answeredBy: actor.startsWith('peer:') || actor === LOCAL_USER_ACTOR ? actor : 'unavailable',
     answerPayload: input.answerPayload
   }
   return sink.execute({

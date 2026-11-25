@@ -39,6 +39,7 @@ import { buildRollbackRejection, isFatalOrchestrationStoreError, isRetryableOrch
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
 import { applyEventToProjection } from './projection'
 import {
+  LOCAL_USER_ACTOR,
   ORCHESTRATION_EVENT_TYPES,
   OrchestrationStoreError,
   type CommandReceiptRow,
@@ -89,7 +90,7 @@ export class EventSink {
   private constructor(handle: OrchestrationDbHandle, options: EventSinkOptions) {
     this.handle = handle
     this.bodyStore = new BodyStore(handle.orchestrationDir)
-    this.#authorizedActors = new Set(['system', ...(options.authorizedActors ?? [])])
+    this.#authorizedActors = new Set(['system', LOCAL_USER_ACTOR, ...(options.authorizedActors ?? [])])
     this.#maxActiveRuns = options.maxActiveRuns ?? 8
     this.#isProviderAuthenticating = options.isProviderAuthenticating ?? (() => false)
     this.#wal = new WalCheckpointController(
@@ -158,6 +159,16 @@ export class EventSink {
 
   isWriteIndeterminate(): boolean {
     return this.#writeIndeterminate
+  }
+
+  /**
+   * A2 (R13): a fatal store failure found outside a command path still has to stop writes. Retention
+   * prune and other maintenance passes call this so the fence is not limited to command handling.
+   */
+  fenceOnFatal(error: unknown): boolean {
+    if (!isFatalOrchestrationStoreError(error)) return false
+    this.#writeIndeterminate = true
+    return true
   }
 
   /** Registers a verified peer actor so shadow/live commands under that peer pass auth checks. */

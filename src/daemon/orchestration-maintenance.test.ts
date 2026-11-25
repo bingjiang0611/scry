@@ -48,3 +48,27 @@ it('does nothing once the store is closed instead of writing through it', () => 
     rmSync(userDataDir, { recursive: true, force: true })
   }
 })
+
+// R13: retention prune is the only writer here; a fatal IO error used to be logged and forgotten, so the
+// store kept accepting writes after a failure that made committed state unknowable.
+it('fences the store when the prune fails fatally', () => {
+  withSink((sink) => {
+    const lines: string[] = []
+    const original = sink.handle.db.prepare.bind(sink.handle.db)
+    ;(sink.handle.db as unknown as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
+      if (sql.includes('DELETE FROM orch_event')) {
+        throw Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' })
+      }
+      return original(sql)
+    }
+    const maintenance = startOrchestrationMaintenance({ sink, now: () => 100 * 3_600_000, log: (line) => lines.push(line) })
+    try {
+      expect(maintenance.runOnce()).toBeUndefined()
+      expect(sink.isWriteIndeterminate()).toBe(true)
+      expect(lines.at(-1)).toContain('daemon.orchestration-retention-fenced')
+    } finally {
+      ;(sink.handle.db as unknown as { prepare: typeof original }).prepare = original
+      maintenance.stop()
+    }
+  })
+})

@@ -23,6 +23,7 @@ import { parseLedgerIntentRouting, type ShadowCommitSample } from './shadow-rout
 import {
   DEFAULT_PENDING_TTL_MS,
   INLINE_BODY_MAX_BYTES,
+  LOCAL_USER_ACTOR,
   OrchestrationStoreError,
   type PreparedBody
 } from './types'
@@ -78,7 +79,8 @@ export class AuthorityEngine {
       this.sink.authorizeActor(actor)
       return actor
     }
-    return 'system'
+    // R13: a local caller is the user, so its receipt must not expire as an internal system one.
+    return LOCAL_USER_ACTOR
   }
 
   private checkLegacySystemReceipt(commandId: string, actor: string):

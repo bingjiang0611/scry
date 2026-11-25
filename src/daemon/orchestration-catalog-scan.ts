@@ -103,12 +103,20 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     // B2: tombstones come from the binding table so a pruned event log cannot resurrect a session.
     if (!existing && isSessionKeyTombstoned(sink, payload.sessionKey)) return
     const payloadSha256 = sha256Hex(canonicalJson(payload))
+    // R13: the receipt is keyed on the payload *and* the observed extent. Content that changes
+    // A -> B -> A produced the same payload id, so the return to A was dropped as a duplicate command;
+    // an unchanged scan of the same file state still reuses its receipt (B4).
+    const observationKey = observation
+      ? sha256Hex(canonicalJson([
+        payloadSha256,
+        observation.extent.device.toString(), observation.extent.inode.toString(),
+        observation.extent.size, observation.extent.mtimeNs.toString()
+      ])).slice(0, 16)
+      : payloadSha256.slice(0, 16)
     const result = sink.runInBatchTransaction(() => {
       const update = sink.execute({
         type: 'session.discover',
-        // B4: stable per session + observed frontier, so an unchanged scan reuses its receipt
-        // instead of writing a new permanent row on every revision bump.
-        commandId: `catalog-scan:${payload.sessionKey}:${payloadSha256.slice(0, 16)}`,
+        commandId: `catalog-scan:${payload.sessionKey}:${observationKey}`,
         actor: 'system',
         scope: 'system',
         at,
@@ -148,7 +156,9 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
         seen.set(session.sessionKey, { ...previous, extent: current })
         return
       }
-      transcript = unavailable(verified.omissionReason ?? 'source_changed', verified.source)
+      // R13: the size is unchanged but the bytes are not, so the stored reference no longer describes
+      // the file. Recapture it instead of publishing the old reference as if it were still evidence.
+      transcript = await captureTranscriptInterval(source, undefined, current)
     } else {
       transcript = await captureTranscriptInterval(source, previous?.extent, current)
     }

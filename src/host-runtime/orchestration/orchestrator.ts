@@ -22,6 +22,7 @@ import { decideRunStop } from './orchestrator-stop'
 import { decideQueueRelease, decideSubmitQueue, queuedRunEvent } from './orchestrator-queue'
 import {
   DEFAULT_PENDING_TTL_MS,
+  LOCAL_USER_ACTOR,
   PROMPT_PREVIEW_MAX_CHARS,
   USER_TEXT_PREVIEW_MAX_CHARS,
   isAgentActor,
@@ -175,7 +176,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       })
       return acceptDecision(cmd, events, [effect], {
         runId: p.runId,
-        ...(cmd.actor === 'system' && p.intentDetailSha256 ? { intentDetailSha256: p.intentDetailSha256 } : {})
+        ...((cmd.actor === 'system' || cmd.actor === LOCAL_USER_ACTOR) && p.intentDetailSha256
+          ? { intentDetailSha256: p.intentDetailSha256 }
+          : {})
       })
     }
 

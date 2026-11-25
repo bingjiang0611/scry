@@ -50,7 +50,7 @@ describe('metadata changes record an event after the catalog write', () => {
     expect(rename).toHaveBeenCalled()
     expect(recorded).toHaveBeenCalledWith({
       externalSessionId: 'native-1', providerId: 'codex', agentProfileId: undefined, cwd,
-      change: { kind: 'rename', title: 'new title' }, actor: 'system'
+      change: { kind: 'rename', title: 'new title' }, actor: 'user:local'
     })
   })
 

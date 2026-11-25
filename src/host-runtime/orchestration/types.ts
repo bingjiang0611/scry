@@ -350,6 +350,17 @@ export class OrchestrationStoreError extends Error {
 const PEER_ACTOR_RE = /^peer:[0-9a-f]{64}$/
 const EFFECT_ACTOR_RE = /^effect:[^\s]+$/
 
+/**
+ * R13: the local App's commands are the user's, not the host's. `system` is reserved for commands the
+ * host writes for itself (checkpoint, effect results, delivery), so a user action keeps its receipt.
+ */
+export const LOCAL_USER_ACTOR = 'user:local'
+
+/** Commands the host writes for itself; these receipts exist only to make the command idempotent. */
+export function isHostActor(actor: string): boolean {
+  return actor === 'system' || actor.startsWith('effect:')
+}
+
 export function isAgentActor(actor: string): boolean {
   return actor.startsWith('agent:')
 }
@@ -359,5 +370,6 @@ export function isPeerActor(actor: string): boolean {
 }
 
 export function isValidP4Actor(actor: string): boolean {
-  return actor === 'system' || PEER_ACTOR_RE.test(actor) || EFFECT_ACTOR_RE.test(actor)
+  // R13: the local App's commands are the local user's, not the host's `system` actor.
+  return actor === 'system' || actor === LOCAL_USER_ACTOR || PEER_ACTOR_RE.test(actor) || EFFECT_ACTOR_RE.test(actor)
 }

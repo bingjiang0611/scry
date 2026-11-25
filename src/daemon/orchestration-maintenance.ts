@@ -36,6 +36,12 @@ export function startOrchestrationMaintenance(options: OrchestrationMaintenanceO
       )
       return report
     } catch (error) {
+      // R13: a prune that failed with a fatal IO error leaves the committed state unknowable, so it
+      // fences the store like every other writer instead of being logged and forgotten.
+      if (options.sink.fenceOnFatal(error)) {
+        options.log?.(`daemon.orchestration-retention-fenced ${(error as Error)?.message ?? String(error)}`)
+        return undefined
+      }
       options.log?.(`daemon.orchestration-retention-failed ${(error as Error)?.message ?? String(error)}`)
       return undefined
     }
