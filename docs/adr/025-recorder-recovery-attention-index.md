@@ -12,4 +12,6 @@ Automatic recovery backs off an unusable session instead of retrying it on every
 
 Unscoped incremental recovery may defer a quiet unresolved session to avoid rereading the same evidence on every poll. This in-memory hint is separate from failure suspension. It can defer a visit only while selected file metadata still matches, the previous observation met the quiet threshold, and the one-hour revisit window has not expired. Hook processing can invalidate the hint; restarting forgets it. Do not use it to close a turn, prune evidence, or bypass explicit recovery. Managed turns need the recovery loop to discover them, and a recorded host can exit without a file update; neither is eligible for deferral.
 
+The visit hint samples file metadata after recovery; it is not an atomic snapshot of the evidence read by that pass. Do not infer that every pending state was fully examined or that every change in eligibility moves a file. The revisit limit still provides a later opportunity to check.
+
 See [runtime-state.ts](../../src/core/turn-recorder/runtime-state.ts), [runtime-state.test.ts](../../src/core/turn-recorder/runtime-state.test.ts), and [recorder-session-suspension.test.ts](../../src/core/turn-recorder/recorder-session-suspension.test.ts).

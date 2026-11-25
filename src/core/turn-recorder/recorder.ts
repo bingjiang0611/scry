@@ -203,9 +203,6 @@ export async function recoverRecorder(
   try {
     const { sessions, failures } = await recoverySessions(enablement.dataRoot, scope, options.incremental)
     for (const item of sessions) {
-      // Judging a session again on evidence that has not moved, for a verdict it already gave, is
-      // most of what a quiet workspace spends CPU on. Only the daemon's polling pass may skip, and
-      // an operator asking for one session skips nothing: the answer they want is the current one.
       if (options.incremental === true && !scope &&
         await deferQuietSession(enablement.dataRoot, item.provider, item.sessionDir)) continue
       let settled = false
@@ -333,9 +330,6 @@ export async function recoverRecorder(
         ).catch(() => undefined)
       }
       await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
-      // Still open after this pass, and nothing here moved for longer than the stale window: the next
-      // pass may skip it until something does. Anything that does change the answer - a hook, an
-      // inbox entry, a growing transcript - also changes the evidence this record was built from.
       if (options.incremental === true) {
         await recordSessionVisit(enablement.dataRoot, item.provider, item.sessionDir, {
           unresolved: !settled && !managedTurn

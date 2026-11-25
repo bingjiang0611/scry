@@ -30,7 +30,6 @@ import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf,
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
   const cached = await readJson<SessionState>(statePath(root))
   if (cached) return cached
-  // Only identity and the two cursors are needed, so the store is not re-parsed to learn them.
   const committed = (await listRecordSummaries(dataRoot)).filter((record) => record.provider === provider && record.sessionId === sessionId)
   const maxGeneration = Math.max(...committed.map((record) => record.generation), 0)
   const maxTurnIndex = Math.max(...committed.map((record) => record.turnIndex), 0)

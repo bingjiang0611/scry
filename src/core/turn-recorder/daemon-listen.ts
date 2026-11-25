@@ -325,9 +325,6 @@ async function startRecorderDaemon(
     throw error
   }
   await pruneStaleTemps(enablement.dataRoot).catch(() => undefined)
-  // Warm the derived record summary before the first hook needs it: a cold rebuild costs one full
-  // pass over the store, and a hook that met it would pay that on its own synchronous path. Started
-  // here, once per daemon, it runs beside the socket instead of inside an event.
   void listRecordSummaries(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)

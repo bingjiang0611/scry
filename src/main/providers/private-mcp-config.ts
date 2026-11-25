@@ -9,7 +9,7 @@ const DIRECTORY_NAME = /^scry-mcp-config-(\d+)-[A-Za-z0-9]{6}$/
 export interface PrivateMcpConfig {
   /** Passed to the SDK's `extraArgs`; the CLI reads the servers from this path. */
   extraArgs: { 'mcp-config': string }
-  /** Idempotent. A leftover from a crash is removed by the next startup sweep. */
+  /** Idempotent. Startup cleanup of crash leftovers is best effort. */
   dispose(): void
 }
 
@@ -36,7 +36,7 @@ export function writePrivateMcpConfig(
 export interface PrivateMcpEnvFiles {
   /** One file per input, in the same order. */
   paths: string[]
-  /** Idempotent. A leftover from a crash is removed by the next startup sweep. */
+  /** Idempotent. Startup cleanup of crash leftovers is best effort. */
   dispose(): void
 }
 
