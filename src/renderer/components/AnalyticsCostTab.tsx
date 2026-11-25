@@ -50,7 +50,7 @@ function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; m
     </div>
     <div className="analytics-chart">
       {series.length > 0 && <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={copy.dailyTitle(metric)} tabIndex={0}
-        aria-describedby="analytics-chart-readout" onBlur={() => setActive(null)}
+        aria-describedby="analytics-chart-readout analytics-chart-help" onBlur={() => setActive(null)}
         onPointerMove={(event) => {
           const rect = event.currentTarget.getBoundingClientRect()
           const local = (event.clientX - rect.left) / rect.width * W
@@ -86,6 +86,7 @@ function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; m
         </g>)}
         {spot != null && <line className="analytics-cursor" x1={x(spot)} x2={x(spot)} y1={T} y2={H - B} />}
       </svg>}
+      <p id="analytics-chart-help" className="visually-hidden">{copy.chartInstructions}</p>
       {spot != null && <p id="analytics-chart-readout" className="analytics-readout" role="status">{readOut}</p>}
     </div>
   </>
