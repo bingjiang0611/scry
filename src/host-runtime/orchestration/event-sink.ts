@@ -35,7 +35,7 @@ import {
 import { WalCheckpointController } from './wal-checkpoint-controller'
 import { prepareEventSinkStatements, type EventSinkStatements } from './event-sink-statements'
 import { createOrchestratorReadView } from './read-view'
-import { buildRollbackRejection, isFatalOrchestrationStoreError } from './store-fault'
+import { buildRollbackRejection, isFatalOrchestrationStoreError, isRetryableOrchestrationStoreError } from './store-fault'
 import { decide, type DecisionResult, type OrchestrationCommand, type OrchestratorReadView } from './orchestrator'
 import { applyEventToProjection } from './projection'
 import {
@@ -305,8 +305,8 @@ export class EventSink {
           })()
       }
     })
-    // A2 fatal failure while persisting the rejection receipt is itself a fence.
-    if (isFatalOrchestrationStoreError(error)) this.tripFence(error)
+    // A2: a fatal failure while persisting the receipt is a fence, and `buildRollbackRejection`
+    // rethrows it; this function is never reached with a fatal error, so there is nothing to re-check.
     return {
       kind: 'rejected',
       reason,
@@ -424,6 +424,12 @@ export class EventSink {
     } catch (error) {
       if (error instanceof OrchestrationStoreError && error.code !== 'orchestration_write_indeterminate') {
         throw error
+      }
+      // R8: the lock said nothing about this command, so it must not be recorded as refused.
+      if (isRetryableOrchestrationStoreError(error)) {
+        throw error instanceof OrchestrationStoreError
+          ? error
+          : new OrchestrationStoreError('orchestration_db_locked', error instanceof Error ? error.message : String(error))
       }
       if (isFatalOrchestrationStoreError(error)) this.tripFence(error)
       return this.rejectAfterRollback(decision, error)

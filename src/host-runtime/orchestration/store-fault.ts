@@ -1,4 +1,4 @@
-import type { CommandReceiptRow, StickyRejectionReason } from './types'
+import { OrchestrationStoreError, type CommandReceiptRow, type StickyRejectionReason } from './types'
 
 /**
  * A1: only these storage faults make the committed state unknowable, so only they fence the store.
@@ -7,6 +7,21 @@ import type { CommandReceiptRow, StickyRejectionReason } from './types'
 const FATAL_SQLITE_CODE =
   /^SQLITE_(IOERR|FULL|CORRUPT|NOTADB|CANTOPEN|PROTOCOL|INTERNAL|NOMEM|READONLY)/
 const FATAL_MESSAGE = /SQLITE_(IOERR|FULL|CORRUPT|NOTADB)|fsync|disk i.o|input.output error/i
+
+/**
+ * R8: contention is not a decision. `SQLITE_BUSY`/`SQLITE_LOCKED` say another writer held the lock, so
+ * the command was never decided — writing a rejection receipt for it refused a deterministic command id
+ * forever. The caller retries instead.
+ */
+const RETRYABLE_SQLITE_CODE = /^SQLITE_(BUSY|LOCKED)/
+const RETRYABLE_MESSAGE = /database is locked|database table is locked|SQLITE_BUSY|SQLITE_LOCKED/i
+
+export function isRetryableOrchestrationStoreError(error: unknown): boolean {
+  if (error instanceof OrchestrationStoreError) return error.code === 'orchestration_db_locked'
+  const code = (error as { code?: unknown } | null)?.code
+  if (typeof code === 'string' && RETRYABLE_SQLITE_CODE.test(code)) return true
+  return RETRYABLE_MESSAGE.test(error instanceof Error ? error.message : String(error))
+}
 
 export function isFatalOrchestrationStoreError(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code
