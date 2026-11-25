@@ -13,7 +13,6 @@ import {
 } from '@qoder-ai/qoder-agent-sdk'
 import type { TraceEvent } from '../../shared/trace'
 import type { NormalizeCtx } from '../normalize-core'
-import type { ProcessIdentity } from '../process-diagnostics'
 import { QoderCreditCollector } from '../../shared/credit-usage'
 import { QoderBackgroundMonitor } from './qoder-background-work'
 import { normalizeQoderMessage, QoderBackgroundTasks } from './qoder-messages'
@@ -68,8 +67,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
   }
   const currentProviderTurnId = (): string | undefined => providerTurnIdAmbiguous ? undefined : providerTurnId
   let q: Query | undefined
-  let qoderPid: number | undefined
-  let qoderIdentityPromise: Promise<ProcessIdentity | undefined> | undefined
+  let turnSlot: QoderSessionTurnSlot = { current: undefined }
   let streamSettled = false
   let exitTimer: ReturnType<typeof setTimeout> | undefined
   let rejectUnexpectedExit: (error: Error) => void = () => {}
@@ -168,10 +166,9 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
         exitTimer = setTimeout(() => {
           rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
         }, 1000)
-      },
-      onPid: () => undefined
+      }
     }
-    let turnSlot: QoderSessionTurnSlot = createQoderTurnSlot(bindings)
+    turnSlot = createQoderTurnSlot(bindings)
     const currentTurn = (): QoderTurnBindings | undefined => turnSlot.current as QoderTurnBindings | undefined
     const openQuery = (promptStream: AsyncIterable<SDKUserMessage>): Query => query({
       // Keep control-response stdin open while Qoder-owned Agents or Bash
@@ -190,20 +187,13 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
           request.cwd,
           request.resume,
           (pid, identityPromise) => {
-            qoderPid = pid
-            qoderIdentityPromise = identityPromise
-            currentTurn()?.onPid?.(pid)
+            turnSlot.process = { pid, identity: identityPromise }
           },
           (code, signal) => {
             // R12: the pool must not hand a dead process to the next turn.
             lease?.markExited()
             // A turned-over session reports its exit to the turn that is live right now.
-            const live = currentTurn()
-            if (live?.onExit) { live.onExit(code, signal); return }
-            if (stopped || streamSettled) return
-            exitTimer = setTimeout(() => {
-              rejectUnexpectedExit(new Error(`Qoder CLI 已退出，但 SDK 事件流未结束（code=${code ?? 'null'}, signal=${signal ?? 'null'}）`))
-            }, 1000)
+            currentTurn()?.onExit?.(code, signal)
           },
           request.permissionMode,
           request.managedRecorder === true,
@@ -361,7 +351,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     if (await applyQoderLogFallback({
       request,
       hookFallback: deps.hookFallback,
-      pid: qoderPid,
+      pid: turnSlot.process?.pid,
       externalSessionId,
       sdkHooks,
       terminalAgentCalls: agents.terminal,
@@ -406,8 +396,7 @@ export function runQoder(request: ProviderRunRequest, deps: QoderRunDependencies
     }),
     interrupt,
     steer: async (input) => steerQoderRun(liveLease, input, !streamSettled && !stopped),
-    forceKill: () => signalProcessTree(qoderIdentityPromise, 'SIGKILL'),
-    // qoderPid 是本轮 spawn 的 CLI 进程树：硬杀不会波及其他 run。
+    forceKill: () => streamSettled ? Promise.resolve() : signalProcessTree(turnSlot.process?.identity, 'SIGKILL'),
     forceKillScope: 'run_scoped',
     getExternalSessionId: () => externalSessionId,
     getProviderTurnId: currentProviderTurnId,

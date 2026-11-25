@@ -13,7 +13,6 @@ export interface QoderTurnBindings {
     permission: never
   ) => Promise<unknown>
   onExit?: (code: number | null, signal: NodeJS.Signals | null) => void
-  onPid?: (pid: number) => void
 }
 
 /**
@@ -34,6 +33,7 @@ function qoderSessionIdentity(request: ProviderRunRequest): string {
 export function qoderSessionKey(request: ProviderRunRequest): string {
   return [
     qoderSessionIdentity(request),
+    JSON.stringify([request.cwd, request.agentProfileId, request.managedRecorder === true, request.managedRecorderIdentity ? request.runId : null]),
     request.permissionMode ?? 'default',
     request.requestUserInput ? 'ask' : 'no_ask',
     request.model?.id ?? 'default',

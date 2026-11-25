@@ -1,3 +1,4 @@
+import type { ProcessIdentity } from '../process-diagnostics'
 import type { Query } from '@qoder-ai/qoder-agent-sdk'
 import { createQoderSession, type QoderSession, type QoderTurnChannel } from './qoder-session'
 import {
@@ -16,6 +17,7 @@ export interface QoderSessionTurnSlot {
   current: unknown
   /** Owned by the session: the transport outlives one turn. */
   transport?: unknown
+  process?: { pid: number; identity: Promise<ProcessIdentity | undefined> }
 }
 
 /** A kept Qoder session, plus the per-turn state the SDK callbacks read. */
@@ -179,7 +181,7 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
     for (let index = list.length - 1; index >= 0; index -= 1) {
       const entry = list[index]!
       if (entry.closed) continue
-      if (entry.exited) {
+      if (entry.exited || entry.session.closed) {
         void closeEntry(keyOfEntry(entry), entry, 'crashed')
         continue
       }
@@ -226,7 +228,7 @@ export function createQoderSessionPool(options: QoderSessionPoolOptions): QoderS
           watchIdle: (listener) => session.watchIdle(listener),
           release: (releaseOptions) => {
             // R12: a session whose process died during the turn cannot serve the next one.
-            if (releaseOptions?.dead || entry.exited) { void closeEntry(key, entry, 'crashed'); return }
+            if (releaseOptions?.dead || entry.exited || session.closed) { void closeEntry(key, entry, 'crashed'); return }
             entry.lastUsed = now()
             startIdle(key, entry)
           },

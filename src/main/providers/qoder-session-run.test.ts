@@ -143,6 +143,20 @@ describe('Qoder kept session in the run path', () => {
     await pool.disposeAll()
   })
 
+  it.each([{ cwd: '/other-repo' }, { agentProfileId: 'alternate' }, { managedRecorder: true }])(
+    'does not reuse a Qoder process across launch contexts: %j', async (changed) => {
+      const cli = fakeCli()
+      sdk.query.mockImplementation((input: never) => cli.create(input))
+      const pool = createQoderSessionPool({ provider: 'qoder_cli', idleMs: 60_000 })
+      const adapter = createQoderAdapter('/home/test', { qoderSessions: pool })
+      try {
+        await adapter.run(runInput('run-1', 'first')).promise
+        await adapter.run({ ...runInput('run-2', 'second'), resume: 'native-1', ...changed }).promise
+        expect(sdk.query).toHaveBeenCalledTimes(2)
+      } finally { await pool.disposeAll() }
+    }
+  )
+
   it('opens a new process when the turn asks for different options', async () => {
     const cli = fakeCli()
     sdk.query.mockImplementation((input: never) => cli.create(input))
