@@ -19,8 +19,13 @@ export const DETACHED_BRANCH_HEAD = '(detached)'
  * The finish-time retry only runs for repositories this turn changed, and it owns its own pool: the
  * shared `pending` counter exists to keep a turn's start sampling bounded, and reusing it would make
  * the retry inherit exactly the drop that left the location incomplete.
+ *
+ * `perRepositoryMs` bounds one repository's read. `turnMs` is the one deadline a whole turn shares
+ * (`collectTurnDiffs` computes it once), so the host's Stop hook waits a constant at most: `turnMs`
+ * plus the reads already inside it, whatever the repository count. The retry runs on the hook's
+ * synchronous path, which is why the ceiling cannot be per repository.
  */
-export const REPOSITORY_REMOTE_RETRY = { deadlineMs: 250, pool: 8, turnDeadlineMs: 500 } as const
+export const REPOSITORY_REMOTE_RETRY = { perRepositoryMs: 250, pool: 8, turnMs: 500 } as const
 
 export interface GitRepositoryHead {
   branch?: string | null
@@ -192,7 +197,7 @@ export async function readTurnRepositoryRemote(
   repoRoot: string, turnDeadline: number
 ): Promise<{ remote?: string; remoteStatus: RepositoryRemoteStatus }> {
   const result = await withRemoteSlot(turnDeadline, async () => {
-    const deadline = Math.min(Date.now() + REPOSITORY_REMOTE_RETRY.deadlineMs, turnDeadline)
+    const deadline = Math.min(Date.now() + REPOSITORY_REMOTE_RETRY.perRepositoryMs, turnDeadline)
     if (Date.now() >= deadline) return { remoteStatus: 'unavailable' as const }
     const dirs = await gitDirsOf(repoRoot, deadline)
     if (!dirs) return { remoteStatus: 'unavailable' as const }
@@ -215,21 +220,29 @@ export interface GitRepositoryStart {
  * Location a record can defend. Values come from the start sample and the end read; the start HEAD
  * and branch the capture already holds fill what the 50 ms sample lost, and each field keeps a status
  * so "this repository has no origin" never reads the same as "the read did not finish".
+ *
+ * A status always describes the value this object finally carries, never the sample it came from: the
+ * sample publishes `unavailable` before the backfill runs, so deriving a status from that first would
+ * report "not read" next to a value that is right there. Value first, sample second, `unavailable`
+ * last.
  */
 export function withRepositoryLocation(
   snapshot: TurnDiffSnapshot, before?: GitRepositoryLocation, after?: GitRepositoryHead, start?: GitRepositoryStart
 ): TurnDiffSnapshot {
+  const remote = before?.remote
   const branch = before?.branch !== undefined
     ? before.branch
     : start?.branchHead === DETACHED_BRANCH_HEAD ? null
       : isRepositoryBranch(start?.branchHead) ? start.branchHead : undefined
-  const branchStatus: RepositoryBranchStatus = before?.branchStatus
-    ?? (typeof branch === 'string' ? 'observed' : branch === null ? 'detached' : 'unavailable')
   const commitBefore = before?.commit ?? (isRepositoryCommit(start?.head) ? start.head : undefined)
-  const commitStatus: RepositoryCommitStatus = before?.commitStatus ?? (commitBefore ? 'observed' : 'unavailable')
+  const remoteStatus: RepositoryRemoteStatus = remote
+    ? 'observed'
+    : before?.remoteStatus && before.remoteStatus !== 'observed' ? before.remoteStatus : 'unavailable'
+  const branchStatus: RepositoryBranchStatus = typeof branch === 'string' ? 'observed' : branch === null ? 'detached' : 'unavailable'
+  const commitStatus: RepositoryCommitStatus = commitBefore ? 'observed' : 'unavailable'
   const repositoryLocation: TurnRepositoryLocation = {
-    ...(before?.remote ? { remote: before.remote } : {}),
-    remoteStatus: before?.remoteStatus ?? (before?.remote ? 'observed' : 'unavailable'),
+    ...(remote ? { remote } : {}),
+    remoteStatus,
     ...(branch !== undefined ? { branch } : {}),
     branchStatus,
     commitStatus,

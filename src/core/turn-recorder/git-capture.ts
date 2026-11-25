@@ -113,6 +113,11 @@ export interface GitTurnDiffFinishOptions {
   /** New untracked files above this count keep only their manifest entry. Defaults to the recorder limit. */
   untrackedPatchLimit?: number
   /**
+   * One epoch deadline shared by every repository of this turn's origin retry. The retry runs inside
+   * the Stop hook, so the whole turn gets one ceiling instead of one per repository.
+   */
+  locationRetryDeadline?: number
+  /**
    * 终态 after-tree 的出口。分段记录用它冻结「本段结束时的状态」，作为下一段的基线；
    * 共享 after 的重算不触发，因为那时树属于另一个 capture。
    */

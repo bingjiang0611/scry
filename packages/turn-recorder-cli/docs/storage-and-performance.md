@@ -114,7 +114,11 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 主因是**启动采样的 32 并发上限**，不是那个 50 毫秒截止：`sampleGitRepositoryLocation` 在 `pending >= 32` 时连读都不启动，直接返回空快照。一轮 41–45 个捕获同时采样时，超出部分整段丢；端采样的 `branchAfter`/`commitAfter` 走同一个计数器，所以也一起丢——这就是“什么都没有”的那一类。本机 39 个仓库的实测：39 并发时 22.2% 为空，只跑 32 个（不触发上限）降到 5.0%；超过上限的那 7 个正好是 17.9%。
 - 第二个原因：远端（`includeOrigin`）只在轮次开始采样时读，结束只读头指针。开始那次没读到，`remote` 就没有第二次机会。
 - 第三个原因：`commitBefore` 和 `branch` 其实已经在手里——同一个 capture 的 `git status --porcelain=v2 --branch` 已经给出 `# branch.oid` 和 `# branch.head`，只是没写进证据。实测缺位置的样本里 94% 只差 `remote` 一项。
-- 现在：收尾只对**这一轮真正改动过**的仓库补读一次远端（专用小并发池 8，单仓库 250 ms、整轮 500 ms 封顶，不共用那个 32 上限）；`commitBefore`/`branch` 直接取开始时那次 status 的结果，分离头指针写 `null`。到顶就放弃并写状态，不延长宿主的 Stop。
+- 现在：收尾只对**这一轮真正改动过**的仓库补读一次远端（专用小并发池 8，不共用那个 32 上限）；`commitBefore`/`branch` 直接取开始时那次 status 的结果，分离头指针写 `null`。到顶就放弃并写状态，不延长宿主的 Stop。
+- 预算是**整轮共用一个截止时间**（`REPOSITORY_REMOTE_RETRY.turnMs = 500`，由 `collectTurnDiffs` 算一次后经 `locationRetryDeadline` 传给每个仓库的收尾），单仓库读上限 250 ms。所以最坏情况下 Stop 钩子最多多等 500 毫秒，与仓库数量无关；不是“每个仓库各自 500 毫秒”。
+- 已经开始采样就确认了 `absent`/`unsupported` 的仓库不再补读：那是关于这个仓库的事实，不是没取到。
+- 状态描述的是**这条记录最终带着的值**，不是采样时的中间状态：回填之后有值就是 `observed`（分支为 `null` 是 `detached`），没值才退回采样给的状态，都没有就是 `unavailable`。这样“50 毫秒采样没赶上、随后由 status 数据补上”这种最常见的情形不会出现“值有了、状态却说没读到”。
+- 一条记录最多保留 32 个仓库的位置，**有改动的仓库先占名额**，剩下的按出现顺序给没改动的；超过名额的条目不带位置。没有改动、三个状态又都是 `unavailable` 的条目直接不带位置（那是“没读”，不是证据），省体积也不占名额。
 - 位置字段带上三个状态，不再靠省略键表达：`remoteStatus`（`observed`/`absent`/`unsupported`/`unavailable`）、`branchStatus`（`observed`/`detached`/`unavailable`）、`commitStatus`（`observed`/`unavailable`）。`absent` 是“config 读到了但没有 origin”，`unsupported` 是“有 origin 但不是可识别的身份（本地路径、token-only URL、本解析器不支持的续行写法）”，`unavailable` 才是“没读到”。本地路径形式的远端只记状态，不记路径本身。
 - 读取方兼容：`repositoryLocation` 的校验走 `normalizeTurnRepositoryLocation`，只投影已知键、忽略未知键。本机实测旧校验器（桌面端自带 CLI 0.2.84、CodeLens 运行时 0.2.84、PATH 上的 `scry` 0.2.80）对“带三个状态键”和“只有状态键”的记录都是 accepted，所以这三个键不需要等任何读取方升级。
 - 读取宽容 / 写入严格：读取时值不在定义的集合里就投影掉，不让整条记录失效；写入时 `commitRecord` 用 `invalidRepositoryLocationStatuses` 拒绝未定义取值（错误信息 `refusing to commit a record with undefined repository location statuses: …`）。
@@ -122,11 +126,11 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 
 | | 改动仓库的位置完整 | 整轮收尾 p50 |
 |---|---|---|
-| 0.2.87 | **0/24（0%）**，全部连位置键都没有 | 2.3–2.6 s |
-| 0.2.88 | **24/24（100%）** | 2.5–3.0 s |
+| 0.2.87（改动的仓库排在最后 3 个） | **3/18（16.7%）** | 2.4 s |
+| 0.2.88（同一排列） | **18/18（100%）** | 2.3 s |
 
 - 补读本身的成本（本机 39 个真实仓库、含远端）：单仓库 p50 0.5 ms、p95 1.0 ms、max 3.3 ms；40 个排队调用仍在 500 ms 上限内返回。整轮收尾的差异落在 git diff 自身的波动里（±300 ms），补读不构成可测增量。
-- 记录体积：每条 `repositoryLocation` 序列化后约 156 字节（之前约 90），一条记录最多 32 条位置 → 每份记录最多增加约 2 KB。
+- 记录体积（45 个仓库的同一轮，走真实 `aggregateTurnEvidence`）：0.2.87 只有 1/45 条带位置、位置字段合计 338 字节；0.2.88 有 32/45 条带位置、合计 **5,204 字节**（每条约 163 字节），也就是 45 仓库工作区每份记录多约 **4.9 KB**。32 是 `TURN_REPOSITORY_LOCATION_LIMITS.repositories` 的上限。
 - 已知限制：没有改动的仓库仍然只有状态没有远端（按设计，不花第二次读）；跨轮缓存仓库身份、把 32 上限抬高都没做。
 
 ### 0.2.87：Codex 首轮用量不再把会话累计当成本轮

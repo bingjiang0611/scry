@@ -451,8 +451,12 @@ export async function computeGitTurnDiff(
   const cleanup = consume ? await cleanupCapture(capture) : 'ok'
   // Only a repository this turn actually changed earns a second read, and only for the origin the
   // start sample may have lost. Its own pool and the turn ceiling keep the host's Stop hook bounded.
-  const retryRemote = consume && files.length > 0 && !capture.repositoryStart?.remote && capture.repoRoot
-    ? await readTurnRepositoryRemote(capture.repoRoot, Date.now() + REPOSITORY_REMOTE_RETRY.turnDeadlineMs)
+  // A start read that named the origin, or proved there is none, is already an answer: only a read
+  // that did not finish earns the second attempt.
+  const startRemoteStatus = capture.repositoryStart?.remoteStatus
+  const startProvedRemote = !!capture.repositoryStart?.remote || startRemoteStatus === 'absent' || startRemoteStatus === 'unsupported'
+  const retryRemote = consume && files.length > 0 && !startProvedRemote && capture.repoRoot
+    ? await readTurnRepositoryRemote(capture.repoRoot, options.locationRetryDeadline ?? Date.now() + REPOSITORY_REMOTE_RETRY.turnMs)
     : undefined
   const snapshot = located(
     terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection),

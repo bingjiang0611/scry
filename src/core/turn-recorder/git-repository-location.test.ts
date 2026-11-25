@@ -9,7 +9,7 @@ import { aggregateTurnEvidence } from './aggregate'
 import { beginGitTurnDiff, finishGitTurnDiff } from './git'
 import {
   normalizeGitOrigin, readGitRepositoryLocation, readTurnRepositoryRemote, REPOSITORY_REMOTE_RETRY,
-  sampleGitRepositoryLocation, type GitRepositoryLocation
+  sampleGitRepositoryLocation, withRepositoryLocation, type GitRepositoryLocation
 } from './git-repository-location'
 
 vi.mock('./git-repository-location.js', async (importOriginal) => {
@@ -134,7 +134,7 @@ describe('Git repository location from disk', () => {
     await sampleNextBoundary(root, false)
     const started = Date.now()
     const snapshot = await finishGitTurnDiff(capture)
-    expect(Date.now() - started).toBeLessThan(REPOSITORY_REMOTE_RETRY.turnDeadlineMs + 5_000)
+    expect(Date.now() - started).toBeLessThan(REPOSITORY_REMOTE_RETRY.turnMs + 5_000)
     expect(snapshot.files).toHaveLength(1)
     expect(snapshot.files[0].path.endsWith('tracked.txt')).toBe(true)
     expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation).toEqual({
@@ -157,6 +157,38 @@ describe('Git repository location from disk', () => {
       remoteStatus: 'unavailable', branch: 'feature/first', branchStatus: 'observed',
       commitBefore: oid, commitStatus: 'observed', branchAfter: 'feature/first', commitAfter: oid
     })
+  })
+
+  it('does not retry an origin the start read already proved absent', async () => {
+    await init()
+    await writeFile(join(root, 'tracked.txt'), 'before\n')
+    await git(root, 'add', 'tracked.txt')
+    await git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'tracked')
+    vi.mocked(sampleGitRepositoryLocation).mockReturnValueOnce(() => ({ remoteStatus: 'absent' }))
+    const capture = await beginGitTurnDiff(root)
+    // An origin that appears mid-turn is not this turn's fact: "absent" was the answer at its start.
+    await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/late.git')
+    await writeFile(join(root, 'tracked.txt'), 'after\n')
+    await sampleNextBoundary(root, false)
+    const snapshot = await finishGitTurnDiff(capture)
+    expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation).toMatchObject({ remoteStatus: 'absent' })
+    expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation?.remote).toBeUndefined()
+  })
+
+  it('honours the turn deadline the caller shares across repositories', async () => {
+    await init()
+    await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/repo.git')
+    await writeFile(join(root, 'tracked.txt'), 'before\n')
+    await git(root, 'add', 'tracked.txt')
+    await git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'tracked')
+    vi.mocked(sampleGitRepositoryLocation).mockReturnValueOnce(() => ({}))
+    const capture = await beginGitTurnDiff(root)
+    await writeFile(join(root, 'tracked.txt'), 'after\n')
+    await sampleNextBoundary(root, false)
+    // A consumed turn ceiling means no retry at all: the location keeps the miss, not a late answer.
+    const snapshot = await finishGitTurnDiff(capture, undefined, { locationRetryDeadline: Date.now() - 1 })
+    expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation?.remoteStatus).toBe('unavailable')
+    expect(normalizeTurnDiffSnapshot(snapshot)?.repositoryLocation?.remote).toBeUndefined()
   })
 
   it('still finishes a changed turn when the origin retry cannot read the config', async () => {
@@ -275,7 +307,7 @@ describe('finish-time origin retry', () => {
     await git(root, 'remote', 'add', 'origin', 'git@example.invalid:group/repo.git')
     const started = Date.now()
     expect(await readTurnRepositoryRemote(root, Date.now() - 1)).toEqual({ remoteStatus: 'unavailable' })
-    expect(Date.now() - started).toBeLessThan(REPOSITORY_REMOTE_RETRY.deadlineMs)
+    expect(Date.now() - started).toBeLessThan(REPOSITORY_REMOTE_RETRY.perRepositoryMs)
   })
 
   it('keeps 40 queued callers inside the turn ceiling', async () => {
@@ -284,8 +316,55 @@ describe('finish-time origin retry', () => {
     const started = Date.now()
     const results = await Promise.all(Array.from({ length: 40 }, () => readTurnRepositoryRemote(root, started + 400)))
     // The pool is 8 deep, so the tail waits; the ceiling, not the queue, decides when it stops.
-    expect(Date.now() - started).toBeLessThan(REPOSITORY_REMOTE_RETRY.turnDeadlineMs + REPOSITORY_REMOTE_RETRY.deadlineMs)
+    expect(Date.now() - started).toBeLessThan(REPOSITORY_REMOTE_RETRY.turnMs + REPOSITORY_REMOTE_RETRY.perRepositoryMs)
     expect(results.every((result) => ['observed', 'absent', 'unsupported', 'unavailable'].includes(result.remoteStatus))).toBe(true)
+  })
+})
+
+describe('location status follows the value it finally carries', () => {
+  const snapshot = {
+    version: 1 as const, status: 'captured' as const, files: [], beforeAt: '2026-11-25T00:00:00Z',
+    afterAt: '2026-11-25T00:00:01Z', captureMs: 1, cleanup: 'ok' as const
+  }
+  const oid = 'a'.repeat(40)
+
+  it('reports a value backfilled from status as observed, not unavailable', () => {
+    // The most common case: the 50 ms sample gave up before it published anything usable.
+    const location = withRepositoryLocation(snapshot, { remoteStatus: 'unavailable', branchStatus: 'unavailable', commitStatus: 'unavailable' },
+      {}, { head: oid, branchHead: 'main' }).repositoryLocation
+    expect(location).toEqual({
+      remoteStatus: 'unavailable', branch: 'main', branchStatus: 'observed',
+      commitBefore: oid, commitStatus: 'observed'
+    })
+  })
+
+  it('keeps a detached backfill detached, and never claims an observation it does not carry', () => {
+    const detached = withRepositoryLocation(snapshot, { remoteStatus: 'absent', branchStatus: 'unavailable', commitStatus: 'unavailable' },
+      {}, { head: oid, branchHead: '(detached)' }).repositoryLocation
+    expect(detached).toEqual({ remoteStatus: 'absent', branch: null, branchStatus: 'detached', commitBefore: oid, commitStatus: 'observed' })
+    // A status that says "observed" without the value it describes is a writer bug, not a claim.
+    const inconsistent = withRepositoryLocation(snapshot, { remoteStatus: 'observed', branchStatus: 'observed', commitStatus: 'observed' }, {}, {}).repositoryLocation
+    expect(inconsistent).toEqual({ remoteStatus: 'unavailable', branchStatus: 'unavailable', commitStatus: 'unavailable' })
+  })
+
+  it('holds the invariant for every produced location', () => {
+    const cases: Array<Parameters<typeof withRepositoryLocation>> = [
+      [snapshot, undefined, undefined, undefined],
+      [snapshot, { remote: 'example.invalid/g/repo' }, { branch: 'main', commit: oid }, { head: oid, branchHead: 'main' }],
+      [snapshot, { remoteStatus: 'absent' }, { branch: null }, { head: oid, branchHead: '(detached)' }],
+      [snapshot, { branchStatus: 'unavailable' }, { commit: oid }, { head: oid }],
+      [snapshot, { remote: 'example.invalid/g/repo', remoteStatus: 'observed' }, undefined, { branchHead: 'release' }]
+    ]
+    for (const args of cases) {
+      const location = withRepositoryLocation(...args).repositoryLocation
+      expect(location).toBeDefined()
+      if (location?.remote || location?.commitBefore) expect(location.remoteStatus === 'unavailable' && location.commitStatus === 'unavailable').toBe(false)
+      if (location?.remoteStatus === 'observed') expect(location.remote).toBeDefined()
+      if (location?.commitStatus === 'observed') expect(location.commitBefore).toBeDefined()
+      if (location?.branchStatus === 'observed') expect(typeof location.branch).toBe('string')
+      if (location?.branchStatus === 'detached') expect(location.branch).toBeNull()
+      if (location?.branch === undefined) expect(location.branchStatus).toBe('unavailable')
+    }
   })
 })
 
