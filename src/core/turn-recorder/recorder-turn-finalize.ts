@@ -271,7 +271,8 @@ export async function finalizeOpenTurn(
     }
     return source.sourceCompleteness === 'complete'
       ? available(value, ['provider_transcript'])
-      : partial(value, ['provider_transcript'], 'transcript parser window started after an incomplete source line', 'exact')
+      : partial(value, ['provider_transcript'],
+        transcript.incompleteReasons?.join('; ') || 'transcript parser window started after an incomplete source line', 'exact')
   })()
   const recordId = stableHash({
     workspace: enablement.config.workspaceId,

@@ -10,7 +10,8 @@ import {
   TRANSCRIPT_WINDOW_LIMIT_BYTES
 } from './recorder-transcript-io'
 import { parseTranscriptSnapshot } from './recorder-transcript-parse'
-import { handleRecorderHook } from './recorder'
+import { handleRecorderHook, recoverRecorder } from './recorder'
+import { listRecords } from './store'
 import {
   resetTranscriptAnchorCache,
   resetTranscriptSnapshotCache,
@@ -53,12 +54,12 @@ describe('bounded transcript windows', () => {
     const root = await workdir()
     const head = '{"type":"user","message":{"content":"HEAD-MARKER"}}\n'
     const tail = '{"type":"assistant","message":{"content":"TAIL-MARKER"}}\n'
-    const size = 512 * 1024 * 1024
+    const size = 600 * 1024 * 1024
+    const incompleteLine = '{"type":"tool"}\n'
     const path = await sparseTranscript(root, 'huge.jsonl', size, [
       { at: 0, text: head },
-      // The window starts mid-file, so its first bytes are the tail of some line. A complete line
-      // there keeps the assertion about the marker rather than about the drop of a partial line.
-      { at: size - TRANSCRIPT_WINDOW_LIMIT_BYTES, text: '{"type":"tool"}\n' },
+      // Place a newline just inside the cap so the following bytes can be retained.
+      { at: size - TRANSCRIPT_WINDOW_LIMIT_BYTES, text: incompleteLine },
       { at: size - tail.length, text: tail }
     ])
 
@@ -71,8 +72,8 @@ describe('bounded transcript windows', () => {
     expect(snapshot.truncation).toEqual({
       reason: 'window_limit',
       requestedBytes: size,
-      keptBytes: TRANSCRIPT_WINDOW_LIMIT_BYTES,
-      droppedBytes: size - TRANSCRIPT_WINDOW_LIMIT_BYTES
+      keptBytes: TRANSCRIPT_WINDOW_LIMIT_BYTES - Buffer.byteLength(incompleteLine),
+      droppedBytes: size - TRANSCRIPT_WINDOW_LIMIT_BYTES + Buffer.byteLength(incompleteLine)
     })
     expect(snapshot.consistent).toBe(true)
     // The cap is what keeps the read legal: the old code allocated the whole window and then threw
@@ -188,6 +189,21 @@ describe('anchor scans are bounded', () => {
   })
 })
 
+describe('a scan that reaches the first byte stops', () => {
+  it('terminates when the file begins with a newline', async () => {
+    const root = await workdir()
+    const path = join(root, 'leading-newline.jsonl')
+    await writeFile(path, '\n' + [
+      { timestamp: '2026-09-09T00:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1' } },
+      { timestamp: '2026-09-09T00:00:01.000Z', type: 'event_msg', payload: { type: 'user_message', message: 'x' } }
+    ].map(row => JSON.stringify(row)).join('\n') + '\n')
+    resetTranscriptAnchorCache()
+    const read = await stableTranscript(path, 'run', 'codex', undefined, 'missing-turn', undefined, undefined, 'session', root)
+    // No matching turn id: the scan walks to byte 0 and answers with the window it settled on.
+    expect(read.source?.startOffset).toBe(0)
+  })
+})
+
 describe('a repeated Codex pass reuses its anchor', () => {
   const rollout = (turnId: string) => [
     { timestamp: '2026-09-09T00:00:00.000Z', type: 'event_msg', payload: { type: 'task_started', turn_id: turnId } },
@@ -233,8 +249,8 @@ describe('a repeated Codex pass reuses its anchor', () => {
   })
 })
 
-describe('a turn records where its own rows begin', () => {
-  async function hookFixture() {
+describe('transcript evidence on disk', () => {
+  async function hookFixture(toolOutput: 'summary' | 'full' = 'summary') {
     const root = await workdir()
     await writeFile(join(root, 'scry.config.json'), JSON.stringify({
       schemaVersion: 1,
@@ -242,7 +258,7 @@ describe('a turn records where its own rows begin', () => {
       workspaceId: 'offset-test',
       dataDir: '.scry',
       repositories: { mode: 'workspace-only' },
-      capture: { prompt: true, assistant: true, toolOutput: 'summary', diff: false, hooks: true }
+      capture: { prompt: true, assistant: true, toolOutput, diff: false, hooks: true }
     }))
     return { root, env: { SCRY_RECORDER_SOCKET: join(root, 'r.sock') } }
   }
@@ -254,6 +270,29 @@ describe('a turn records where its own rows begin', () => {
     const path = join(providerRoot, sessionDir, 'open.json')
     return JSON.parse(await readFile(path, 'utf8')) as { transcriptStartOffset?: number | null; transcriptPath?: string }
   }
+
+  it('stores a capped transcript as partial with the byte-limit reason', async () => {
+    const { root, env } = await hookFixture('full')
+    const size = 600 * 1024 * 1024
+    const timestamp = new Date().toISOString()
+    const tail = '\n' + [
+      { type: 'user', timestamp, message: { role: 'user', content: 'fixture prompt' } },
+      { type: 'assistant', timestamp, message: { role: 'assistant', content: [{ type: 'text', text: 'fixture answer' }] } }
+    ].map(row => JSON.stringify(row)).join('\n') + '\n'
+    const transcript = await sparseTranscript(root, 'capped.jsonl', size, [{ at: size - Buffer.byteLength(tail), text: tail }])
+    const hook = { workspace: root, provider: 'claude' as const, quiet: true, env,
+      payload: { session_id: 'capped', cwd: root, transcript_path: transcript, timestamp } }
+    await handleRecorderHook({ ...hook, event: 'UserPromptSubmit' })
+    await handleRecorderHook({ ...hook, event: 'Stop' })
+    await recoverRecorder(root, env)
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(1)
+    expect(records[0].transcript).toMatchObject({
+      status: 'partial',
+      omissionReason: expect.stringContaining('transcript read limit'),
+      value: { sourceCompleteness: 'partial', endOffset: size, startOffset: size - Buffer.byteLength(tail) + 1 }
+    })
+  })
 
   it('stores the size at open, not a zero that reads as "the file starts here"', async () => {
     const { root, env } = await hookFixture()
@@ -288,6 +327,7 @@ describe('a turn records where its own rows begin', () => {
       env,
       quiet: true
     })
+    expect((await openTurn(root, 'claude', 'offset-late')).transcriptStartOffset).toBeNull()
     await handleRecorderHook({
       workspace: root,
       provider: 'claude',

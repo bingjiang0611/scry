@@ -43,8 +43,8 @@ Recorder 合同在 `diff.value[].repositoryLocation` 增加可选对象。内部
 读取方对该对象的处理是宽容的：值不在已知集合里就投影掉，不让整条记录失效；写入侧 `commitRecord` 拒绝未定义取值。
 
 每条记录最多给 32 个不同的仓库根各附一次位置；重复快照和超过上限的仓库仍保留原 diff。读取不启进程、不等待额外 I/O；只读已知 Git 文件布局。支持 loose ref、`packed-refs` 和 worktree/gitdir 指针，不追踪 Git config include、不应用 URL 重写规则、不读取其他 ref 后端。超过读取预算、读失败或无法确认的字段留空。
-- 转录快照有字节上限（0.2.89 起 64 MiB，见 `storage-and-performance.md`）。超过上限时 `source.sourceCompleteness` 是 `partial`，`complete` 是 `false`，`incompleteReasons` 写明保留了多长、丢了多少。这只是“这一段没读到”，不是“这一轮没有内容”；需要整轮完整正文时，仍要按长期方案补齐，不能把 `partial` 当成完整证据，也不能反过来把截断当成读取失败。
-- `open.json` 的 `transcriptStartOffset` 是轮次开始时那条转录的真实字节位置。`null` 表示当时读不到（例如转录文件在轮次开始后才出现），历史记录里的 `0` 不代表任何真实观测，不要用它判断“该轮次区间之后是否还在增长”。恢复流程读到完整窗口后会把锚点回填成真实起点；截断窗口不回填。
+- 转录快照有字节上限（0.2.89 起 64 MiB，见 `storage-and-performance.md`）。超过上限时，解析快照的 `complete` 是 `false`。启用原始转录采集且能确认字节范围时，正式记录的 `transcript` 段标 `partial`，`value.sourceCompleteness` 为 `partial`，`omissionReason` 写明保留和丢弃的大小。这只是“这一段没读到”，不是“这一轮没有内容”；需要整轮完整正文时，仍要按长期方案补齐，不能把 `partial` 当成完整证据，也不能反过来把截断当成读取失败。
+- `open.json` 的 `transcriptStartOffset` 是轮次开始时那条转录的真实字节位置。`null` 表示当时读不到（例如转录文件在轮次开始后才出现），历史记录里的 `0` 不代表任何真实观测，不要用它判断“该轮次区间之后是否还在增长”。恢复时定位的解析锚点不会覆盖开轮观测值。
 - 会话捕获记录里的 `source` 与 `client` 是两件事：`source` 是谁要求采集，`client` 是这轮发生在哪个客户端里（例如 `source=friday` + `client=3eye`）。`client` 缺失只表示没观测到，不能读成“不在任何客户端里”；它只能是 `[a-z0-9][a-z0-9-]{0,31}` 形式的标识，不是自由文案。
 - `diff` 为 `partial` 时，`omissionReason` 是给人读的句子，`omissionCodes` 是同一批原因的封闭枚举（`baseline_after_turn_start` / `continuation_no_baseline` / `diff_exclude` / `untracked_limit` / `patch_policy` / `patch_budget` / `patch_deadline` / `patch_git_error` / `patch_truncated` / `patch_unavailable`）。平台与测试按码判断，不从句子解析；旧记录没有该字段表示只有文案。
 - `usage` 为 `unavailable` 时也可能带 `omissionReason`（暂时不带 `omissionCodes`）。Codex 上报累计用量，一轮的用量是相邻帧的差；拿不到“这一轮开始前的累计”时，这一轮标 `unavailable`，句子固定为 `USAGE_BASELINE_MISSING_REASON`（详见 `storage-and-performance.md` 的 0.2.87 一节）。这与“会话从 0 开始”是两件事。

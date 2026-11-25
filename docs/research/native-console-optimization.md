@@ -419,8 +419,8 @@ claim is made.
 - Legacy open-turn state may still contain `transcriptStartOffset`; recovery intentionally recomputes
   the anchor rather than trusting that heuristic, and `0` is never read as a real position. Since
   0.2.89 an open turn records the transcript's actual byte length when it opens, `null` when the file
-  was not readable yet, and recovery backfills the located anchor only from a complete, untruncated
-  window. Snapshot identity checks before/after the read and path inode checks still prevent a
+  was not readable yet. Recovery does not overwrite that observation with a parsed anchor.
+  Snapshot identity checks before/after the read and path inode checks still prevent a
   rotated or concurrently changed file from being called stable.
 - Focused regression covers a 33 MiB snapshot and a Claude JSONL prompt line larger than the old
   rewind budget, including exact Provider identity and assistant recovery.
@@ -443,8 +443,10 @@ claim is made.
   index store with torn-tail repair and identity checks (comparable to the existing remote ledger
   checkpoint work), per-Provider indexers for the four JSONL formats, a parser that can resume from a
   (lineOffset, parserState) pair, and a migration that rebuilds missing indexes in the background. It
-  touches the recorder store, the four transcript parsers and every recovery pass, so it needs its own
-  change and a compatibility plan for sessions recorded before it. Until then, `partial` +
+  touches the recorder store, four transcript parsers and recovery. Budget roughly 1–2 engineering
+  weeks for a Codex pilot and 1–2 more for the remaining formats, migration, and cross-platform
+  validation. Start that work if production sampling finds recurring truncation of turns whose
+  complete evidence is needed. Until then, `partial` +
   `incompleteReasons` is the honest answer for a capped window.
 
 ## Durable model and diff bodies

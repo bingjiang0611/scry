@@ -113,11 +113,11 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 0.2.89 起，transcript 的读取和定位都有字节上限；超过上限是一次带原因的截断，而不是一次会重试的异常。
 
 - **窗口上限 64 MiB。** `readTranscriptWindow` 最多读 64 MiB（`TRANSCRIPT_WINDOW_LIMIT_BYTES`）。超限时只保留最新的 64 MiB，丢掉起点处的残缺行，其余照常解析。返回值带 `truncated` 和 `truncation: { reason: 'window_limit', requestedBytes, keptBytes, droppedBytes }`。
-- **截断会进入记录，不静默。** 截断窗口的 `source` 标 `sourceCompleteness: "partial"`，记录的 `incompleteReasons` 写明句固定原因，例如 `window exceeded the 64.0 MiB transcript read limit; kept the last 64.0 MiB of 979.6 MiB and dropped 915.6 MiB`，`complete` 为 `false`。读取方看到的是“这一段没读到”，不是“这一轮什么都没发生”。
+- **截断会进入记录，不静默。** 解析快照标 `complete: false`，原因写明保留和丢弃的大小。启用原始转录采集且能确认字节范围时，记录的 `transcript` 段标 `partial`，带 `value.sourceCompleteness: "partial"` 和 `omissionReason`。读取方看到的是“这一段没读到”，不是“这一轮什么都没发生”。
 - **锚点扫描也有上限。** 反向扫描最多回看 64 MiB（`TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES`），单行最多在内存里保留 4 MiB（`TRANSCRIPT_ANCHOR_LINE_LIMIT_BYTES`），有记录的起点时只从起点前 8 MiB 开始（`TRANSCRIPT_ANCHOR_LOOKBACK_BYTES`）。超长行直接按记录正文丢弃，不再跨 chunk 反复 `concat`；NUL 字节按格式边界处理，不为了找锚点把稀疏前缀读进内存。找不到锚点时仍回退 byte 0，但读取本身受窗口上限约束。
 - **Codex 的锚点缓存只复用轮次边界。** 同一个 `task_started` 轮次在后续 pass 里直接复用已定位的起点，只补扫新增字节。`user_message` 行只是反向扫描的提示，不会被当成新的轮次起点，否则窗口会从提问行开始、丢掉 `task_started`。
 - **一次失败不再变成每轮重试。** 任意转录读取/解析失败（不只是“会话不可读”）现在都按“会话 + 轮次”记账；同一原因连续 3 次失败后挂起该会话，每小时重探一次，`recorder.log` 留 `WARN session suspended after 3 identical failed passes`，`health.json` 的 `suspendedSessions` 和 `scry status` 会报出来。整轮 pass 正常完成才清记录，`open.json` 和证据保持原样。
-- **`transcriptStartOffset` 记真实位置。** 轮次打开时记录当时 transcript 的字节长度；转录文件在轮次开始后才出现（或读不到）时记 `null` = 未知，不再用 `0` 冒充“从头开始”。恢复流程读到完整且未被截断的窗口后，把定位到的锚点回填成真实起点（只在大于 0 且与现值不同时写一次）。截断窗口不回填，因为它的起点只是“读到哪里”，不是这一轮的起点。
+- **`transcriptStartOffset` 记真实位置。** 轮次打开时记录当时 transcript 的字节长度；转录文件在轮次开始后才出现（或读不到）时记 `null` = 未知，不再用 `0` 冒充“从头开始”。这个值只是定位提示，不证明 Provider 从这个字节开始写本轮；恢复时找到的解析锚点不回填。
 
 改动前后的实测数字（同一台机器、同一份 transcript，`stableTranscript` 单次调用）：
 

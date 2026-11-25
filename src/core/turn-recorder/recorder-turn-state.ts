@@ -37,10 +37,7 @@ import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf,
  * verified. A size read at open is the honest value; a path that cannot be read, or that only
  * appears after the turn already produced rows, is `null` (unknown) so no reader mistakes it for 0.
  */
-async function transcriptStartOffsetAt(path: string, options: { appearedLater?: boolean } = {}): Promise<number | null> {
-  // Rows written before this hook belong to this turn too, and nothing on disk says where they
-  // start, so the honest value is unknown rather than the current end of the file.
-  if (options.appearedLater) return null
+async function transcriptStartOffsetAt(path: string): Promise<number | null> {
   try {
     return (await statTranscript(path)).size
   } catch {
@@ -89,7 +86,7 @@ export async function beginOpenTurn(
   const providerTurnId = claim?.providerTurnId ?? providerTurnIdOf(payload, provider)
   const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
   const transcriptPath = transcriptPathOf(payload)
-  const transcriptOffset = transcriptPath ? await transcriptStartOffsetAt(transcriptPath) : undefined
+  const transcriptOffset = transcriptPath ? await transcriptStartOffsetAt(transcriptPath) : null
   const piTranscriptAnchor = provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
   const open: OpenTurnState = {
     ...(isFullToolContentPolicy(enablement.config.capture) ? { toolContentPolicy: {
@@ -123,7 +120,7 @@ export async function beginOpenTurn(
     ...(managedRunId ? { managedRunId } : {}),
     ...(managedPromptHash ? { managedPromptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
-    ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
+    transcriptStartOffset: transcriptOffset,
     ...(piTranscriptAnchor ? { piTranscriptAnchor } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(requestSetId ? { requestSetId } : {}),
@@ -407,10 +404,7 @@ export async function storeLifecycleEvent(
     open.transcriptPath = transcriptPath
     // The path can appear after this turn opened. The turn's own rows are somewhere earlier in that
     // file and the recorder cannot prove where, so this is `null` (unknown), not `0` (from the top).
-    open.transcriptStartOffset = await transcriptStartOffsetAt(transcriptPath, { appearedLater: true })
-    await writeJsonAtomic(openPath(root), open, { sync: false })
-  } else if (transcriptPath && open.transcriptStartOffset == null) {
-    open.transcriptStartOffset = await transcriptStartOffsetAt(transcriptPath, { appearedLater: true })
+    open.transcriptStartOffset = null
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   return id

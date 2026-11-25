@@ -48,8 +48,8 @@ function sameTranscriptIdentity(left: TranscriptSnapshotIdentity, right: Transcr
 export const TRANSCRIPT_WINDOW_LIMIT_BYTES = 64 * 1024 * 1024
 
 /**
- * Why a window is shorter than the caller asked for. The bytes are not evidence that was read and
- * then dropped: they were never loaded, and the record says so (`sourceCompleteness: 'partial'`).
+ * Why a window is shorter than requested. Dropped bytes include the unread prefix and any
+ * incomplete first line removed from the retained range (`sourceCompleteness: 'partial'`).
  */
 export interface TranscriptWindowTruncation {
   reason: 'window_limit'
@@ -80,7 +80,9 @@ export async function readTranscriptWindow(
   consistent: boolean
 }> {
   const boundedEnd = Math.max(0, endOffset)
-  const limit = Math.max(1, Math.trunc(windowLimitBytes))
+  const limit = Number.isFinite(windowLimitBytes)
+    ? Math.min(TRANSCRIPT_WINDOW_LIMIT_BYTES, Math.max(1, Math.trunc(windowLimitBytes)))
+    : TRANSCRIPT_WINDOW_LIMIT_BYTES
   const requestedStart = Math.max(0, Math.min(preferredStartOffset, boundedEnd))
   const requestedBytes = boundedEnd - requestedStart
   // Keep the newest bytes of an over-limit window. The rows that can still close this turn — the
@@ -136,7 +138,7 @@ export async function readTranscriptWindow(
     ...(consistent && after ? { identity: after } : {}),
     truncated,
     ...(capped
-      ? { truncation: { reason: 'window_limit' as const, requestedBytes, keptBytes: bytesRead, droppedBytes: requestedBytes - bytesRead } }
+      ? { truncation: { reason: 'window_limit' as const, requestedBytes, keptBytes: contentBuffer.length, droppedBytes: requestedBytes - contentBuffer.length } }
       : {}),
     consistent
   }

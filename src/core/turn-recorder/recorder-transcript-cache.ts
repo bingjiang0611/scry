@@ -276,7 +276,9 @@ async function anchorOffsetFor(
   const proofHash = provider === 'codex' ? undefined : promptHash
   const key = JSON.stringify([path, provider, promptHash ?? '', providerTurnId ?? ''])
   const cached = anchorCache.get(key)
-  if (cached) {
+  // An out-of-range cursor (for example at a frozen Stop boundary) or a large burst of
+  // new data needs a fresh bounded scan, not an unbounded forward walk from the old cursor.
+  if (cached && cached.scannedTo <= endOffset && endOffset - cached.scannedTo <= TRANSCRIPT_ANCHOR_SCAN_LIMIT_BYTES) {
     let reusable = false
     try {
       const info = await statTranscript(path)
@@ -340,8 +342,9 @@ async function transcriptAnchorOffset(
       }
       const combined = Buffer.concat([chunk, suffix])
       let lineEnd = combined.length
-      for (let index = combined.length - 1; index >= 0; index--) {
-        if (combined[index] !== 0x0a) continue
+      // `lastIndexOf` is the native scan; a byte-per-byte loop here made a NUL-filled or
+      // record-body-heavy region cost seconds per pass instead of milliseconds.
+      for (let index = combined.lastIndexOf(0x0a); index >= 0; index = index > 0 ? combined.lastIndexOf(0x0a, index - 1) : -1) {
         const lineStart = index + 1
         if (lineEnd > lineStart) {
           const absoluteOffset = start + lineStart

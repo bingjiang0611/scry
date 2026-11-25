@@ -297,18 +297,6 @@ export async function recoverRecorder(
                     open.piTranscriptAnchor
                   )
                 : undefined
-              // The read just located where this turn's rows begin. Remembering it makes the next
-              // pass cheap, and heals a turn that opened before the recorder recorded a real offset.
-              // A capped window starts wherever the cap fell, which is not the turn's start: only a
-              // complete read may teach the recorder a new offset.
-              const resolvedStart = transcript?.source?.sourceCompleteness === 'complete' && transcript.observed
-                ? transcript.source?.startOffset
-                : undefined
-              // `0` is the legacy "read from the top" value and is not an improvement worth a write.
-              if (resolvedStart != null && resolvedStart > 0 && resolvedStart !== open.transcriptStartOffset) {
-                open.transcriptStartOffset = resolvedStart
-                await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
-              }
               if (transcript?.terminalStatus && transcript.completedAt && transcript.identityMatched !== false) {
                 open.status = 'closing'
                 open.closingAt = transcript.completedAt
