@@ -78,6 +78,12 @@ export interface RunCheckpointPayload {
   cwd?: string | null
 }
 
+/** R9: retention dropped this run's ref, so the run must stop claiming a checkpoint it no longer has. */
+export interface RunCheckpointForgottenPayload {
+  runId: string
+  ref: string
+}
+
 /**
  * D1: release one held queue entry. The hold exists so a stop does not let the queue keep firing; the
  * user has to say go once more, and this is that command.
@@ -251,6 +257,7 @@ export type OrchestrationCommand =
   | (BaseCommand & { type: 'run.resolve_intent'; payload: RunResolveIntentPayload })
   | (BaseCommand & { type: 'run.stop'; payload: RunStopPayload })
   | (BaseCommand & { type: 'run.checkpoint'; payload: RunCheckpointPayload })
+  | (BaseCommand & { type: 'run.checkpoint_forgotten'; payload: RunCheckpointForgottenPayload })
   | (BaseCommand & { type: 'run.rollback'; payload: RunRollbackPayload })
   | (BaseCommand & { type: 'run.release_queue'; payload: RunReleaseQueuePayload })
   | (BaseCommand & { type: 'session.stop_subtasks'; payload: SessionStopSubtasksPayload })

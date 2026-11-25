@@ -166,6 +166,12 @@ export function applyEventToProjection(db: Database.Database, event: Orchestrati
     }
 
     // D5: the checkpoint row carries the ref name; the git object itself is the evidence.
+    case 'checkpoint.forgotten': {
+      db.prepare('UPDATE orch_p_run SET checkpoint_ref = NULL, rev_seq = ? WHERE run_id = ? AND checkpoint_ref = ?')
+        .run(event.seq, event.runId, p.ref as string)
+      return
+    }
+
     case 'checkpoint.captured': {
       db.prepare('UPDATE orch_p_run SET checkpoint_ref = ?, rev_seq = ? WHERE run_id = ?')
         .run(String(p.ref), event.seq, event.runId)

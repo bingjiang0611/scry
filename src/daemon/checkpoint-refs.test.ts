@@ -36,6 +36,8 @@ const git = (): CheckpointGit => ({
       { cwd: root, env: { ...process.env, GIT_INDEX_FILE: index }, encoding: 'utf8' }).trim()
   },
   updateRef: async (root, ref, target) => { gitIn(root, ['update-ref', ref, target]) },
+  listRefs: async (root, prefix) =>
+    gitIn(root, ['for-each-ref', '--format=%(refname)', prefix]).split('\n').map((line) => line.trim()).filter(Boolean),
   readRef: async (root, ref) => {
     try {
       return execFileSync('git', ['rev-parse', '--verify', ref], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()

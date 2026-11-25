@@ -23,7 +23,9 @@ export function createCheckpointGit(options: CheckpointGitOptions): CheckpointGi
       const env = { ...process.env, GIT_INDEX_FILE: join(dir, 'index') }
       try {
         await run(cwd, ['read-tree', 'HEAD'], env)
-        await run(cwd, ['add', '-A', '--', '.'], env)
+        // R9: `add -u` stages tracked modifications only. `add -A` wrote every untracked file the user
+        // happens to have in the checkout into the object database, on every settled run.
+        await run(cwd, ['add', '-u', '--', '.'], env)
         return (await run(cwd, ['write-tree'], env)).trim()
       } finally {
         await rm(dir, { recursive: true, force: true })
@@ -31,6 +33,10 @@ export function createCheckpointGit(options: CheckpointGitOptions): CheckpointGi
     },
     async updateRef(cwd, ref, target) {
       await run(cwd, ['update-ref', ref, target])
+    },
+    async listRefs(cwd, prefix) {
+      const output = await run(cwd, ['for-each-ref', '--format=%(refname)', prefix])
+      return output.split('\n').map((line) => line.trim()).filter(Boolean)
     },
     async readRef(cwd, ref) {
       try {

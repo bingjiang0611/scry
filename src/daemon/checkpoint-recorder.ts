@@ -62,9 +62,23 @@ export async function applyRunRollback(
   if (sink.isWriteIndeterminate()) return { status: 'unavailable', reason: 'orchestration_write_indeterminate' }
   const run = sink.getRun(input.runId)
   if (!run?.checkpointRef) return { status: 'unavailable', reason: 'checkpoint_missing' }
+  // R9: the restore overwrites whatever the worktree holds now, including work another run is still
+  // writing. Both refusals arrive before a single file changes.
+  const busy = sink.handle.db
+    .prepare(
+      `SELECT 1 FROM orch_p_run
+       WHERE cwd = ? AND run_id != ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted', 'rolled_back')
+       LIMIT 1`
+    )
+    .get(input.cwd, input.runId)
+  if (busy) return { status: 'unavailable', reason: 'checkpoint_worktree_busy' }
   // The authority only accepts a rollback from a settled run. Checking it here keeps the refusal from
   // arriving after the files were already rewritten — "拒绝" must mean nothing changed.
   if (!canTransitionRun(run.lifecycle, 'rolled_back')) return { status: 'unavailable', reason: 'illegal_transition' }
+  // R9: keep what is about to be overwritten, so a rollback is itself undoable. A safety copy that
+  // cannot be written refuses the rollback: losing the user's current work is not an acceptable price.
+  const safety = await captureCheckpoint(git, { cwd: input.cwd, runId: `${input.runId}-prelude` })
+  if (safety.status !== 'captured') return { status: 'unavailable', reason: 'checkpoint_safety_copy_failed' }
   const restored = await rollbackCheckpoint(git, { cwd: input.cwd, runId: input.runId, managed: input.managed })
   if (restored.status !== 'restored') return restored
   const result = submit(sink, {

@@ -68,6 +68,7 @@ export type OrchestrationEventType =
   | 'run.content_gap'
   | 'run.rolled_back'
   | 'checkpoint.captured'
+  | 'checkpoint.forgotten'
   | 'checkpoint.rollback_requested'
   | 'session.created'
   | 'session.renamed'
@@ -107,6 +108,7 @@ export const ORCHESTRATION_EVENT_TYPE_LIST: readonly OrchestrationEventType[] = 
   'run.content_gap',
   'run.rolled_back',
   'checkpoint.captured',
+  'checkpoint.forgotten',
   'checkpoint.rollback_requested',
   'session.created',
   'session.renamed',

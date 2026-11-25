@@ -17,7 +17,7 @@ import {
   type DecisionResult,
   type OrchestratorReadView
 } from './orchestrator-handlers'
-import { decideRunCheckpoint, decideRunRollback } from './orchestrator-checkpoint'
+import { decideRunCheckpoint, decideRunCheckpointForgotten, decideRunRollback } from './orchestrator-checkpoint'
 import { decideRunStop } from './orchestrator-stop'
 import { decideQueueRelease, decideSubmitQueue, queuedRunEvent } from './orchestrator-queue'
 import {
@@ -195,6 +195,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         result: tombstoneResult
       })
     }
+
+    case 'run.checkpoint_forgotten':
+      return decideRunCheckpointForgotten(cmd, view)
 
     case 'run.checkpoint':
       return decideRunCheckpoint(cmd, view)

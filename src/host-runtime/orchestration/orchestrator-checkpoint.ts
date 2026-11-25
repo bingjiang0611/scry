@@ -4,6 +4,7 @@ import { canTransitionRun } from './run-transitions'
 
 type CheckpointCommand = Extract<OrchestrationCommand, { type: 'run.checkpoint' }>
 type RollbackCommand = Extract<OrchestrationCommand, { type: 'run.rollback' }>
+type ForgottenCommand = Extract<OrchestrationCommand, { type: 'run.checkpoint_forgotten' }>
 
 /**
  * D5: the checkpoint row is recorded from evidence the host already produced — a git ref and the
@@ -23,6 +24,25 @@ export function decideRunCheckpoint(cmd: CheckpointCommand, view: OrchestratorRe
     payload: { runId: run.runId, ref: p.ref, tree: p.tree }
   })
   return acceptDecision(cmd, [event], [], { runId: run.runId })
+}
+
+/**
+ * R9: retention deleted a ref, and a run that still reports `hasCheckpoint` would offer the App a rollback
+ * that cannot work. Forgetting it is its own recorded decision, not a silent column reset.
+ */
+export function decideRunCheckpointForgotten(cmd: ForgottenCommand, view: OrchestratorReadView): DecisionResult {
+  const p = cmd.payload
+  const run = view.getRun(p.runId)
+  if (!run) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+  if (!run.checkpointRef || run.checkpointRef !== p.ref) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+  return acceptDecision(cmd, [makeEvent(cmd, 0, {
+    type: 'checkpoint.forgotten',
+    stream: `run:${run.runId}`,
+    sessionKey: run.sessionKey,
+    runId: run.runId,
+    cwd: run.cwd,
+    payload: { runId: run.runId, ref: p.ref }
+  })], [], { runId: run.runId })
 }
 
 /**

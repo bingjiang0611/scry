@@ -1,9 +1,16 @@
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
+import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonical-json'
 import { gitCommand } from '../core/turn-recorder/git-command'
 import { createCheckpointGit } from './checkpoint-git'
 import { isManagedWorktreePath } from '../main/app-store'
 import { applyRunRollback, recordRunCheckpoint, type CheckpointRecordResult, type CheckpointRestoreResult } from './checkpoint-recorder'
-import type { CheckpointGit } from './checkpoint-refs'
+import { pruneCheckpointRefs, type CheckpointGit } from './checkpoint-refs'
+
+/**
+ * R9: how many refs one worktree keeps. A checkpoint is a convenience, not a backup service, and an
+ * unbounded namespace both grows without limit and hides which state the user can still return to.
+ */
+const MAX_CHECKPOINTS_PER_WORKTREE = 20
 
 export interface CheckpointService {
   /** D5: capture the finished run's worktree. Never throws: a settlement must not fail on git. */
@@ -25,12 +32,50 @@ export function createCheckpointService(deps: {
   isManagedWorktree: (cwd: string) => boolean
   now?: () => number
   warn?: (message: string, error: unknown) => void
+  maxCheckpoints?: number
 }): CheckpointService {
   const now = deps.now ?? Date.now
+  const maxCheckpoints = deps.maxCheckpoints ?? MAX_CHECKPOINTS_PER_WORKTREE
+  /** Drops the refs of runs this worktree no longer keeps, and forgets them in the projection too. */
+  const prune = async (sink: EventSink | undefined, cwd: string): Promise<void> => {
+    if (!sink) return
+    const rows = sink.handle.db
+      .prepare(
+        `SELECT run_id AS runId, checkpoint_ref AS ref FROM orch_p_run
+         WHERE cwd = ? AND checkpoint_ref IS NOT NULL
+         ORDER BY COALESCE(settled_at, 0) DESC, rev_seq DESC`
+      )
+      .all(cwd) as Array<{ runId: string; ref: string }>
+    const dropped = await pruneCheckpointRefs(deps.git, { cwd, keep: rows.slice(0, maxCheckpoints).map((row) => row.ref) })
+    for (const ref of dropped) {
+      const run = rows.find((row) => row.ref === ref)
+      if (!run) continue
+      try {
+        const payload = { runId: run.runId, ref }
+        sink.execute({
+          type: 'run.checkpoint_forgotten',
+          commandId: `checkpoint-forgotten:${run.runId}`,
+          actor: 'system',
+          scope: 'system',
+          at: now(),
+          payload,
+          payloadSha256: sha256Hex(canonicalJson(payload))
+        })
+      } catch {
+        // The ref is gone either way; a projection that cannot say so is not worth failing a run over.
+      }
+    }
+  }
   return {
     async capture(input) {
+      // R9: the user's own checkout is not ours to write trees into on every settled run.
+      if (!deps.isManagedWorktree(input.cwd)) {
+        return { status: 'unavailable', reason: 'checkpoint_unmanaged_worktree' }
+      }
       try {
-        return await recordRunCheckpoint(deps.sink(), deps.git, input, now())
+        const captured = await recordRunCheckpoint(deps.sink(), deps.git, input, now())
+        if (captured.status === 'captured') await prune(deps.sink(), input.cwd)
+        return captured
       } catch (error) {
         deps.warn?.('checkpoint capture failed', error)
         return undefined
