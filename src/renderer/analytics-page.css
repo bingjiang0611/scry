@@ -146,7 +146,8 @@
 .analytics-tile-value {
   min-height: 1.1em;
   color: var(--fg);
-  font-size: var(--text-2xl);
+  /* 设计稿里第一张卡的数字明显更大；字号走现有档位，不引入新尺寸。 */
+  font-size: var(--text-xl);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
