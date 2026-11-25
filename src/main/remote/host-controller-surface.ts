@@ -73,12 +73,19 @@ export class HostController {
     this.#disposeExecution = wiring.dispose
   }
 
-  /** C4: a writer with no request behind it (the usage-limit scheduler) still has to drive dispatch. */
-  pump(): void { this.#dispatcher.pump() }
+  /**
+   * C4/W9: a writer with no request behind it still has to drive dispatch. These callers pump
+   * because something the queue was waiting on has changed, so the deferred rows get a fresh look.
+   */
+  pump(): void {
+    this.#dispatcher.wake()
+    this.#dispatcher.pump()
+  }
 
   // Startup only: reconcile orphaned dispatched runs and pump undispatched intents.
   recover(): void {
     recoverDispatchedLedgerRuns(this.#ledger, this.#injected.orchestration)
+    this.#dispatcher.wake()
     this.#dispatcher.pump()
   }
 

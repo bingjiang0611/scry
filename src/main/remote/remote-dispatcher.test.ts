@@ -161,7 +161,9 @@ function memoryOutbox(seed: Array<{ effectId: string; runId: string | null; kind
     payload: JSON.stringify({ runId: row.runId }),
     attempts: 0,
     state: 'pending' as 'pending' | 'done' | 'failed' | 'voided',
-    expiresAt: row.expiresAt
+    expiresAt: row.expiresAt,
+    // R1: a settled-deferred row is invisible until its backoff elapses.
+    availableAt: undefined as number | undefined
   }))
   const settled: string[] = []
   return {
@@ -171,7 +173,8 @@ function memoryOutbox(seed: Array<{ effectId: string; runId: string | null; kind
       void owner
       const expired = rows.filter((r) => r.state === 'pending' && r.expiresAt !== undefined && r.expiresAt <= now)
       for (const row of expired) row.state = 'voided'
-      const row = rows.find((r) => r.state === 'pending' && (r.expiresAt === undefined || r.expiresAt > now))
+      const row = rows.find((r) => r.state === 'pending' && (r.expiresAt === undefined || r.expiresAt > now)
+        && (r.availableAt === undefined || r.availableAt <= now))
       if (!row) return { expired: expired.map((r) => ({ effectId: r.effectId, runId: r.runId })) }
       row.state = 'done'
       row.attempts += 1
@@ -191,10 +194,20 @@ function memoryOutbox(seed: Array<{ effectId: string; runId: string | null; kind
     },
     retry(effectId: string) {
       settled.push(`retry:${effectId}`)
+      const row = rows.find((r) => r.effectId === effectId)
+      if (row) {
+        row.state = 'pending'
+        row.availableAt = Date.now() + 100
+      }
       return { status: 'retry' as const, delayMs: 100 }
     },
-    defer(effectId: string) {
+    defer(effectId: string, _owner: string, _reason: string, now: number, delayMs: number) {
       settled.push(`defer:${effectId}`)
+      const row = rows.find((r) => r.effectId === effectId)
+      if (row) {
+        row.state = 'pending'
+        row.availableAt = now + delayMs
+      }
       return true
     }
   }
@@ -295,6 +308,35 @@ describe('RemoteDispatcher outbox-driven dispatch (B1)', () => {
 
     dispatcher.pump()
     expect(outbox.settled).toEqual(['claim:eff-stop', 'retry:eff-stop'])
+  })
+
+  // R1: a held row used to be the permanent head of the queue, so every other session starved.
+  it('R1: a held run does not stop another session from dispatching', () => {
+    const ledger = new SessionLedger({ store: new MemoryLedgerStore() })
+    const { executor, calls, gates } = deferredExecutor()
+    const heldRun = randomUUID()
+    const freeRun = randomUUID()
+    ledger.recordIntent({ intentId: randomUUID(), runId: heldRun })
+    ledger.recordIntent({ intentId: randomUUID(), runId: freeRun })
+    const outbox = memoryOutbox([
+      { effectId: 'eff-held', runId: heldRun },
+      { effectId: 'eff-free', runId: freeRun }
+    ])
+    const dispatcher = new RemoteDispatcher({
+      ledger,
+      executor,
+      outbox,
+      beforeDispatch: (runId) =>
+        runId === heldRun ? { ok: false, action: 'requeue', reason: 'queue_held', retryAfterMs: 500 } : { ok: true }
+    })
+
+    expect(dispatcher.pump()).toEqual([freeRun])
+    expect(calls).toEqual([freeRun])
+    // The held row was deferred once, not reclaimed in a loop for every pass.
+    expect(outbox.settled.filter((entry) => entry === 'defer:eff-held')).toHaveLength(1)
+    expect(outbox.settled).toContain('succeed:eff-free')
+    gates.get(freeRun)!.resolve()
+    dispatcher.dispose()
   })
 
   it('never scans the in-memory intent list once a durable outbox is wired', () => {

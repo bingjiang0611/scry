@@ -57,8 +57,9 @@ export interface RemoteDispatcherOutbox {
   }
   succeed(effectId: string, owner: string, now: number): boolean
   fail(effectId: string, owner: string, now: number, reason: string): boolean
-  /** Policy deferral: back to pending without spending an attempt. */
-  defer(effectId: string, owner: string, reason: string): boolean
+  /** Policy deferral: back to pending without spending an attempt, claimable again at `now + delayMs`. */
+  defer(effectId: string, owner: string, reason: string, now: number, delayMs: number): boolean
+  wake?(): void
   retry(effectId: string, owner: string, now: number, reason: string): { status: string; delayMs?: number }
 }
 
@@ -144,6 +145,11 @@ export class RemoteDispatcher {
     }, Math.max(10, delayMs))
     timer.unref?.()
     this.#retryTimer = timer
+  }
+
+  /** Clears backoffs so a "conditions changed" pump sees rows it deferred earlier. */
+  wake(): void {
+    this.#outbox?.wake?.()
   }
 
   // Dispatch every intent still awaiting its first dispatch, exactly once.
@@ -233,9 +239,11 @@ export class RemoteDispatcher {
             } catch { /* already terminal */ }
             continue
           }
-          // A held gate is not a failure, so it must not consume the attempt budget.
-          outbox.defer(effect.effectId, this.#leaseOwner, gate.reason)
-          this.#scheduleRetry(gate.retryAfterMs ?? 100)
+          // A held gate is not a failure, so it must not consume the attempt budget. The backoff
+          // also keeps this row from being the head of every other session's queue.
+          const retryAfterMs = gate.retryAfterMs ?? 100
+          outbox.defer(effect.effectId, this.#leaseOwner, gate.reason, Date.now(), retryAfterMs)
+          this.#scheduleRetry(retryAfterMs)
           continue
         }
       }

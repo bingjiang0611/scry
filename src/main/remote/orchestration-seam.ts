@@ -23,8 +23,13 @@ export interface OrchestrationOutboxGate {
   }
   succeed(effectId: string, owner: string, now: number): boolean
   fail(effectId: string, owner: string, now: number, reason: string): boolean
-  /** Policy deferral: back to pending without spending an attempt. */
-  defer(effectId: string, owner: string, reason: string): boolean
+  /**
+   * Policy deferral: back to pending without spending an attempt. `delayMs` is when it may be
+   * claimed again, so a held row cannot become the head of every other session's queue.
+   */
+  defer(effectId: string, owner: string, reason: string, now: number, delayMs: number): boolean
+  /** Clears every backoff after the condition that held the rows has actually changed. */
+  wake?(): void
   retry(effectId: string, owner: string, now: number, reason: string): { status: string; delayMs?: number }
 }
 

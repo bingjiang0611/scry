@@ -5,6 +5,7 @@ import {
   failEffect,
   retryEffect,
   succeedEffect,
+  wakeDeferredEffects,
 } from '../host-runtime/orchestration/effect-outbox'
 import type { OrchestrationOutboxGate } from '../main/remote/orchestration-seam'
 
@@ -20,7 +21,8 @@ export function createOutboxGate(db: () => Database.Database): OrchestrationOutb
     },
     succeed: (effectId, owner, now) => succeedEffect({ db: db(), effectId, owner, now }),
     fail: (effectId, owner, now, reason) => failEffect({ db: db(), effectId, owner, now, reason }),
-    defer: (effectId, owner, reason) => deferEffect({ db: db(), effectId, owner, reason }),
+    defer: (effectId, owner, reason, now, delayMs) => deferEffect({ db: db(), effectId, owner, reason, now, delayMs }),
+    wake: () => wakeDeferredEffects(db()),
     retry: (effectId, owner, now, reason) => {
       const outcome = retryEffect({ db: db(), effectId, owner, now, reason })
       return outcome.status === 'retry'

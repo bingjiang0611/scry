@@ -259,6 +259,8 @@ export function createExecution(input: ExecutionDeps): {
   })
   const unsubscribeGate = deps.orchestration
     ? gate.onAuthenticationReleased(() => {
+        // The rows deferred because this auth lease was held are exactly the ones to reconsider.
+        dispatcher.wake()
         dispatcher.pump()
       })
     : () => undefined

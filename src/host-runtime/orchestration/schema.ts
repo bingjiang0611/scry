@@ -1,4 +1,4 @@
-export const ORCHESTRATION_SCHEMA_VERSION = 13
+export const ORCHESTRATION_SCHEMA_VERSION = 14
 export const ORCHESTRATION_PROJECTION_SCHEMA_VERSION = 6
 
 export const ORCH_DDL_V1: readonly string[] = [
@@ -394,7 +394,17 @@ const ORCH_DDL_V13: readonly string[] = [
   'CREATE INDEX IF NOT EXISTS idx_orch_usage_limit_due ON orch_usage_limit(resumed_at, reset_at)'
 ]
 
+/**
+ * R1: when a claim may be retried. Without this column a deferred or retried row stays the global
+ * head of the queue, so it is claimed, deferred and reclaimed in a tight loop and every other
+ * session waits behind it.
+ */
+const ORCH_DDL_V14: readonly string[] = [
+  'ALTER TABLE orch_outbox ADD COLUMN available_at INTEGER',
+  'CREATE INDEX IF NOT EXISTS idx_orch_outbox_available ON orch_outbox(state, available_at)'
+]
+
 export const ORCHESTRATION_MIGRATIONS: readonly (readonly string[])[] = [
   ORCH_DDL_V1, ORCH_DDL_V2, ORCH_DDL_V3, ORCH_DDL_V4, ORCH_DDL_V5, ORCH_DDL_V6, ORCH_DDL_V7, ORCH_DDL_V8,
-  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11, ORCH_DDL_V12, ORCH_DDL_V13
+  ORCH_DDL_V9, ORCH_DDL_V10, ORCH_DDL_V11, ORCH_DDL_V12, ORCH_DDL_V13, ORCH_DDL_V14
 ]

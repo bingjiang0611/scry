@@ -5,6 +5,7 @@ import { expect, it } from 'vitest'
 import { EventSink } from './event-sink'
 import {
   claimNextEffect,
+  deferEffect,
   failEffect,
   retryEffect,
   runEffectWorkerPass,
@@ -144,3 +145,35 @@ it('skips expired effects and reports them as voided', () => {
     expect(row).toEqual({ state: 'voided', last_error: 'pending_expired' })
   })
 })
+
+it('R1: a deferred effect does not starve the other sessions', () => {
+  withSink((sink) => {
+    enqueue(sink, 'a1', { sessionKey: 'sess-a', causationSeq: 1 })
+    enqueue(sink, 'b1', { sessionKey: 'sess-b', causationSeq: 2 })
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 1_000 }).effect?.effectId).toBe('a1')
+    // The gate holds session A (its run is still live), so the row goes back with a backoff.
+    expect(
+      deferEffect({ db: sink.handle.db, effectId: 'a1', owner: 'w', reason: 'queue_held', now: 1_000, delayMs: 500 })
+    ).toBe(true)
+    // Before the backoff elapses the queue must move on: the old behaviour re-claimed a1 forever.
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 1_010 }).effect?.effectId).toBe('b1')
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 1_010 }).effect).toBeUndefined()
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 1_500 }).effect?.effectId).toBe('a1')
+  })
+})
+
+it('R1: a retried effect waits out its backoff before it can block another session again', () => {
+  withSink((sink) => {
+    enqueue(sink, 'a1', { sessionKey: 'sess-a', causationSeq: 1 })
+    enqueue(sink, 'b1', { sessionKey: 'sess-b', causationSeq: 2 })
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 2_000 }).effect?.effectId).toBe('a1')
+    expect(retryEffect({ db: sink.handle.db, effectId: 'a1', owner: 'w', now: 2_000, reason: 'auth_pending' })).toMatchObject({
+      status: 'retry',
+      delayMs: 100
+    })
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 2_010 }).effect?.effectId).toBe('b1')
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 2_050 }).effect).toBeUndefined()
+    expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 2_100 }).effect?.effectId).toBe('a1')
+  })
+})
+

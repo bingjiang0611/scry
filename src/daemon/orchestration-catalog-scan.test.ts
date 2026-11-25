@@ -212,10 +212,12 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
         ALTER TABLE orch_p_run DROP COLUMN checkpoint_ref;
         ALTER TABLE orch_p_run DROP COLUMN rolled_back_at;
         DROP INDEX IF EXISTS idx_orch_outbox_fifo;
+        DROP INDEX IF EXISTS idx_orch_outbox_available;
         ALTER TABLE orch_p_run DROP COLUMN intent_command_id;
         ALTER TABLE orch_p_run DROP COLUMN intent_at;
         ALTER TABLE orch_p_run DROP COLUMN intent_detail_sha256;
         ALTER TABLE orch_outbox DROP COLUMN session_key;
+        ALTER TABLE orch_outbox DROP COLUMN available_at;
       `)
       sink.handle.db.pragma('user_version = 5')
       sink.close()

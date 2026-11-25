@@ -57,6 +57,17 @@ export function voidExpiredEffects(
     .all(now, now) as Array<{ effectId: string; runId: string | null }>
 }
 
+/**
+ * R1/W9: clears every backoff. Called only when the condition that deferred the rows has actually
+ * changed (auth released, queue released, a restart note consumed), never on an ordinary pump —
+ * otherwise a steady stream of new submissions would nullify the backoff entirely.
+ */
+export function wakeDeferredEffects(db: Database.Database): number {
+  return db
+    .prepare("UPDATE orch_outbox SET available_at = NULL WHERE state = 'pending' AND available_at IS NOT NULL")
+    .run().changes
+}
+
 export interface ClaimResult {
   /** Rows past their pending TTL, surfaced so the caller can cancel their runs. */
   expired: Array<{ effectId: string; runId: string | null }>
@@ -83,6 +94,7 @@ export function claimNextEffect(input: {
                   COALESCE(o.session_key, (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id)) AS sess
            FROM orch_outbox o
            WHERE o.state = 'pending'
+             AND (o.available_at IS NULL OR o.available_at <= :now)
              AND (:kind IS NULL OR o.kind = :kind)
              AND (:session IS NULL OR COALESCE(o.session_key,
                    (SELECT r.session_key FROM orch_p_run r WHERE r.run_id = o.run_id)) = :session)
@@ -103,7 +115,7 @@ export function claimNextEffect(input: {
                 o.causation_seq, o.payload, o.attempts
          FROM orch_outbox o JOIN pending ON pending.effect_id = o.effect_id`
       )
-      .get({ session: input.sessionKey ?? null, kind: input.kind ?? null }) as RawOutboxRow | undefined
+      .get({ session: input.sessionKey ?? null, kind: input.kind ?? null, now }) as RawOutboxRow | undefined
     if (!row) return { expired }
     const claimed = db
       .prepare(
@@ -181,13 +193,15 @@ export function retryEffect(input: {
         .run(input.now, input.reason, input.effectId, input.owner)
       return { status: 'exhausted', attempts: row.attempts }
     }
+    const delayMs = backoffFor(row.attempts)
     input.db
       .prepare(
-        `UPDATE orch_outbox SET state = 'pending', claimed_at = NULL, lease_owner = NULL, last_error = ?
+        `UPDATE orch_outbox SET state = 'pending', claimed_at = NULL, lease_owner = NULL, last_error = ?,
+             available_at = ?
          WHERE effect_id = ? AND state = 'running' AND lease_owner = ?`
       )
-      .run(input.reason, input.effectId, input.owner)
-    return { status: 'retry', delayMs: backoffFor(row.attempts), attempts: row.attempts }
+      .run(input.reason, input.now + delayMs, input.effectId, input.owner)
+    return { status: 'retry', delayMs, attempts: row.attempts }
   })()
 }
 
@@ -201,16 +215,19 @@ export function deferEffect(input: {
   effectId: string
   owner: string
   reason: string
+  /** When the deferred row may be claimed again; the caller's retry hint, clamped to a floor. */
+  now: number
+  delayMs: number
 }): boolean {
   return (
     input.db
       .prepare(
         `UPDATE orch_outbox
          SET state = 'pending', claimed_at = NULL, lease_owner = NULL, last_error = ?,
-             attempts = MAX(0, attempts - 1)
+             attempts = MAX(0, attempts - 1), available_at = ?
          WHERE effect_id = ? AND state = 'running' AND lease_owner = ?`
       )
-      .run(input.reason, input.effectId, input.owner).changes > 0
+      .run(input.reason, input.now + Math.max(10, input.delayMs), input.effectId, input.owner).changes > 0
   )
 }
 
