@@ -141,9 +141,13 @@ extension G0Transport {
     let revSeq: Int
     var outputSeq: Int?
     var traceRunId: String?
+    /// D1: host-assigned queue slot and hold, so the phone can show the host's queue.
+    var queuePosition: Int?
+    var queueHeld: Bool?
 
     var state: String? {
       switch lifecycle {
+      case "queued": "queued"
       case "recorded": "recorded"
       case "admitted", "dispatched": "dispatched"
       case "settled", "failed", "cancelled": lifecycle

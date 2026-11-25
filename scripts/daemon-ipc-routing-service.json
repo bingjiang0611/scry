@@ -28,6 +28,16 @@
       "why": "开启前在 main 弹原生确认框，并由 main 按自身路径写入并操作 LaunchAgent / systemd 用户服务；renderer 只传布尔值（P5-2）"
     },
     {
+      "channel": "remote:backgroundService:usageLimitResume",
+      "route": "main",
+      "why": "读取 App 自己写的「用量限额到期后自动继续」开关；daemon 调度器读同一个文件，所以这里不向 daemon 询问（C4）"
+    },
+    {
+      "channel": "remote:backgroundService:setUsageLimitResume",
+      "route": "main",
+      "why": "写入上述开关：只接受一个布尔值，路径由 main 决定；写入后 daemon 下一次判断即生效（C4）"
+    },
+    {
       "channel": "remote:backgroundService:status",
       "route": "split",
       "why": "设置页「后台服务」状态",

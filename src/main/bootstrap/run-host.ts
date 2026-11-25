@@ -69,6 +69,8 @@ export type RunHost = {
   flushTraceSend: () => void
   runStopLifecycle: RunStopLifecycle
   runTraces: Pick<RunTraceRouter, 'settle' | 'hasDemand'>
+  /** D5: capture the finished run's worktree as a checkpoint ref. Absent = no checkpoints. */
+  captureCheckpoint?: (input: { runId: string; cwd: string }) => Promise<unknown>
 }
 
 export interface NativeTranscriptRun {

@@ -1,3 +1,4 @@
+import { buildRunStartEffectPayload } from './run-start-effect'
 import { truncatePreview } from './canonical-json'
 import {
   decodeOrchestrationEvent,
@@ -7,6 +8,7 @@ import {
 import {
   acceptDecision,
   decideCatalogChange,
+  decideSessionMetadata,
   decideRunEffectResult,
   makeEffect,
   makeEvent,
@@ -15,9 +17,12 @@ import {
   type DecisionResult,
   type OrchestratorReadView
 } from './orchestrator-handlers'
-import { isTerminalRunLifecycle } from './run-transitions'
+import { decideRunCheckpoint, decideRunCheckpointForgotten, decideRunRollback } from './orchestrator-checkpoint'
+import { decideRunStop } from './orchestrator-stop'
+import { decideQueueRelease, decideSubmitQueue, queuedRunEvent } from './orchestrator-queue'
 import {
   DEFAULT_PENDING_TTL_MS,
+  LOCAL_USER_ACTOR,
   PROMPT_PREVIEW_MAX_CHARS,
   USER_TEXT_PREVIEW_MAX_CHARS,
   isAgentActor,
@@ -81,9 +86,8 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
   switch (cmd.type) {
     case 'run.submit': {
       const p = cmd.payload
-      if (p.sessionKey && !p.historicalBackfill && view.hasActiveRunForSession(p.sessionKey)) {
-        return retryableReject('session_run_active')
-      }
+      const queueDecision = decideSubmitQueue(view, p)
+      if (queueDecision === 'reject') return retryableReject('session_run_active')
       if (!p.historicalBackfill && view.activeRunCount() >= view.maxActiveRuns()) {
         return retryableReject('capacity_exceeded')
       }
@@ -91,6 +95,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         return retryableReject('provider_authenticating')
       }
       if (view.getRun(p.runId)) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
+      // A1: an explicit ordinal taken by another run is a decision-time invariant failure, not a
+      // storage fault. Reject the command so the sink never sees a `(session_key, ordinal)` conflict.
+      if (p.sessionKey && !p.skipTurnProjection && p.ordinal !== undefined) {
+        const taken = view.getTurnByOrdinal?.(p.sessionKey, p.ordinal)
+        if (taken && taken.runId !== p.runId) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+      }
 
       const promptPreview = truncatePreview(p.promptPreview, PROMPT_PREVIEW_MAX_CHARS)
       const bodyDescriptor = p.body ? { storage: p.body.storage, sha256: p.body.sha256, bytes: p.body.bytes } : null
@@ -133,24 +143,14 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
               ordinal,
               ordinalOrigin,
               userTextPreview: truncatePreview(p.userTextPreview ?? p.promptPreview, USER_TEXT_PREVIEW_MAX_CHARS),
-              author: 'user'
+              // C3: an agent wake is not the user's turn.
+              author: p.origin === 'agent' ? 'agent' : 'user'
             }
           })
         )
       }
-      const effectPayload: Record<string, unknown> = {
-        runId: p.runId,
-        sessionKey: p.sessionKey,
-        provider: p.provider,
-        profile: p.profile,
-        cwd: p.cwd,
-        ...(p.shadowOnly ? { shadowOnly: true } : {}),
-        ...(p.body
-          ? p.body.storage === 'inline'
-            ? { body: { storage: 'inline', sha256: p.body.sha256, bytes: p.body.bytes, inline: p.body.inline } }
-            : { body: { storage: 'external', sha256: p.body.sha256, bytes: p.body.bytes } }
-          : {})
-      }
+      if (queueDecision === 'queued') events.push(queuedRunEvent(cmd, events.length, p, view))
+      const effectPayload = buildRunStartEffectPayload(p)
       const isImmediate = p.claimMode === 'immediate'
       if (p.dispatchImmediately && isImmediate && !p.shadowOnly && !p.historicalBackfill) {
         const dispatchFields = { stream: `run:${p.runId}`, sessionKey: p.sessionKey, runId: p.runId, cwd: p.cwd, payload: { runId: p.runId } }
@@ -162,14 +162,23 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
         kind: 'provider.run.start',
         runId: p.runId,
         payload: effectPayload,
-        state: p.shadowOnly ? 'done' : isImmediate ? 'running' : 'pending',
-        expiresAt: p.shadowOnly || isImmediate ? null : cmd.at + boundedPendingTtlMs,
-        leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : isImmediate ? (p.leaseOwner ?? 'daemon') : null,
-        claimedAt: p.shadowOnly || isImmediate ? cmd.at : null
+        // B1: the outbox owns dispatch. Live submissions enqueue `pending` and a worker claims
+        // them with a lease. Shadow writes and historical backfill replay a record instead of
+        // starting a Provider run, so they are never claimable.
+        state: p.shadowOnly || p.historicalBackfill ? 'done' : 'pending',
+        // D1: a queued turn is the user's queue, not a pending dispatch. The TTL exists to void a
+        // dispatch nobody will claim; the queue may legitimately wait minutes, so it has no deadline.
+        expiresAt: p.shadowOnly || p.historicalBackfill || isImmediate || queueDecision === 'queued'
+          ? null
+          : cmd.at + boundedPendingTtlMs,
+        leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : p.historicalBackfill ? 'historical:no-dispatch' : null,
+        claimedAt: p.shadowOnly || p.historicalBackfill ? cmd.at : null
       })
       return acceptDecision(cmd, events, [effect], {
         runId: p.runId,
-        ...(cmd.actor === 'system' && p.intentDetailSha256 ? { intentDetailSha256: p.intentDetailSha256 } : {})
+        ...((cmd.actor === 'system' || cmd.actor === LOCAL_USER_ACTOR) && p.intentDetailSha256
+          ? { intentDetailSha256: p.intentDetailSha256 }
+          : {})
       })
     }
 
@@ -190,64 +199,20 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       })
     }
 
-    case 'run.stop': {
-      const target = view.getRun(cmd.payload.runId)
-      if (!target) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      if (isTerminalRunLifecycle(target.lifecycle)) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
+    case 'run.checkpoint_forgotten':
+      return decideRunCheckpointForgotten(cmd, view)
 
-      const events: PendingOrchestrationEvent[] = [
-        makeEvent(cmd, 0, {
-          type: 'run.stop_requested',
-          stream: `run:${target.runId}`,
-          sessionKey: target.sessionKey,
-          runId: target.runId,
-          cwd: target.cwd,
-          payload: { runId: target.runId, ...(cmd.payload.reason ? { reason: cmd.payload.reason } : {}) }
-        })
-      ]
-      const shadowOnly = Boolean(cmd.payload.shadowOnly)
-      const effects: PendingOutboxEffect[] = [
-        makeEffect(cmd, 0, {
-          kind: 'provider.run.stop',
-          runId: target.runId,
-          payload: { runId: target.runId, ...(shadowOnly ? { shadowOnly: true } : {}) },
-          state: shadowOnly ? 'done' : 'pending',
-          leaseOwner: shadowOnly ? 'shadow:no-dispatch' : null,
-          claimedAt: shadowOnly ? cmd.at : null
-        })
-      ]
-      const visited = new Set<string>([target.runId])
-      const queue = [target.runId]
-      while (queue.length > 0) {
-        const parentId = queue.shift()!
-        for (const child of view.listNonTerminalChildRuns(parentId)) {
-          if (visited.has(child.runId)) continue
-          visited.add(child.runId)
-          queue.push(child.runId)
-          events.push(
-            makeEvent(cmd, events.length, {
-              type: 'run.stop_requested',
-              stream: `run:${child.runId}`,
-              sessionKey: child.sessionKey,
-              runId: child.runId,
-              cwd: child.cwd,
-              payload: { runId: child.runId, cascadeRoot: target.runId }
-            })
-          )
-          effects.push(
-            makeEffect(cmd, effects.length, {
-              kind: 'provider.run.stop',
-              runId: child.runId,
-              payload: { runId: child.runId, cascadeRoot: target.runId, ...(shadowOnly ? { shadowOnly: true } : {}) },
-              state: shadowOnly ? 'done' : 'pending',
-              leaseOwner: shadowOnly ? 'shadow:no-dispatch' : null,
-              claimedAt: shadowOnly ? cmd.at : null
-            })
-          )
-        }
-      }
-      return acceptDecision(cmd, events, effects, { runId: target.runId, cascadedCount: events.length - 1 })
-    }
+    case 'run.checkpoint':
+      return decideRunCheckpoint(cmd, view)
+
+    case 'run.rollback':
+      return decideRunRollback(cmd, view)
+
+    case 'run.release_queue':
+      return decideQueueRelease(cmd, view)
+
+    case 'run.stop':
+      return decideRunStop(cmd, view)
 
     case 'session.stop_subtasks': {
       if (!isPeerActor(cmd.actor)) return retryableReject('device_not_authorized')
@@ -286,6 +251,10 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       const existingTurn = view.getTurnByRunId?.(p.runId)
       const session = view.getSession(p.sessionKey)
       if (!existingTurn) {
+        // A1: the turn is located by `run_id`. A caller-supplied ordinal that is already owned by a
+        // different run is rejected here instead of reaching the `(session_key, ordinal)` primary key.
+        const taken = view.getTurnByOrdinal?.(p.sessionKey, p.ordinal)
+        if (taken && taken.runId !== p.runId) return stickyReject(cmd, 'illegal_transition', { writeReceipt: true })
         events.push(
           makeEvent(cmd, events.length, {
             type: 'turn.began',
@@ -354,8 +323,9 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
             runId: p.runId,
             questionId: p.questionId,
             answerId: p.answerId,
-            ...(p.shadowOnly ? { shadowOnly: true } : {}),
-            ...(p.answerPayload ? { answerPayload: p.answerPayload } : {})
+            // R7: the daemon reads this payload to deliver the answer; it is never optional.
+            answerPayload: p.answerPayload,
+            ...(p.shadowOnly ? { shadowOnly: true } : {})
           },
           state: p.shadowOnly ? 'done' : 'pending',
           leaseOwner: p.shadowOnly ? 'shadow:no-dispatch' : null,
@@ -413,40 +383,12 @@ export function decide(cmd: OrchestrationCommand, view: OrchestratorReadView): D
       return acceptDecision(cmd, [event], [], { sessionKey: p.sessionKey })
     }
 
-    case 'session.rename': {
-      const existing = view.getSession(cmd.payload.sessionKey)
-      if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      const event = makeEvent(cmd, 0, {
-        type: 'session.renamed',
-        stream: `session:${existing.sessionKey}`,
-        sessionKey: existing.sessionKey,
-        cwd: existing.cwd,
-        payload: { sessionKey: existing.sessionKey, title: cmd.payload.title }
-      })
-      return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
-    }
-
+    case 'session.rename':
     case 'session.pin':
     case 'session.unpin':
     case 'session.archive':
-    case 'session.restore': {
-      const existing = view.getSession(cmd.payload.sessionKey)
-      if (!existing) return stickyReject(cmd, 'invalid_target', { writeReceipt: true })
-      const typeMap = {
-        'session.pin': 'session.pinned',
-        'session.unpin': 'session.unpinned',
-        'session.archive': 'session.archived',
-        'session.restore': 'session.restored'
-      } as const
-      const event = makeEvent(cmd, 0, {
-        type: typeMap[cmd.type],
-        stream: `session:${existing.sessionKey}`,
-        sessionKey: existing.sessionKey,
-        cwd: existing.cwd,
-        payload: { sessionKey: existing.sessionKey }
-      })
-      return acceptDecision(cmd, [event], [], { sessionKey: existing.sessionKey })
-    }
+    case 'session.restore':
+      return decideSessionMetadata(cmd, view)
 
     case 'session.discover':
     case 'session.withdraw':

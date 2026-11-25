@@ -54,6 +54,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
       ? { category: runtimeErr.brief.stage, hint: runtimeErr.brief.nextAction }
       : classifyError(message, providerId)
   const { category, hint } = classified
+  const usageLimit = 'usageLimit' in classified ? classified.usageLimit : undefined
   let providerTurnId: string | undefined
   try {
     providerTurnId = handle.current?.getProviderTurnId?.()
@@ -206,7 +207,7 @@ export async function handleRunFailure(err: unknown, ctx: RunFailureContext): Pr
       ...(forkTurnId ? { forkTurnId } : {})
     })
   } else {
-    renderer.send('agent:error', { runId, message, category, hint })
+    renderer.send('agent:error', { runId, message, category, hint, ...(usageLimit ? { usageLimit } : {}) })
     markTerminalAttention(storageSessionId, true)
   }
   await turnDiffDone

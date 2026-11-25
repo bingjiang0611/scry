@@ -147,3 +147,13 @@ export function runtimeNoticeMessages(notice: BackgroundServiceRuntimeNotice | n
   if (notice.remoteConfigMismatch) lines.push(formatRemoteConfigMismatchNotice(notice.remoteConfigMismatch))
   return lines
 }
+
+// C4: automatic resume spends the user's quota, so the switch says what it will do before it is on.
+export const USAGE_LIMIT_RESUME_COPY = {
+  sectionTitle: '用量限额到期后自动继续',
+  hint: '开启后，Provider 报用量限额并给出重置时间时，Scry 会在重置后自动重跑这条消息。没有重置时间就不重试。',
+  onText: '已开启',
+  offText: '未开启',
+  enableButton: '开启自动继续',
+  disableButton: '关闭自动继续'
+}

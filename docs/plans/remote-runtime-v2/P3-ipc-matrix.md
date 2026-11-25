@@ -2,8 +2,8 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：185 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：67，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：87
+- 生产特权 IPC channel：192 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：69，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：92
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 18 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 桌面远程客户端（`desktopRemote:*`，共 33 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)
@@ -36,6 +36,7 @@
 | `agent:catalogHealth` | new-op | `sessionStore:catalogHealth` | navigation | — | 会话账本在 daemon |
 | `agent:chooseFolder` | split | `workspaceSelection:chooseFolder` | navigation | main: 原生目录选择框与窗口的当前工作区（同 agent:setCwd）留在 main；daemon 只收选择框给出的路径，校验 canonical 目录并 rememberProject，App 在 daemon 回答后再选中该目录 | 选择框与持久化分开 |
 | `agent:clipboardImage` | main | `—` | — | — | 剪贴板 |
+| `agent:continueAfterRestart` | new-op | `restartNote:continueAfterRestart` | controls | — | C4 显式继续由宿主提交并驱动派发；提示只能被消耗一次 |
 | `agent:deleteArchivedSessions` | new-op | `sessionPurge:deleteArchivedSessions` | navigation | — | 批量删除要重放既有 preview/指纹语义 |
 | `agent:deleteSession` | new-op | `sessionLifecycle:deleteSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
 | `agent:detect` | new-op | `providerCatalog:detect` | providers | — | 本机要安装路径、版本与兼容判定；远程设备的 providers 元数据不变 |
@@ -47,6 +48,7 @@
 | `agent:gitDiff` | new-op | `workspaceDiff:gitDiff` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:gitDiffCommits` | new-op | `workspaceDiff:gitDiffCommits` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
 | `agent:gitDiffSnapshot` | new-op | `workspaceDiff:gitDiffSnapshot` | source-control | — | 项目授权归 daemon；git 读取跟随授权 |
+| `agent:hostQueue` | new-op | `hostQueue:hostQueue` | navigation | — | D1 队列在宿主：App 读宿主持有的队列，而不是自己重建 |
 | `agent:importBillingFixture` | new-op | `billing:importBillingFixture` | analytics | — | 计费账本在 daemon 持有的 scry.db 里 |
 | `agent:invalidateProviderContext` | new-op | `providerContext:invalidateProviderContext` | providers | — | Provider 运行时在 daemon |
 | `agent:listArchivedSessions` | new-op | `sessionStore:listArchivedSessions` | navigation | — | 会话账本在 daemon |
@@ -65,12 +67,15 @@
 | `agent:reauthenticateMcp` | new-op | `mcp:reauthenticateMcp` | providers | — | MCP 与 trust gate 都在 daemon；Provider 认证队列也在 daemon，App 不能在自己进程里另行认证 |
 | `agent:recentFolders` | split | `projectStore:recentFolders` | navigation | main: 窗口只渲染；列表来自 daemon 的授权输入，main 不打开该 store | 授权输入单一写者 |
 | `agent:recorderContentPage` | new-op | `recorderContent:recorderContentPage` | evidence | — | recorder 记录写在工作区里，由 daemon 读 |
+| `agent:releaseQueuedRun` | new-op | `checkpoints:releaseQueuedRun` | controls | — | D1 挂起的队列只能由宿主放行；是否可放行由权威判定 |
 | `agent:removePiProfile` | new-op | `piProfile:removePiProfile` | providers | — | Provider 配置随 adapter 一起迁移 |
 | `agent:removeProject` | new-op | `projectStore:removeProject` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:removeRecentFolder` | split | `projectStore:removeRecentFolder` | navigation | main: 窗口只发请求；删除由 daemon 执行并回新的最近目录列表 | 授权输入单一写者 |
 | `agent:renameProject` | new-op | `projectStore:renameProject` | navigation | — | 设备也读项目目录，必须单一写者 |
 | `agent:renameSession` | new-op | `sessionLifecycle:renameSession` | navigation | — | App 语义：空 cwd 会话、确认后可删未存档会话、确认框在 App；设备的 sessionAction/sessionDelete 规则不同，不复用 |
+| `agent:restartNote` | new-op | `restartNote:restartNote` | navigation | — | C4 重启提示存在宿主：App 只问有没有待续做的后台任务 |
 | `agent:revealProject` | main | `—` | — | — | 原生 showItemInFolder |
+| `agent:rollbackRun` | new-op | `checkpoints:rollbackRun` | controls | — | D5 倒回会改工作树，只能由持有 git 与检查点的宿主执行 |
 | `agent:runControls` | new-op | `providerCatalog:runControls` | providers | — | 本机按用户权限模式取 run controls；远程设备受 SCRY_REMOTE_PERMISSION_MODE 约束的路径不变 |
 | `agent:setCwd` | split | `workspaceSelection:setCwd` | navigation | main: 窗口选择留在 main，按发出顺序生效；daemon 按自己的已知项目校验目录、回 canonical 路径，不落盘 | 窗口选择与已知项目授权分开 |
 | `agent:setProjectPinned` | new-op | `projectStore:setProjectPinned` | navigation | — | 设备也读项目目录，必须单一写者 |
@@ -103,7 +108,9 @@
 | `remote:backgroundService:restart` | main | `—` | — | — | 版本不一致时 App 不与 daemon 通话；确认框、按身份停止与启动对应版本的后台服务都在 App |
 | `remote:backgroundService:runtimeNotice` | main | `—` | — | — | 读取 main 内存里当前的回退拉起或策略差异提示，不主动拉起 daemon（P5-2 S4） |
 | `remote:backgroundService:setLoginStart` | main | `—` | — | — | 开启前在 main 弹原生确认框，并由 main 按自身路径写入并操作 LaunchAgent / systemd 用户服务；renderer 只传布尔值（P5-2） |
+| `remote:backgroundService:setUsageLimitResume` | main | `—` | — | — | 写入上述开关：只接受一个布尔值，路径由 main 决定；写入后 daemon 下一次判断即生效（C4） |
 | `remote:backgroundService:status` | split | `localBackgroundService:status` | remote | main: 连接结果（就绪、版本不一致、未授权、不可用及原因）、userData 位置与 daemon.lock 登记且身份复核一致的 pid 由 App 自己确定；连接就绪时才向 daemon 询问其余字段，问不到的显示为未知 | 设置页「后台服务」状态 |
+| `remote:backgroundService:usageLimitResume` | main | `—` | — | — | 读取 App 自己写的「用量限额到期后自动继续」开关；daemon 调度器读同一个文件，所以这里不向 daemon 询问（C4） |
 | `remote:desktop:disable` | new-op | `localDesktopHost:disable` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:desktop:invite` | new-op | `localDesktopHost:invite` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:desktop:status` | new-op | `localDesktopHost:status` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |

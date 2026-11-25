@@ -60,3 +60,18 @@ describe('classifyError', () => {
     expect(agyAcpHint.hint).toContain('agy')
   })
 })
+
+// C4: a quota failure must carry its reset time to the App, otherwise the only recovery is
+// 「稍后重试」 and the user cannot tell when.
+describe('classifyError carries the usage limit', () => {
+  it('reads the reset time out of a rate-limit message', () => {
+    const classified = classifyError('429 rate limit reached, resets in 2 hours', 'claude')
+    expect(classified.category).toBe('rate')
+    expect(classified.usageLimit).toMatchObject({ provider: 'claude', source: 'relative' })
+    expect(typeof classified.usageLimit?.resetAt).toBe('number')
+  })
+
+  it('omits the limit for failures that are not about quota', () => {
+    expect(classifyError('MCP connection failed', 'claude').usageLimit).toBeUndefined()
+  })
+})

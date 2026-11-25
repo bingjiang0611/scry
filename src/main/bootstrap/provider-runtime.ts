@@ -4,10 +4,30 @@ import { ProviderCompatibilityStore } from '../provider-compatibility-manifest'
 import { createBuiltInProviderAdapters } from '../providers'
 import { createSmokeProviderAdapter, type SmokeFixtureProviderId } from '../providers/smoke'
 import { sweepStalePrivateMcpConfigs } from '../providers/private-mcp-config'
+import { ProviderSessionHost } from '../../host-runtime/provider-sessions/session-host'
+import type { AntigravityProcessSession } from '../providers/antigravity-session'
 import type { PiAgentProfile } from '../pi-agent-profiles'
+import type { SessionLifecycleObserver } from '../providers/session-pool-policy'
 import { PiRunDiagnostics } from '../providers/pi-run-diagnostics'
 
+/** C1: what the Pi pool reports; the daemon records it next to the Antigravity sessions. */
+export interface PiSessionObserver {
+  onOpened?: (key: string, provider: 'pi', at: number) => void
+  onNativeSessionId?: (key: string, nativeSessionId: string) => void
+  onReleased?: (key: string, reason: string, at: number) => void
+}
+
 export function createProviderRuntime(deps: {
+  /** C1: the daemon owns Provider session lifetime because only it can record the release reason. */
+  providerSessions?: ProviderSessionHost<AntigravityProcessSession>
+  /** C1: Pi reports its pool lifecycle here so open/release reasons are stored, not logged. */
+  piSessions?: PiSessionObserver
+  /** C1: Codex reports its app-server pool lifecycle for the same reason. */
+  codexSessions?: SessionLifecycleObserver
+  /** C1: OpenCode reports the same pool lifecycle. */
+  openCodeSessions?: SessionLifecycleObserver
+  /** C1: Qoder reports the same pool lifecycle. */
+  qoderSessions?: SessionLifecycleObserver
   homeDir: string
   userDataDir: string
   appPath: string
@@ -45,6 +65,7 @@ export function createProviderRuntime(deps: {
     id: id === 'pi' ? 'pi:0123456789abcdef' : id,
     name: id === 'pi' ? 'Pi · Rotom Smoke Fixture' : `${id} Smoke Fixture`, bin: id, path: process.execPath
   }))
+  const providerSessions = deps.providerSessions ?? new ProviderSessionHost<AntigravityProcessSession>()
   const builtInProviderAdapters = smokeProviderEnabled ? smokeProviderIds.map((id) => createSmokeProviderAdapter(id)) : createBuiltInProviderAdapters(
     homeDir,
     join(userDataDir, 'codex-home-v1'),
@@ -52,9 +73,14 @@ export function createProviderRuntime(deps: {
     join(userDataDir, 'provider-state', 'opencode-v1'),
     {
       listProfiles: listPiProfiles, resolveProfile: resolvePiProfile, diagnostics: piRunDiagnostics,
-      historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs')
+      historyExtensionPath: join(isPackaged ? resourcesPath : join(appPath, 'resources'), 'scry-history', 'pi-history-reader.mjs'),
+      ...(deps.piSessions ? { sessions: deps.piSessions } : {})
     },
-    userDataDir
+    userDataDir,
+    providerSessions,
+    deps.codexSessions,
+    deps.openCodeSessions,
+    deps.qoderSessions
   )
   /**
    * 兼容性策略在进程内保持一份。远端地址只有用户/部署配置了才会访问；
@@ -76,5 +102,13 @@ export function createProviderRuntime(deps: {
     }
   )
 
-  return { builtInProviderAdapters, providerCompatibility, providerRegistry, piRunDiagnostics, smokeProviderEnabled, smokeDetectedAgents }
+  return {
+    builtInProviderAdapters,
+    providerCompatibility,
+    providerRegistry,
+    providerSessions,
+    piRunDiagnostics,
+    smokeProviderEnabled,
+    smokeDetectedAgents
+  }
 }

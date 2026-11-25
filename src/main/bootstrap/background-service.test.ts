@@ -303,4 +303,21 @@ describe('background service channels', () => {
       uninstall()
     }
   })
+
+  it('C4: the automatic-resume switch takes one boolean, and the read reports what was written', async () => {
+    const { invoke } = register(fakeDaemon({ status: 'device-not-authorized' }), true)
+
+    // Nothing written yet: off, so the daemon cannot spend quota on its own.
+    await expect(invoke('remote:backgroundService:usageLimitResume')).resolves.toEqual({ enabled: false })
+
+    await expect(invoke('remote:backgroundService:setUsageLimitResume', true)).resolves.toEqual({ status: 'done' })
+    await expect(invoke('remote:backgroundService:usageLimitResume')).resolves.toEqual({ enabled: true })
+
+    // A renderer cannot smuggle a path, a string or a second argument through the switch.
+    for (const bad of [[], ['true'], [true, '/tmp/x'], [{ enabled: true }]]) {
+      await expect(invoke('remote:backgroundService:setUsageLimitResume', ...bad)).rejects.toThrow('invalid_request')
+    }
+    await expect(invoke('remote:backgroundService:setUsageLimitResume', false)).resolves.toEqual({ status: 'done' })
+    await expect(invoke('remote:backgroundService:usageLimitResume')).resolves.toEqual({ enabled: false })
+  })
 })

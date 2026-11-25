@@ -83,6 +83,10 @@ export function deleteSessionInDb(
       db.prepare(`DELETE FROM ${table} WHERE run_id IN (SELECT value FROM json_each(?))`).run(runIds)
     }
 
+    // B3: the tombstone lives in the binding table, so pruning the event log cannot revive it.
+    db.prepare(
+      'UPDATE orch_binding SET deleted_at = COALESCE(deleted_at, ?), delete_epoch = delete_epoch + 1 WHERE session_key = ?'
+    ).run(input.at, input.sessionKey)
     const tombstone = {
       sessionKey: input.sessionKey, cwd: input.cwd,
       ...(input.nativeIdentity ? { nativeIdentity: input.nativeIdentity } : {}),
@@ -315,4 +319,41 @@ export function resumeBodyErasure(
     }
   }
   return { completed, erased, deferred, ...(error ? { error } : {}) }
+}
+
+export interface SessionErasureContext {
+  db: Database.Database
+  bodyStore: BodyStore
+  isFenced: () => boolean
+  onFenced: () => void
+  bumpDeleteEpoch: (sessionKey: string) => void
+  onCommitted: () => void
+  beforeCommitHook?: () => void
+}
+
+/**
+ * Deletes a session projection, redacts its events, and erases uncommitted bodies. Any failure
+ * fences the store because the deletion outcome is then unknown.
+ */
+export function deleteSessionWithErasure(
+  ctx: SessionErasureContext,
+  input: DeleteSessionInput
+): DeleteSessionOutcome {
+  try {
+    const { existed, redactedEvents } = deleteSessionInDb(ctx.db, input, ctx.beforeCommitHook)
+    if (existed) {
+      ctx.bumpDeleteEpoch(input.sessionKey)
+      ctx.onCommitted()
+    }
+    const erased = resumeBodyErasure(ctx.db, ctx.bodyStore, {
+      sessionKey: input.sessionKey,
+      canWrite: () => !ctx.isFenced()
+    })
+    if (erased.error) return { status: 'unavailable', error: erased.error }
+    if (!existed && erased.completed === 0 && erased.deferred === 0) return { status: 'not_present' }
+    return { status: 'deleted', deletedBodies: erased.erased, redactedEvents }
+  } catch (error) {
+    ctx.onFenced()
+    return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) }
+  }
 }

@@ -64,6 +64,7 @@ export type RunCompletionContext = {
   markTerminalAttention: (sessionId: string, needsAttention: boolean) => void
   firstTextPerf: PerformanceTrace
   runs: CompletionRuns
+  captureCheckpoint?: (input: { runId: string; cwd: string }) => Promise<unknown>
 }
 
 export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompletionContext): Promise<void> {
@@ -223,6 +224,9 @@ export async function handleRunCompletion(r: ProviderRunResult, ctx: RunCompleti
   }
   await turnDiffDone
   terminalPerf.mark('turn_diff_joined')
+  // D5: capture after the diff settles so the tree is the state this turn left behind. A capture
+  // failure is not a run failure; the service reports it and the run still settles.
+  if (!isRemoteRun && cwd && ctx.captureCheckpoint) await ctx.captureCheckpoint({ runId, cwd })
   await finalizeSessionDiff()
   terminalPerf.mark('diff_complete')
   try {

@@ -173,7 +173,10 @@ export function parseSubscribeReply(reply: Record<string, unknown>, network = fa
       snapshot.detail = {
         turns: rawSnap.detail.turns,
         ...(rawSnap.detail.legacyBefore === true ? { legacyBefore: true } : {}),
-        ...(isHistoryPage(rawSnap.detail.firstPage, network) ? { firstPage: rawSnap.detail.firstPage } : {})
+        ...(isHistoryPage(rawSnap.detail.firstPage, network) ? { firstPage: rawSnap.detail.firstPage } : {}),
+        ...(typeof rawSnap.detail.nextCursor === 'string' && rawSnap.detail.nextCursor.startsWith('d6:')
+          ? { nextCursor: rawSnap.detail.nextCursor } : {}),
+        ...(rawSnap.detail.truncated === true ? { truncated: true } : {})
       }
     }
     return { ...base, mode: 'snapshot', snapshot }

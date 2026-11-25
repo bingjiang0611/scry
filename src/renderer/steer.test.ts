@@ -187,3 +187,16 @@ describe('renderer Steer queue contract', () => {
     expect(removed.get('session')?.map((item) => item.messageId)).toEqual(['first'])
   })
 })
+
+// C2: an interrupted-then-restarted steer must not freeze the queue. `restarted` means the turn
+// will end and this message becomes the next prompt, so it may drain; `accepted` may not.
+describe('restarted steer state', () => {
+  it('does not block the queue drain', () => {
+    expect(isSteerDrainBlocked({ status: 'restarted', message: '已中断当前轮' })).toBe(false)
+    expect(isSteerDrainBlocked({ status: 'accepted' })).toBe(true)
+  })
+
+  it('is not dismissable away as if it were unknown', () => {
+    expect(canDismissUnknownSteer({ status: 'restarted', message: 'x' }, undefined)).toBe(false)
+  })
+})

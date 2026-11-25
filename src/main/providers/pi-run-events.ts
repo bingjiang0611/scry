@@ -23,6 +23,10 @@ export interface PiEventHandlerContext {
   resolveAgentCycleEnd: () => void
   settledResolve: (() => void) | undefined
   nativeIdle: boolean
+  /** C3: the answer was complete while a detached child was still running. */
+  backgroundPendingAtSettle: boolean
+  /** C3: attach the watch in the same tick as the settle, before a fast child can report. */
+  backgroundSettled: () => void
   agentStarted: boolean
   steerCapabilityEmitted: boolean
   steerPending: boolean
@@ -78,21 +82,14 @@ export function attachPiEventHandlers(ctx: PiEventHandlerContext): () => void {
       if (ctx.steerPending) ctx.state.steerAdmissionUncertain = true
       ctx.agentEnded = true
       ctx.resolveAgentCycleEnd()
-      // Native idle does not include detached extension work. Keep this run's
-      // listener/usage/recorder owner until the child result and parent continuation —
-      // but only while the Provider still reports child evidence. An extension that
-      // clears its async widget ends observation, so the release below settles the run
-      // instead of holding it open for a terminal row that cannot arrive.
+      // C3: native idle does not include detached extension work, so the answer is complete even
+      // while a child runs. The run ends here; the host keeps the process, watches it, and wakes the
+      // session with an agent-origin run when the child reports a result. Holding this run open made
+      // the session's next turn wait for work the user never asked to wait for.
       if (event.aborted !== true && ctx.background.pending && !ctx.state.stopped) {
-        ctx.nativeIdle = true
-        return
+        ctx.backgroundPendingAtSettle = true
+        ctx.backgroundSettled()
       }
-      ctx.nativeIdle = false
-      ctx.agentSettled = true
-      ctx.settledResolve?.()
-      return
-    }
-    if (ctx.nativeIdle && !ctx.agentSettled && !ctx.state.stopped && !ctx.background.pending) {
       ctx.nativeIdle = false
       ctx.agentSettled = true
       ctx.settledResolve?.()

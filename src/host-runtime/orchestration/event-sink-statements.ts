@@ -1,19 +1,25 @@
 import type Database from 'better-sqlite3'
 import type { OrchestrationEventRow, OrchestrationScope, OutboxEffectRow } from './types'
+import { TERMINAL_LIFECYCLE_SQL } from './run-transitions'
 
 export interface EventSinkStatements {
   insertEvent: Database.Statement
   insertOutbox: Database.Statement
+  voidQueuedStart: Database.Statement
   insertCommand: Database.Statement
   insertLegacyRun: Database.Statement
   advanceLegacySeq: Database.Statement
   readReceipt: Database.Statement
   readRun: Database.Statement
   readSession: Database.Statement
+  readSessionByConversation: Database.Statement
   readTurnByRunId: Database.Statement
+  readTurnByOrdinal: Database.Statement
   nextOrdinal: Database.Statement
   readInteraction: Database.Statement
   hasActiveSessionRun: Database.Statement
+  nextQueuePosition: Database.Statement
+  listQueuedRuns: Database.Statement
   activeRunCount: Database.Statement
   listNonTerminalChildRuns: Database.Statement
   listNonTerminalChildRunsBySession: Database.Statement
@@ -30,8 +36,14 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
     insertOutbox: db.prepare(
       `INSERT INTO orch_outbox (
         effect_id, kind, policy, run_id, causation_seq, payload, state,
-        expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL)`
+        expires_at, attempts, lease_owner, claimed_at, completed_at, result_seq, last_error, session_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, ?)`
+    ),
+    voidQueuedStart: db.prepare(
+      `UPDATE orch_outbox
+       SET state = 'voided', completed_at = ?, lease_owner = NULL, last_error = 'stopped_before_dispatch'
+       WHERE run_id = ? AND kind = 'provider.run.start' AND state IN ('pending', 'running')
+         AND EXISTS (SELECT 1 FROM orch_p_run WHERE run_id = orch_outbox.run_id AND lifecycle = 'queued')`
     ),
     insertCommand: db.prepare(
       `INSERT INTO orch_command (
@@ -52,27 +64,40 @@ export function prepareEventSinkStatements(db: Database.Database): EventSinkStat
     readReceipt: db.prepare('SELECT * FROM orch_command WHERE command_id = ? AND actor = ?'),
     readRun: db.prepare('SELECT * FROM orch_p_run WHERE run_id = ?'),
     readSession: db.prepare('SELECT * FROM orch_p_session WHERE session_key = ?'),
+    // D3: a side chat names its parent conversation, and the parent's session is the lineage edge.
+    readSessionByConversation: db.prepare(
+      'SELECT * FROM orch_p_session WHERE conversation_id = ? ORDER BY ts DESC, rev_seq DESC LIMIT 1'
+    ),
     readTurnByRunId: db.prepare('SELECT * FROM orch_p_turn WHERE run_id = ?'),
+    readTurnByOrdinal: db.prepare('SELECT * FROM orch_p_turn WHERE session_key = ? AND ordinal = ?'),
     nextOrdinal: db.prepare(
       'SELECT COALESCE(MAX(ordinal), 0) + 1 AS next_ordinal FROM orch_p_turn WHERE session_key = ?'
     ),
     readInteraction: db.prepare('SELECT * FROM orch_p_interaction WHERE run_id = ? AND question_id = ?'),
     hasActiveSessionRun: db.prepare(
       `SELECT 1 FROM orch_p_run
-       WHERE session_key = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')
+       WHERE session_key = ? AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}
        LIMIT 1`
     ),
+    nextQueuePosition: db.prepare(
+      'SELECT COALESCE(MAX(queue_position), 0) + 1 AS next_position FROM orch_p_run WHERE session_key = ?'
+    ),
+    listQueuedRuns: db.prepare(
+      `SELECT * FROM orch_p_run
+       WHERE session_key = ? AND lifecycle = 'queued'
+       ORDER BY queue_held ASC, COALESCE(queue_position, 2147483647) ASC, rev_seq ASC`
+    ),
     activeRunCount: db.prepare(
-      "SELECT COUNT(*) AS count FROM orch_p_run WHERE lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')"
+      `SELECT COUNT(*) AS count FROM orch_p_run WHERE lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}`
     ),
     listNonTerminalChildRuns: db.prepare(
       `SELECT * FROM orch_p_run
-       WHERE parent_run_id = ? AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
+       WHERE parent_run_id = ? AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}`
     ),
     listNonTerminalChildRunsBySession: db.prepare(
       `SELECT * FROM orch_p_run
        WHERE session_key = ? AND parent_run_id IS NOT NULL
-         AND lifecycle NOT IN ('settled', 'failed', 'cancelled', 'interrupted')`
+         AND lifecycle NOT IN ${TERMINAL_LIFECYCLE_SQL}`
     )
   }
 }

@@ -172,6 +172,9 @@ describe('authoritative daemon lifecycle parity', () => {
       )
       expect(['cancelled', 'interrupted']).toContain(stoppedState)
       expect(authority.sink.getRun(stopLedgerRunId)?.lifecycle).toBe(stoppedState)
+      // B1: the stop is a queued effect. A run that is already terminal when its stop effect is
+      // still pending means nothing pumped it, and the next turn waits for a stop that never ran.
+      expect(authority.sink.listOutbox().filter((row) => row.state === 'pending')).toEqual([])
       expect(authority.sink.verifyReplayConsistency()).toEqual({ matches: true })
     } finally {
       await host?.dispose()

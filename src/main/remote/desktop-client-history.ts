@@ -11,12 +11,32 @@ import { context, fail, record, text, uuid, MAX_ITEMS, validateTurn } from './de
 import { DESKTOP_ATTACHMENT_MAX_COUNT, DESKTOP_ATTACHMENT_MAX_BYTES, DESKTOP_ATTACHMENT_MAX_TOTAL_BYTES } from './desktop-attachments'
 
 export abstract class DesktopRemoteClientHistory extends DesktopRemoteClientCatalog {
-  async history(connectionIdValue: string, value: DesktopRemoteContext, before?: number, snapshot?: string): Promise<DesktopRemoteHistory> {
+  async history(
+    connectionIdValue: string,
+    value: DesktopRemoteContext,
+    before?: number,
+    snapshot?: string,
+    detailCursor?: string
+  ): Promise<DesktopRemoteHistory> {
     if (before !== undefined && (!Number.isSafeInteger(before) || before < 0) || snapshot !== undefined && !text(snapshot, 256)) fail('invalid_history_cursor')
+    if (detailCursor !== undefined && !text(detailCursor, 64)) fail('invalid_history_cursor')
     const scope = context(value)
     if (before === undefined && snapshot === undefined) {
+      // D6: `detailCursor` reads an older detail page; without one the watched first page is used
+      // and its own next cursor is returned so the caller can page instead of re-reading by offset.
       const detail = await this.watchDetail(connectionIdValue, scope)
-      if (detail?.firstPage) return this.decodeHistory(connectionIdValue, scope, detail.firstPage)
+      if (detailCursor !== undefined && detail) {
+        // The lane carries one request per connection at a time, and the live watch is parked on a
+        // long poll, so the watch is closed before the older page is read. The next `history()` call
+        // reopens it; a stale watch would otherwise block every page read behind its own wait.
+        this.detailSubscriptions.delete(connectionIdValue)
+        detail.close()
+        const page = await this.readDetailCursor(connectionIdValue, detail, detailCursor)
+        return { ...await this.decodeHistory(connectionIdValue, scope, page.history), ...(page.nextCursor ? { detailCursor: page.nextCursor } : {}) }
+      }
+      if (detail?.firstPage) {
+        return { ...await this.decodeHistory(connectionIdValue, scope, detail.firstPage), ...(detail.nextCursor ? { detailCursor: detail.nextCursor } : {}) }
+      }
     }
     const query: Extract<DesktopHostRead, { kind: 'history' }> = { kind: 'history', historyScope: 'session', context: scope, byteChunks: true, images: true, ...(before === undefined ? {} : { before }), ...(snapshot === undefined ? {} : { snapshot }) }
     let result = await this.desktop(connectionIdValue, query)
@@ -59,6 +79,21 @@ export abstract class DesktopRemoteClientHistory extends DesktopRemoteClientCata
       throw error
     }
     return watch
+  }
+
+  private async readDetailCursor(
+    connectionIdValue: string,
+    detail: DesktopDetailSubscription,
+    cursor: string
+  ): Promise<{ history: unknown; nextCursor?: string }> {
+    const raw = await this.requestForConnection(connectionIdValue, {
+      op: 'subscribe', views: ['detail'], session: detail.reference, historyOnly: true, waitMs: 0, detailCursor: cursor
+    }, undefined)
+    const reply = parseSubscribeReply(raw, true)
+    if (reply.mode !== 'snapshot' || !reply.snapshot.detail) fail('invalid_history_response')
+    const page = reply.snapshot.detail.firstPage
+    if (!page || !('kind' in page) || page.kind !== 'remoteHistory') fail('invalid_history_response')
+    return { history: page.history, ...(reply.snapshot.detail.nextCursor ? { nextCursor: reply.snapshot.detail.nextCursor } : {}) }
   }
 
   private async decodeHistory(connectionIdValue: string, value: DesktopRemoteContext, raw: unknown): Promise<DesktopRemoteHistory> {
@@ -136,6 +171,7 @@ export class DesktopDetailSubscription {
   #cursor?: SubscribeKnownCursor
   #opening?: Promise<void>
   #firstPage?: DesktopRemoteHistory
+  #nextCursor?: string
 
   constructor(options: { hostId: string; session: SubscribeSessionRef; read: ReadDetail; changed(): void }) {
     this.#hostId = options.hostId
@@ -150,6 +186,9 @@ export class DesktopDetailSubscription {
       this.#session.externalSessionId === session.externalSessionId
   }
   get firstPage(): DesktopRemoteHistory | undefined { return this.#firstPage }
+  /** D6: the cursor for older turns of this detail view, when the host still holds more. */
+  get nextCursor(): string | undefined { return this.#nextCursor }
+  get reference(): SubscribeSessionRef { return this.#session }
   close(): void { this.#abort.abort() }
 
   open(): Promise<void> {
@@ -177,6 +216,7 @@ export class DesktopDetailSubscription {
       if (!reply.snapshot.detail) fail('invalid_subscribe_detail')
       const page = reply.snapshot.detail.firstPage
       this.#firstPage = page && 'kind' in page && page.kind === 'remoteHistory' ? page.history : undefined
+      this.#nextCursor = reply.snapshot.detail.nextCursor
       this.#cursor = { hostId, logId, seq }
       if (this.#observed) this.#changed()
       this.#observed = true

@@ -26,6 +26,12 @@ export function readSessionRaw(stmts: EventSinkStatements, sessionKey: string): 
   return row ? mapSessionRow(row) : undefined
 }
 
+/** The newest session of a conversation; a conversation may open more than one native session. */
+export function readSessionByConversation(stmts: EventSinkStatements, conversationId: string): SessionProjectionRow | undefined {
+  const row = stmts.readSessionByConversation.get(conversationId) as Record<string, unknown> | undefined
+  return row ? mapSessionRow(row) : undefined
+}
+
 export function readTurnRaw(db: Database.Database, sessionKey: string, ordinal: number): TurnProjectionRow | undefined {
   const row = db
     .prepare('SELECT * FROM orch_p_turn WHERE session_key = ? AND ordinal = ?')
@@ -35,6 +41,15 @@ export function readTurnRaw(db: Database.Database, sessionKey: string, ordinal: 
 
 export function readTurnByRunIdRaw(stmts: EventSinkStatements, runId: string): TurnProjectionRow | undefined {
   const row = stmts.readTurnByRunId.get(runId) as Record<string, unknown> | undefined
+  return row ? mapTurnRow(row) : undefined
+}
+
+export function readTurnByOrdinalRaw(
+  stmts: EventSinkStatements,
+  sessionKey: string,
+  ordinal: number
+): TurnProjectionRow | undefined {
+  const row = stmts.readTurnByOrdinal.get(sessionKey, ordinal) as Record<string, unknown> | undefined
   return row ? mapTurnRow(row) : undefined
 }
 
@@ -72,4 +87,10 @@ export function listAllOutboxRaw(db: Database.Database): OutboxEffectRow[] {
     .prepare('SELECT * FROM orch_outbox ORDER BY causation_seq ASC, effect_id ASC')
     .all() as Array<Record<string, unknown>>
   return rows.map(mapOutboxRow)
+}
+
+/** D1: the session's queued runs in release order: held ones last, then by position. */
+export function listQueuedRunsRaw(stmts: EventSinkStatements, sessionKey: string): RunProjectionRow[] {
+  const rows = stmts.listQueuedRuns.all(sessionKey) as Array<Record<string, unknown>>
+  return rows.map(mapRunRow)
 }

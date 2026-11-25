@@ -57,9 +57,26 @@ export interface DaemonLocalEndpointDeps {
   hostMetrics?: () => Promise<import('../../shared/host-metrics').HostMetricsSnapshot>
   // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
+  /** D4: the authority records metadata changes; it is attached after the local ops are built. */
+  getOrchestrationAuthority?: () => {
+    recordSessionMetadata?: (input: {
+      externalSessionId: string
+      providerId: string
+      agentProfileId?: string | undefined
+      cwd: string
+      change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+      actor: string
+    }) => unknown
+  } | undefined
   // Shared session-lifecycle link table so host-runtime remote session actions reuse local-ops' lifecycle (W17).
   links?: DaemonSessionLinks
   subscribe?: NonNullable<import('../../main/remote/host-local-ops').LocalEndpointHandlers['subscribe']>
+  /** D1: the projection read, plus the one session lookup, so the App can show the host's queue. */
+  orchestrationReader?: () => import('../../host-runtime/orchestration/native-session-lookup').SessionReader | undefined
+  /** C4: the explicit "继续" is an outbox write, so its handler needs the dispatcher's pump. */
+  pumpOrchestration?: () => void
+  /** D5: checkpoint capture and rollback; the host owns the git side. */
+  checkpoints?: import('../checkpoint-service').CheckpointService
   log?: (line: string) => void
 }
 
@@ -69,11 +86,19 @@ export interface DaemonLocalEndpointDeps {
  * the groups are built, read only when a call runs.
  */
 export interface DaemonSessionLinks {
+  reconcileSessionMetadata?: () => Promise<number>
   deleteNativeProjection?: import('../../main/bootstrap/session-lifecycle').SessionLifecycleDependencies['deleteNativeProjection']
   deleteConversationProjection?: import('../../main/bootstrap/conversation').ConversationTableDependencies['deleteConversationProjection']
   deleteOneSession?: (request: Record<string, unknown>, options: Record<string, unknown>) => Promise<DeleteSessionResult>
   sessionRefFromRequest?: (value: unknown) => import('../../main/app-store').AppSessionRef | null
-  changeLegacySessionMetadata?: (ref: import('../../main/app-store').AppSessionRef, change: () => boolean) => Promise<boolean>
+  changeLegacySessionMetadata?: (
+    ref: import('../../main/app-store').AppSessionRef,
+    change: () => boolean,
+    meta?: {
+      change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+      actor: string
+    }
+  ) => Promise<boolean>
   prepareConversationDeletion?: (conversation: Conversation) => Promise<ConversationDeletionPreview>
   // Session deletion takes the session's side chats along (conversation-delete.ts).
   sideChatCascade?: SideChatCascade

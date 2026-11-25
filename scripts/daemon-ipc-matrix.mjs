@@ -16,6 +16,10 @@ export const CONVERSATION_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/
 export const CLIENT_MATRIX_DOC = join(root, 'docs/plans/remote-runtime-v2/P3-ipc-matrix-client.md')
 const ROUTING = join(root, 'scripts/daemon-ipc-routing.json')
 const ROUTING_WORKBENCH = join(root, 'scripts/daemon-ipc-routing-workbench.json')
+// D1/D5 host-authority channels (queue reads, checkpoint rollback) moved here when the main file
+// reached the file-size limit; they are one group because both answer "what does the host hold for
+// this run/session".
+const ROUTING_QUEUE = join(root, 'scripts/daemon-ipc-routing-queue.json')
 const ROUTING_CLIENT = join(root, 'scripts/daemon-ipc-routing-client.json')
 const ROUTING_SERVICE = join(root, 'scripts/daemon-ipc-routing-service.json')
 const OPS = join(root, 'scripts/daemon-ipc-ops.json')
@@ -158,21 +162,22 @@ export function performancePaths() {
  * new op looks like, how each forwarded op differs from the device protocol, and which
  * new ops a remote device may reach. Each file stays under the staged size budget.
  */
-export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH, clientPath = ROUTING_CLIENT, servicePath = ROUTING_SERVICE) {
+export function loadRouting(routingPath = ROUTING, opsPath = OPS, differencesPath = DIFFERENCES, approvalsPath = APPROVALS, workbenchPath = ROUTING_WORKBENCH, clientPath = ROUTING_CLIENT, servicePath = ROUTING_SERVICE, queuePath = ROUTING_QUEUE) {
   const routing = JSON.parse(readFileSync(routingPath, 'utf8'))
   const workbench = JSON.parse(readFileSync(workbenchPath, 'utf8'))
+  const queue = JSON.parse(readFileSync(queuePath, 'utf8'))
   const client = JSON.parse(readFileSync(clientPath, 'utf8'))
   const service = JSON.parse(readFileSync(servicePath, 'utf8'))
   const ops = JSON.parse(readFileSync(opsPath, 'utf8'))
   const differences = JSON.parse(readFileSync(differencesPath, 'utf8'))
   const approvals = JSON.parse(readFileSync(approvalsPath, 'utf8'))
-  for (const [name, data] of [['routing', routing], ['workbench routing', workbench], ['client routing', client], ['service routing', service], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
+  for (const [name, data] of [['routing', routing], ['queue routing', queue], ['workbench routing', workbench], ['client routing', client], ['service routing', service], ['ops', ops], ['differences', differences], ['approvals', approvals]]) {
     if (data.schema !== 1) throw new Error(`${name} schema must be 1`)
   }
-  if (!Array.isArray(routing.channels) || !Array.isArray(workbench.channels) || !Array.isArray(client.channels) || !Array.isArray(service.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
+  if (!Array.isArray(routing.channels) || !Array.isArray(queue.channels) || !Array.isArray(workbench.channels) || !Array.isArray(client.channels) || !Array.isArray(service.channels) || !ops.ops || !differences.differences || !Array.isArray(approvals.approved)) {
     throw new Error('routing inputs are incomplete')
   }
-  return { schema: 1, channels: [...routing.channels, ...workbench.channels, ...client.channels, ...service.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
+  return { schema: 1, channels: [...routing.channels, ...queue.channels, ...workbench.channels, ...client.channels, ...service.channels], ops: ops.ops, differences: differences.differences, approved: new Set(approvals.approved) }
 }
 
 /**

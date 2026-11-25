@@ -58,6 +58,21 @@ it('follows a session Scry knows and reads only the appended interval when its d
     ])
     await work.scanDetail(discovered.sessionKey!, false)
     expect(sink.listEvents()).toHaveLength(base + 2)
+    // B4: one receipt per session+frontier, and none keyed on a projector revision, so a
+    // revision bump cannot spawn an extra permanent receipt.
+    const scanReceipts = sink.handle.db
+      .prepare("SELECT command_id FROM orch_command WHERE command_id LIKE 'catalog-scan:%' ORDER BY command_id")
+      .pluck()
+      .all() as string[]
+    expect(scanReceipts).toHaveLength(2)
+    for (const commandId of scanReceipts) {
+      expect(commandId).toBe(`catalog-scan:${discovered.sessionKey}:${commandId.split(':').at(-1)}`)
+      expect(commandId.split(':')).toHaveLength(3)
+    }
+    await work.scanDetail(discovered.sessionKey!, false)
+    expect(
+      sink.handle.db.prepare("SELECT COUNT(*) FROM orch_command WHERE command_id LIKE 'catalog-scan:%'").pluck().get()
+    ).toBe(2)
     const reopened = createWork()
     await reopened.scanCatalog()
     expect(sink.listEvents()).toHaveLength(base + 2)
@@ -187,6 +202,23 @@ it.each(['new projection', 'v5 upgrade', 'v5 pruned'])('counts after recorded tr
     if (mode !== 'new projection') {
       const savedRevision = sink.getSession(sessionKey)?.revSeq
       sink.handle.db.prepare('UPDATE orch_p_session SET legacy = 0 WHERE session_key = ?').run(sessionKey)
+      // Reconstruct a real v5 database so reopening exercises the V6–V8 migrations.
+      sink.handle.db.exec(`
+        DROP TABLE IF EXISTS orch_binding;
+        DROP TABLE IF EXISTS orch_provider_session;
+        DROP INDEX IF EXISTS idx_orch_p_run_queue;
+        ALTER TABLE orch_p_run DROP COLUMN queue_position;
+        ALTER TABLE orch_p_run DROP COLUMN queue_held;
+        ALTER TABLE orch_p_run DROP COLUMN checkpoint_ref;
+        ALTER TABLE orch_p_run DROP COLUMN rolled_back_at;
+        DROP INDEX IF EXISTS idx_orch_outbox_fifo;
+        DROP INDEX IF EXISTS idx_orch_outbox_available;
+        ALTER TABLE orch_p_run DROP COLUMN intent_command_id;
+        ALTER TABLE orch_p_run DROP COLUMN intent_at;
+        ALTER TABLE orch_p_run DROP COLUMN intent_detail_sha256;
+        ALTER TABLE orch_outbox DROP COLUMN session_key;
+        ALTER TABLE orch_outbox DROP COLUMN available_at;
+      `)
       sink.handle.db.pragma('user_version = 5')
       sink.close()
       sink = open()

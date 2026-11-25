@@ -17,13 +17,15 @@ import type { SessionRef } from './env'
 import type { SettingsTab } from './components/Modals'
 import { APP_PANE_LIMITS, useAppPanes, useSessionDetailWatch } from './hooks/useAppPanes'
 import { applyProviderCatalogRefresh, resetQueuedPromptControl, updateSessionPromptQueue, type DraftAttachment } from './app-model'
-import { scrollChatToBottomIfNeeded } from './chat-scroll'
+import { useChatBottom } from './hooks/use-chat-bottom'
 import { retainProtectedSteerPrompts } from './steer'
 import { useAppSidebarActions } from './app-sidebar-actions'
 import { useAppSessionRuntime } from './app-session-runtime'
 import { useAppDraftPersistence } from './app-draft-persistence'
 import { useDiffReviewSelection } from './hooks/useDiffReviewSelection'
 import { useConversationWorkspace } from './hooks/useConversationWorkspace'
+import { useSessionHostQueueWithRelease } from './hooks/useHostQueue'
+import { retryHistoryAction } from './retry-history'
 const EMPTY_DRAFT_ATTACHMENTS: DraftAttachment[] = []
 type AppInteractionContext = { state: ReturnType<typeof import('./app-state').useAppState> }
 export function useAppInteraction(context: AppInteractionContext) {
@@ -63,14 +65,8 @@ export function useAppInteraction(context: AppInteractionContext) {
   const chatNavigation = useChatNavigation(scrollRef, view === 'chat' || view === 'conversation', session.turns.length,
     view === 'conversation' ? logicalConversation?.id : selectedProviderSessionId)
   const { focusedTurnRunId } = chatNavigation
-  const shouldStickToBottomRef = useRef(true)
-  const openingSessionBottomRef = useRef(false)
-  const requestChatBottom = useCallback((preserveDuringSessionOpen = false): void => {
-    chatNavigation.cancel()
-    if (preserveDuringSessionOpen) openingSessionBottomRef.current = true
-    shouldStickToBottomRef.current = true
-    scrollChatToBottomIfNeeded(scrollRef.current, true)
-  }, [chatNavigation.cancel])
+  const { shouldStickToBottomRef, openingSessionBottomRef, requestChatBottom } =
+    useChatBottom(scrollRef, chatNavigation.cancel)
   const queuedStartPendingRef = useRef(false)
   const queuedStartInFlightRef = useRef(false)
   const queuedDrainGenerationRef = useRef(0)
@@ -190,15 +186,15 @@ export function useAppInteraction(context: AppInteractionContext) {
   })
   const { steerQueuedPrompt, removeQueuedPrompt, editQueuedPrompt, cancelQueuedPromptEdit, removeDraftAttachment,
     openWorkspaceFile, addWorkspaceReference, stopRun, loadOlderTurns, historyOlderLoading } = queueActions
-  const retryHistory = activeEvidenceGap?.status === 'error' && activeSessionId
-    ? projects.flatMap(project => project.sessions.map(row => ({ cwd: row.cwd ?? project.cwd, row })))
-        .find(entry => entry.row.sessionId === activeSessionId && entry.cwd === cwd)
-    : undefined
+  const retryHistory = retryHistoryAction(projects, activeSessionId, cwd, activeEvidenceGap?.status)
+  // D1/C4: queue and restart offer are host state; both re-read when the projection moves.
+  const { state: hostQueue, release: hostQueueRelease, restartContinue } = useSessionHostQueueWithRelease({ sessionId: activeSessionId,
+    providerId: integrations.selectedId, cwd }, session.historyWindow?.projectionKey)
   const chatProps = createAppChatProps({
     workspaceContext: appView.workspaceContext, workspaceSendLabel: appView.workspaceSendLabel, workspaceBlockedReason: appView.workspaceBlockedReason, workspaceSetup: appView.workspaceSetup,
     draftStore, draftKey, session, scrollRef, taRef, cwd, workspaceRoots, recent, integrations, switchingAgent, composerSubmitting,
     sessionLoading, activeSessionId, sendBlockedReason, sessionWorkspaceMissing, composerError, providerSendBlockedReason, providerCompatibilityIssue,
-    sessionCacheVisible, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
+    sessionCacheVisible, hostQueue, hostQueueRelease, restartContinue, activeEvidenceGap, draftAttachments, queuedPrompts, steerCapability, steerEvidenceByMessageId,
     retryHistory: retryHistory ? () => {
       const { row } = retryHistory
       void pickSession(retryHistory.cwd, row.sessionId, row.providerId, row.externalSessionId, row.runId, row.agentProfileId)

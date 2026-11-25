@@ -154,6 +154,10 @@ export function createRecorderEvidenceFinder(
   sink: EventSink
 ): (runId: string) => RecorderTerminalEvidence | undefined {
   return (runId: string) => {
+    // The terminal settlement retries this lookup on a timer, so it outlives a shutdown. A closed
+    // projection cannot have the run and will never gain evidence: answer "not yet" instead of
+    // letting the closed handle throw from a timer nobody can catch.
+    if (!sink.handle.db.open) return undefined
     const run = sink.getRun(runId)
     const fromArchive = findInTraceArchive(userDataDir, runId, {
       provider: run?.provider ?? null,

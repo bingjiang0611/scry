@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { RunRegistry, type RunRegistryControl, type RunRegistryState } from '../../main/run-registry'
 import { canonicalJson, sha256Hex } from './canonical-json'
+import Database from 'better-sqlite3'
 import { EventSink } from './event-sink'
 import { INLINE_BODY_MAX_BYTES } from './types'
 import type { OrchestrationCommand } from './orchestrator-commands'
@@ -461,6 +462,38 @@ describe('P4-0 EventSink atomic commits, fail closed, deletion, pruning, and rep
         expect(sink.getReceipt('old-cmd', PEER_A)).toBeDefined()
         expect(sink.getMeta('pruned_through')).toBe(String(pruned.prunedThrough))
       } finally {
+        sink.close()
+      }
+    })
+  })
+})
+
+// R8: a busy lock is not a decision. It used to be classified as a non-fatal logic error, which wrote a
+// permanent rejection receipt: a command with a deterministic id was then refused forever, so the run it
+// belonged to could never reach a terminal state.
+describe('R8: a busy store is retryable, not a rejection', () => {
+  it('refuses to write a receipt for SQLITE_BUSY and leaves the command id unused', () => {
+    withTempDir((dir) => {
+      const sink = EventSink.open({ userDataDir: dir, authorizedActors: [PEER_A] })
+      const other = new Database(join(dir, 'orchestration', 'orchestration.db'))
+      try {
+        // Exclusive locking would hide the contention; NORMAL lets a second writer hold the lock.
+        sink.setLockingMode('normal')
+        other.pragma('busy_timeout = 0')
+        other.prepare('BEGIN IMMEDIATE').run()
+        const command = makeSubmit(sink, { commandId: 'busy-1', runId: 'run-busy', sessionKey: 'sess-busy', prompt: 'hi' })
+        expect(() => sink.execute(command)).toThrow(/database is locked|orchestration_db_locked/)
+        // Nothing was decided, and no receipt claims the command was refused.
+        expect(sink.getRun('run-busy')).toBeUndefined()
+        const receipt = sink.handle.db.prepare('SELECT status FROM orch_command WHERE command_id = ?').get('busy-1')
+        expect(receipt).toBeUndefined()
+
+        // Once the lock is gone the same command id is still usable.
+        other.prepare('COMMIT').run()
+        const accepted = sink.execute(command)
+        expect(accepted.kind).toBe('accepted')
+      } finally {
+        other.close()
         sink.close()
       }
     })

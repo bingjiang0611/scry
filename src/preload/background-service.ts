@@ -17,6 +17,10 @@ export const backgroundServiceApi = {
   reconnectBackgroundService: (): Promise<BackgroundServiceActionResult> => ipcRenderer.invoke('remote:backgroundService:reconnect'),
   setBackgroundServiceLoginStart: (enabled: boolean): Promise<BackgroundServiceActionResult> =>
     ipcRenderer.invoke('remote:backgroundService:setLoginStart', enabled),
+  usageLimitResume: (): Promise<{ enabled: boolean }> => ipcRenderer.invoke('remote:backgroundService:usageLimitResume'),
+  // C4: one boolean, nothing else. The daemon reads the same file this writes.
+  setUsageLimitResume: (enabled: boolean): Promise<{ status: 'done' }> =>
+    ipcRenderer.invoke('remote:backgroundService:setUsageLimitResume', enabled),
   setHostCliApproval: (enabled: boolean): Promise<BackgroundServiceActionResult> =>
     ipcRenderer.invoke('remote:hostAdmin:setCliApproval', enabled),
   onBackgroundServiceNotice: (cb: (notice: BackgroundServiceRuntimeNotice | null) => void): (() => void) => {

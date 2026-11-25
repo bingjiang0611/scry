@@ -17,6 +17,7 @@ import { openCodeMessageId, openCodeMessageRole, record } from './opencode-recor
 import { openCodeContinuationKey } from './host-continuation-identity'
 import { runOpenCode } from './opencode-run'
 import { createOpenCodeServerPool } from './opencode-server-pool'
+import type { SessionLifecycleObserver } from './session-pool-policy'
 import { permissionOptions } from './run-controls'
 
 /** The CLI path the adapter launches; identity checks hash the same resolution. */
@@ -27,9 +28,10 @@ export function openCodeExecutable(): string | undefined {
 export function createOpenCodeAdapter(
   homeDir = homedir(),
   privateMcpAuthDirectory?: string,
-  sessionStateRoot?: string
+  sessionStateRoot?: string,
+  sessions?: SessionLifecycleObserver
 ): ProviderAdapter {
-  const pool = createOpenCodeServerPool(openCodeExecutable, privateMcpAuthDirectory, sessionStateRoot)
+  const pool = createOpenCodeServerPool(openCodeExecutable, privateMcpAuthDirectory, sessionStateRoot, sessions)
   const identity = {
     homeDir,
     privateMcpAuthDirectory,

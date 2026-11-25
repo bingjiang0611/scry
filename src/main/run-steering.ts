@@ -112,7 +112,7 @@ export class RunSteering {
 export async function steerObservedRun(payload: unknown, lookup: (runId: string) => {
   state: ActiveRun
   control: { steer: (input: AgentSteerInput) => Promise<AgentSteerResult> }
-} | undefined): Promise<AgentSteerResult> {
+} | undefined, options: { restart?: (runId: string) => boolean } = {}): Promise<AgentSteerResult> {
   let request
   try { request = normalizeAgentSteerRequest(payload) } catch (error) {
     return { status: 'rejected', message: error instanceof Error ? error.message : String(error) }
@@ -123,5 +123,13 @@ export async function steerObservedRun(payload: unknown, lookup: (runId: string)
     run.state.cwd !== request.cwd || run.state.externalSessionId !== request.expectedExternalSessionId) {
     return { status: 'rejected', message: 'Steer 的运行、Provider、目录或会话身份已变化，消息未发送。' }
   }
-  return run.control.steer({ messageId: request.messageId, prompt: request.prompt, attachments: request.attachments })
+  const result = await run.control.steer({
+    messageId: request.messageId, prompt: request.prompt, attachments: request.attachments
+  })
+  // C2: a provider with no verified native steer could not take the message. When the caller asked
+  // for a restart, stop this turn and leave the message for the next one; the queue delivers it
+  // once the turn is terminal. The message was never admitted as a steer, so this is not `accepted`.
+  if (result.status !== 'unavailable' || !request.restartWhenUnsupported) return result
+  if (!options.restart?.(request.runId)) return result
+  return { status: 'restarted', message: '已中断当前轮；消息仍在本轮结束后的队列中' }
 }

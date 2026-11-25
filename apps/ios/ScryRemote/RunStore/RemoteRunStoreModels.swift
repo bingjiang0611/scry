@@ -46,7 +46,9 @@ extension RemoteRunStore {
   // The device-observable lifecycle. `.unknown` = we have not learned a state
   // yet (e.g. before any poll), never shown as success.
   enum Lifecycle: String, Equatable {
-    case unknown, submitting, recorded, dispatched, running, settled, failed, cancelled
+    // `queued` means the host accepted this turn and is holding it behind the session's live run.
+    // It is not execution, and it is not terminal: the turn still has to run.
+    case unknown, submitting, queued, recorded, dispatched, running, settled, failed, cancelled
   }
 
   struct OutputLine: Identifiable, Equatable {
