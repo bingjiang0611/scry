@@ -84,13 +84,13 @@ describe('local LLM performance observation', () => {
 
   it('pairs per-call tokens with the same calls\' local time, ignoring child calls and turn usage', () => {
     const { emit } = fixture()
-    const first = emit(1000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 4000, model: 'ultimate' } })
-    expect(first).toMatchObject({ outputTokens: 100, apiDurationMs: 4000, apiTokensPerSecond: 25, tokenTimingSource: 'observed_calls', llmCalls: 1, model: 'ultimate' })
-    emit(1500, { kind: 'harness', stage: 'runtime:llm_call', parentToolUseId: 'agent', llmCall: { outputTokens: 900, durationMs: 1000 } })
-    emit(2000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 1000 } })
+    const first = emit(1000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 4000, firstTokenMs: 1000, model: 'ultimate' } })
+    expect(first).toMatchObject({ outputTokens: 100, apiDurationMs: 4000, apiTokensPerSecond: 100 / 3, tokenTimingSource: 'observed_calls', llmCalls: 1, model: 'ultimate' })
+    emit(1500, { kind: 'harness', stage: 'runtime:llm_call', parentToolUseId: 'agent', llmCall: { outputTokens: 900, durationMs: 1000, firstTokenMs: 100 } })
+    emit(2000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 1000, firstTokenMs: 500 } })
+    // Turn usage also counts retried/failed calls; it must not replace the per-call numerator.
     const end = emit(9000, { kind: 'harness', stage: 'result', tokensOut: 400, durationMs: 9000 })
-    expect(end).toMatchObject({ state: 'complete', outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 30, llmCalls: 2, model: 'ultimate' })
-    expect(end).not.toHaveProperty('firstTokenMs')
+    expect(end).toMatchObject({ state: 'complete', outputTokens: 150, apiDurationMs: 5000, apiTokensPerSecond: 150 / 3.5, llmCalls: 2, model: 'ultimate', firstTokenMs: 750 })
   })
 
   it('averages first-token wait over root calls that carry it, never counting missing calls as 0', () => {
@@ -100,6 +100,20 @@ describe('local LLM performance observation', () => {
     emit(2000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 1000 } })
     const end = emit(3000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 50, durationMs: 3000, firstTokenMs: 2000 } })
     expect(end).toMatchObject({ llmCalls: 3, firstTokenMs: 1500, firstTokenCalls: 2 })
+  })
+
+  it('divides output tokens by generation time only, never counting the first-token wait (Q8)', () => {
+    // 2 秒生成 100 token，另有 3 秒首 token 等待：速度是 50/秒，不是 20/秒。
+    const observed = fixture()
+    const sample = observed.emit(1000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 5000, firstTokenMs: 3000 } })
+    expect(sample).toMatchObject({ apiDurationMs: 5000, firstTokenMs: 3000, apiTokensPerSecond: 50 })
+    // 首 token 未知时不拿含等待的时长当分母，宁可不给速度。
+    const unknown = fixture()
+    expect(unknown.emit(1000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 5000 } }).apiTokensPerSecond).toBeUndefined()
+    // 只有部分调用有首 token：同样不给速度。
+    const partial = fixture()
+    partial.emit(1000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 5000, firstTokenMs: 3000 } })
+    expect(partial.emit(2000, { kind: 'harness', stage: 'runtime:llm_stream_end', llmCall: { outputTokens: 100, durationMs: 5000 } }).apiTokensPerSecond).toBeUndefined()
   })
 
   it('keeps Provider API time authoritative and never labels it as observed calls', () => {

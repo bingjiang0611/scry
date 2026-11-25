@@ -47,11 +47,11 @@ export function AppShell(props: AppShellProps) {
     metaPromptTarget, integrations, session, displayedTurns, displayedBusy, selectedProviderSessionId,
     panelRuntimeProvider, showSessionOverview, panelVisible, currentSurface, rightSurface, rightSurfaces,
     handleRightSurfaceAction, openTurnInChat, diffInspector, openWorkspaceDiff, workspaceRefreshKey,
-    workspaceOpenRequests, setScopeDirty, addWorkspaceReference, showLlmPerformance, setShowLlmPerformance,
+    workspaceOpenRequests, setScopeDirty, addWorkspaceReference,
     showSkills, showMcp, openSkills, openMcp, settingsTab, setSettingsTab, theme, changeTheme, archiveUndo, sessionSaves,
     setArchiveUndo, workspace, runningRunIds, waitingQuestionRunIds, unreadSessionKeys, unreadRevision, backgroundWorkByRun,
     catalogHealth, catalogHealthError, projectsError, summary, sidebarMin, sidebarMax, panelMin, panelMax, rightPanelMounted, mountedSurfaces,
-    setRemoteWorkspaceDirty, toggleOverviewPanel, changeView, openRemoteLocation, openMachines, setShowSkills, setShowMcp,
+    setRemoteWorkspaceDirty, toggleOverviewPanel, openRemoteLocation, openMachines, setShowSkills, setShowMcp,
     draftKey, questionKindsByRun
   } = props
   // Measured narrow layout and the side-chat tabs of this session. No child transcript
@@ -131,7 +131,7 @@ export function AppShell(props: AppShellProps) {
             </div>
             {view === 'meta-prompts' && <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div>}
           </> : view === 'analytics' ? <div className="main-content main-content--single"><Suspense fallback={<div className="lazy-panel-loading">正在加载分析视图…</div>}>
-            <AnalyticsView analytics={integrations.analytics} rangeDays={integrations.analyticsRange} loading={integrations.analyticsLoading} creditsPending={integrations.analyticsCreditsLoading} error={integrations.analyticsError} onRangeChange={integrations.setAnalyticsRange} onRefresh={() => integrations.loadAnalytics()} onBack={() => { changeView('chat') }} />
+            <AnalyticsView analytics={integrations.analytics ?? undefined} rangeDays={integrations.analyticsRange} loading={integrations.analyticsLoading} creditsPending={integrations.analyticsCreditsLoading} error={integrations.analyticsError} onRangeChange={integrations.setAnalyticsRange} onRefresh={() => integrations.loadAnalytics()} />
           </Suspense></div> : view === 'machines' ? <div className="main-content main-content--single">
             <MachinesView onNewSession={(connectionId, machinesCwd) => openRemoteLocation(connectionId, machinesCwd)} />
           </div> : view === 'meta-prompts' ? <div className="main-content main-content--single"><MetaPromptsView onBack={returnFromMetaPrompts} onInsert={insertMetaPrompt} /></div> : <>
@@ -195,7 +195,7 @@ export function AppShell(props: AppShellProps) {
       {sideChatPanel.history.open && <SideChatHistoryDialog history={sideChatPanel.history}
         onClose={sideChatPanel.history.close} />}
       <AppShellModals
-        cwd={cwd} integrations={integrations} showLlmPerformance={showLlmPerformance} setShowLlmPerformance={setShowLlmPerformance}
+        cwd={cwd} integrations={integrations}
         showSkills={showSkills} showMcp={showMcp} openSkills={openSkills} openMcp={openMcp} setShowSkills={setShowSkills} setShowMcp={setShowMcp}
         settingsTab={settingsTab} setSettingsTab={setSettingsTab} theme={theme} changeTheme={changeTheme}
         setArchiveUndo={setArchiveUndo} workspace={workspace} openMachines={openMachines}

@@ -6,7 +6,7 @@ import { providerDangerCoverage } from '../../shared/provider.js'
 import { providerUsageResultEvents } from '../../shared/result-timing.js'
 import { HOOK_DELIVERY_STAGE, type TraceEvent } from '../../shared/trace.js'
 import { limitTurnDiffPatchBytes } from './git.js'
-import { normalizeTurnRepositoryLocation, TURN_REPOSITORY_LOCATION_LIMITS } from '../../shared/turn-repository-location.js'
+import { normalizeTurnRepositoryLocation, TURN_REPOSITORY_LOCATION_LIMITS, type TurnRepositoryLocation } from '../../shared/turn-repository-location.js'
 import { aggregateCallEvidence, outputSummary } from './aggregate-call-evidence.js'
 import { aggregateHooks, isRecorderHook } from './aggregate-hooks.js'
 import { captureOmissionReasons, joinOmissionReasons } from './aggregate-capture.js'
@@ -230,14 +230,36 @@ export function aggregateTurnEvidence(args: {
     })
   }
   const diffSnapshots = limitTurnDiffPatchBytes(args.events.flatMap((event) => event.turnDiff ? [event.turnDiff] : []))
-  const locatedRepositories = new Set<string>()
-  const diffs = diffSnapshots.map((diff) => {
+  // A repository this turn changed outranks one it merely touched: with 45 repositories and a 32
+  // location budget, filling slots in appearance order would drop exactly the locations that matter.
+  // Entries below the budget, and unchanged entries that carry neither a value nor a fact ("not read"
+  // is not evidence), keep no location at all — that is bytes and a slot returned, not a hidden state.
+  const hasValue = (location: TurnRepositoryLocation): boolean =>
+    !!(location.remote || location.commitBefore || location.commitAfter) ||
+    location.branch !== undefined || location.branchAfter !== undefined
+  const isFact = (location: TurnRepositoryLocation): boolean =>
+    location.remoteStatus === 'absent' || location.remoteStatus === 'unsupported' || location.branchStatus === 'detached'
+  const candidates = diffSnapshots.flatMap((diff, index) => {
     const { version: _version, repositoryLocation: rawLocation, ...record } = diff
     const repositoryLocation = normalizeTurnRepositoryLocation(rawLocation)
-    if (!record.repoRoot || !repositoryLocation || locatedRepositories.has(record.repoRoot) ||
-        locatedRepositories.size >= TURN_REPOSITORY_LOCATION_LIMITS.repositories) return record
-    locatedRepositories.add(record.repoRoot)
-    return { ...record, repositoryLocation }
+    const wanted = !!record.repoRoot && !!repositoryLocation &&
+      (record.files.length > 0 || hasValue(repositoryLocation) || isFact(repositoryLocation))
+    return wanted ? [{ index, record, repositoryLocation: repositoryLocation! }] : []
+  })
+  // Stable: changed first, appearance order inside each rank.
+  candidates.sort((left, right) => Number(right.record.files.length > 0) - Number(left.record.files.length > 0) || left.index - right.index)
+  const locatedRepositories = new Set<string>()
+  const granted = new Map<number, TurnRepositoryLocation>()
+  for (const { index, record, repositoryLocation } of candidates) {
+    if (locatedRepositories.has(record.repoRoot!)) continue
+    if (locatedRepositories.size >= TURN_REPOSITORY_LOCATION_LIMITS.repositories) break
+    locatedRepositories.add(record.repoRoot!)
+    granted.set(index, repositoryLocation)
+  }
+  const diffs = diffSnapshots.map((diff, index) => {
+    const { version: _version, repositoryLocation: _raw, ...record } = diff
+    const repositoryLocation = granted.get(index)
+    return repositoryLocation ? { ...record, repositoryLocation } : record
   })
   const capturedDiffs = diffs.filter((diff) => diff.status === 'captured')
   const incompletePatchReasons = new Set(diffs.flatMap((diff) => diff.files.flatMap((file) =>

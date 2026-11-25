@@ -11,7 +11,7 @@ import {
   terminalSnapshot,
   cleanupCapture
 } from './git-capture.js'
-import { sampleGitRepositoryLocation, withRepositoryLocation } from './git-repository-location.js'
+import { readTurnRepositoryRemote, REPOSITORY_REMOTE_RETRY, sampleGitRepositoryLocation, withRepositoryLocation } from './git-repository-location.js'
 import { rm } from 'node:fs/promises'
 import {
   gitCommand,
@@ -128,8 +128,11 @@ export async function computeGitTurnDiff(
     if (observed?.branch !== undefined || observed?.commit !== undefined) repositoryEnd = observed
     return repositoryEnd
   }
-  const located = (snapshot: TurnDiffSnapshot): TurnDiffSnapshot =>
-    withRepositoryLocation(snapshot, capture.repositoryStart, readEnd())
+  // Start HEAD and branch head come from this capture's own `status` read, so an incomplete 50 ms
+  // location sample no longer costs `commitBefore` or `branch`.
+  const start = { ...(capture.turnStartHead ? { head: capture.turnStartHead } : {}), ...(capture.branchHead ? { branchHead: capture.branchHead } : {}) }
+  const located = (snapshot: TurnDiffSnapshot, before = capture.repositoryStart): TurnDiffSnapshot =>
+    withRepositoryLocation(snapshot, before, readEnd(), start)
   if (!sharedAfter && capture.status === 'ready' && capture.beforeTree && capture.tempDir && capture.objectDir) {
     const unchanged = await unchangedSinceCleanBaseline(capture, options, started + deadlineMs)
     if (unchanged) {
@@ -398,6 +401,18 @@ export async function computeGitTurnDiff(
   }
   const finishMs = Date.now() - started
   const cleanup = consume ? await cleanupCapture(capture) : 'ok'
-  const snapshot = located(terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection))
+  // Only a repository this turn actually changed earns a second read, and only for the origin the
+  // start sample may have lost. Its own pool and the turn ceiling keep the host's Stop hook bounded.
+  // A start read that named the origin, or proved there is none, is already an answer: only a read
+  // that did not finish earns the second attempt.
+  const startRemoteStatus = capture.repositoryStart?.remoteStatus
+  const startProvedRemote = !!capture.repositoryStart?.remote || startRemoteStatus === 'absent' || startRemoteStatus === 'unsupported'
+  const retryRemote = consume && files.length > 0 && !startProvedRemote && capture.repoRoot
+    ? await readTurnRepositoryRemote(capture.repoRoot, options.locationRetryDeadline ?? Date.now() + REPOSITORY_REMOTE_RETRY.turnMs)
+    : undefined
+  const snapshot = located(
+    terminalSnapshot(capture, status, reason, files, afterAt, finishMs, cleanup, collection),
+    retryRemote ? { ...capture.repositoryStart, ...retryRemote } : capture.repositoryStart
+  )
   return exclusion ? { ...snapshot, diffExclude: exclusion } : snapshot
 }

@@ -6,6 +6,7 @@ import { QODER_CREDIT_SCOPES_SQL, qoderCreditScope } from './qoder-credit-scopes
 import { type DbStats, type UsageAnalytics, type UsageAnalyticsRangeDays } from '../shared/trace'
 import { TOTALS_SQL, TOP_TOOLS_SQL, BY_CWD_SQL, BY_MODEL_SQL, TOOL_STATS_SQL, DANGER_TREND_SQL, INTERVENTION_STATS_SQL, ANALYTICS_RESULTS_SQL, ANALYTICS_TOOLS_SQL, ANALYTICS_DANGER_SQL, ANALYTICS_MCP_SQL, USAGE_ANALYTICS_TOKENS_SQL, USAGE_ANALYTICS_COSTS_SQL, buildAnalyticsStats, buildUsageAnalytics, usageAnalyticsBounds, type AnalyticsResultRow, type AnalyticsToolRow, type AnalyticsDangerRow, type AnalyticsMcpRow, type UsageAnalyticsTokenRow, type UsageAnalyticsCostRow } from './span-ledger'
 import { dataRevision, db, statsCacheSlot, usageAnalyticsCache } from './db-connection'
+import { currentModelPrices } from './db-model-prices'
 import { storageUserDataDir } from './storage-paths'
 
 const EMPTY: DbStats = {
@@ -103,7 +104,8 @@ export function usageAnalyticsQuery(rangeDays: UsageAnalyticsRangeDays): UsageAn
       nowMs,
       rangeDays,
       tokens: db.prepare(USAGE_ANALYTICS_TOKENS_SQL).all(bounds.from, bounds.to) as UsageAnalyticsTokenRow[],
-      costs: db.prepare(USAGE_ANALYTICS_COSTS_SQL).all(bounds.from, bounds.to) as UsageAnalyticsCostRow[]
+      costs: db.prepare(USAGE_ANALYTICS_COSTS_SQL).all(bounds.from, bounds.to) as UsageAnalyticsCostRow[],
+      prices: currentModelPrices(db)
     })
     // Persisted credit evidence is projected before any native fallback.
     const scopes = (db.prepare(QODER_CREDIT_SCOPES_SQL).all(bounds.from, bounds.to) as Parameters<typeof qoderCreditScope>[0][]).map(qoderCreditScope)

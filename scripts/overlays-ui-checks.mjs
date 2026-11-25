@@ -69,7 +69,7 @@ export async function exerciseOverlays(contents) {
     await click(css(`.settings-pane .segmented button:nth-child(${theme === 'dark' ? 2 : 1})`))
     await wait(`document.documentElement.dataset.theme === '${theme}'`)
     await close('.settings-modal', '.sb-settings')
-    for (const [title, selector] of [['Skills', '.capabilities-modal--skills'], ['MCP', '.capabilities-modal--mcp'], ['LLM 性能', '.llm-perf-modal']]) {
+    for (const [title, selector] of [['Skills', '.capabilities-modal--skills'], ['MCP', '.capabilities-modal--mcp']]) {
       const trigger = `.sb-nav [title="${title}"]`
       await click(css(trigger))
       await wait(`${modalIn(selector)}?.effect.getTiming().duration === 250`)

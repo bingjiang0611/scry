@@ -1,8 +1,7 @@
 import { LLM_METRICS, quantile, type LlmComparisonRound, type LlmMetric, type LlmMetricSample } from '@shared/llm-performance'
 import type { ProviderId } from '@shared/provider'
 
-export type RangeHours = 1 | 24 | 168
-export const INTERVAL_MS: Record<RangeHours, number> = { 1: 600_000, 24: 7_200_000, 168: 86_400_000 }
+export type RangeHours = 1 | 24 | 168 | 720
 
 export function metricDistribution(samples: readonly LlmMetricSample[]) {
   if (!samples.length) return null
@@ -47,25 +46,6 @@ export function compareModels(rounds: readonly LlmComparisonRound[]) {
     (a.outputSummary?.median ?? Infinity) - (b.outputSummary?.median ?? Infinity))
 }
 export type ModelDistribution = ReturnType<typeof compareModels>[number]
-
-/** Empty buckets stay absent; 1–2 samples retain their actual times and values. */
-export function metricIntervals(samples: readonly LlmMetricSample[], from: number, to: number, span: number) {
-  const buckets = new Map<number, LlmMetricSample[]>()
-  for (const sample of samples) {
-    if (sample.ts < from || sample.ts > to) continue
-    const start = Math.floor(sample.ts / span) * span
-    const group = buckets.get(start)
-    if (group) group.push(sample)
-    else buckets.set(start, [sample])
-  }
-  return [...buckets].flatMap(([bucket, group]) => {
-    if (group.length < 3) return group.map(sample => ({
-      ...metricDistribution([sample])!, ts: sample.ts, start: sample.ts, stop: sample.ts, individual: true
-    }))
-    const start = Math.max(from, bucket), stop = Math.min(to, bucket + span)
-    return [{ ...metricDistribution(group)!, ts: (start + stop) / 2, start, stop, individual: false }]
-  }).sort((a, b) => a.ts - b.ts)
-}
 
 /** Full measured range, never percentile-clipped; 1/2/4/5 × 10^n ticks. */
 export function metricAxisMax(values: readonly number[]): number {

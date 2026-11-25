@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>空值与小样本规则</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#141416}
+</style>
+</helmet>
+<div style="width: 1440px; height: 640px; box-sizing: border-box; padding: 40px; background: #141416; color: #e8e8ea; font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 20px; font-weight: 700">显示规则</h1>
+<p style="margin: 0; color: #a1a1aa; font-size: 13px">只有一条原则：没有数据就不显示。</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+<sc-for list="{{rules}}" as="r" hint-placeholder-count="6">
+<article style="background: #1b1b1f; border: 0.5px solid rgba(255,255,255,0.09); border-custom-gateway: 14px; box-shadow: 0 1px 1px rgba(0,0,0,0.16), 0 3px 3px rgba(0,0,0,0.16), 0 6px 6px rgba(0,0,0,0.14), 0 12px 12px rgba(0,0,0,0.12); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 14px; font-weight: 600">{{r.title}}</h2>
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.6">
+<div style="display: flex; gap: 8px"><span style="flex: none; font-size: 12px; font-weight: 600; color: #ff9b8f; width: 28px">现在</span><span style="color: #c9c9cf">{{r.before}}</span></div>
+<div style="display: flex; gap: 8px"><span style="flex: none; font-size: 12px; font-weight: 600; color: #3ecf8e; width: 28px">改为</span><span>{{r.after}}</span></div>
+</div>
+</article>
+</sc-for>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      rules: [
+        { title: '没有数据的行', before: '「所选：model-d」、custom-gateway、Antigravity、unknown 等行，每列都是「—」。', after: '不显示。未成功的轮次不计入。' },
+        { title: '没有数据的格子', before: '显示「—」。', after: '留空。' },
+        { title: '0 Token 的记录', before: '被算成 $0.00、0.0%，图上多出灰点。', after: '不计入。' },
+        { title: '没有活动的日子', before: '曲线断开。', after: '画 0。' },
+        { title: '整页没有数据', before: '表格和图表全是空的。', after: '一个小图标 + 一句话（这段时间没有在 Scry 里运行）+ 一个文字按钮「看 7 天」。' },
+        { title: '加载中', before: '空白或转圈。', after: '300 毫秒内不显示加载态；更久就用和表格、图表同尺寸的骨架，标题和筛选立即显示。' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

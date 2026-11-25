@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { verifyNativeModalExit, waitForNativeModalEntrance } from './electron-security-modal-exit.mjs'
 
 export async function exerciseProductionPerformance(smokeContext) {
   const { evaluate, cdp, workspace, secondWorkspace } = smokeContext
@@ -34,49 +33,57 @@ export async function exerciseProductionPerformance(smokeContext) {
       return { runIds: [first.runId, second.runId], running: sampled.sessions.length }
     })()`)
     const point = await evaluate(`(() => {
-      const node = document.querySelector('.sb-navitem[title="LLM 性能"]')
-      if (!node) throw new Error('Production performance entry missing')
+      const node = document.querySelector('.sb-navitem:nth-of-type(1)')
+      if (!node) throw new Error('Production analytics entry missing')
       node.focus()
       const box = node.getBoundingClientRect()
       return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
     })()`)
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
-    const modal = await evaluate(`(async () => {
+    const page = await evaluate(`(async () => {
       const deadline = Date.now() + 5000
       while (Date.now() < deadline) {
-        const dialog = document.querySelector('.llm-perf-modal[role="dialog"]')
-        if (dialog?.contains(document.activeElement) && dialog.querySelector('.llm-perf-comparison h3')?.textContent === '模型对比' && !dialog.querySelector('.llm-perf-running, .llm-perf-run') && dialog.querySelector('.llm-perf-empty')?.textContent === '还没有数据')
-          return { focused: true, labelled: !!dialog.getAttribute('aria-labelledby') }
+        const view = document.querySelector('.analytics-page')
+        if (document.querySelector('.llm-perf-modal, .sb-navitem[title="LLM 性能"]')) throw new Error('The removed performance modal is still reachable')
+        if (view && view.querySelector('.analytics-tabs [aria-selected="true"]')?.textContent === 'LLM 性能'
+          && view.querySelector('#analytics-comparison h2')?.textContent === '模型对比'
+          && view.querySelector('.analytics-empty')?.textContent.includes('这段时间没有在 Scry 里运行')) {
+          // 页面要有可访问名：aria-labelledby 必须指向页面里真实的标题元素。
+          const named = view.getAttribute('aria-labelledby')
+          const title = named ? document.getElementById(named) : null
+          if (!title || !title.textContent.trim()) throw new Error('Analytics page lost its accessible name')
+          return { defaultTab: 'LLM 性能', labelled: title.textContent.trim() }
+        }
         await new Promise(requestAnimationFrame)
       }
-      throw new Error('Production modal did not load real IPC history or focus')
+      throw new Error('Production analytics page did not load real IPC history: ' + (document.querySelector('.analytics-page')?.textContent ?? document.body.innerText).slice(0, 600))
     })()`)
-    assert.deepEqual(modal, { focused: true, labelled: true })
+    assert.deepEqual(page, { defaultTab: 'LLM 性能', labelled: '分析' })
     const terminal = await evaluate(`(async () => {
       for (const runId of ${JSON.stringify(measurement.runIds)}) await window.scry.stop(runId)
       const deadline = Date.now() + 10_000
       while (Date.now() < deadline) {
         const summary = await window.scry.llmPerformanceSummary()
         const history = await window.scry.llmPerformanceHistory()
-        const dialog = document.querySelector('.llm-perf-modal')
-        if (summary.sessions.length === 0 && history.rows.length === 2 && dialog?.querySelector('.llm-perf-mrow')?.textContent.includes('未成功')) {
+        const view = document.querySelector('.analytics-page')
+        if (summary.sessions.length === 0 && history.rows.length === 2) {
           if (!history.rows.every(row => row.failed && row.performance.firstOutputWaitMs != null && row.performance.networkConfiguration && row.performance.tokenTimingSource !== 'provider_api'))
             throw new Error('Failed rounds lost evidence or fabricated API timing')
-          if (dialog.querySelector('.llm-perf-interval') || !Array.from(dialog.querySelectorAll('.llm-perf-reading')).every(node => node.textContent === '—')) throw new Error('Stopped rounds were drawn as performance')
+          // 只有失败轮次的模型不成行，也不会画出性能点。
+          if (view.querySelector('.analytics-table.is-models tbody tr, .analytics-point')) throw new Error('Stopped rounds were drawn as performance')
+          if (/—|所选：/.test(view.textContent)) throw new Error('Placeholder dash or removed model label is visible')
           return { historyRounds: history.rows.length, networkSources: history.rows.map(row => row.performance.networkConfiguration.source) }
         }
         await new Promise(resolve => setTimeout(resolve, 50))
       }
-      throw new Error('Live production modal did not clear stopped runs or refresh owned history: ' + JSON.stringify({
+      throw new Error('Live production page did not clear stopped runs or refresh owned history: ' + JSON.stringify({
         summary: await window.scry.llmPerformanceSummary(), history: await window.scry.llmPerformanceHistory(),
-        dialog: document.querySelector('.llm-perf-modal')?.textContent
+        page: document.querySelector('.analytics-page')?.textContent
       }))
     })()`)
 
-    await waitForNativeModalEntrance(cdp, evaluate, '.llm-perf-modal')
-    const exit = await verifyNativeModalExit(cdp, evaluate, '.llm-perf-modal', '.sb-navitem[title="LLM 性能"]')
-    console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, modal: { ...modal, exit } }))
+    console.log(JSON.stringify({ productionPerformance: { ...measurement, ...terminal }, page }))
     cdp.close()
     return
 }

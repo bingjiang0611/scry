@@ -72,7 +72,6 @@ export const Sidebar = memo(function Sidebar({
   analyticsActive = false,
   onMachines,
   machinesActive = false,
-  onLlmPerformance,
   onSkills,
   onMcp,
   onMetaPrompts,
@@ -125,7 +124,6 @@ export const Sidebar = memo(function Sidebar({
   analyticsActive?: boolean
   onMachines?: () => void
   machinesActive?: boolean
-  onLlmPerformance?: () => void
   onSkills?: () => void
   onMcp?: () => void
   onMetaPrompts?: () => void
@@ -239,7 +237,7 @@ export const Sidebar = memo(function Sidebar({
       <SidebarNav
         onAnalytics={onAnalytics} analyticsActive={analyticsActive}
         onMachines={onMachines} machinesActive={machinesActive}
-        onLlmPerformance={onLlmPerformance} onSkills={onSkills} onMcp={onMcp}
+        onSkills={onSkills} onMcp={onMcp}
         onMetaPrompts={onMetaPrompts} metaPromptsActive={metaPromptsActive}
       />
 

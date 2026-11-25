@@ -37,6 +37,8 @@
 
 ## Contextual reviews with follow-ups
 
+Synced main through `e3355f86`, including [#198](https://github.com/bingjiang0611/scry/pull/198), [#200](https://github.com/bingjiang0611/scry/pull/200), and [#199](https://github.com/bingjiang0611/scry/pull/199). Resolved 12 conflicting paths using upstream behavior and deletions. Across the 120 upstream-changed paths, verified six deletions, comment-free syntax and emitted code for 98 JS/TS files, and rule trees for two CSS files. Kept all 178 new or rewritten upstream JS/TS comment tokens; the older coverage record does not cover those changes. All 46 focused repository-location and analytics tests passed, as did the comment ratchet against the new main. Full local tests were deferred because of host load.
+
 At `613378ad`, removed four overstated or duplicated Recorder comments. ADRs 025 and 026 distinguish a quiet-visit metadata hint from turn evidence and a warm summary from canonical body validation. Code emission and tool directives match; 22 Recorder tests and the ratchet passed. No benchmark was run.
 
 At `c03714c6`, narrowed the Machines sampling and response-size claims to completed-cache reuse and a tested byte budget. [#197](https://github.com/bingjiang0611/scry/issues/197) tracks sampling overlap separately. Six comment tokens were removed net; comment-free output and directives matched, 33 focused tests and the ratchet passed. No performance measurement was made.

@@ -16,6 +16,7 @@ import { ProviderWarmPool, providerWarmKey } from './provider-warm-pool'
 import { contextUsageEvidence } from '../../shared/trace'
 import { effortOption } from './run-controls'
 import { questionFromExtension } from './pi-events'
+import { catalogPriceRows } from '../../shared/model-price'
 
 function explicitPiSkill(prompt: string): { command: string; name: string } | null {
   const match = prompt.match(/^\/skill:([A-Za-z0-9._-]+)(?:\s|$)/)
@@ -292,7 +293,9 @@ function enrichPiHistory(turns: ParsedTurn[], windows: ReadonlyMap<string, numbe
 function runControlCatalog(probe: PiProbe): AgentRunControlCatalog {
   const current = record(probe.state.model)
   const currentKey = `${String(current.provider ?? '')}\0${String(current.id ?? '')}`
+  const prices = catalogPriceRows(probe.models, Date.now())
   return {
+    ...(prices.length > 0 ? { prices } : {}),
     models: probe.models.flatMap((model) => {
       if (typeof model.id !== 'string' || typeof model.provider !== 'string') return []
       const key = `${model.provider}\0${model.id}`

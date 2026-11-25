@@ -1,3 +1,4 @@
+import type { ModelPrice } from './model-price.js'
 import type { ProviderId } from './provider.js'
 import type { PreparedWorkspace, WorkspaceStartSelection } from './workspace-selection.js'
 
@@ -84,6 +85,8 @@ export interface AgentPermissionOption {
 export interface AgentRunControlCatalog {
   models: AgentModelOption[]
   permissions: AgentPermissionOption[]
+  /** Provider 目录里的每百万 Token 单价（Pi 的模型目录会带上）。只用于折算金额。 */
+  prices?: ModelPrice[]
 }
 
 export interface AgentRunControls {

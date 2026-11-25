@@ -24,6 +24,46 @@ describe('aggregateTurnEvidence', () => {
     expect(diffs[1].repositoryLocation).toBeUndefined()
     expect(diffs[33].repositoryLocation).toBeUndefined()
   })
+  it('keeps the locations of changed repositories even when they sort after the budget', () => {
+    const ts = '2026-10-11T00:00:00Z'
+    const repos = Array.from({ length: 45 }, (_, index) => `/repo/${index}`)
+    const changed = new Set([repos[42], repos[43], repos[44]])
+    const events: TraceEvent[] = repos.map((repoRoot, index) => ({
+      id: String(index), ts, runId: 'r', kind: 'harness', stage: 'turn_diff',
+      turnDiff: {
+        version: 1, status: 'captured', repoRoot, beforeAt: ts, afterAt: ts, captureMs: 1, cleanup: 'ok',
+        files: changed.has(repoRoot) ? [{ path: `${repoRoot}/file.ts`, change: 'modified' as const, added: 1, deleted: 1 }] : [],
+        repositoryLocation: {
+          remote: `example.invalid/group/repo-${index}`, remoteStatus: 'observed',
+          branch: 'main', branchStatus: 'observed', commitBefore: 'a'.repeat(40), commitStatus: 'observed'
+        }
+      }
+    }))
+    const diffs = aggregateTurnEvidence({ events }).diff.value!
+    expect(diffs).toHaveLength(45)
+    const located = diffs.filter((diff) => diff.repositoryLocation)
+    expect(located).toHaveLength(32)
+    // The three changed repositories appear last in the turn and still keep their location.
+    for (const repoRoot of changed) expect(diffs.find((diff) => diff.repoRoot === repoRoot)?.repositoryLocation).toBeDefined()
+    // Slots are handed out in appearance order after the changed ones.
+    expect(diffs[0].repositoryLocation).toBeDefined()
+    expect(diffs[29].repositoryLocation).toBeUndefined()
+  })
+
+  it('drops an unchanged location that carries no value and no fact', () => {
+    const ts = '2026-10-11T00:00:00Z'
+    const unchanged = (repoRoot: string, repositoryLocation: Record<string, unknown>): TraceEvent => ({
+      id: repoRoot, ts, runId: 'r', kind: 'harness', stage: 'turn_diff',
+      turnDiff: { version: 1, status: 'captured', repoRoot, beforeAt: ts, afterAt: ts, captureMs: 1, cleanup: 'ok', files: [], repositoryLocation }
+    })
+    const diffs = aggregateTurnEvidence({ events: [
+      unchanged('/repo/not-read', { remoteStatus: 'unavailable', branchStatus: 'unavailable', commitStatus: 'unavailable' }),
+      unchanged('/repo/no-origin', { remoteStatus: 'absent', branch: 'main', branchStatus: 'observed', commitBefore: 'a'.repeat(40), commitStatus: 'observed' })
+    ] }).diff.value!
+    expect(diffs[0].repositoryLocation).toBeUndefined()
+    expect(diffs[1].repositoryLocation).toMatchObject({ remoteStatus: 'absent', branch: 'main' })
+  })
+
   it('preserves Steer admission evidence without rewriting the canonical root prompt or double counting usage', () => {
     const bytes = Buffer.from('image payload')
     const steer = { messageId: 'message-1', prompt: '补充要求', attachments: [{ kind: 'image' as const, name: 'screen.png', mimeType: 'image/png' as const, dataBase64: bytes.toString('base64') }] }

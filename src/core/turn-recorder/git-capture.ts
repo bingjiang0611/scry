@@ -49,6 +49,13 @@ export interface GitTurnDiffCapture {
   repositoryStart?: GitRepositoryLocation
   head?: string
   branch?: string
+  /**
+   * HEAD this capture's own `status` read observed at the turn start. `head` may be a session
+   * baseline commit instead; this one is what `commitBefore` means, and it costs no extra read.
+   */
+  turnStartHead?: string
+  /** Raw `# branch.head` value, so finish can tell a detached HEAD from a status read that skipped it. */
+  branchHead?: string
   baselineClean?: boolean
   indexPath?: string
   indexState?: { mtimeMs: number; ctimeMs: number; size: number; ino: number }
@@ -79,6 +86,15 @@ export interface GitTurnDiffFinishOptions {
   completePatches?: boolean
   workspaceSnapshot?: boolean
   untrackedPatchLimit?: number
+  /**
+   * One epoch deadline shared by every repository of this turn's origin retry. The retry runs inside
+   * the Stop hook, so the whole turn gets one ceiling instead of one per repository.
+   */
+  locationRetryDeadline?: number
+  /**
+   * 终态 after-tree 的出口。分段记录用它冻结「本段结束时的状态」，作为下一段的基线；
+   * 共享 after 的重算不触发，因为那时树属于另一个 capture。
+   */
   onAfter?: (after: GitAfterTree) => void
 }
 
@@ -285,6 +301,8 @@ export async function beginGitTurnDiff(
         beforeTree: baselineTree,
         head: baseline.commit,
         branch,
+        turnStartHead: head,
+        branchHead: branchName,
         repositoryStart: location?.(),
         baselineClean: false,
         indexPath,
@@ -313,6 +331,8 @@ export async function beginGitTurnDiff(
         beforeTree: head,
         head,
         branch,
+        turnStartHead: head,
+        branchHead: branchName,
         repositoryStart: location?.(),
         baselineClean,
         indexPath,
@@ -352,6 +372,8 @@ export async function beginGitTurnDiff(
       beforeTree,
       head,
       branch,
+      turnStartHead: head,
+      branchHead: branchName,
       repositoryStart: location?.(),
       baselineClean,
       indexPath,

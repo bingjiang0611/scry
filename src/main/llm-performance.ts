@@ -93,6 +93,11 @@ export class LlmPerformanceObserver {
     const observedCalls = providerApiMs == null && this.calls > 0
     const apiDurationMs = observedCalls ? this.callDurationMs : providerApiMs
     const outputTokens = observedCalls ? this.callTokens : terminal ? resultTokens : undefined
+    // Q8：输出速度只除生成时间（调用时长 − 首 token）。首 token 未全部观测到时不猜，
+    // 宁可没有速度，也不把等待算进分母。
+    const generationMs = observedCalls
+      ? (this.firstTokenCalls === this.calls ? this.callDurationMs - this.firstTokenMs : undefined)
+      : apiDurationMs
     return {
       state: this.state,
       observedAt: new Date(wall).toISOString(),
@@ -105,8 +110,8 @@ export class LlmPerformanceObserver {
       ...(streamDurationMs > 0 && !this.untimedSegment ? { averageCharactersPerSecond: this.characters / (streamDurationMs / 1000) } : {}),
       ...(outputTokens != null ? { outputTokens } : {}),
       ...(apiDurationMs != null ? { apiDurationMs, tokenTimingSource: observedCalls ? 'observed_calls' as const : 'provider_api' as const } : {}),
-      ...(apiDurationMs != null && apiDurationMs > 0 && outputTokens != null
-        ? { apiTokensPerSecond: outputTokens / (apiDurationMs / 1000) } : {}),
+      ...(generationMs != null && generationMs > 0 && outputTokens != null
+        ? { apiTokensPerSecond: outputTokens / (generationMs / 1000) } : {}),
       ...(observedCalls ? { llmCalls: this.calls } : {}),
       ...(this.firstTokenCalls > 0 ? { firstTokenMs: this.firstTokenMs / this.firstTokenCalls, firstTokenCalls: this.firstTokenCalls } : {}),
       ...(this.model ? { model: this.model } : {})

@@ -199,4 +199,10 @@ npm run publish:cli:internal -- --publish     # 真发布，并回读版本与 d
 可用 `--registry` 覆盖。发布后必须回读 `npm view <包名>@<版本> version` 与 `dist-tags`。
 不要从陈旧 `dist` 手工 `npm publish`。
 
+**桌面端自带的命令行至少要是 0.2.87。** `electron-builder.yml` 把仓库里的 `packages/turn-recorder-cli`
+拷成 `Contents/Resources/scry-cli`，所以发布 App 时要确认该提交的 recorder 版本不低于 0.2.87。
+0.2.84 一类的旧版校验器把带未知 `omissionCodes` 的记录整条判为非法，而钩子路径用 `listRecords`
+全量解析记录：一条新码记录会让该工作区之后每个钩子都失败。发版记录里要写明这个下限，
+不要把更早的 recorder 打进包里。
+
 完成对应验证后，Agent 默认主动执行[本地提交前自查](pr-workflow.md#local-preflight)，检查需求与批准、范围、风险、验证证据以及完整 diff / 暂存区；无需用户再次提醒。处理发现的问题后，在任务分支只提交本任务改动，并在交付中简述自查结论与未验证项。随后按 [PR 工作流](pr-workflow.md) 推送任务分支并开 PR，避免混入已有无关未推送提交；合并须用户明确要求。本地自查不替代正式 PR 分诊或独立评审。

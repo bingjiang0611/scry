@@ -48,13 +48,13 @@ describe('usage channel table', () => {
 
   it('validates the analytics range before any ledger query', async () => {
     const table = usageChannelHandlers({ userDataDir: () => tempDir() }) as Table
-    for (const rangeDays of [7, 30, 90]) {
+    for (const rangeDays of [1, 7, 30, 90]) {
       expect(table['agent:usageAnalytics'](rangeDays)).toEqual({ status: 'ready', rangeDays })
       await expect(table['agent:usageCredits'](rangeDays)).resolves.toEqual({ status: 'ready', rangeDays, credits: true })
     }
     vi.mocked(db.usageAnalyticsQuery).mockClear()
     vi.mocked(db.usageAnalyticsWithCreditsQuery).mockClear()
-    for (const rangeDays of [8, '7', null, undefined]) {
+    for (const rangeDays of [0, 2, 8, '7', null, undefined]) {
       expect(() => table['agent:usageAnalytics'](rangeDays)).toThrow('分析时间范围无效')
       expect(() => table['agent:usageCredits'](rangeDays)).toThrow('分析时间范围无效')
     }

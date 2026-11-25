@@ -155,12 +155,12 @@ export async function exerciseWindowBoundary(smokeContext) {
     const analyticsButton = [...document.querySelectorAll('button.sb-navitem')]
       .find((node) => node.textContent?.includes('分析'))
     analyticsButton?.click()
-    const analytics = await waitFor(() => !!document.querySelector('.usage-page'))
+    const analytics = await waitFor(() => !!document.querySelector('.analytics-page'))
     const analyticsLoading = document.querySelector('.lazy-panel-loading')?.textContent
     const auxTopbar = document.querySelector('.aux-view-topbar')
     const auxRect = auxTopbar?.getBoundingClientRect()
     const auxDrag = auxTopbar ? getComputedStyle(auxTopbar).getPropertyValue('-webkit-app-region') : null
-    const analyticsTop = Math.round(document.querySelector('.usage-page')?.getBoundingClientRect().top ?? -1)
+    const analyticsTop = Math.round(document.querySelector('.analytics-page')?.getBoundingClientRect().top ?? -1)
 
     document.querySelector('button.sb-sess')?.click()
     const chatRestored = await waitFor(() => !!document.querySelector('.topbar'))

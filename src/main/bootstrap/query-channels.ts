@@ -27,7 +27,7 @@ export function usageChannelHandlers(deps: { userDataDir: () => string }) {
   // Two-part answer: the SQLite ledger returns first (milliseconds); the Credit projection
   // reads native transcripts and can take seconds, so the renderer asks for it afterwards.
   const usageRange = (rangeDays: unknown): UsageAnalyticsRangeDays => {
-    if (rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
+    if (rangeDays !== 1 && rangeDays !== 7 && rangeDays !== 30 && rangeDays !== 90) throw new Error('分析时间范围无效')
     return rangeDays
   }
   return {
