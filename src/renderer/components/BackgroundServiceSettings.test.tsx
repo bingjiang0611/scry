@@ -180,4 +180,19 @@ describe('Settings «后台服务» tab', () => {
     expect(html).toContain('后台服务')
     expect(html).toContain('读取中…')
   })
+
+  it('C4: draws the automatic-resume switch as a switch, off until the user turns it on', () => {
+    const off = render(daemon(), { usageLimitResume: { enabled: false }, onToggleUsageLimitResume: () => {} })
+    expect(off).toContain('用量限额到期后自动继续')
+    expect(off).toContain('未开启')
+    expect(off).toMatch(/role="switch"[^>]*aria-checked="false"|aria-checked="false"[^>]*role="switch"/)
+    expect(off).toContain('没有重置时间就不重试')
+
+    const on = render(daemon(), { usageLimitResume: { enabled: true }, onToggleUsageLimitResume: () => {} })
+    expect(on).toContain('已开启')
+    expect(on).toContain('aria-checked="true"')
+
+    // Without a switch state nothing is drawn: off and unknown must not look the same.
+    expect(render(daemon())).not.toContain('用量限额到期后自动继续')
+  })
 })

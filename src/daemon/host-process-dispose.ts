@@ -4,6 +4,7 @@ import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import { attachDaemonOrchestrationAuthority, type DaemonOrchestrationAuthority } from './orchestration-authority'
 import { createUsageLimitScheduler } from './usage-limit-scheduler'
 import { wakeBackgroundSession } from './agent-wake'
+import { usageLimitResumeSettings } from './usage-limit-resume'
 import { findRestartBackgroundNotes, storeRestartBackgroundNotes } from './restart-background-note'
 import type { DaemonHostProcessOptions } from './host-process-types'
 
@@ -31,7 +32,7 @@ export async function attachHostProcessOrchestration<
       return db?.open ? db : undefined
     },
     sink: () => attached?.sink,
-    settings: () => ({ autoResume: process.env.SCRY_USAGE_LIMIT_AUTO_RESUME === '1' }),
+    settings: () => usageLimitResumeSettings(process.env, options.userDataDir),
     ...(input.pumpDispatcher ? { pump: input.pumpDispatcher } : {}),
     log
   })

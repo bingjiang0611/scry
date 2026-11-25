@@ -2,8 +2,8 @@
 
 本文件由 `node scripts/daemon-ipc-matrix.mjs --write` 从源码生成，`scripts/daemon-ipc-matrix.test.ts` 在漂移时失败。不要手工编辑；改 `scripts/daemon-ipc-routing.json` 后重新生成。
 
-- 生产特权 IPC channel：188 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
-- 留在 main：66，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：91
+- 生产特权 IPC channel：190 个（`src/main/**` 经 `handleTrusted` 注册，不含测试；含 `handle(` 参数名与 `sourceControl:${method}` 这类按表展开的注册）
+- 留在 main：68，一半 main 一半 daemon（`split`）：8，转发到现有 op：23，需要新增 op：91
 - 新增 op 的请求、响应、授权与调用方范围见 [P3-ipc-ops](P3-ipc-ops.md)；设计正文见 [P3 §13](P3-batch4-design.md)
 - 统一对话（`conversation:*`，共 18 行）见 [P3-ipc-matrix-conversation](P3-ipc-matrix-conversation.md)
 - 桌面远程客户端（`desktopRemote:*`，共 32 行）见 [P3-ipc-matrix-client](P3-ipc-matrix-client.md)
@@ -107,7 +107,9 @@
 | `remote:backgroundService:restart` | main | `—` | — | — | 版本不一致时 App 不与 daemon 通话；确认框、按身份停止与启动对应版本的后台服务都在 App |
 | `remote:backgroundService:runtimeNotice` | main | `—` | — | — | 读取 main 内存里当前的回退拉起或策略差异提示，不主动拉起 daemon（P5-2 S4） |
 | `remote:backgroundService:setLoginStart` | main | `—` | — | — | 开启前在 main 弹原生确认框，并由 main 按自身路径写入并操作 LaunchAgent / systemd 用户服务；renderer 只传布尔值（P5-2） |
+| `remote:backgroundService:setUsageLimitResume` | main | `—` | — | — | 写入上述开关：只接受一个布尔值，路径由 main 决定；写入后 daemon 下一次判断即生效（C4） |
 | `remote:backgroundService:status` | split | `localBackgroundService:status` | remote | main: 连接结果（就绪、版本不一致、未授权、不可用及原因）、userData 位置与 daemon.lock 登记且身份复核一致的 pid 由 App 自己确定；连接就绪时才向 daemon 询问其余字段，问不到的显示为未知 | 设置页「后台服务」状态 |
+| `remote:backgroundService:usageLimitResume` | main | `—` | — | — | 读取 App 自己写的「用量限额到期后自动继续」开关；daemon 调度器读同一个文件，所以这里不向 daemon 询问（C4） |
 | `remote:desktop:disable` | new-op | `localDesktopHost:disable` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:desktop:invite` | new-op | `localDesktopHost:invite` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |
 | `remote:desktop:status` | new-op | `localDesktopHost:status` | remote | — | 本机宿主的桌面接入：daemon 模式下宿主在 daemon |

@@ -34,6 +34,7 @@ import {
   reasonMessage,
   type BackgroundServicePrompt
 } from '../background-service-copy'
+import { readUsageLimitResumeSwitch, writeUsageLimitResumeSwitch } from '../../shared/background-service'
 import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli'
 import { createVersionMismatchPrompt, daemonCommandBelongsToCheckout } from '../background-service-mismatch-prompt'
 import { readProcessIdentity, type ProcessRow } from '../process-diagnostics'
@@ -242,6 +243,11 @@ export function registerBackgroundServiceHandlers(input: {
     apply: async (value) => { await callDaemonChannel('remote:hostAdmin:setCliApproval', [value]) }
   }))()
 
+  // C4: the App's own switch for automatic resume after a usage limit. Main writes it here; the daemon
+  // reads the same file when its scheduler decides, so the switch the user sees is the one in force.
+  register('remote:backgroundService:usageLimitResume', async () => ({
+    enabled: readUsageLimitResumeSwitch(userDataDir)
+  }))
   register('remote:backgroundService:status', status)
   register('remote:backgroundService:runtimeNotice', async () => buildRuntimeNotice())
   register('remote:backgroundService:restart', restart)
@@ -250,6 +256,11 @@ export function registerBackgroundServiceHandlers(input: {
   input.handleTrusted('remote:backgroundService:setLoginStart', async (_event, ...args: unknown[]) => {
     const enabled = requireBooleanArgument(args)
     return await setLoginStart(enabled)
+  })
+  input.handleTrusted('remote:backgroundService:setUsageLimitResume', async (_event, ...args: unknown[]) => {
+    const enabled = requireBooleanArgument(args)
+    writeUsageLimitResumeSwitch(userDataDir, enabled)
+    return { status: 'done' }
   })
   input.handleTrusted('remote:hostAdmin:setCliApproval', async (_event, ...args: unknown[]) => {
     const enabled = requireBooleanArgument(args)

@@ -144,7 +144,10 @@ const invokeChannels = {
   quitWithBackgroundService: 'remote:backgroundService:quit',
   reconnectBackgroundService: 'remote:backgroundService:reconnect',
   setBackgroundServiceLoginStart: 'remote:backgroundService:setLoginStart',
-  setHostCliApproval: 'remote:hostAdmin:setCliApproval'
+  setHostCliApproval: 'remote:hostAdmin:setCliApproval',
+  // C4: the automatic-resume switch main owns and the daemon reads from the same file.
+  usageLimitResume: 'remote:backgroundService:usageLimitResume',
+  setUsageLimitResume: 'remote:backgroundService:setUsageLimitResume'
 } as const satisfies Partial<Record<keyof ScryApi, string>>
 
 const desktopChannels = {

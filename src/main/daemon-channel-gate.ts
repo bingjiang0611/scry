@@ -50,6 +50,8 @@ export const DAEMON_MODE_IN_PROCESS_CHANNELS: ReadonlySet<string> = new Set([
   // «后台服务» actions: dialogs, signals to the verified daemon.lock holder, login-start service, app.quit (B4-S, P5).
   'remote:backgroundService:quit', 'remote:backgroundService:reconnect', 'remote:backgroundService:restart',
   'remote:backgroundService:runtimeNotice', 'remote:backgroundService:setLoginStart',
+  // C4: the automatic-resume switch lives in a userData file main writes and the daemon reads.
+  'remote:backgroundService:usageLimitResume', 'remote:backgroundService:setUsageLimitResume',
   'runTraces:ack', 'runTraces:confirm', 'runTraces:resync', 'runTraces:setLegacyDemand',
   'runTraces:subscribe', 'runTraces:unsubscribe',
   'workspace:openExternal', 'workspace:openKnownExternal', 'workspace:readKnown', 'workspace:readPageKnown',

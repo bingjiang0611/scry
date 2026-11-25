@@ -7,7 +7,12 @@ import {
   projectBackgroundService,
   type BackgroundServiceNotice
 } from '../background-service-view'
-import { BACKGROUND_SERVICE_READ_COPY, CLI_APPROVAL_COPY, LOGIN_START_COPY } from '../constants/background-service-copy'
+import {
+  BACKGROUND_SERVICE_READ_COPY,
+  CLI_APPROVAL_COPY,
+  LOGIN_START_COPY,
+  USAGE_LIMIT_RESUME_COPY
+} from '../constants/background-service-copy'
 import { EmptyState } from './primitives/EmptyState'
 import { DelayedSkeletonRows } from './primitives/Skeleton'
 import { ipcErrorMessage } from '../constants/ipc-error-copy'
@@ -35,10 +40,13 @@ export type BackgroundServiceBusy =
   | 'login-start-disable'
   | 'cli-approval-enable'
   | 'cli-approval-disable'
+  | 'usage-limit-resume-enable'
+  | 'usage-limit-resume-disable'
   | null
 
 export function BackgroundServicePanel({
-  status, readError, busy, result, now, platform, onRefresh, onAction, onToggleLoginStart, onToggleCliApproval
+  status, readError, busy, result, now, platform, onRefresh, onAction, onToggleLoginStart, onToggleCliApproval,
+  usageLimitResume, onToggleUsageLimitResume
 }: {
   status: BackgroundServiceStatus | null
   readError: string | null
@@ -51,6 +59,9 @@ export function BackgroundServicePanel({
   onAction: (action: BackgroundServiceAction) => void
   onToggleLoginStart?: (enabled: boolean) => void
   onToggleCliApproval?: (enabled: boolean) => void
+  /** C4: the App's own switch for automatic resume; omitted means the row is not shown. */
+  usageLimitResume?: { enabled: boolean } | null
+  onToggleUsageLimitResume?: (enabled: boolean) => void
 }): JSX.Element {
   const cliPathCopy = useCopyFeedback()
   const view = status ? projectBackgroundService(status, now, platform) : null
@@ -69,6 +80,8 @@ export function BackgroundServicePanel({
   const cliApproval = view?.cliApproval
   const togglingOn = busy === 'login-start-enable'
   const togglingOff = busy === 'login-start-disable'
+  const resumeEnabling = busy === 'usage-limit-resume-enable'
+  const resumeDisabling = busy === 'usage-limit-resume-disable'
   const cliEnabling = busy === 'cli-approval-enable'
   const cliDisabling = busy === 'cli-approval-disable'
   return (
@@ -182,6 +195,31 @@ export function BackgroundServicePanel({
           {view.actions.quit && button('quit')}
         </div>
       )}
+      {usageLimitResume && (
+        <div className="background-service__section">
+          <div className="background-service__section-head">
+            <div className="background-service__section-title">
+              <b>{USAGE_LIMIT_RESUME_COPY.sectionTitle}</b>
+              <span className="background-service__muted">
+                {usageLimitResume.enabled ? USAGE_LIMIT_RESUME_COPY.onText : USAGE_LIMIT_RESUME_COPY.offText}
+              </span>
+            </div>
+            {onToggleUsageLimitResume && (
+              <button
+                type="button"
+                className="setting-switch"
+                role="switch"
+                aria-label={USAGE_LIMIT_RESUME_COPY.sectionTitle}
+                aria-checked={usageLimitResume.enabled}
+                aria-busy={resumeEnabling || resumeDisabling || undefined}
+                disabled={busy !== null}
+                onClick={() => onToggleUsageLimitResume(!usageLimitResume.enabled)}
+              ><span aria-hidden="true" /></button>
+            )}
+          </div>
+          <p className="background-service__muted">{USAGE_LIMIT_RESUME_COPY.hint}</p>
+        </div>
+      )}
       {view?.actions.quit && (
         <p className="background-service__muted">普通的退出 Scry 不会停止后台服务；它会继续为已配对设备和运行中的任务服务。</p>
       )}
@@ -195,6 +233,7 @@ export function BackgroundServiceSettings(): JSX.Element {
   const [readError, setReadError] = useState<string | null>(null)
   const [busy, setBusy] = useState<BackgroundServiceBusy>('reading')
   const [result, setResult] = useState<BackgroundServiceNotice | null>(null)
+  const [usageLimitResume, setUsageLimitResume] = useState<{ enabled: boolean } | null>(null)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -215,6 +254,31 @@ export function BackgroundServiceSettings(): JSX.Element {
     try { await read() } finally { if (mounted.current) setBusy(null) }
   }, [read])
   useEffect(() => { void refresh() }, [refresh])
+
+  const readResumeSwitch = useCallback(async (): Promise<void> => {
+    try {
+      const next = await window.scry.usageLimitResume()
+      if (mounted.current) setUsageLimitResume(next)
+    } catch (error) {
+      // A switch Scry cannot read is not a switch Scry should draw: say so instead of guessing off.
+      if (mounted.current) setUsageLimitResume(null)
+      console.error('[Scry] usage limit switch read failed', error)
+    }
+  }, [])
+  useEffect(() => { void readResumeSwitch() }, [readResumeSwitch])
+
+  const toggleUsageLimitResume = useCallback(async (enabled: boolean): Promise<void> => {
+    setBusy(enabled ? 'usage-limit-resume-enable' : 'usage-limit-resume-disable')
+    setResult(null)
+    try {
+      await window.scry.setUsageLimitResume(enabled)
+      if (mounted.current) setUsageLimitResume({ enabled })
+    } catch (error) {
+      if (mounted.current) setResult({ tone: 'bad', text: ipcErrorMessage(error) })
+    }
+    await readResumeSwitch()
+    if (mounted.current) setBusy(null)
+  }, [readResumeSwitch])
 
   const act = useCallback(async (action: BackgroundServiceAction): Promise<void> => {
     setBusy(action)
@@ -269,6 +333,8 @@ export function BackgroundServiceSettings(): JSX.Element {
       onAction={(action) => { void act(action) }}
       onToggleLoginStart={(enabled) => { void toggleLoginStart(enabled) }}
       onToggleCliApproval={(enabled) => { void toggleCliApproval(enabled) }}
+      usageLimitResume={usageLimitResume}
+      onToggleUsageLimitResume={(enabled) => { void toggleUsageLimitResume(enabled) }}
     />
   )
 }

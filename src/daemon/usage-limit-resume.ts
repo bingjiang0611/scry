@@ -2,6 +2,7 @@ import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonica
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { OrchestrationCommand } from '../host-runtime/orchestration/orchestrator-commands'
 import type { UsageLimit } from '../main/providers/usage-limit'
+import { readUsageLimitResumeSwitch } from '../shared/background-service'
 
 /**
  * C4: a hit usage limit becomes a pending item, and — only when the user turned it on — a queued
@@ -26,6 +27,14 @@ export interface UsageLimitPending extends Omit<UsageLimit, 'provider'> {
 export interface UsageLimitResumeSettings {
   /** Off unless the user asked for it: an automatic retry spends the user's quota. */
   autoResume: boolean
+}
+
+/**
+ * C4: where "the user turned it on" comes from. The App's switch is the truth; `SCRY_USAGE_LIMIT_AUTO_RESUME=1`
+ * is the explicit override a test or a headless host sets. Neither can be inferred from a Provider report.
+ */
+export function usageLimitResumeSettings(env: NodeJS.ProcessEnv, userDataDir: string): UsageLimitResumeSettings {
+  return { autoResume: env.SCRY_USAGE_LIMIT_AUTO_RESUME === '1' || readUsageLimitResumeSwitch(userDataDir) }
 }
 
 export type UsageLimitResumeDecision =

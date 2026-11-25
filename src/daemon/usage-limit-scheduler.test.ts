@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { listPendingUsageLimits } from '../host-runtime/orchestration/usage-limit-store'
 import { createUsageLimitScheduler } from './usage-limit-scheduler'
+import { usageLimitResumeSettings } from './usage-limit-resume'
+import { writeUsageLimitResumeSwitch } from '../shared/background-service'
 
 let dirs: string[] = []
 afterEach(() => {
@@ -143,5 +145,23 @@ describe('usage-limit scheduler: a submitted resume drives the dispatcher', () =
     scheduler.pump()
     expect(pumped).toBe(1)
     scheduler.stop()
+  })
+})
+
+describe('C4: where the resume switch comes from', () => {
+  it('follows the App switch file, and the environment is an explicit override', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'scry-usage-limit-where-'))
+    try {
+      expect(usageLimitResumeSettings({}, dir)).toEqual({ autoResume: false })
+      writeUsageLimitResumeSwitch(dir, true)
+      expect(usageLimitResumeSettings({}, dir)).toEqual({ autoResume: true })
+      // The override enables a host that has no App switch; it never disables a switch the user turned on.
+      expect(usageLimitResumeSettings({ SCRY_USAGE_LIMIT_AUTO_RESUME: '1' }, dir)).toEqual({ autoResume: true })
+      writeUsageLimitResumeSwitch(dir, false)
+      expect(usageLimitResumeSettings({ SCRY_USAGE_LIMIT_AUTO_RESUME: '1' }, dir)).toEqual({ autoResume: true })
+      expect(usageLimitResumeSettings({ SCRY_USAGE_LIMIT_AUTO_RESUME: '0' }, dir)).toEqual({ autoResume: false })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
