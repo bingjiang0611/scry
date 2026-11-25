@@ -33,3 +33,8 @@
 - [ ] mac2、mac3 各打开一次「机器」页，和「活动监视器」对照：CPU 差在 10 个百分点以内，内存压力级别一致。
 - [ ] W20 完成后接上两项：排队数（读 `orch_p_run`）；Provider 根进程，按 run 链路暴露的根 PID 归属，替代现在按可执行名的识别。之后再做 P8 §8 的第二版。
 - [ ] W20 合一次 main，main 里已经有 #187。
+
+## W20 延后项（维护者 2026-11-25）
+
+- [ ] **Claude 常驻会话**（V2 对齐 C1 的 Claude 部分，连同 C5 空闲压缩、C3(c) Claude 后台任务停止）：W20 期间执行机没有安装 claude，无法验证，所以先跳过。等有一台装了 claude 的机器再单独做：用流式输入的 `query()`，配合 `setModel`、`setPermissionMode` 和会话池；做完后用真实 Provider 测首 token，和改动前对比。
+- [ ] **B1 遗留的两个 kind**：`conversation.writeback` 跟 D4 一起实现，由 worker 把事件写回会话文件。`catalog.*` 如果到时还没有生产者，就从 effect-policy 里删掉。
