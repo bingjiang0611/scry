@@ -105,10 +105,18 @@ describe('Antigravity model attribution in performance history', () => {
     expect((await readLlmPerformanceHistory(userDataDir, now + 2000)).rows).toEqual([sample])
   })
 
-  it('does not choose one model when the transcript verifies multiple models', async () => {
+  it('attributes a multi-model round to the model with the most output tokens (Q11)', async () => {
+    archive()
+    await appendLlmPerformance(userDataDir, { cwd, externalSessionId: sessionId }, sample)
+    // 窗口内 other-model 只有 3110 个输出 Token，主模型那一步 5301 更多，归主模型。
+    writeTranscript(transcript.map(row => row.step_index === 12 ? { ...row, model: 'other-model' } : row))
+    expect((await readLlmPerformanceHistory(userDataDir, now)).rows).toMatchObject([{ model: 'gemini-4-neon-high' }])
+  })
+
+  it('attributes to the second model when it ends up with the most tokens', async () => {
     archive()
     await appendLlmPerformance(userDataDir, { cwd, externalSessionId: sessionId }, sample)
     writeTranscript(transcript.map(row => row.step_index === 14 ? { ...row, model: 'other-model' } : row))
-    expect((await readLlmPerformanceHistory(userDataDir, now)).rows).toMatchObject([{ model: '多模型' }])
+    expect((await readLlmPerformanceHistory(userDataDir, now)).rows).toMatchObject([{ model: 'other-model' }])
   })
 })

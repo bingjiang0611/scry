@@ -1,4 +1,4 @@
-import type { AgentTurnRecord, DiffOmissionCode, Evidence, EvidenceQuality } from './turn-record-contracts.js'
+import type { AgentTurnRecord, Evidence, EvidenceQuality, OmissionCode } from './turn-record-contracts.js'
 
 export { validateAgentTurnRecord, isAgentTurnRecord } from './turn-record-validate.js'
 export { canonicalCostUsd } from './turn-record-contracts.js'
@@ -59,6 +59,14 @@ export function available<T>(value: T, source: string[], quality: EvidenceQualit
   return { status: 'available', quality, source, value }
 }
 
+/**
+ * Fixed wording for a usage section nobody can attribute. Records carry this sentence instead of an
+ * `omissionCode` until servers and older readers accept codes other than the diff set; keep it stable
+ * so a later version can recognise it, and match on this constant rather than on a copy of the text.
+ */
+export const USAGE_BASELINE_MISSING_REASON =
+  "the provider reported cumulative usage but nothing proves the session counters before this turn, so this turn's usage is unknown"
+
 export function unavailable<T>(reason: string, source: string[] = []): Evidence<T> {
   return { status: 'unavailable', quality: 'unavailable', source, omissionReason: reason }
 }
@@ -72,7 +80,7 @@ export function partial<T>(
   source: string[],
   reason: string,
   quality: EvidenceQuality = 'inferred',
-  codes: DiffOmissionCode[] = []
+  codes: OmissionCode[] = []
 ): Evidence<T> {
   return {
     status: 'partial',

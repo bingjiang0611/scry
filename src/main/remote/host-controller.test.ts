@@ -61,7 +61,7 @@ describe('HostController (composition root)', () => {
       totals: { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null,
         costUsd: null, turns: 0, usageRows: 0, inputKnownRows: 0, outputKnownRows: 0, cacheReadKnownRows: 0, cacheWriteKnownRows: 0,
         reasoningKnownRows: 0, tokenKnownRows: 0, costKnownRows: 0, exactCostRows: 0, providerReportedCostRows: 0, estimatedCostRows: 0, inferredCostRows: 0 },
-      byDay: [], dailyByProvider: [], byProvider: [], byModel: []
+      byDay: [], dailyByProvider: [], dailyByAgent: [], byProvider: [], byAgent: [], byModel: []
     }))
     const mcpTrust = vi.fn(async () => ({ snapshot: { configured: [], runtime: null }, scan: {
       summary: { critical: 1, high: 0, medium: 0, low: 0, info: 0, status: 'block' },

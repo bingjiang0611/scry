@@ -18,6 +18,7 @@ import { holdSeal, refreshSealWindow } from './recorder-segment.js'
 import { resumeAfterStorage } from './git.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
 import { hostProcessChain } from './host-process.js'
+import { forgetSessionVisit } from './session-visit.js'
 
 export async function applyHookLocked(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -26,6 +27,9 @@ export async function applyHookLocked(
 ): Promise<RecorderHookResult> {
   const taskNotification = START_EVENTS.has(input.event) && isTaskNotificationPrompt(input.payload)
   const root = sessionRoot(enablement.dataRoot, input.provider, sessionId)
+  // This session just produced an event, so a pass that was deferring it must look again now, even if
+  // the event itself leaves every file byte-identical.
+  forgetSessionVisit(enablement.dataRoot, input.provider, safeKey(sessionId))
   let open = await readJson<OpenTurnState>(openPath(root))
   // Set when this start had to be persisted to the inbox before a fallible seal of the open turn.
   let supersededStart: string | undefined

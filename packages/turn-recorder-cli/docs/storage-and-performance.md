@@ -101,8 +101,73 @@ hook 在 Provider 每个生命周期事件上同步执行,所以这条路径的�
 - 同一 socket 的直接 `serve` 也串行认领，避免两个进程互相 unlink；不自动清理此前已启动的旧版孤儿进程。检查存量进程时须核对 PID、工作区、版本和 owner，不按进程名批量杀进程。
 - `scripts/recorder-daemon-cpu-bench.mjs` 提供 600 秒真实等待的隔离 L2 socket 基准。它计 daemon 与小型测试客户端所在进程的 user+system CPU，不含 Git 子进程、真实宿主或上传。历史目录只用合成数据，不改生产账本。
 
-不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
+### 0.2.85：单个会话不可读不再中断整轮
 
+- 恢复轮、健康统计、`staleOpenTurns` 列表和“是否还有 open turn”的判断都逐会话隔离。一个会话目录里出现非目录项（Finder 写的 `.DS_Store`、被文件占位的 `turns/`）或权限不足，只跳过这一个会话，其余会话照常处理，整轮不再是全有或全无。
+- 只有“这个条目不是可读会话”的错误（`ENOTDIR`/`ENOENT`/`EACCES`/`EPERM`/`ELOOP`/`ENAMETOOLONG`）按可跳过处理。轮次内部的读错误（例如事件 `stat` 的 `EIO`）仍然直接失败：它可能改变结论，不能变成一次安静的跳过。
+- 同一个会话连续 3 次失败后进入 suspended：不再每轮重试，改为每小时重探一次。转入时 `recorder.log` 留一行 `WARN session suspended after N failed passes`，`health.json` 的 `suspendedSessions` 和 `scry status` 都会报出来。暂停只影响重试，不删标记、不改 `open.json`、不丢弃证据。
+- 一次成功收尾会清掉该会话的失败记录，瞬时故障不会累积成 suspended。记录写在 `.scry/session-failures.json`（和 `health.json` 同级），是报告，不是事实源；删掉它只会让下一轮重新计数。
+
+### 0.2.88：多仓库工作区的位置信息不再时有时无
+
+- 症状：45 个仓库的工作区里，同一会话、同一版本的轮次，diff 条目的 `repositoryLocation` 时有时无，出现时通常只挂在一条上，每轮挂哪个仓库不固定，有时只剩 `branchAfter`/`commitAfter`。
+- 主因是**启动采样的 32 并发上限**，不是那个 50 毫秒截止：`sampleGitRepositoryLocation` 在 `pending >= 32` 时连读都不启动，直接返回空快照。一轮 41–45 个捕获同时采样时，超出部分整段丢；端采样的 `branchAfter`/`commitAfter` 走同一个计数器，所以也一起丢——这就是“什么都没有”的那一类。本机 39 个仓库的实测：39 并发时 22.2% 为空，只跑 32 个（不触发上限）降到 5.0%；超过上限的那 7 个正好是 17.9%。
+- 第二个原因：远端（`includeOrigin`）只在轮次开始采样时读，结束只读头指针。开始那次没读到，`remote` 就没有第二次机会。
+- 第三个原因：`commitBefore` 和 `branch` 其实已经在手里——同一个 capture 的 `git status --porcelain=v2 --branch` 已经给出 `# branch.oid` 和 `# branch.head`，只是没写进证据。实测缺位置的样本里 94% 只差 `remote` 一项。
+- 现在：收尾只对**这一轮真正改动过**的仓库补读一次远端（专用小并发池 8，不共用那个 32 上限）；`commitBefore`/`branch` 直接取开始时那次 status 的结果，分离头指针写 `null`。到顶就放弃并写状态，不延长宿主的 Stop。
+- 预算是**整轮共用一个截止时间**（`REPOSITORY_REMOTE_RETRY.turnMs = 500`，由 `collectTurnDiffs` 算一次后经 `locationRetryDeadline` 传给每个仓库的收尾），单仓库读上限 250 ms。所以最坏情况下 Stop 钩子最多多等 500 毫秒，与仓库数量无关；不是“每个仓库各自 500 毫秒”。
+- 已经开始采样就确认了 `absent`/`unsupported` 的仓库不再补读：那是关于这个仓库的事实，不是没取到。
+- 状态描述的是**这条记录最终带着的值**，不是采样时的中间状态：回填之后有值就是 `observed`（分支为 `null` 是 `detached`），没值才退回采样给的状态，都没有就是 `unavailable`。这样“50 毫秒采样没赶上、随后由 status 数据补上”这种最常见的情形不会出现“值有了、状态却说没读到”。
+- 一条记录最多保留 32 个仓库的位置，**有改动的仓库先占名额**，剩下的按出现顺序给没改动的；超过名额的条目不带位置。没有改动、三个状态又都是 `unavailable` 的条目直接不带位置（那是“没读”，不是证据），省体积也不占名额。
+- 位置字段带上三个状态，不再靠省略键表达：`remoteStatus`（`observed`/`absent`/`unsupported`/`unavailable`）、`branchStatus`（`observed`/`detached`/`unavailable`）、`commitStatus`（`observed`/`unavailable`）。`absent` 是“config 读到了但没有 origin”，`unsupported` 是“有 origin 但不是可识别的身份（本地路径、token-only URL、本解析器不支持的续行写法）”，`unavailable` 才是“没读到”。本地路径形式的远端只记状态，不记路径本身。
+- 读取方兼容：`repositoryLocation` 的校验走 `normalizeTurnRepositoryLocation`，只投影已知键、忽略未知键。本机实测旧校验器（桌面端自带 CLI 0.2.84、CodeLens 运行时 0.2.84、PATH 上的 `scry` 0.2.80）对“带三个状态键”和“只有状态键”的记录都是 accepted，所以这三个键不需要等任何读取方升级。
+- 读取宽容 / 写入严格：读取时值不在定义的集合里就投影掉，不让整条记录失效；写入时 `commitRecord` 用 `invalidRepositoryLocationStatuses` 拒绝未定义取值（错误信息 `refusing to commit a record with undefined repository location statuses: …`）。
+- 实测（本机 45 个仓库的临时工作区，端到端跑真实的 `beginGitTurnDiff`/`finishGitTurnDiff`，每轮 3 个仓库有改动）：
+
+| | 改动仓库的位置完整 | 整轮收尾 p50 |
+|---|---|---|
+| 0.2.87（改动的仓库排在最后 3 个） | **3/18（16.7%）** | 2.4 s |
+| 0.2.88（同一排列） | **18/18（100%）** | 2.3 s |
+
+- 补读本身的成本（本机 39 个真实仓库、含远端）：单仓库 p50 0.5 ms、p95 1.0 ms、max 3.3 ms；40 个排队调用仍在 500 ms 上限内返回。整轮收尾的差异落在 git diff 自身的波动里（±300 ms），补读不构成可测增量。
+- 记录体积（45 个仓库的同一轮，走真实 `aggregateTurnEvidence`）：0.2.87 只有 1/45 条带位置、位置字段合计 338 字节；0.2.88 有 32/45 条带位置、合计 **5,204 字节**（每条约 163 字节），也就是 45 仓库工作区每份记录多约 **4.9 KB**。32 是 `TURN_REPOSITORY_LOCATION_LIMITS.repositories` 的上限。
+- 已知限制：没有改动的仓库仍然只有状态没有远端（按设计，不花第二次读）；跨轮缓存仓库身份、把 32 上限抬高都没做。
+
+### 0.2.87：Codex 首轮用量不再把会话累计当成本轮
+
+- Codex 的 `token_count` 帧是会话累计值，一轮的用量是相邻帧的差。差需要“这一轮开始前的累计”做基线，而按轮解析的窗口从本轮 `task_started` 开始，看不到上一帧。
+- 以前找不到基线就把基线当 0：`没有基线` 和 `会话从 0 开始` 在代码里是同一个值。续写 rollout（`resume`/`fork`、同一会话的第二段文件）的首帧累计本来就已经很大，于是那一轮把整个会话累计写成了本轮用量。
+- 现在按顺序取基线：① 同文件内前序累计帧（原逻辑，`CODEX_USAGE_BASELINE_BYTES` 窗口内最后一帧）；② 窗口首帧自带的 `last_token_usage`：`首帧累计 − 最近一次` 就是首帧之前的累计，前提是该帧同时带两组值且 `最近一次 ≤ 累计`；③ 两者都拿不到时，这一轮用量标 `unavailable`，只写固定句子 `USAGE_BASELINE_MISSING_REASON`，不写数字，**也不写 `omissionCodes`**：旧读取方和服务端的码表只认 diff 的码，一条带新码的记录会被整条拒收。新码在读取方宽容的版本铺开后再写：本机实测桌面端自带 CLI 0.2.84 与 CodeLens 运行时内置 0.2.84 的校验器都会把带该码的记录判成 `invalid turn record`，而它们的 hook 路径用 `listRecords` 全量解析，一条坏记录会让该工作区之后每个 hook 都失败（全局 CLI 0.2.8 的校验器宽松，不是瓶颈）。
+- 真正从 0 开始的新会话（首帧累计等于最近一次）算出的基线就是 0，仍然按本轮算，不会被标未知。
+- 实测（本机 2,223 个 rollout、803 个带累计帧的轮次）：input 合计 20.07b → 3.79b（5.3×），单轮最大 2.51b → 426.2M，值发生变化的只有 14 轮；每个文件都满足“逐轮差值 + 推导基线 = 文件末累计”。三个具体文件：2,514,734,962 → 465,004、550,229,534 → 2,843,638、2,450,973,309 → 23,925,566。
+- 本机 14,801 个 `token_count` 帧全部同时带 `total_token_usage` 与 `last_token_usage`，五个计数齐全，也没有 `最近一次 > 累计` 的情况，所以第 ② 步在真实数据上总能成立；第 ③ 步只兜住残缺或手写的帧。
+- 逐轮自检（每一轮的用量应等于这一轮内所有帧的 `last_token_usage` 之和，按解析器自己的相邻重复规则去重）：803 轮里 799 轮完全相等，4 轮不等。不去重时是 42 轮不等，多出的 38 轮都是同一份 `last_token_usage` 被连续重复广播——这也正是 `CodexUsageDeltaFilter` 存在的原因。剩下 4 轮：3 轮是某个 `token_count` 帧的累计没前进、`last` 却非零（少算一次请求，10.7 万–19.5 万）；1 轮是累计前进了 141,402 而该轮唯一的帧只写 `last` 73,177，差的 68,225 来自一次没有留下 `last` 帧的请求（归到了轮边界之外）。单轮可能把边界外的一次请求算进来，同时另一轮漏掉它，整份文件的总量仍然对得上，不会凭空增加。
+- 已知限制：如果一轮的第一次请求没有留下用量帧，推导出的基线会把那次请求算在轮外，结果是少算一次请求，不会多算。
+- 修后仍有 28 轮 >2000 万 input，全部来自真实的多请求轮次（20.2M–426.2M，中位 31.6M），其中最大那轮 426,209,277 是 1,702 次请求、单次 input 中位 254,174（最大 449,791），等于这些帧 `last_token_usage` 之和，没有累计重复。
+- 历史记录不回填、不重传。已经写进 store 和已经上传的偏大值仍然存在，要单独处理。
+
+### 0.2.86：记录摘要缓存（派生，可重建）
+
+- 身份路径（给新会话分配 `generation`/`turnIndex`、判断某个 `providerTurnId` 是否已提交）只需要每份记录的五个字段：`provider`、`sessionId`、`generation`、`turnIndex`、`providerTurnId`。以前为这五个字段要解析整份记录，现在读 `.scry/records-summary.json`。
+- 缓存按记录文件名（序号 + recordId）对齐：文件名列表与缓存不一致、文件缺失、JSON 损坏、字段不合规，一律丢弃重建成一次全量解析。全量解析遇到读不出来的记录仍按原样报错，不静默跳过。
+- 写入方在 `commitRecord` 里追加一行；写缓存失败只丢缓存，不影响提交结果。缺缓存时的冷重建由第一个读者完成（守护进程启动时就会预热），之后不再全量解析。
+- 记录仍是唯一事实源。原地改写已有记录不会被文件名对齐发现，所以未来任何改写记录字段的路径必须删掉该缓存；目前没有这样的路径：提交只追加、归档只把文件移出、`content-repair` 不改记录。
+- 实测（3,000 条 × ~88 KB）：`listRecords()` 1,011 ms / 峰值 352 MiB；冷重建 925 ms / 79 MiB；热读 9 ms / 55 MiB。`npm run bench:record-summary` 复现，每个模式独立进程计峰值。
+
+### 0.2.86：静默轮次改低频复查
+
+- 一次 recovery pass 以前会把每个仍有 open 轮次的会话重新判一遍，包括那些结论不会再变、证据也没动过的会话。工作区里存在几十个陈旧轮次时，这份重复劳动是常驻 CPU 的主要来源。
+- 现在：某次 pass 判过“仍然开着、且它自己的文件已经超过 stale 窗口没动静”的会话，会记住当时的文件指纹，之后**一小时**才复查一次；任何 hook 到达、或任何它读的文件发生变化（`open.json`、`session.json`、当前 generation 目录与 `events/`、`inbox/`、transcript），下一次 pass 立即恢复常规频率。
+- 只改调度。不收尾轮次、不动 marker、不删证据；记录在内存里，进程重启后第一遍复查全部——偏向安全的一侧。
+- 两类会话永不延迟：`open.json` 里记录了 `host` 进程的轮次（宿主退出不会改变任何文件，下一遍就能收尾），以及 managed 轮次（它们的恢复靠一条只在“循环看见了 managed 轮”时才跑的 pass）。
+- 只对尚未收敛的会话生效：已收尾的会话不留记录；操作者用 `recover --session` 点名的会话永远照常复查。`--expire-open` 等显式动作不受影响。
+- 实测（45 个陈旧会话，两个模式用同一个 `npm run bench:quiet-revisit`，`--mode=visit` 在每遍之间改 `open.json` 的 mtime，就是改动前“每遍重新判一遍”的行为）：
+  - 合成 fixture（45 个会话，每轮 64 KB transcript）：整遍约 0.9 s → 约 0.2 s CPU（同机负载波动约 ±30%）。剩下的 0.2 s 里几乎全部是每遍结束时的 health 扫描（45 × 约 4 ms），与本节无关。
+  - `rate-native` 工作区真实 `.scry` 的只读副本（1,120 个会话、3,212 条记录、其中 45 个陈旧轮次、2 个 managed 轮次）：陈旧轮次这部分每遍 401–702 ms CPU → 21–29 ms CPU（约 19 倍）。
+  - 同一副本上整遍仍要 3–5 s CPU，因为大头不在这里：managed 恢复（2 个会话，约 3.1 s）与每遍 health 扫描（约 0.24 s）。前者正是摘要缓存（上面 0.2.86 第一节）要解决的问题。
+  - 结论：本节只降低“重复判静默会话”那一份；工作区里没有陈旧轮次时它什么也不省。
+
+不想要常驻进程:`export SCRY_RECORDER_TRANSPORT=direct`(行为等价,更慢)。
 存量 workspace 升级 CLI 后需要重新生成 hook 脚本才能拿到快路径:`scry integrations repair --yes`(不做也不会错,只是慢)。
 
 ## 容量与归档

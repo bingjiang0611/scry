@@ -5,6 +5,7 @@ import type { DesktopRemoteAPI, DesktopHostAccess, DesktopRemoteUpdate } from '.
 export const remoteApi = {
   desktopRemote: {
     workbench: (id, request) => ipcRenderer.invoke('desktopRemote:workbench', id, request),
+    hostMetrics: (id) => ipcRenderer.invoke('desktopRemote:hostMetrics', id),
     list: () => ipcRenderer.invoke('desktopRemote:list'),
     pair: (input) => ipcRenderer.invoke('desktopRemote:pair', input),
     finishPairing: (id) => ipcRenderer.invoke('desktopRemote:finishPairing', id),

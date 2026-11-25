@@ -1,5 +1,6 @@
 import type { BillingProvider } from './billing.js'
 import type { ProviderId } from './provider.js'
+import type { UsageAgentId } from './usage-identity.js'
 
 export type CostSource =
   | 'sdk_estimate'
@@ -99,7 +100,7 @@ export interface DbStats {
   }
 }
 
-export type UsageAnalyticsRangeDays = 7 | 30 | 90
+export type UsageAnalyticsRangeDays = 1 | 7 | 30 | 90
 
 export interface QoderCreditEvidence {
   credits: number | null
@@ -148,6 +149,19 @@ export interface UsageAnalyticsDailyProviderRow extends UsageAnalyticsDayRow {
 export interface UsageAnalyticsBreakdownRow extends UsageAnalyticsAggregate {
   provider: BillingProvider
   model: string | null
+  /** Identity used by the page: the agent owns the row, the provider does not.
+   *  可选以兼容 dev/HMR 中的旧 preload；页面只按 agent 分组，缺这行的数据不显示。 */
+  agent?: UsageAgentId
+  /** Upstream name (openai-codex, cc-switch…); absent when none was recorded. */
+  gateway?: string
+}
+
+export interface UsageAnalyticsAgentRow extends UsageAnalyticsAggregate {
+  agent: UsageAgentId
+}
+
+export interface UsageAnalyticsDailyAgentRow extends UsageAnalyticsDayRow {
+  agent: UsageAgentId
 }
 
 export interface UsageAnalytics {
@@ -160,7 +174,9 @@ export interface UsageAnalytics {
   totals: UsageAnalyticsAggregate
   byDay: UsageAnalyticsDayRow[]
   dailyByProvider: UsageAnalyticsDailyProviderRow[]
+  dailyByAgent: UsageAnalyticsDailyAgentRow[]
   byProvider: UsageAnalyticsBreakdownRow[]
+  byAgent: UsageAnalyticsAgentRow[]
   byModel: UsageAnalyticsBreakdownRow[]
 }
 

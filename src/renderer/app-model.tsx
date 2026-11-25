@@ -7,7 +7,7 @@ import type { ParsedTurn } from './env'
 import { newSteerMessageId, updateQueuedPromptByMessageId, type QueuedSteerState } from './steer'
 import type { ComposerDraft, ComposerDraftAttachment } from './composer-drafts'
 
-type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote'
+type AppView = 'chat' | 'conversation' | 'analytics' | 'meta-prompts' | 'remote' | 'machines'
 export function providerContextCacheKey(context: ProviderContext): string {
   return `${context.providerId}\0${context.agentProfileId ?? ''}\0${context.cwd ?? ''}`
 }

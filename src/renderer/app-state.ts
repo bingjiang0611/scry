@@ -137,7 +137,6 @@ export function useAppState() {
   )
   const [showSkills, setShowSkills] = useState(false)
   const [showMcp, setShowMcp] = useState(false)
-  const [showLlmPerformance, setShowLlmPerformance] = useState(false)
   const [view, setView] = useState<AppView>('chat')
   const [logicalConversation, setLogicalConversation] = useState<ConversationSummary>()
   const [conversationError, setConversationError] = useState<string>()
@@ -336,8 +335,6 @@ export function useAppState() {
     setShowSkills,
     showMcp,
     setShowMcp,
-    showLlmPerformance,
-    setShowLlmPerformance,
     view,
     setView,
     logicalConversation,

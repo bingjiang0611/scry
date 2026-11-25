@@ -1,6 +1,9 @@
 // Usage Analytics 与 canonical billing 去重 SQL / 聚合纯函数。
 import type { UsageAnalytics, UsageAnalyticsAggregate, UsageAnalyticsRangeDays } from '../shared/trace'
 import type { BillingConfidence, BillingCostSource, BillingProvider } from '../shared/billing'
+import { usageIdentity, type UsageAgentId } from '../shared/usage-identity'
+import { estimatedCostFromPrice, priceForRow, type ModelPrice } from '../shared/model-price'
+import { tokenCacheAccounting, uncachedInputTokens } from '../shared/token-accounting'
 import { officialApiCost } from './official-api-cost'
 import { localDay, startOfLocalDay } from './span-ledger-analytics'
 
@@ -40,11 +43,20 @@ export const canonicalUsdCostWhere = (a = 'usage_ledger'): string =>
 const canonicalSessionUsdCostWhere = (a: string): string =>
   `(${a}.session_id IS NOT NULL AND ${canonicalCostWhere(a, 'b.session_id IS NOT NULL')} AND ${a}.cost_unit='usd')`
 
+// 明确报了全 0 的记录是空记录：它不该成行、不该计入轮次，也不该被价格表算成 $0.00。
+// 一列都没报的行（账单导入的成本行）保留为「量未知」，不能当成 0 丢掉。
+const USAGE_TOKEN_COLS = ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens']
+export const USAGE_TOKENS_PRESENT_SQL = (a: string): string =>
+  `(COALESCE(${USAGE_TOKEN_COLS.map((col) => `COALESCE(${a}.${col},0)`).join('+')},0)>0 OR ${USAGE_TOKEN_COLS
+    .map((col) => `${a}.${col} IS NULL`).join(' AND ')})`
+
 export const USAGE_ANALYTICS_TOKENS_SQL = `SELECT
   bucket_start tsStart, provider, model,
   input_tokens inputTokens, output_tokens outputTokens,
   cache_read_tokens cacheReadTokens, cache_write_tokens cacheWriteTokens,
   reasoning_tokens reasoningTokens, run_id runId,
+  json_extract(u.metadata_json,'$.runtimeProvider') runtimeProvider,
+  json_extract(u.metadata_json,'$.upstreamProvider') upstreamProvider,
   (u.usage_kind='model' AND u.cost IS NULL AND u.run_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM usage_ledger b
     WHERE b.session_id=u.session_id AND b.run_id=u.run_id AND b.provider=u.provider
@@ -59,16 +71,23 @@ export const USAGE_ANALYTICS_TOKENS_SQL = `SELECT
     ))`
 export const USAGE_ANALYTICS_COSTS_SQL = `SELECT
   u.bucket_start tsStart, u.provider, u.model,
-  u.cost costUsd, u.cost_source costSource, u.confidence confidence
+  u.cost costUsd, u.cost_source costSource, u.confidence confidence,
+  u.input_tokens inputTokens, u.output_tokens outputTokens, u.cache_read_tokens cacheReadTokens,
+  u.cache_write_tokens cacheWriteTokens, u.reasoning_tokens reasoningTokens,
+  json_extract(u.metadata_json,'$.runtimeProvider') runtimeProvider,
+  json_extract(u.metadata_json,'$.upstreamProvider') upstreamProvider
   FROM usage_ledger u
   WHERE u.bucket_start>=? AND u.bucket_start<?
-    AND ${canonicalSessionUsdCostWhere('u')}`
+    AND ${canonicalSessionUsdCostWhere('u')}
+    AND ${USAGE_TOKENS_PRESENT_SQL('u')}`
 
 export interface UsageAnalyticsTokenRow {
   // Query proves no existing model/whole-turn USD cost would be double counted.
   officialCostEligible?: number
   tsStart: number
   provider: BillingProvider
+  runtimeProvider?: string | null
+  upstreamProvider?: string | null
   model: string | null
   inputTokens: number | null
   outputTokens: number | null
@@ -81,12 +100,37 @@ export interface UsageAnalyticsTokenRow {
 export interface UsageAnalyticsCostRow {
   tsStart: number
   provider: BillingProvider
+  runtimeProvider?: string | null
+  upstreamProvider?: string | null
   model: string | null
   costUsd: number
   costSource: BillingCostSource
   confidence: BillingConfidence
   officialApiEstimate?: boolean
+  /** 来自 model_price_versions（Pi 模型目录）的单价，不是官方静态价表。 */
+  catalogPriceId?: string
+  inputTokens?: number | null
+  outputTokens?: number | null
+  cacheReadTokens?: number | null
+  cacheWriteTokens?: number | null
+  reasoningTokens?: number | null
 }
+
+// 0 Token 的记录没有可展示的量；「没有上报」与「上报了 0」要分开处理。
+type TokenCounters = Pick<UsageAnalyticsCostRow, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'reasoningTokens'>
+
+const reportedTokens = (row: TokenCounters): number[] =>
+  [row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheWriteTokens, row.reasoningTokens]
+    .filter((value): value is number => value != null)
+
+// 明确报了全 0 的记录不成行；完全没报 Token 的保留为「量未知」，不能假装是 0。
+const tokenRowHasUsage = (row: TokenCounters): boolean => {
+  const tokens = reportedTokens(row)
+  return tokens.length === 0 || tokens.some((value) => value > 0)
+}
+
+// 成本行可能来自账单导入，本来就没有 Token 字段；只有明确报 0 才丢弃。
+const costRowHasUsage = tokenRowHasUsage
 
 interface UsageAccumulator {
   inputTokens: number
@@ -209,13 +253,16 @@ export function buildUsageAnalytics(args: {
   rangeDays: UsageAnalyticsRangeDays
   tokens: UsageAnalyticsTokenRow[]
   costs: UsageAnalyticsCostRow[]
+  prices?: readonly ModelPrice[]
 }): UsageAnalytics {
   const bounds = usageAnalyticsBounds(args.nowMs, args.rangeDays)
   const total = emptyUsageAccumulator()
   const providers = new Map<BillingProvider, UsageAccumulator>()
-  const models = new Map<string, { provider: BillingProvider; model: string | null; value: UsageAccumulator }>()
+  const agents = new Map<UsageAgentId, UsageAccumulator>()
+  const models = new Map<string, { provider: BillingProvider; agent: UsageAgentId; gateway?: string; model: string | null; value: UsageAccumulator }>()
   const days = new Map<string, UsageAccumulator>()
   const daily = new Map<string, { day: string; provider: BillingProvider; value: UsageAccumulator }>()
+  const dailyAgent = new Map<string, { day: string; agent: UsageAgentId; value: UsageAccumulator }>()
   const targetFor = <K>(map: Map<K, UsageAccumulator>, key: K): UsageAccumulator => {
     const current = map.get(key)
     if (current) return current
@@ -223,13 +270,30 @@ export function buildUsageAnalytics(args: {
     map.set(key, created)
     return created
   }
-  const modelTarget = (provider: BillingProvider, model: string | null): UsageAccumulator => {
-    const normalizedModel = model?.trim() || null
-    const key = `${provider}\0${normalizedModel ?? ''}`
+  // 行按 Agent → 模型分组；网关只作副标题，不参与分组身份之外的判断。
+  const modelTarget = (row: { provider: BillingProvider; runtimeProvider?: string | null; upstreamProvider?: string | null; model: string | null }): UsageAccumulator => {
+    const normalizedModel = row.model?.trim() || null
+    const identity = usageIdentity(row)
+    const key = `${identity.agent}\0${identity.gateway ?? ''}\0${normalizedModel ?? ''}`
     const current = models.get(key)
     if (current) return current.value
     const value = emptyUsageAccumulator()
-    models.set(key, { provider, model: normalizedModel, value })
+    models.set(key, { provider: row.provider, agent: identity.agent, ...(identity.gateway ? { gateway: identity.gateway } : {}), model: normalizedModel, value })
+    return value
+  }
+  const agentTarget = (agent: UsageAgentId): UsageAccumulator => {
+    const current = agents.get(agent)
+    if (current) return current
+    const value = emptyUsageAccumulator()
+    agents.set(agent, value)
+    return value
+  }
+  const dailyAgentTarget = (day: string, agent: UsageAgentId): UsageAccumulator => {
+    const key = `${day}\0${agent}`
+    const current = dailyAgent.get(key)
+    if (current) return current.value
+    const value = emptyUsageAccumulator()
+    dailyAgent.set(key, { day, agent, value })
     return value
   }
   const dailyTarget = (day: string, provider: BillingProvider): UsageAccumulator => {
@@ -241,28 +305,53 @@ export function buildUsageAnalytics(args: {
     return value
   }
 
-  for (const row of args.tokens) {
+  // 统一成「输入不含缓存 + 输出」：Codex 的输入含缓存，读的时候减掉，不改写账本。
+  const normalizeInput = (row: UsageAnalyticsTokenRow): UsageAnalyticsTokenRow => {
+    // 只在明确记录了 Codex app-server 运行时才减缓存：没有 runtime 的历史行
+    // 无法判断输入是否含缓存，保持原值，不猜。
+    const accounting = tokenCacheAccounting({ runtimeProvider: row.runtimeProvider })
+    const inputTokens = uncachedInputTokens(row.inputTokens ?? null, row.cacheReadTokens ?? null, accounting)
+    return inputTokens === row.inputTokens ? row : { ...row, inputTokens }
+  }
+  // 0 Token 的记录不成行，也不计入轮次：它没有可展示的量。
+  const tokens = args.tokens.filter(tokenRowHasUsage).map(normalizeInput)
+  for (const row of tokens) {
     const day = localDay(row.tsStart)
+    const identity = usageIdentity(row)
     addUsageTokenRow(total, row)
     addUsageTokenRow(targetFor(providers, row.provider), row)
-    addUsageTokenRow(modelTarget(row.provider, row.model), row)
+    addUsageTokenRow(agentTarget(identity.agent), row)
+    addUsageTokenRow(modelTarget(row), row)
     addUsageTokenRow(targetFor(days, day), row)
     addUsageTokenRow(dailyTarget(day, row.provider), row)
+    addUsageTokenRow(dailyAgentTarget(day, identity.agent), row)
   }
   // Estimate at read time so existing history benefits without rewriting ledger evidence.
-  const costs = [...args.costs]
-  for (const row of args.tokens) {
+  const costs = args.costs.filter(costRowHasUsage)
+  for (const row of tokens) {
     if (!row.officialCostEligible) continue
-    const costUsd = officialApiCost(row)
-    if (costUsd != null) costs.push({ ...row, costUsd, costSource: 'price_table', confidence: 'estimated', officialApiEstimate: true })
+    const official = officialApiCost(row)
+    if (official != null) {
+      costs.push({ ...row, costUsd: official, costSource: 'price_table', confidence: 'estimated', officialApiEstimate: true })
+      continue
+    }
+    // 官方静态价表没有这个模型时，查本地价格表（Pi 模型目录写进来的单价）。
+    const price = priceForRow(row, args.prices)
+    const costUsd = price ? estimatedCostFromPrice(row, price) : null
+    if (price && costUsd != null) {
+      costs.push({ ...row, costUsd, costSource: 'price_table', confidence: 'estimated', catalogPriceId: price.id })
+    }
   }
   for (const row of costs) {
     const day = localDay(row.tsStart)
+    const identity = usageIdentity(row)
     addUsageCostRow(total, row)
     addUsageCostRow(targetFor(providers, row.provider), row)
-    addUsageCostRow(modelTarget(row.provider, row.model), row)
+    addUsageCostRow(agentTarget(identity.agent), row)
+    addUsageCostRow(modelTarget(row), row)
     addUsageCostRow(targetFor(days, day), row)
     addUsageCostRow(dailyTarget(day, row.provider), row)
+    addUsageCostRow(dailyAgentTarget(day, identity.agent), row)
   }
 
   const rank = (value: UsageAccumulator): number => value.costUsd || value.inputTokens + value.outputTokens
@@ -277,12 +366,18 @@ export function buildUsageAnalytics(args: {
     byDay: bounds.days.map((day) => ({ day, ...usageAggregate(days.get(day) ?? emptyUsageAccumulator()) })),
     dailyByProvider: [...daily.values()]
       .sort((a, b) => a.day.localeCompare(b.day) || a.provider.localeCompare(b.provider))
-      .map((row) => ({ day: row.day, provider: row.provider, ...usageAggregate(row.value) })),
+      .map((row) => ({ day: row.day, provider: row.provider, ...usageIdentity(row), ...usageAggregate(row.value) })),
+    dailyByAgent: [...dailyAgent.values()]
+      .sort((a, b) => a.day.localeCompare(b.day) || a.agent.localeCompare(b.agent))
+      .map((row) => ({ day: row.day, agent: row.agent, ...usageAggregate(row.value) })),
     byProvider: [...providers.entries()]
       .sort((a, b) => rank(b[1]) - rank(a[1]))
-      .map(([provider, value]) => ({ provider, model: null, ...usageAggregate(value) })),
+      .map(([provider, value]) => ({ provider, model: null, ...usageIdentity({ provider }), ...usageAggregate(value) })),
+    byAgent: [...agents.entries()]
+      .sort((a, b) => rank(b[1]) - rank(a[1]))
+      .map(([agent, value]) => ({ agent, ...usageAggregate(value) })),
     byModel: [...models.values()]
       .sort((a, b) => rank(b.value) - rank(a.value))
-      .map((row) => ({ provider: row.provider, model: row.model, ...usageAggregate(row.value) }))
+      .map((row) => ({ provider: row.provider, agent: row.agent, ...(row.gateway ? { gateway: row.gateway } : {}), model: row.model, ...usageAggregate(row.value) }))
   }
 }

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>设置 · 远程已迁移</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0f0f11}
+a{color:#8ab4ff}a:hover{color:#b3ceff}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 960px; height: 560px; box-sizing: border-box; padding: 48px 80px; background: #0f0f11; color: #e8e8ea; font-family: Inter, 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; font-size: 14px; display: flex; align-items: center; justify-content: center">
+<div role="dialog" aria-labelledby="set-h" style="width: 800px; height: 460px; box-sizing: border-box; background: #1b1b1f; border: 1px solid #2c2c31; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden">
+<div style="display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid #2c2c31">
+<h1 id="set-h" style="margin: 0; font-size: 16px; font-weight: 600">设置</h1>
+<button aria-label="关闭设置" style="margin-left: auto; width: 32px; height: 32px; border-radius: 8px; border: none; background: transparent; color: #c9c9cf; cursor: pointer">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button>
+</div>
+<div style="display: flex; flex: 1 1 auto; min-height: 0">
+<div role="tablist" aria-orientation="vertical" style="width: 190px; border-right: 1px solid #2c2c31; padding: 12px; display: flex; flex-direction: column; gap: 4px">
+<button role="tab" aria-selected="false" style="text-align: left; height: 34px; padding: 0 10px; border-radius: 8px; border: none; background: transparent; color: #c9c9cf; font-size: 13px; cursor: pointer">外观</button>
+<button role="tab" aria-selected="false" style="text-align: left; height: 34px; padding: 0 10px; border-radius: 8px; border: none; background: transparent; color: #c9c9cf; font-size: 13px; cursor: pointer">已归档</button>
+<button role="tab" aria-selected="false" style="text-align: left; height: 34px; padding: 0 10px; border-radius: 8px; border: none; background: transparent; color: #c9c9cf; font-size: 13px; cursor: pointer">后台服务</button>
+<button role="tab" aria-selected="true" style="text-align: left; height: 34px; padding: 0 10px; border-radius: 8px; border: none; background: #2a2a30; color: #ffffff; font-size: 13px; font-weight: 600; cursor: pointer">远程 <span style="font-weight: 400; color: #a1a1aa">· 已迁移</span></button>
+</div>
+<div role="tabpanel" style="flex: 1 1 auto; padding: 28px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; gap: 14px; align-items: flex-start; background: #202027; border: 1px solid #2f2f37; border-radius: 12px; padding: 18px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8ab4ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 14px; line-height: 1.6">连接与设备已移到侧栏「机器」。执行目标、已配对的设备、允许其他设备连接本机，都在那里管理。</p>
+<a href="Main.dc.html" style="align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 8px; background: #e8e8ea; color: #141416; font-size: 13px; font-weight: 600; text-decoration: none">打开「机器」
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; color: #a1a1aa">这一页保留一个版本作为指引，之后会从设置里移除。</p>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":960,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

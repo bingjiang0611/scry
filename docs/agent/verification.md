@@ -46,6 +46,7 @@ npm run build
 - `--coverage.reportsDirectory=<独立目录>` 会清理原报告目录；禁止指向源码或基线备份。默认 `coverage/` 已忽略。
 - Git fixture 隔离宿主 config、hooks、模板和仓库定位环境，但保留临时仓库本地 config，以便真实验证恶意 filter/hook 的防护。Pi lifecycle fixture 固定测试 Node/HOME，只有专门的 Node 探测测试才控制探测边界；RPC 和进程退出仍走真实子进程。
 - 覆盖率只用于寻找缺口，不等于验收成功。尤其不得把 malformed wire、未确认退出、丢失快照或超时改成成功空结果来提分。
+- 每个 Vitest 文件经 `src/test-support/user-home-isolation.ts` 拿到自己的临时 `HOME` 与 `SCRY_GRANT_DIR`：recorder grant、CLI 更新状态和 Provider 配置发现都从 `HOME` 推导路径，继承真实环境会把测试写进开发者的 `~/.scry/grants`。同一文件还快照真实 `~/.scry`，规则按环境分开：`CI` 下任何新增、修改、删除都让该文件失败；本地只有能归因到测试（授权文件里的工作区在本轮临时根目录或系统临时目录下）才失败，归因不到的真实会话、其他 checkout 与并发写入只在整次运行结束时汇总告警一次。删除的条目读不出工作区，按归因不到处理。成本每文件约 10ms（两次快照加一个临时目录，全量约 10s）。`~/.pi` 会话文件太多不计入，只靠 `HOME` 隔离；`SCRY_TEST_GUARD_DIR` 可把被监视目录换成 fixture，供守卫自身用例使用。需要断言落点的 fixture 仍显式传 env，用 `src/test-support/isolated-env.ts` 把 fixture 根目录当 `HOME`。
 
 ## 验证与交付
 
@@ -194,5 +195,11 @@ npm run publish:cli:internal -- --publish     # 真发布，并回读版本与 d
 上尚不存在（`--force` 才允许重发同版本）。默认 `--registry https://registry.anpm.alibaba-inc.com/`，
 可用 `--registry` 覆盖。发布后必须回读 `npm view <包名>@<版本> version` 与 `dist-tags`。
 不要从陈旧 `dist` 手工 `npm publish`。
+
+**桌面端自带的命令行至少要是 0.2.87。** `electron-builder.yml` 把仓库里的 `packages/turn-recorder-cli`
+拷成 `Contents/Resources/scry-cli`，所以发布 App 时要确认该提交的 recorder 版本不低于 0.2.87。
+0.2.84 一类的旧版校验器把带未知 `omissionCodes` 的记录整条判为非法，而钩子路径用 `listRecords`
+全量解析记录：一条新码记录会让该工作区之后每个钩子都失败。发版记录里要写明这个下限，
+不要把更早的 recorder 打进包里。
 
 完成对应验证后，Agent 默认主动执行[本地提交前自查](pr-workflow.md#local-preflight)，检查需求与批准、范围、风险、验证证据以及完整 diff / 暂存区；无需用户再次提醒。处理发现的问题后，在任务分支只提交本任务改动，并在交付中简述自查结论与未验证项。随后按 [PR 工作流](pr-workflow.md) 推送任务分支并开 PR，避免混入已有无关未推送提交；合并须用户明确要求。本地自查不替代正式 PR 分诊或独立评审。

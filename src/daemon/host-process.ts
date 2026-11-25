@@ -45,6 +45,8 @@ import { attachDaemonHostAdmin } from './host-admin-runtime'
 import { isHostCliExperimentalEnabled } from '../shared/experimental-host-cli'
 import type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 import { buildIdentity } from '../shared/build-identity'
+import { HostMetricsSampler, createHostMetricsSources } from './host-metrics'
+import { rememberPiCatalogPrices } from '../main/db-model-prices'
 
 export type { DaemonHostProcess, DaemonHostProcessOptions } from './host-process-types'
 
@@ -85,6 +87,8 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     appUserDataDir: options.userDataDir,
     loadSessions: () => loadSessions()
   })
+  // 历史轮次的金额在启动时就用本机 Pi 目录的单价补上，不要求先跑一轮。
+  rememberPiCatalogPrices(workspace.homeDir)
   const catalogProjection = createOrchestrationCatalogAccess(() => orchestrationAuthority?.sink, log)
   const terminal = createDaemonTerminalService({
     userDataDir: options.userDataDir,
@@ -258,6 +262,15 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onNotice: (notice) => publishHint({ kind: 'hostNotice', notice })
   })
   const relay = await resolveRemoteRelay(remoteStateDirectory)
+  // P8 §4: sampled only when asked. Providers stay 「其他」 until per-session roots exist.
+  const hostMetrics = new HostMetricsSampler(createHostMetricsSources({
+    platform: process.platform,
+    userDataDir: options.userDataDir,
+    workspaceRoots: () => workspace.remoteProjectRoots(),
+    providerRoots: () => [],
+    // 排队数在编排投影（orch_p_run 的 recorded/admitted）里，第一版没接；报 null 不报 0。
+    activeRuns: () => ({ active: pipeline.runs.activeStates().length, queued: null })
+  }))
   const listHostAdminNotices = isHostCliExperimentalEnabled(process.env) ? () => hostAdmin.recentNotices() : undefined
   const service = await createHostRuntime({
     runtime,
@@ -276,6 +289,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     onRunActivity: (runId) => publishHint({ kind: 'run', runId }),
     orchestration: authority.hooks,
     ...(listHostAdminNotices ? { listHostAdminNotices } : {}),
+    readHostMetrics: () => hostMetrics.read('remote'),
     localEndpoint: daemonLocalEndpoint({
       catalog, workspace, providers, pi, session, history, historyChannels, conversationSend, publishHint, terminal,
       runs: () => pipeline.runs,
@@ -294,6 +308,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
       hostAdmin,
       links: sessionLinks,
       orchestrationStatus: () => authority.status(),
+      hostMetrics: () => hostMetrics.read('local'),
       subscribe: authority.createSubscribeHandler({
         ...authoritySubscribeDeps(() => remoteHostService!, workspace.remoteProjectRoots),
         remoteHostNotices: listHostAdminNotices,

@@ -277,6 +277,12 @@ export async function dispatchRemoteRequest(
     if (request.op === 'fileDownload') {
       return { fileDownload: await controller.readFileDownload(fingerprint, request.query) }
     }
+    if (request.op === 'hostMetrics') {
+      // P8 §5: read-only machine summary. The snapshot is already the remote scope
+      // (no PID, no process name, no path), and the controller re-authorizes the peer.
+      if (Object.keys(request).some((key) => !['op', 'keepAlive', 'deviceLabel', 'protocol'].includes(key))) return { error: 'invalid_request' }
+      return { hostMetrics: await controller.hostMetrics(fingerprint) }
+    }
     if (request.op === 'desktop') {
       return { desktop: await controller.readDesktop(fingerprint, request.query) }
     }

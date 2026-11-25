@@ -69,7 +69,8 @@ async function readAntigravityTranscriptModel(args: {
   let lastStep: number | undefined
   let tokens = 0
   let model: string | undefined
-  let multiple = false
+  // 一轮里换了模型时，按输出 Token 归到最多的那个（Q11），不再写成「多模型」。
+  const outputByModel = new Map<string, number>()
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     const step: unknown = JSON.parse(line)
@@ -91,9 +92,13 @@ async function readAntigravityTranscriptModel(args: {
       if (!input || typeof id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(id) ||
         typeof output !== 'number' || !Number.isSafeInteger(output) || output < 0) return
       tokens += output
-      if (model !== undefined && model !== id) multiple = true
-      model = id
+      outputByModel.set(id, (outputByModel.get(id) ?? 0) + output)
+      model ??= id
     }
   }
-  if (tokens === args.outputTokens) return multiple ? '多模型' : model
+  if (tokens !== args.outputTokens) return
+  if (outputByModel.size > 1) {
+    return [...outputByModel].reduce((best, entry) => (entry[1] > best[1] ? entry : best))[0]
+  }
+  return model
 }

@@ -7,7 +7,7 @@ import { forgetRemoteCatalog, refreshRemoteCatalog } from '../hooks/useRemoteCat
 import { SidebarRemoteProjects, useRemoteProjectGroups } from './SidebarRemoteProjects'
 import { createComposerDraftStore } from '../composer-drafts'
 import { RemotePromptQueueStore } from '../remote-prompt-queue'
-import { RemotePairing } from './RemotePairing'
+import { MachinesView } from './MachinesView'
 import { SettingsModal } from './Modals'
 import { REMOTE_ACCESS_COPY as copy } from '../constants/copy'
 import { LocationPicker, LOCAL_MACHINE } from './LocationPicker'
@@ -27,7 +27,7 @@ function RemoteSidebar() {
   const groups = useRemoteProjectGroups('')
   return <SidebarRemoteProjects groups={groups} active={null} collapsed={new Set()} onToggle={() => {}} onPickSession={() => {}} onNewProjectChat={() => {}} />
 }
-const hosts = () => renderToStaticMarkup(<RemotePairing onNewSession={() => {}} />)
+const hosts = () => renderToStaticMarkup(<MachinesView onNewSession={() => {}} />)
 const picker = (machineId = LOCAL_MACHINE) => renderToStaticMarkup(<LocationPicker
   current={{ machineId, cwd: machineId === LOCAL_MACHINE ? '/work/app' : '/remote/app' }}
   localCwd="/work/app" recent={['/work/app', '/work/other']}
@@ -64,23 +64,27 @@ describe('saved host projection', () => {
     expect(hosts()).not.toContain('还没有添加主机')
   })
 
-  it('keeps outbound hosts and inbound device access as separate sections', async () => {
+  it('keeps outbound targets and inbound devices in their own sections of the machines page', async () => {
     list.mockResolvedValue([host])
     await refreshDesktopConnections()
     const html = hosts()
-    expect(html).toContain(`aria-label="${copy.outboundTitle}"`)
+    // 三块从上到下：本机、执行目标、已配对的设备。
+    expect(html).toContain('aria-label="本机"')
+    expect(html).toContain('aria-label="执行目标"')
+    expect(html).toContain('aria-label="已配对的设备"')
     expect(html).toContain(`aria-label="${copy.inboundTitle}"`)
     expect(html).not.toContain('打开主机页')
     expect(html).not.toContain('通过 SSH 访问本机')
   })
 
-  it('opens the remote settings tab without claiming unread devices or access are ready', () => {
-    const html = renderToStaticMarkup(<SettingsModal initialTab="remote" theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onNewRemoteSession={() => {}} onClose={() => {}} />)
+  it('leaves a one-line pointer in settings instead of the moved connection surfaces', () => {
+    const html = renderToStaticMarkup(<SettingsModal initialTab="remote" theme="dark" onThemeChange={() => {}} onSessionsChanged={() => {}} onOpenMachines={() => {}} onClose={() => {}} />)
     expect(html).toContain(`-remote-tab" type="button" role="tab" aria-selected="true"`)
-    expect(html).toContain(`class="remote-connections-settings"`)
-    expect(html).toContain(copy.loadingDesktopStatus)
-    expect(html).not.toContain(copy.noAuthorizedDevices)
-    expect(html).not.toContain(copy.relayOnline)
+    expect(html).toContain('连接与设备已移到侧栏「机器」')
+    expect(html).toContain('打开「机器」')
+    // 设置里不再有出站主机列表或入站设备：它们都在机器页。
+    expect(html).not.toContain('class="remote-connections-settings"')
+    expect(html).not.toContain('class="remote-pairing"')
     expect(html).not.toContain('modal-foot')
   })
 

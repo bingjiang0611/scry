@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { type ToolContentRef } from '../../shared/tool-content.js'
 import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn-record.js'
+import { unwritableOmissionCodes } from '../../shared/turn-evidence-validation.js'
+import { invalidRepositoryLocationStatuses } from '../../shared/turn-repository-location.js'
 import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
@@ -10,12 +12,14 @@ import { applyRecordContentBudget, recordTransportBytes, RECORDER_TRANSPORT_MAX_
 import { archiveJournal, readArchiveState, archivePathsOverlap } from './store-archive.js'
 import { nextSequence, reserveSequence } from './sequence-watermark.js'
 import { pruneStaleTemps } from './temp-prune.js'
+import { appendRecordSummary } from './store-summary.js'
 export { recordStoreIndexStats, resetRecordStoreIndex, stableHash, safeKey, findRecordById, recordStoreStamp, readRecordFile, type RecordContentItem, recordContentItems, recordContentItem } from './store-index.js'
+export { listRecordSummaries, recordSummaryPath, type RecordSummary } from './store-summary.js'
 export { type RecordCommittedNotification, type CommitNotificationStatus, type CommitNotificationScope, commitNotificationStatus, HOOK_DRAIN_MAX_RECORDS, HOOK_DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drainCommitNotifications, retryCommitNotifications, redeliverLatestCommitNotification } from './store-notifications.js'
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.84'
+export const RECORDER_VERSION = '0.2.88'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -34,6 +38,11 @@ export interface RecorderHealth {
   openTurns: number
   /** Those open turns that wrote nothing for the stale window: the ones to look at first. */
   staleOpenTurns: number
+  /**
+   * Sessions every pass fails the same way, so a reader does not mistake them for quiet work. Their
+   * evidence is untouched and they are retried hourly; see `session-failures.ts`.
+   */
+  suspendedSessions?: number
   recoveredRecords: number
 }
 
@@ -80,6 +89,19 @@ export async function commitRecord(
       const detail = validation.issues.slice(0, 4).map((issue) => `${issue.path}: ${issue.message}`).join('; ')
       throw new Error(`refusing to commit invalid turn record: ${detail}`)
     }
+    // Readers tolerate codes this build knows nothing about so a newer record stays readable. Writing
+    // is narrower than reading: a code enters `WRITABLE_OMISSION_CODES` only after every reader that
+    // can open this store ships a tolerant version, so this build never writes one they would reject.
+    const unwritableCodes = unwritableOmissionCodes(record)
+    if (unwritableCodes.length > 0) {
+      throw new Error(`refusing to commit a record with codes this version must not write: ${unwritableCodes.join(', ')}`)
+    }
+    // Readers drop a location status they do not know instead of failing the record; the writer still
+    // has to stay inside the defined values, so a typo cannot masquerade as a newer status.
+    const undefinedStatuses = invalidRepositoryLocationStatuses(record)
+    if (undefinedStatuses.length > 0) {
+      throw new Error(`refusing to commit a record with undefined repository location statuses: ${undefinedStatuses.join(', ')}`)
+    }
     // Reserve the number durably before the record exists: a crash may skip a sequence, never reuse one.
     await reserveSequence(dataRoot, sequence)
     const filename = `${String(sequence).padStart(20, '0')}-${record.recordId}.json`
@@ -87,6 +109,8 @@ export async function commitRecord(
     if (uploadEnvironment !== undefined) await persistUploadEnvironment(dataRoot, record.recordId, uploadEnvironment)
     await writeJsonAtomic(join(dataRoot, 'records', filename), record)
     invalidateRecordIndex(dataRoot)
+    // Derived cache only: it may be stale, missing or unwritable, and none of that may fail a commit.
+    await appendRecordSummary(dataRoot, record).catch(() => undefined)
     // 中断的写入会留下永不 rename 上屏的 `.tmp`（0 字节也算）：它们不是记录，但会被按目录枚举的
     // 脚本读到。提交是所有写入方唯一的收敛点，所以在这里按天清理一次；失败只影响这次卫生。
     await pruneStaleTemps(dataRoot).catch(() => undefined)
@@ -320,6 +344,7 @@ const EMPTY_HEALTH: RecorderHealth = {
   oldestPendingAgeMs: 0,
   openTurns: 0,
   staleOpenTurns: 0,
+  suspendedSessions: 0,
   recoveredRecords: 0
 }
 

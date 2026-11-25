@@ -9,7 +9,7 @@ import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic, writeT
 import type { RecorderEnablement } from './config.js'
 import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
-import { RECORDER_VERSION } from './store.js'
+import { RECORDER_VERSION, listRecordSummaries } from './store.js'
 import { pruneStaleTemps } from './temp-prune.js'
 import {
   PROTOCOL_VERSION, HOOK_EVENT_PATH, RECORDER_VERSION_HEADER, daemonRequest, writeJson, header, readJsonBody, recorderSocketPath
@@ -357,6 +357,10 @@ async function startRecorderDaemon(
   // 等很久。与提交路径的按天清理互不依赖，失败也只是这次不清理。等待它完成，避免进程在别处收尾时
   // 还有一次目录遍历在写标记文件。
   await pruneStaleTemps(enablement.dataRoot).catch(() => undefined)
+  // Warm the derived record summary before the first hook needs it: a cold rebuild costs one full
+  // pass over the store, and a hook that met it would pay that on its own synchronous path. Started
+  // here, once per daemon, it runs beside the socket instead of inside an event.
+  void listRecordSummaries(enablement.dataRoot).catch(() => undefined)
   scheduleIdle()
   scheduleRecovery(true)
   return { socketPath, closed, close }

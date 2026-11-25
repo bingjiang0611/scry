@@ -283,7 +283,7 @@
     },
     "hostQueue": {
       "path": "hostQueue",
-      "request": "{ op:'hostQueue', method:'hostQueue', args: [sessionKey] }",
+      "request": "{ op:'hostQueue', method:'hostQueue', args:[{ sessionId, providerId?, agentProfileId?, cwd? }] }",
       "response": "该会话在宿主队列里的条目（按派发顺序，含位置与是否挂起）",
       "authorize": "本机 grant；只读投影，不写任何状态",
       "why": "D1 队列的权威在宿主，App 与设备读同一份",
@@ -293,10 +293,20 @@
     },
     "checkpoints": {
       "path": "controls",
-      "request": "{ op:'checkpoints', method:'rollbackRun', args:[{ runId, reason? }] }",
-      "response": "倒回结果：恢复到的检查点、重置了哪些工作树，或拒绝原因",
+      "request": "{ op:'checkpoints', method:'rollbackRun', args:[{ runId, reason? }] } | { op:'checkpoints', method:'releaseQueuedRun', args:[{ runId }] }",
+      "response": "rollbackRun：倒回结果——恢复到的检查点、重置了哪些工作树，或拒绝原因；releaseQueuedRun：解除挂起的结果",
       "authorize": "本机 grant；只接受纯 run id，工作树是否可重置由检查点服务判定",
       "why": "D5 检查点与 git ref 在宿主，工作树也在宿主",
+      "scopes": [
+        "local"
+      ]
+    },
+    "localHostMetrics": {
+      "path": "resources-shell",
+      "request": "{ op:'hostMetrics', method:'read', args: [] }（这个 op 没有参数；scope 由调用方的 grant 决定，不由参数决定）",
+      "response": "HostMetricsSnapshot（P8 §5）：sampledAt、uptimeSec、cpu{percent,cores,load1}、memory{totalBytes,usedBytes,pressure,swapUsedBytes}、disks[{role,totalBytes,freeBytes}]、scry{daemon{cpuPercent,rssBytes,pid?},providers[]|null}、runs{active,queued}。采不到的字段为 null；remote scope 不含 PID",
+      "authorize": "本机 grant（scope: local），每次请求重验；每 2 秒最多真正采样一次，其余返回 5 秒缓存。设备与 Desktop 走只读设备 op `hostMetrics`，不是这个 local op",
+      "why": "ps 只能在 daemon 里跑（App 主进程禁止 child_process），而机器页需要后台服务及其 Provider 子进程的真实占用",
       "scopes": [
         "local"
       ]

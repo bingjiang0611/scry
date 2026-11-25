@@ -57,6 +57,11 @@ export interface WorkspaceStatusReport {
         openTurnsPending: number
         /** Open turns that wrote nothing for the stale window: the ones worth looking at first. */
         staleOpenTurns: number
+        /**
+         * Sessions every pass fails the same way, so they are retried hourly instead. Their evidence
+         * is untouched; this is here because a skipped session would otherwise look like quiet work.
+         */
+        suspendedSessions: number
       }
   providers: ProviderStatusRow[]
   /** Stated once instead of per row: the CLI can never observe provider hook trust. */
@@ -149,7 +154,8 @@ export async function workspaceStatus(
       enabled: true,
       dataRoot: enablement.dataRoot,
       openTurnsPending: health.pendingCount + health.openTurns,
-      staleOpenTurns: health.staleOpenTurns
+      staleOpenTurns: health.staleOpenTurns,
+      suspendedSessions: health.suspendedSessions ?? 0
     },
     providers,
     trustEvidence: TRUST_UNOBSERVABLE,

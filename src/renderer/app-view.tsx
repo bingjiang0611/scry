@@ -26,7 +26,7 @@ import { ipcErrorMessage } from './constants/ipc-error-copy'
 import { animatePaneChange, cancelPaneMotion } from './pane-motion'
 
 export function useAppView(context: AppViewContext) {
-  const { setTheme, setShowSkills, setShowMcp, setShowLlmPerformance, refreshProviderCatalogs,
+  const { setTheme, setShowSkills, setShowMcp, refreshProviderCatalogs,
     view, viewRef, setView, cwd, setCwd, activeSessionId, selectSessionId, session, integrations, sessionLoading, composerSubmitting,
     switchingAgentRef, setSwitchingAgent, setComposerError, draftAttachments, queuedPrompts, draftKey, draftStore, setInput,
     releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, sessionNavigationSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
@@ -37,19 +37,12 @@ export function useAppView(context: AppViewContext) {
     setTurnDiffSelection, setWorkspaceDirty, setSettingsTab, newConversation, unbindProject, pickRecent,
     turnDiffSelection, taRef, setSlashHidden, workspaceRefreshKey } = context
 
-  const openLlmPerformance = (): void => {
-    setShowSkills(false)
-    setShowMcp(false)
-    setShowLlmPerformance(true)
-  }
   const openSkills = (): void => {
-    setShowLlmPerformance(false)
     setShowMcp(false)
     setShowSkills(true)
     void refreshProviderCatalogs()
   }
   const openMcp = (): void => {
-    setShowLlmPerformance(false)
     setShowSkills(false)
     setShowMcp(true)
     if (!integrations.mcpCapability) void integrations.refreshMcp().catch(() => { })
@@ -199,11 +192,16 @@ export function useAppView(context: AppViewContext) {
     setSettingsTab(null)
     setShowSkills(false)
     setShowMcp(false)
-    setShowLlmPerformance(false)
   }
+  // 原来这里打开设置里的「远程」标签页；P8 之后连接与设备都在侧栏「机器」页，
+  // 位置菜单的「管理远程访问」直接跳到那一页。
   const openRemoteAccessSettings = (): void => {
     closeOverlays()
-    setSettingsTab('remote')
+    changeView('machines')
+  }
+  const openMachines = (): void => {
+    closeOverlays()
+    changeView('machines')
   }
   const setRemoteDraft = (key: string, value: string): void => {
     setSessionDrafts((current) => updateSessionComposerDraft(current, key, (draft) => ({ ...draft, input: value }), releaseDraft))
@@ -342,7 +340,6 @@ export function useAppView(context: AppViewContext) {
     workspaceSendLabel: workspaceSelection.sendLabel,
     workspaceBlockedReason: workspaceSelection.blockedReason,
     workspaceSetup: workspaceSelection.workspaceSetup,
-    openLlmPerformance,
     openSkills,
     openMcp,
     changeTheme,
@@ -367,6 +364,7 @@ export function useAppView(context: AppViewContext) {
     selectChatAgent,
     closeOverlays,
     openRemoteAccessSettings,
+    openMachines,
     setRemoteDraft,
     openRemoteLocation,
     pickRemoteLocation,

@@ -36,7 +36,7 @@ function isSample(value: unknown): value is LlmPerformanceHistoryRow {
   const row = value as Record<string, unknown>
   if (typeof row.runId !== 'string' || typeof row.ts !== 'string' || !Number.isFinite(Date.parse(row.ts)) ||
     !['claude', 'codex', 'qoder', 'opencode', 'pi', 'antigravity'].includes(String(row.providerId)) ||
-    typeof row.model !== 'string' || typeof row.networkLabel !== 'string' || typeof row.failed !== 'boolean' ||
+    (row.model !== undefined && typeof row.model !== 'string') || typeof row.networkLabel !== 'string' || typeof row.failed !== 'boolean' ||
     (row.modelSource !== undefined && (row.modelSource !== 'antigravity_transcript' || row.providerId !== 'antigravity')) ||
     (row.agentProfileId !== undefined && typeof row.agentProfileId !== 'string') ||
     (row.upstreamProvider !== undefined && typeof row.upstreamProvider !== 'string')) return false
@@ -93,7 +93,8 @@ async function scanLlmPerformanceHistory(userDataDir: string, file: string, now:
   for (const entry of [...rows.values()].reverse()) {
     const { sample } = entry
     const needsModel = sample.providerId === 'antigravity' && !sample.failed && !sample.modelSource && sample.performance.outputTokens &&
-      entry.sessionId && entry.cwd !== undefined && (sample.model === '未知模型' || sample.model.startsWith('所选：'))
+      entry.sessionId && entry.cwd !== undefined && Boolean(sample.model) &&
+      (sample.model === '未知模型' || (sample.model?.startsWith('所选：') ?? false))
     history.rows.push(needsModel && lookups++ < ANTIGRAVITY_LOOKUP_LIMIT
       ? await withAntigravityModel(userDataDir, entry)
       : sample)
@@ -121,7 +122,7 @@ export async function readLlmPerformanceHistory(userDataDir: string, now = Date.
     const history = await entry.value
     entry.expiresAt = Math.min(...history.rows.map(row => Date.parse(row.ts) + 30 * 86400_000 + 1))
     // The usage row can become visible before the terminal archive. Retry recent unresolved turns on the next cache window.
-    if (history.rows.some(row => row.providerId === 'antigravity' && !row.failed && !row.modelSource &&
+    if (history.rows.some(row => row.providerId === 'antigravity' && !row.failed && !row.modelSource && row.model &&
       (row.model === '未知模型' || row.model.startsWith('所选：')) && Date.parse(row.ts) > now - RECENT_ARCHIVE_WINDOW_MS)) {
       entry.expiresAt = Math.min(entry.expiresAt, now + 1_000)
     }

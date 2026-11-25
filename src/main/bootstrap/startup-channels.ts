@@ -83,13 +83,19 @@ export function providerDetectionChannelHandlers(deps: {
 }
 
 /** Run controls for one Provider context, queued with that Provider's auth operations. */
+import { rememberCatalogPrices } from '../db-model-prices'
+
 export function providerControlChannelHandlers(deps: {
   providerRegistry: Pick<ProviderRegistry, 'runControls'>
   withProviderOperation: <T>(providerId: ProviderContext['providerId'], operation: () => T | Promise<T>, agentProfileId?: string) => Promise<T>
 }) {
   return {
-    'agent:runControls': (context: ProviderContext) =>
-      deps.withProviderOperation(context.providerId, () => deps.providerRegistry.runControls(context), context.agentProfileId)
+    // 目录里的单价只用于折算金额：记进本地价格表，失败不影响这次读取。
+    'agent:runControls': async (context: ProviderContext) => {
+      const catalog = await deps.withProviderOperation(context.providerId, () => deps.providerRegistry.runControls(context), context.agentProfileId)
+      rememberCatalogPrices(catalog?.data?.prices)
+      return catalog
+    }
   } satisfies ChannelHandlers
 }
 

@@ -15,6 +15,7 @@ import { registerSuite9 } from './recorder-tests/codex-1.test'
 import { registerSuite10 } from './recorder-tests/codex-2.test'
 import { registerSuite11 } from './recorder-tests/codex-3.test'
 import { registerSuite12 } from './recorder-tests/codex-4.test'
+import { registerCodexUsageBaselineSuite } from './recorder-tests/codex-5.test'
 import { registerSuite13 } from './recorder-tests/store-1.test'
 import { registerSuite14 } from './recorder-tests/store-2.test'
 import { registerSuite15 } from './recorder-tests/store-3.test'
@@ -57,6 +58,7 @@ describe('Codex rollout recorder evidence', () => {
   registerSuite10()
   registerSuite11()
   registerSuite12()
+  registerCodexUsageBaselineSuite()
 })
 
 describe('record store cursor and recovery semantics', () => {

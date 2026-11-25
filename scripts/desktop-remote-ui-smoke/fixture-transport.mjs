@@ -35,7 +35,23 @@ function publishFixtureRemoteUpdate({ catalog: includeCatalog, runs, history } =
   for (const listener of remoteUpdateListeners) listener(update)
 }
 
+// 一份固定的资源汇总：机器页要显示数字，不能靠「不可用」蒙混过去。
+const machineSnapshot = (sampledAt) => ({
+  sampledAt, uptimeSec: 3 * 86400, cpu: { percent: 34, cores: 10, load1: 2.5 },
+  memory: { totalBytes: 17179869184, usedBytes: 9761284096, pressure: 'medium', swapUsedBytes: 2147483648, swapTotalBytes: 4294967296 },
+  disks: [{ role: 'data', totalBytes: 1073741824000, freeBytes: 227633152000 }],
+  scry: { daemon: { cpuPercent: 0.8, rssBytes: 220200960 }, providers: [
+    { providerId: 'claude', processes: 2, cpuPercent: 12, rssBytes: 1258291200 },
+    { providerId: 'qoder', processes: 1, cpuPercent: 2, rssBytes: 314572800 }] },
+  runs: { active: 2, queued: 1 }
+})
 const api = {
+  async hostMetrics(id) {
+    state.targetMetricsCalls.push(id)
+    if (state.targetMetricsUnsupported) throw new Error('desktop_host_metrics_unsupported')
+    if (state.targetMetricsFailure) throw new Error('请求超时（2 秒）')
+    return machineSnapshot(Date.now() - 3000)
+  },
   async list() { state.listCalls++; await holdVisibilityRead('list'); if (state.listFailure) throw new Error('fixture connection read failed'); return [{ ...connection, state: state.connected ? 'connected' : 'disconnected' }] },
   async pair() { throw new Error('pairing is outside this fixture') },
   async finishPairing() { throw new Error('pairing is outside this fixture') },

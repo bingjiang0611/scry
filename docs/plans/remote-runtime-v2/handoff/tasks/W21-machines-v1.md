@@ -1,6 +1,6 @@
 # W21 · 机器管理第一版（与 W20 并行）
 
-执行方：维护者本机上一个独立的执行方，与 W20 并行。依据：[P8-machine-management](../../P8-machine-management.md)，以下简称「设计」，维护者 2026-11-23 已定。界面以 UI 设计稿 [Scry 机器管理](https://claude.ai/artifact/LSPCVQDeBUC6wxYN2i1La9) 为准。
+执行方：维护者本机上一个独立的执行方，与 W20 并行。依据：[P8-machine-management](../../P8-machine-management.md)，以下简称「设计」，维护者 2026-11-23 已定。界面以 UI 设计稿为准：源文件在 [ui-mockups/machines/](../../ui-mockups/machines/README.md)。
 
 ## 范围
 
@@ -21,7 +21,7 @@
 ## 规则
 
 - 照 [README](../README.md) 执行：分支、提交身份、证据目录、报告格式、测量互斥都按它来。
-- **分支**：新建远程分支 `feat/machines-v1`，基于最新的 `origin/main`，以后只推送到这个分支；不开 PR，不合并 main，不 force push。
+- **分支**：远程分支 `feat/machines-v1` 已经建好，基于 main，含设计文档、设计稿和本任务单。在它上面开发，只推送到这个分支。不开 PR，不合并 main，不 force push。
 - **不碰 W20 正在改的文件**：设计 §7 列出的订阅引擎、表结构、Provider 适配器、派发器、`run-*.ts`。如果确实必须动，停下来写进报告，不要动手。
 - **门限与测试**：
   - 不放宽任何性能门限、预算或棘轮；

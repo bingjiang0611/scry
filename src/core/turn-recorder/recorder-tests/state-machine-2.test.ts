@@ -4,6 +4,7 @@ import { it, expect } from 'vitest'
 import { handleRecorderHook, resetTranscriptSnapshotCache, recoverRecorder, transcriptSnapshotCacheStats, readTranscriptWindow } from '../recorder'
 import { listRecords, exportRecords, commitRecord } from '../store'
 import { readRecorderContent } from '../content-store'
+import { normalizeTurnRepositoryLocation } from '../../../shared/turn-repository-location'
 import { workspace, completeTurn, payload } from './fixture.test'
 
 export function registerSuite2(): void {
@@ -52,6 +53,140 @@ export function registerSuite2(): void {
       await writeFile(path, JSON.stringify(invalid))
       await expect(listRecords(dataRoot)).rejects.toThrow('invalid turn record')
     }
+  })
+
+  it('读得懂别的版本写的未知 omissionCodes，但提交时不许自己造一个', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'code-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const path = join(dataRoot, 'records', name)
+    const stored = JSON.parse(await readFile(path, 'utf8'))
+    // A newer recorder may explain a usage gap with a code this build does not know. The whole
+    // record must stay readable; one unknown code may not invalidate every other section.
+    stored.usage = {
+      status: 'unavailable',
+      quality: 'unavailable',
+      source: ['provider_transcript+lifecycle_hooks'],
+      omissionReason: 'a newer recorder explained this gap with a code this build does not know',
+      omissionCodes: ['some_future_code']
+    }
+    await writeFile(path, JSON.stringify(stored))
+    const records = await listRecords(dataRoot)
+    expect(records).toHaveLength(1)
+    expect(records[0].usage.omissionCodes).toEqual(['some_future_code'])
+    // Writing stays narrower than reading: the same record cannot be committed again from this build.
+    await expect(commitRecord(dataRoot, { ...stored, recordId: 'a'.repeat(32) }))
+      .rejects.toThrow('refusing to commit a record with codes this version must not write: some_future_code')
+  })
+
+  it('位置状态：读取容忍未知取值，写入拒绝未定义取值', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'status-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const stored = JSON.parse(await readFile(join(dataRoot, 'records', name), 'utf8'))
+    const entry = { version: 1, status: 'captured', files: [], repoRoot: '/tmp/fixture-repo', beforeAt: stored.startedAt, afterAt: stored.completedAt, captureMs: 1, cleanup: 'ok' }
+    const diff = { status: 'available', quality: 'exact', source: ['git'], value: [entry] }
+    // A newer recorder may name a status this build does not know. Like omissionCodes, it stays a
+    // readable record: the projection drops the value, and no other section is affected.
+    await writeFile(join(dataRoot, 'records', name), JSON.stringify({
+      ...stored,
+      diff: { ...diff, value: [{ ...entry, repositoryLocation: { remoteStatus: 'mirrored', branchStatus: 'observed', commitStatus: 'observed' } }] }
+    }))
+    const read = await listRecords(dataRoot)
+    expect(read).toHaveLength(1)
+    const location = read[0].diff.value?.[0].repositoryLocation
+    // Reading keeps the raw record; displaying it projects the known vocabulary and drops the rest.
+    expect(location).toEqual({ remoteStatus: 'mirrored', branchStatus: 'observed', commitStatus: 'observed' })
+    expect(normalizeTurnRepositoryLocation(location)).toEqual({ branchStatus: 'observed', commitStatus: 'observed' })
+    // Writing is narrower: this build only emits the defined values, and a typo must not survive.
+    await expect(commitRecord(dataRoot, {
+      ...stored,
+      recordId: 'f'.repeat(32),
+      diff: { ...diff, value: [{ ...entry, repositoryLocation: { remoteStatus: 'mirrored' } }] }
+    })).rejects.toThrow('refusing to commit a record with undefined repository location statuses: remoteStatus=mirrored')
+    const committed = await commitRecord(dataRoot, {
+      ...stored,
+      recordId: '9'.repeat(32),
+      diff: { ...diff, value: [{ ...entry, repositoryLocation: { remoteStatus: 'absent', branchStatus: 'detached', commitStatus: 'unavailable' } }] }
+    })
+    expect(committed.record.diff.value?.[0].repositoryLocation).toEqual({ remoteStatus: 'absent', branchStatus: 'detached', commitStatus: 'unavailable' })
+  })
+
+  it('已认识但本版还禁止写入的码会被提交拒绝，diff 码照常提交', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'code-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const stored = JSON.parse(await readFile(join(dataRoot, 'records', name), 'utf8'))
+    // `usage_baseline_missing` is readable but not writable yet: readers with an older whitelist
+    // reject the whole record, and their hook path parses every record.
+    await expect(commitRecord(dataRoot, {
+      ...stored,
+      recordId: 'b'.repeat(32),
+      usage: {
+        status: 'unavailable',
+        quality: 'unavailable',
+        source: ['provider_transcript+lifecycle_hooks'],
+        omissionReason: 'usage baseline could not be proven',
+        omissionCodes: ['usage_baseline_missing']
+      }
+    })).rejects.toThrow('refusing to commit a record with codes this version must not write: usage_baseline_missing')
+    // The diff codes are what this version is allowed to write.
+    const committed = await commitRecord(dataRoot, {
+      ...stored,
+      recordId: 'c'.repeat(32),
+      diff: {
+        status: 'partial',
+        quality: 'exact',
+        source: ['git'],
+        value: [],
+        omissionReason: 'session capture started mid-turn',
+        omissionCodes: ['baseline_after_turn_start']
+      }
+    })
+    expect(committed.record.diff.omissionCodes).toEqual(['baseline_after_turn_start'])
+  })
+
+  it('大记录里的码一样会被查到：按证据段定位，没有节点预算可以提前收摊', async () => {
+    const root = await workspace()
+    const dataRoot = join(root, '.scry')
+    await completeTurn(root, 'code-session')
+    const name = (await readdir(join(dataRoot, 'records')))[0]
+    const stored = JSON.parse(await readFile(join(dataRoot, 'records', name), 'utf8'))
+    // Tens of thousands of nodes: a scan with a node or depth budget could stop before the last
+    // section, so this record must be checked by position and not by walking budget.
+    const tools = Array.from({ length: 3_000 }, (_, index) => ({
+      name: `Bash`, id: `call-${index}`, status: 'success',
+      input: { cmd: `printf ${index}` }, outputSummary: 'ok'
+    }))
+    const large = {
+      ...stored,
+      recordId: 'd'.repeat(32),
+      tools: { status: 'available', quality: 'exact', source: ['provider_transcript'], value: tools },
+      termination: {
+        status: 'available',
+        quality: 'exact',
+        source: ['provider_transcript'],
+        value: { reason: 'provider_terminal', completedAtSource: 'provider_transcript' }
+      }
+    }
+    await expect(commitRecord(dataRoot, {
+      ...large,
+      termination: { ...large.termination, omissionReason: 'x', omissionCodes: ['usage_baseline_missing'] }
+    })).rejects.toThrow('usage_baseline_missing')
+    // The same large record with only writable codes commits.
+    const committed = await commitRecord(dataRoot, {
+      ...large,
+      recordId: 'e'.repeat(32),
+      errors: {
+        status: 'partial', quality: 'exact', source: ['provider_transcript'], value: [],
+        omissionReason: 'one error body was truncated',
+        omissionCodes: ['patch_truncated']
+      }
+    })
+    expect(committed.record.tools.value).toHaveLength(3_000)
   })
 
   it('大 assistant 与 reasoning 保留有界预览和可分页完整正文引用', async () => {

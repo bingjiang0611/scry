@@ -136,6 +136,14 @@ export class HostController {
     return answerOwnerRunQuestion(this.#deps(), runId, response)
   }
 
+  // P8 §5: read-only machine summary for a paired device. Authorization is the same
+  // verified peer check as every other device read; nothing here grants anything.
+  async hostMetrics(peerCertSHA256: string): Promise<import('../../shared/host-metrics').HostMetricsSnapshot> {
+    this.authorizeDevice(peerCertSHA256)
+    if (!this.#injected.readHostMetrics) throw new Error('host_metrics_unavailable')
+    return await this.#injected.readHostMetrics()
+  }
+
   async readDesktop(peerCertSHA256: string, input: unknown): Promise<DesktopHostReadResult> {
     return await readDesktop(this.#deps(), peerCertSHA256, input)
   }
@@ -207,6 +215,7 @@ export class HostController {
       canSessionFork: d.sessionFork !== undefined,
       canSessionDelete: d.sessionDelete !== undefined,
       hasHostAdminNotices: d.listHostAdminNotices !== undefined,
+      canHostMetrics: d.readHostMetrics !== undefined,
       workspace: this.#workspace, sessionAction: d.sessionAction, sessionFork: d.sessionFork, sessionDelete: d.sessionDelete,
       isRemoteRun: (runId) => isRemoteRun(this.#ledger, runId), macRun: (runId) => macRun({ ...(d.macRuns ? { macRuns: d.macRuns } : {}), workspace: this.#workspace }, runId, (code) => new RemoteInteractionError(code)), macRuns: d.macRuns,
       interactions: this.#interactions, stops: this.#stops, orchestration: d.orchestration, immediateDispatch: this.#immediateDispatch,

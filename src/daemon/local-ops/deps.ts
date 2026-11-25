@@ -53,6 +53,8 @@ export interface DaemonLocalEndpointDeps {
   executionTargetBridge?: import('../app-execution-target-bridge').ExecutionTargetBridgeHandlers
   // Host CLI admin state (P5-5b): persisted switch & rate limits; local endpoint only.
   hostAdmin?: import('../host-admin-store').HostAdminStore
+  // P8 host metrics: the daemon's own sampler, local scope (may carry the PID).
+  hostMetrics?: () => Promise<import('../../shared/host-metrics').HostMetricsSnapshot>
   // P4-2 authoritative orchestration status (Decision H).
   orchestrationStatus?: () => import('../../shared/background-service').BackgroundServiceOrchestrationStatus
   /** D4: the authority records metadata changes; it is attached after the local ops are built. */

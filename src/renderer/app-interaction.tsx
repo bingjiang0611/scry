@@ -34,8 +34,8 @@ export function useAppInteraction(context: AppInteractionContext) {
     sessionCacheVisible, setSessionCacheVisible, sessionSnapshots, sessionEvidenceGap, setSessionEvidenceGap, draftStartPendingRef,
     activeRunHydrated, setActiveRunHydrated, workspace, cwd, setCwd, recent, projects, activeSessionId, loadProjects, chooseFolder,
     removeRecentFolder, workspaceRoots, setRunningRunIds, setWaitingQuestionRunIds, setQuestionKindsByRun, terminalRunIdsRef, localRunIdsRef, localStartsRef, localDraftOwnersRef, markRunStarted,
-    markRunFinished, cwdRef, activeSessionIdRef, selectSessionId, showSkills, setShowSkills, showMcp, setShowMcp, showLlmPerformance,
-    setShowLlmPerformance, view, setView, logicalConversation, setLogicalConversation, setConversationError, setConversationAgent,
+    markRunFinished, cwdRef, activeSessionIdRef, selectSessionId, showSkills, setShowSkills, showMcp, setShowMcp,
+    view, setView, logicalConversation, setLogicalConversation, setConversationError, setConversationAgent,
     conversationProjection, setConversationProjection, switchingAgent, setSwitchingAgent,
     switchingAgentRef, viewRef, integrations, selectedProviderSessionId, draftStore, setSessionDrafts, draftKey, rightSurfaces,
     currentSurface, dispatchRightSurface, migrateRightSurface, rightSurface, terminalOpen, hasSurfaceContext, setScopeDirty, setWorkspaceDirty, workspaceRefreshKey, setWorkspaceRefreshKey, workspaceOpenRequests,
@@ -163,7 +163,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   restoreStoredSelectionRef.current = restoreLastSelection
   const appView = useAppView({
     openWorkspaceRun, sessionNavigationSeqRef,
-    theme, setTheme, setShowSkills, setShowMcp, setShowLlmPerformance, refreshProviderCatalogs,
+    theme, setTheme, setShowSkills, setShowMcp, refreshProviderCatalogs,
     view, setView, cwd, setCwd, activeSessionId, selectSessionId, session, integrations, sessionLoading, composerSubmitting,
     switchingAgentRef, setSwitchingAgent, setComposerError, draftAttachments, queuedPrompts, draftKey, draftStore, setInput,
     releaseDraft, selectedProviderSessionId, sessionSelectionSeqRef, activeSessionIdRef, cwdRef, setSessionDrafts, migrateRightSurface,
@@ -174,7 +174,7 @@ export function useAppInteraction(context: AppInteractionContext) {
     viewRef, conversationProjection, sessionEvidenceGap, workspaceRefreshKey,
     setSettingsTab, newConversation, unbindProject, pickRecent, setSessionLoading
   })
-  const { openLlmPerformance, openSkills, openMcp, changeView, pickConversation,
+  const { openSkills, openMcp, changeView, pickConversation,
     selectChatAgent, openRemoteLocation, startNewConversation, renderLocationPicker, openMetaPrompts, openTurnDiffReview,
     pinnedSummary, activeEvidenceGap } = appView
   const queueActions = useAppQueueActions({
@@ -210,7 +210,7 @@ export function useAppInteraction(context: AppInteractionContext) {
   const sidebarActions = useAppSidebarActions({
     startNewConversation, openRemoteLocation, remoteQueueStore, view, remoteTarget, remoteAdoptedSession, pickSession,
     togglePinSession, archiveSession, renameSession, newConversationInProject, pickConversation, toggleProjectPin, renameProject,
-    removeProject, undoArchive, changeView, openLlmPerformance, openSkills, openMcp, openMetaPrompts,
+    removeProject, undoArchive, changeView, openSkills, openMcp, openMetaPrompts,
     setSettingsTab
   })
 
@@ -265,8 +265,6 @@ export function useAppInteraction(context: AppInteractionContext) {
     settingsTab,
     setSettingsTab,
     theme,
-    setShowLlmPerformance,
-    showLlmPerformance,
     showSkills,
     showMcp,
     setShowSkills,
