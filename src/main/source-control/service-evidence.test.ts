@@ -130,6 +130,41 @@ describe('source control real temporary Git', { timeout: 15_000 }, () => {
     expect((await mutation).status).toBe('succeeded')
   })
 
+  it('excludes launches and Git mutations during checkpoint rollback', async () => {
+    const state = await snapshot()
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>(resolve => { enter = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    const rollback = service.withCheckpointRollback(cwd, async () => {
+      enter()
+      await held
+      return 'restored'
+    })
+    let staged: ReturnType<typeof service.mutate> | undefined
+    try {
+      await entered
+      const register = vi.fn()
+      await expect(service.admitRun(cwd, register)).rejects.toThrow('源代码管理操作')
+      expect(register).not.toHaveBeenCalled()
+      await writeFile(join(cwd, 'base.txt'), 'changed\n')
+      const status = await snapshot()
+      expect(status.id).toBe(state.id)
+      staged = service.mutate({ action: 'stage', repositoryId: state.id,
+        expectedRevision: status.revision, paths: ['base.txt'], operationId: randomUUID() })
+      await expect(vi.waitFor(() => { expect(git('diff', '--cached', '--name-only')).toBe('base.txt') }, { timeout: 100 }))
+        .rejects.toThrow()
+    } finally {
+      release()
+      await rollback
+    }
+    expect((await staged)?.status).toBe('succeeded')
+    running = [cwd]
+    const restore = vi.fn(async () => 'restored')
+    await expect(service.withCheckpointRollback(cwd, restore)).resolves.toBeUndefined()
+    expect(restore).not.toHaveBeenCalled()
+  })
+
   it('persists commit and review drafts with their original head across restart', async () => {
     const state = await snapshot()
     await service.saveCommitDraft({

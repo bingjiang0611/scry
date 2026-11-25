@@ -152,7 +152,7 @@ export async function createDaemonHostProcess(options: DaemonHostProcessOptions)
     registeredWorkspaceRun: (runId, cwd) => pipeline.runs.get(runId)?.state.cwd === cwd
   })
 
-  const checkpoints = createHostCheckpointService({ sink: () => userDataAuthority, userDataDir: options.userDataDir, log })
+  const checkpoints = createHostCheckpointService({ sink: () => userDataAuthority, userDataDir: options.userDataDir, sourceControl, log })
 
   const remoteRunIds = new Set<string>()
   const remoteRunLedgerIds = new Map<string, string>()

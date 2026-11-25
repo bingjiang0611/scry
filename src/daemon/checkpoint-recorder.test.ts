@@ -186,12 +186,16 @@ describe('R9: checkpoints are bounded and never rewrite an unmanaged checkout', 
     const handle = sink()
     try {
       writeFileSync(join(cwd, 'untracked.txt'), 'never committed\n')
+      writeFileSync(join(cwd, 'tracked.txt'), 'already in the Git index\n')
+      gitIn(cwd, ['add', 'tracked.txt'])
       settledRun(handle, 'run-1', cwd)
       const captured = await recordRunCheckpoint(handle, git, { runId: 'run-1', cwd }, 100)
       expect(captured.status).toBe('captured')
       if (captured.status !== 'captured') return
       const tree = gitIn(cwd, ['ls-tree', '-r', '--name-only', captured.tree])
+      expect(tree.split('\n')).toContain('tracked.txt')
       expect(tree).not.toContain('untracked.txt')
+      gitIn(cwd, ['commit', '-qm', 'track the new file'])
 
       writeFileSync(join(cwd, 'a.txt'), 'work in progress\n')
       const restored = await applyRunRollback(handle, git, { runId: 'run-1', cwd, managed: true }, 200)

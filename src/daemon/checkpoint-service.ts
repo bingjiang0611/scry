@@ -3,6 +3,7 @@ import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonica
 import { gitCommand } from '../core/turn-recorder/git-command'
 import { createCheckpointGit } from './checkpoint-git'
 import { isManagedWorktreePath } from '../main/app-store'
+import type { SourceControlService } from '../main/source-control/service'
 import { applyRunRollback, recordRunCheckpoint, type CheckpointRecordResult, type CheckpointRestoreResult } from './checkpoint-recorder'
 import { checkpointSafetyRef, type CheckpointGit } from './checkpoint-refs'
 
@@ -30,6 +31,7 @@ export function createCheckpointService(deps: {
   sink: () => EventSink | undefined
   git: CheckpointGit
   isManagedWorktree: (cwd: string) => boolean
+  withRollbackGuard?: SourceControlService['withCheckpointRollback']
   now?: () => number
   warn?: (message: string, error: unknown) => void
   maxCheckpoints?: number
@@ -86,12 +88,17 @@ export function createCheckpointService(deps: {
       if (!sink) return { status: 'unavailable', reason: 'orchestration_unavailable' }
       const run = sink.getRun(input.runId)
       if (!run?.cwd) return { status: 'unavailable', reason: 'checkpoint_run_cwd_unknown' }
-      return applyRunRollback(deps.sink(), deps.git, {
-        runId: input.runId,
-        cwd: run.cwd,
-        managed: deps.isManagedWorktree(run.cwd),
-        ...(input.reason ? { reason: input.reason } : {})
-      }, now())
+      const cwd = run.cwd
+      if (!deps.isManagedWorktree(cwd)) return { status: 'unavailable', reason: 'checkpoint_unmanaged_worktree' }
+      if (!deps.withRollbackGuard) return { status: 'unavailable', reason: 'checkpoint_guard_unavailable' }
+      try {
+        return await deps.withRollbackGuard(cwd, () => applyRunRollback(deps.sink(), deps.git, {
+          ...input, cwd, managed: true
+        }, now())) ?? { status: 'unavailable', reason: 'checkpoint_worktree_busy' }
+      } catch (error) {
+        deps.warn?.('checkpoint rollback failed', error)
+        return { status: 'unavailable', reason: 'checkpoint_restore_failed' }
+      }
     }
   }
 }
@@ -104,9 +111,11 @@ export function createHostCheckpointService(deps: {
   sink: () => EventSink | undefined
   userDataDir: string
   log: (line: string) => void
+  sourceControl: SourceControlService
 }): CheckpointService {
   return createCheckpointService({
     sink: deps.sink,
+    withRollbackGuard: deps.sourceControl.withCheckpointRollback.bind(deps.sourceControl),
     isManagedWorktree: (cwd) => isManagedWorktreePath(deps.userDataDir, cwd),
     git: createCheckpointGit({
       git: (args, options) =>

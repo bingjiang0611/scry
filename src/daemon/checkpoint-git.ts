@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { copyFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CheckpointGit } from './checkpoint-refs'
@@ -22,10 +22,10 @@ export function createCheckpointGit(options: CheckpointGitOptions): CheckpointGi
       const dir = await mkdtemp(join(tmpdir(), 'scry-checkpoint-'))
       const env = { ...process.env, GIT_INDEX_FILE: join(dir, 'index') }
       try {
-        await run(cwd, ['read-tree', 'HEAD'], env)
-        // R9: `add -u` stages tracked modifications only. `add -A` wrote every untracked file the user
-        // happens to have in the checkout into the object database, on every settled run.
-        await run(cwd, ['add', '-u'], env)
+        // Keep the index's stat cache so Git doesn't rehash every tracked file from scratch.
+        const index = (await run(cwd, ['rev-parse', '--path-format=absolute', '--git-path', 'index'])).trim()
+        await copyFile(index, env.GIT_INDEX_FILE)
+        await run(cwd, ['-c', 'core.fsmonitor=false', 'add', '-u'], env)
         return (await run(cwd, ['write-tree'], env)).trim()
       } finally {
         await rm(dir, { recursive: true, force: true })
