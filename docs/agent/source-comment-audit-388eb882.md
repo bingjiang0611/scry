@@ -10,6 +10,8 @@ At `f1f268fb`, the third batch handled 64 of the 94 remaining wording tokens acr
 
 At `c104dd5b`, closed the remaining 30 wording decisions: 22 revised and eight retained for their local fixture or authority rationale. A separate ADR reconciliation closed 20 exact wording tokens (19 grouped review entries; the Qoder note contains two tokens). The combined changes cover 14 source files; exact edit replay, non-comment source, emit, directives, the ratchet, and 211 focused tests passed. No runtime or assertion changes were made. The 31 evidence follow-up tokens in this ledger are separate.
 
+The final byte check restored the `steer-ui-smoke.mjs` wording candidate and its neighboring line: the smoke serializes the whole function. The old text is kept as fixture bytes, not as proof of Provider receipt. This changes the final wording disposition to 129 revised or removed and nine kept.
+
 ## Candidate locations
 
 Line numbers refer to the pinned commit, not the cleanup result. Review the current blob and adjacent assertions before applying further changes. Follow-ups belong in separate behavior or validation work if confirmed; consolidate them by contract, not per token.
@@ -40,7 +42,7 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `scripts/scry-cli-wrapper.test.mjs` | 22, 23 | — | — | — |
 | `scripts/sidebar-activity-ui-continuation.mjs` | 114 | — | — | — |
 | `scripts/smoke-app-entries.mjs` | 250 | — | — | 121 |
-| `scripts/steer-ui-smoke.mjs` | — | — | — | 90 |
+| `scripts/steer-ui-smoke.mjs` | 90 | — | — | — |
 | `scripts/unified-conversation-smoke.mjs` | 196 | — | — | — |
 | `scripts/workspace-numstat-bench.mjs` | — | — | — | 76 |
 | `scripts/workspace-session-ui-checks.mjs` | 180 | — | — | — |

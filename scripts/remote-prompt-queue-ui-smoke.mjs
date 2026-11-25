@@ -51,6 +51,7 @@ async function exercise(contents) {
   // runner can still report false on the very next read. Wait for it within the normal bound.
   await wait('document.hasFocus()').catch((error) => { throw new Error(`Fixture document did not receive focus: ${error.message}`) })
 
+  // 铅笔在远端队列里必须可用：这是本次补的能力，之前 RemoteChat 没传编辑回调。
   check(await read(`(() => { const button = document.querySelectorAll('.queue-item')[0].querySelector('.queue-edit'); return button != null && !button.disabled })()`), 'Remote queue pencil is missing or disabled')
   await clickRowButton(0, 'queue-edit')
   await wait(`document.querySelectorAll('.queue-item')[0].classList.contains('is-editing')`)
@@ -65,10 +66,12 @@ async function exercise(contents) {
   check(await read(`document.querySelector('#fixture').dataset.claimed === ${JSON.stringify('远端第二条消息')}`), 'Drain did not skip the row being edited')
   check(await read(`document.querySelectorAll('.queue-item').length === 3 && document.querySelectorAll('.queue-item')[0].classList.contains('is-editing')`), 'Drain removed the row being edited')
 
+  // 取消编辑后行与原文本原样保留，输入框清空。
   await clickRowButton(0, 'queue-edit-cancel')
   await wait(`!document.querySelectorAll('.queue-item')[0].classList.contains('is-editing')`)
   check(await read(`(() => { const row = document.querySelectorAll('.queue-item')[0]; return row.querySelector('.queue-edit') != null && row.classList.contains('is-next') && ${composerValue} === '' })()`), 'Cancel did not restore the remote row')
 
+  // 编辑后发送：原位置移除、排到队尾，数量不变。
   await clickRowButton(0, 'queue-edit')
   await wait(`document.querySelectorAll('.queue-item')[0].classList.contains('is-editing')`)
   await click('button[aria-label="加入队列"]')

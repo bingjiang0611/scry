@@ -136,6 +136,7 @@ async function exercise(contents) {
     `the preview must be requested for the parent that clicked: ${JSON.stringify(previewPending)}`)
   await switchTo('scope-B', ['tab-B'])
   await answer('preview', preview('scope-A'))
+  // The lookup the new parent always needs is answered as the host would answer it.
   await settleList(['tab-B'], ['tab-B'])
   await wait(`document.querySelector('[data-races-tabs]').textContent === 'tab-B'`, 'B layout')
   const afterPreview = await state()

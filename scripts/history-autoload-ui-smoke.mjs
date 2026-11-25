@@ -34,6 +34,7 @@ async function exerciseHistoryAutoload(PAGE, TOTAL) {
   }
   const run = async (id) => {
     const scroller = scrollerOf(id)
+    // 初始只挂最近一页，滚动位置在底部（和真实会话打开一致）。
     if (countOf(id) !== PAGE) throw new Error(id + ': expected the latest page, got ' + countOf(id))
     await frame()
     scroller.scrollTop = scroller.scrollHeight
@@ -91,6 +92,7 @@ async function exerciseHistoryAutoload(PAGE, TOTAL) {
     const movedDrift = moving.getBoundingClientRect().top - movingTop
     if (Math.abs(movedDrift) > 1) throw new Error(id + ': user-scrolled view moved by ' + movedDrift + 'px after prepending ' + insertedWhileScrolling + 'px')
 
+    // 一路滚到最早一轮：继续请求直到没有更早轮次，然后确认不再请求。
     while (fixture(id).dataset.hasOlder === 'true') {
       const before = loadsOf(id)
       scroller.scrollTop = 0

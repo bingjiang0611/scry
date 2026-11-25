@@ -86,8 +86,8 @@ async function exercise(contents) {
   contents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' })
   await wait(`document.querySelector('#fixture').dataset.sends === '1'`)
 
-  // 提交中的行不能编辑。编辑其他排队消息时，文本进入输入框，
-  // 行内操作换成取消编辑，下一条高亮跳过正在编辑的行。
+  // 编辑队列消息：行内动作让位给取消编辑，文本进到真实输入框，队列高亮跟真实发送顺序走。
+  // 先断「正在提交的行不能编辑」——文本已经在 Provider 那一侧了。
   console.log('Steer UI: checking queue message editing')
   check(await read(`(() => { const button = document.querySelectorAll('.queue-item')[1].querySelector('.queue-edit'); return button.disabled && button.title.includes('Steer 正在提交') })()`), 'Pending Steer row allowed editing')
   await clickRowButton(0, 'queue-edit')

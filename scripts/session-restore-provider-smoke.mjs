@@ -73,6 +73,8 @@ async function exercise(window, workspace, agentPattern) {
   await waitFor(`() => JSON.parse(localStorage.getItem('scry.session-selection.v1') || 'null')?.cwd === ${JSON.stringify(workspace)}`,
     'workspace binding persisted')
 
+  // 这台机器上 `claude --version` 被 SIGKILL，codex/pi/opencode 都高于已验证版本线，
+  // 只有 qoder 1.1.79 在 supported 区间内；仍然走 Agent picker 的真实选择路径。
   const picked = await contents.executeJavaScript(`(async () => {
     const trigger = document.querySelector('.clipick .clibtn')
     if (!trigger || trigger.disabled) return 'agent picker disabled'
@@ -101,8 +103,10 @@ async function exercise(window, workspace, agentPattern) {
     throw new Error(`${error.message}; composer state: ${await composerState()}`)
   })
   await contents.executeJavaScript(`document.querySelector('.composer .send').click()`)
+  // 真实 Provider：提交后输入框应被消费，随后进入运行态。
   await waitFor(`() => document.querySelector('textarea[aria-label="描述任务"]').value === ''`, 'send consumed')
   await waitFor(() => document.body.innerText.includes('运行中'), 'run started', 120_000)
+  // 一轮真实回合结束：运行态消失且转写里出现本轮提示词。
   await waitFor(`() => !document.body.innerText.includes('运行中')`, 'run finished', 300_000)
   const transcript = () => contents.executeJavaScript(
     `document.querySelector('.chat-transcript')?.innerText ?? ''`)
