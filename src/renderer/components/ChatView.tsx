@@ -13,6 +13,8 @@ import { WorkspaceFileLinkProvider } from './MarkdownImpl'
 import { DelayedLoadingStatus } from './LoadingStatus'
 import { HISTORY_WINDOW_COPY, LOADING_COPY, SESSION_EMPTY_COPY } from '../constants/copy'
 import { useHistoryAutoload } from '../hooks/useHistoryAutoload'
+import { useRollbackRun } from '../hooks/useRollbackRun'
+import { RollbackRunRow } from './RollbackRunRow'
 
 const NO_PENDING_QUESTIONS: AgentQuestionRequest[] = []
 const NO_TURNS: ChatViewProps['turns'] = []
@@ -67,6 +69,8 @@ export function ChatView(props: ChatViewProps) {
   const ownerReady = !sessionLoading && !sessionCacheVisible
   const transcriptLoading = sessionLoading || (transcriptPending && displayedTurns.length === 0)
   const liveRunId = ownerReady && busy ? turns.find(turn => !turn.done && !turn.error)?.runId ?? null : null
+  // D5: the entry acts on the selected turn, or on the run that is live right now.
+  const rollback = useRollbackRun({ runId: focusedTurnRunId ?? liveRunId, hasCheckpoint: 'unknown', available: true, busy: Boolean(busy) })
   const lastLive = useRef<{ scope: string | undefined; runId: string | null }>({ scope: composerScopeKey, runId: null })
   const completedLiveRunId = ownerReady && lastLive.current.scope === composerScopeKey ? lastLive.current.runId : null
   const liveArrivalResetKey = useMemo(() => ({ scope: composerScopeKey, ready: ownerReady }), [composerScopeKey, ownerReady])
@@ -127,6 +131,7 @@ export function ChatView(props: ChatViewProps) {
                 ? <DelayedLoadingStatus loading className="is-quiet" title={LOADING_COPY.sessionHistoryVerifying} detail={LOADING_COPY.sessionHistoryVerifyingDetail} />
                 : !sessionEvidenceGap?.retrying && <DelayedSkeletonRows loading rows={4} label={LOADING_COPY.sessionHistory} />
             )}
+            <RollbackRunRow runId={focusedTurnRunId ?? liveRunId} actions={rollback} />
             <div className="chat-transcript-content">
               <ChatTranscriptTurns turns={displayedTurns} selectedId={selectedId} focusedTurnRunId={focusedTurnRunId} onTurnRef={onTurnRef} onSelect={onSelect} onOpenDiff={onOpenDiff} forkableRunIds={forkableRunIds} onForkTurn={!sessionLoading && !busy && queuedPrompts.length === 0 && pendingQuestions.length === 0 ? onForkTurn : undefined} pendingQuestions={pendingQuestions} onAnswerQuestion={onAnswerQuestion} remote={remote}
                 liveRunId={liveRunId} completedLiveRunId={completedLiveRunId} liveArrivalResetKey={liveArrivalResetKey} workspaceSetup={workspaceSetup} />

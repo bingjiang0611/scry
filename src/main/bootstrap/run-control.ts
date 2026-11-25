@@ -16,6 +16,8 @@ export interface RunControl {
    * 没有可调用对象就不能声称已经发出 run-scoped 强制终止。
    */
   forceKillScope: () => AgentForceKillScope | undefined
+  /** A5：共享 transport 是否只服务本 run；由 Provider handle 当下的事实回答。 */
+  exclusiveKillAvailable: () => boolean
   cwd?: string
   resume?: string
   getExternalSessionId: () => string | undefined

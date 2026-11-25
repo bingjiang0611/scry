@@ -10,20 +10,20 @@ import {
   buildSubmitCommandForAuthority,
   getRunStartExpiryInfo,
   h1DetailDigest,
-  requeueRunStartOutbox,
   runAuthorityPreDispatchRecheck,
   tryRealpath,
-  updateRunStartOutbox,
   type AuthorityBeforeDispatchInput,
   type AuthoritySubmitInput
 } from './authority-dispatch'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
+import type { Evidence } from '../../shared/turn-record-contracts'
 import { findNativeSession, scopedNativeSessionKey } from './native-session-lookup'
 import { parseLedgerIntentRouting, type ShadowCommitSample } from './shadow-routing'
 import {
   DEFAULT_PENDING_TTL_MS,
   INLINE_BODY_MAX_BYTES,
+  LOCAL_USER_ACTOR,
   OrchestrationStoreError,
   type PreparedBody
 } from './types'
@@ -79,7 +79,8 @@ export class AuthorityEngine {
       this.sink.authorizeActor(actor)
       return actor
     }
-    return 'system'
+    // R13: a local caller is the user, so its receipt must not expire as an internal system one.
+    return LOCAL_USER_ACTOR
   }
 
   private checkLegacySystemReceipt(commandId: string, actor: string):
@@ -182,7 +183,10 @@ export class AuthorityEngine {
   }
 
   /** Async authoritative submit: writes and fsyncs >16 KiB body BEFORE EventSink commit (data §4.7). */
-  async submitAsync(input: AuthoritySubmitInput): Promise<AuthoritySubmitResult> {
+  async submitAsync(
+    input: AuthoritySubmitInput,
+    onCommitted?: (result: Extract<AuthoritySubmitResult, { kind: 'accepted' }>) => void
+  ): Promise<AuthoritySubmitResult> {
     const start = this.beginSubmit(input)
     if ('early' in start) return start.early
     let preparedBody: PreparedBody | undefined
@@ -195,7 +199,11 @@ export class AuthorityEngine {
         preparedBody = await this.sink.bodyStore.prepareBodyAsync(input.detail)
         bodyWriteMs = performance.now() - bodyStart
       }
-      return this.submitBuilt(input, start.actor, start.hookStarted, start.sessionKey, start.epochBeforePrepare, preparedBody, bodyWriteMs)
+      const result = this.submitBuilt(input, start.actor, start.hookStarted, start.sessionKey, start.epochBeforePrepare, preparedBody, bodyWriteMs)
+      // The outbox becomes visible at commit. Publish the transient dispatch index in
+      // the same stack, before another pump can observe that row.
+      if (result.kind === 'accepted') onCommitted?.(result)
+      return result
     } finally {
       unpinBody?.()
     }
@@ -237,15 +245,24 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: ['host.stop_before_dispatch']
       })
-      updateRunStartOutbox(this.sink, this.#clock(), input.runId, 'done')
       return { ok: false, action: 'fail', reason: 'stop_requested' }
     }
     if (preDispatched && run.lifecycle === 'dispatched') return { ok: true }
-    if (run.lifecycle !== 'recorded') return { ok: false, action: 'fail', reason: 'illegal_transition' }
+    // D1: a queued run is accepted and not yet dispatched — exactly what this gate admits. Without
+    // `queued` here, the first time the session head cleared the queue entry failed the gate and the
+    // row stayed `queued` forever, which then blocked every later send in that session.
+    if (run.lifecycle !== 'recorded' && run.lifecycle !== 'queued') {
+      return { ok: false, action: 'fail', reason: 'illegal_transition' }
+    }
 
     const now = this.#clock()
     const { intentAt, expiresAt } = getRunStartExpiryInfo(this.sink, input.runId, run.intentSeq)
-    const effectiveExpiresAt = expiresAt ?? (intentAt !== null ? intentAt + this.#pendingTtlMs : null)
+    // D1: a queued run waits as long as the head takes. The pending TTL bounds a dispatch nobody will
+    // claim, so it must not be recomputed from the intent time here — that cancelled a queue entry the
+    // moment the head cleared after more than a minute, which is exactly what the queue exists for.
+    const effectiveExpiresAt = run.lifecycle === 'queued'
+      ? null
+      : expiresAt ?? (intentAt !== null ? intentAt + this.#pendingTtlMs : null)
     if ((intentAt !== null && now < intentAt) || (effectiveExpiresAt !== null && now > effectiveExpiresAt)) {
       this.recordTerminal({
         runId: input.runId,
@@ -254,8 +271,13 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: ['pre_dispatch_recheck:pending_expired']
       })
-      updateRunStartOutbox(this.sink, now, input.runId, 'voided', 'pending_expired')
       return { ok: false, action: 'fail', reason: 'pending_expired' }
+    }
+
+    if (input.intentBodyMissing && run.body) {
+      const reason = 'intent_body_unavailable'
+      this.recordTerminal({ runId: run.runId, step: 'failed', reason, delivery: 'not_sent', evidence: [`pre_dispatch_recheck:${reason}`] })
+      return { ok: false, action: 'fail', reason }
     }
 
     const effectiveActor = run.ownerActor.startsWith('peer:') ? run.ownerActor : input.actor
@@ -263,7 +285,6 @@ export class AuthorityEngine {
     const recheck = runAuthorityPreDispatchRecheck({ ...input, actor: effectiveActor }, preparedRealCwd, run.cwd)
     if (!recheck.ok) {
       if (recheck.action === 'requeue') {
-        requeueRunStartOutbox(this.sink, now, this.#pendingTtlMs, input.runId)
         const retryAfterMs =
           effectiveExpiresAt !== null ? Math.max(10, effectiveExpiresAt - now + 5) : this.#pendingTtlMs
         return { ok: false, action: 'requeue', reason: recheck.reason, retryAfterMs }
@@ -276,7 +297,6 @@ export class AuthorityEngine {
         delivery: 'not_sent',
         evidence: [`pre_dispatch_recheck:${recheck.reason}`]
       })
-      updateRunStartOutbox(this.sink, now, input.runId, 'failed', recheck.reason)
       return recheck
     }
 
@@ -346,7 +366,7 @@ export class AuthorityEngine {
     questionId: string
     answerId: string
     answerSha256: string
-    answerPayload?: Record<string, unknown>
+    answerPayload: Record<string, unknown>
   }) {
     return answerQuestionWithSink({
       sink: this.sink,
@@ -386,7 +406,6 @@ export class AuthorityEngine {
       delivery: 'not_sent',
       evidence: ['host.submit_compensation']
     })
-    updateRunStartOutbox(this.sink, this.#clock(), runId, 'voided', reason)
   }
 
   recordTerminal(input: {
@@ -397,6 +416,7 @@ export class AuthorityEngine {
     detail?: string
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
+    outcome?: Evidence<string>
   }): void {
     this.#preDispatchedRuns.delete(input.runId)
     this.#preparedRealCwdByRun.delete(input.runId)

@@ -369,6 +369,13 @@ export class SessionLedger {
     return pending
   }
 
+  /** Detail of a still-recorded intent, or undefined once it has left `recorded`. */
+  intentDetail(runId: string): string | undefined {
+    this.#assertDeterminate()
+    const entry = this.#runs.get(runId)
+    return entry?.lifecycle === 'recorded' ? entry.intentDetail : undefined
+  }
+
   // Runs whose executor was started but has not reported a terminal result.
   dispatchedRuns(): string[] {
     this.#assertDeterminate()

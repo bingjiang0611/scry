@@ -1,13 +1,18 @@
+import { withSessionCapabilities } from './session-capabilities'
 import type { ProviderAdapter } from './types'
+import type { ProviderSessionHost } from '../../host-runtime/provider-sessions/session-host'
+import type { AntigravityProcessSession } from './antigravity-session'
 import { isExperimentalProviderEnabled } from '../../shared/experimental-providers'
 import { createAntigravityAdapter } from './antigravity'
 import { createClaudeAdapter } from './claude'
 import { createCodexAdapter } from './codex'
 import { createQoderAdapter } from './qoder'
+import { createQoderSessionPool } from './qoder-session-pool'
 import { createOpenCodeAdapter } from './opencode'
 import { createPiAdapter } from './pi'
 import type { PiRunDiagnostics } from './pi-run-diagnostics'
 import type { PiAgentProfile } from '../pi-agent-profiles'
+import type { SessionLifecycleObserver } from './session-pool-policy'
 
 export function createBuiltInProviderAdapters(
   homeDir: string,
@@ -19,15 +24,37 @@ export function createBuiltInProviderAdapters(
     resolveProfile: (id: string) => Promise<PiAgentProfile | undefined>
     historyExtensionPath?: string
     diagnostics?: PiRunDiagnostics
+    /** C1: Pi's pool reports open/release so the host can store the reason. */
+    sessions?: {
+      onOpened?: (key: string, provider: 'pi', at: number) => void
+      onNativeSessionId?: (key: string, nativeSessionId: string) => void
+      onReleased?: (key: string, reason: string, at: number) => void
+    }
   },
-  userDataDir?: string
+  userDataDir?: string,
+  /** Scry C1: daemon-owned Provider session host shared by adapters that can keep a process. */
+  providerSessions?: ProviderSessionHost<AntigravityProcessSession>,
+  /** C1: Codex keeps one app-server per session key and reports open/release here. */
+  codexSessions?: SessionLifecycleObserver,
+  /** C1: OpenCode keeps one server per workspace and reports the same lifecycle. */
+  openCodeSessions?: SessionLifecycleObserver,
+  /** C1: Qoder keeps one CLI session per conversation and reports the same lifecycle. */
+  qoderSessions?: SessionLifecycleObserver
 ): ProviderAdapter[] {
-  return [
+  return withDeclaredCapabilities([
     createClaudeAdapter(homeDir),
-    createCodexAdapter(codexHomeDir, homeDir),
-    createQoderAdapter(homeDir),
-    createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory),
+    createCodexAdapter(codexHomeDir, homeDir, codexSessions),
+    createQoderAdapter(homeDir, qoderSessions
+      ? { qoderSessions: createQoderSessionPool({ provider: 'qoder_cli', observer: qoderSessions }) }
+      : {}),
+    createOpenCodeAdapter(homeDir, openCodeMcpAuthDirectory, openCodeSessionStateDirectory, openCodeSessions),
     ...(piProfiles ? [createPiAdapter(piProfiles)] : []),
-    ...(isExperimentalProviderEnabled('antigravity') ? [createAntigravityAdapter(homeDir, { userDataDir })] : [])
-  ]
+    ...(isExperimentalProviderEnabled('antigravity')
+      ? [createAntigravityAdapter(homeDir, { userDataDir, sessions: providerSessions })]
+      : [])
+  ])
+}
+
+function withDeclaredCapabilities(adapters: ProviderAdapter[]): ProviderAdapter[] {
+  return adapters.map(withSessionCapabilities)
 }

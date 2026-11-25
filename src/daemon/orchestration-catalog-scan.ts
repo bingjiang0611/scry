@@ -17,7 +17,7 @@ import {
   type TranscriptExtent, type TranscriptSource
 } from '../host-runtime/orchestration/transcript-interval'
 import type { SessionProjectionRow } from '../host-runtime/orchestration/types'
-import { wasNativeSourceDeleted } from '../host-runtime/orchestration/native-session-lookup'
+import { isSessionKeyTombstoned, wasNativeSourceDeleted } from '../host-runtime/orchestration/native-session-lookup'
 import { isWithdrawableSession } from '../host-runtime/orchestration/orchestrator-handlers'
 
 interface CatalogScanOptions {
@@ -100,14 +100,23 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
     if (!existing && payload.provider && payload.catalog?.nativeSessionId && wasNativeSourceDeleted(sink, {
       sessionId: payload.catalog.nativeSessionId, provider: payload.provider, profile: null, cwd: payload.cwd
     })) return
-    if (!existing && sink.handle.db.prepare(
-      "SELECT 1 FROM orch_event WHERE session_key IN (?, ?) AND cwd = ? AND type = 'session.deleted' LIMIT 1"
-    ).get(payload.sessionKey, payload.catalog?.nativeSessionId ?? '', payload.cwd)) return
+    // B2: tombstones come from the binding table so a pruned event log cannot resurrect a session.
+    if (!existing && isSessionKeyTombstoned(sink, payload.sessionKey)) return
     const payloadSha256 = sha256Hex(canonicalJson(payload))
+    // R13: the receipt is keyed on the payload *and* the observed extent. Content that changes
+    // A -> B -> A produced the same payload id, so the return to A was dropped as a duplicate command;
+    // an unchanged scan of the same file state still reuses its receipt (B4).
+    const observationKey = observation
+      ? sha256Hex(canonicalJson([
+        payloadSha256,
+        observation.extent.device.toString(), observation.extent.inode.toString(),
+        observation.extent.size, observation.extent.mtimeNs.toString()
+      ])).slice(0, 16)
+      : payloadSha256.slice(0, 16)
     const result = sink.runInBatchTransaction(() => {
       const update = sink.execute({
         type: 'session.discover',
-        commandId: `catalog-scan:${payload.sessionKey}:${existing?.revSeq ?? 0}:${payloadSha256.slice(0, 16)}`,
+        commandId: `catalog-scan:${payload.sessionKey}:${observationKey}`,
         actor: 'system',
         scope: 'system',
         at,
@@ -147,7 +156,9 @@ export function createCatalogScanWork(options: CatalogScanOptions) {
         seen.set(session.sessionKey, { ...previous, extent: current })
         return
       }
-      transcript = unavailable(verified.omissionReason ?? 'source_changed', verified.source)
+      // R13: the size is unchanged but the bytes are not, so the stored reference no longer describes
+      // the file. Recapture it instead of publishing the old reference as if it were still evidence.
+      transcript = await captureTranscriptInterval(source, undefined, current)
     } else {
       transcript = await captureTranscriptInterval(source, previous?.extent, current)
     }

@@ -140,6 +140,11 @@ struct RemoteRunClient {
     try await G0Transport.relayRunState(endpoint: endpoint(), identity: try identity(), runId: runId)
   }
 
+  // D1: lifecycle plus the host's queue slot/hold, so a queued run can say where it stands.
+  func runQueueState(runId: String) async throws -> G0Transport.RunQueueSnapshot? {
+    try await G0Transport.relayRunQueueState(endpoint: endpoint(), identity: try identity(), runId: runId)
+  }
+
   func answerQuestion(runId: String, answerId: String, response: G0Transport.RunQuestionResponse) async throws -> G0Transport.RunQuestionAnswerOutcome {
     try await G0Transport.relayRunAnswerQuestion(endpoint: endpoint(), identity: try identity(), runId: runId,
                                                   answerId: answerId, response: response)

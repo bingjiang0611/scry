@@ -23,8 +23,24 @@ export function createPiAdapter(options: {
   historyExtensionPath?: string
   /** Tests may lower the frame residency boundary without allocating tens of MiB. */
   rpcMaxFrameBytes?: number
+  /**
+   * C1: a kept Pi process is a session. The host records when it opened and why it was released,
+   * so "reused" and "released because idle" are stored facts rather than log lines.
+   */
+  sessions?: {
+    onOpened?: (key: string, provider: 'pi', at: number) => void
+    onNativeSessionId?: (key: string, nativeSessionId: string) => void
+    onReleased?: (key: string, reason: string, at: number) => void
+  }
 }): ProviderAdapter {
-  const rotomPool = new RotomRpcPool()
+  const rotomPool = new RotomRpcPool({
+    onOpened: (sessionId, at) => {
+      const key = `pi:${sessionId}`
+      options.sessions?.onOpened?.(key, 'pi', at)
+      options.sessions?.onNativeSessionId?.(key, sessionId)
+    },
+    onReleased: (sessionId, reason) => options.sessions?.onReleased?.(`pi:${sessionId}`, reason, Date.now())
+  })
   const profileForContext = async (context: ProviderContext): Promise<PiAgentProfile> => {
     if (!context.agentProfileId) throw new Error('Pi Provider 缺少 agentProfileId')
     const profile = await options.resolveProfile(context.agentProfileId)

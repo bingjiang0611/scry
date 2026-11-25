@@ -1,5 +1,11 @@
-import { randomUUID } from 'node:crypto'
 import type { BackgroundServiceOrchestrationStatus } from '../shared/background-service'
+import { maybeStartOrchestrationMaintenance } from './orchestration-maintenance'
+import { createOutboxGate } from './orchestration-outbox-gate'
+import { recordSessionLineage } from './orchestration-lineage'
+import { runDeferredLegacyImport } from './orchestration-deferred-import'
+import { recordSessionMetadata } from './orchestration-session-metadata'
+import { createTransportHandlers } from './orchestration-transport-handlers'
+import { observeAuthorityNativeTranscript } from './orchestration-native-transcript'
 import type { ConversationStore } from '../main/conversation-store'
 import type { NativeTranscriptRun } from '../main/bootstrap/run-host'
 import type { Evidence } from '../shared/turn-record'
@@ -10,20 +16,22 @@ import { recordOrchestrationCommitTiming } from '../main/run-stage-timing'
 import { AuthorityEngine } from '../host-runtime/orchestration/authority-engine'
 import { createConversationOrdinalResolver } from '../host-runtime/orchestration/conversation-ordinal-lookup'
 import { EventSink } from '../host-runtime/orchestration/event-sink'
-import { startDeferredLegacyImport, type LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
+import type { LegacyLedgerPlan } from '../host-runtime/orchestration/legacy-import'
 import { createAuthorityLedgerStore } from './orchestration-authority-ledger'
-import { LEGACY_H1_IMPORT_COMPLETE, runAuthorityStartupSequence } from './orchestration-authority-startup'
+import { runAuthorityStartupSequence } from './orchestration-authority-startup'
 import {
   buildAuthorityStatus,
-  createAuthoritySubscribeHandler,
   createAuthoritySubscribeHub,
-  forwardAppHintToSubscribeHub,
   handleAuthorityRunProgress,
   type AppHint,
   type AuthoritySubscribeRuntimeDeps
 } from './orchestration-authority-subscribe'
 import { AuthorityMcpTrustGate } from './orchestration-trust-gate'
 import { createRunTranscriptWrites, observeNativeRunTranscript } from './orchestration-run-transcript'
+import { createAuthorityRunTerminalHandler, terminalConversationWriteback } from './orchestration-run-terminal'
+import { createQuotaFailureHook } from './usage-limit-capture'
+import { takeRestartNoteForRun } from './restart-background-note'
+import type { UsageLimitScheduler } from './usage-limit-scheduler'
 import type { SubscribeHub } from '../host-runtime/orchestration/subscribe-hub'
 import type { SessionAttentionSnapshot } from '../shared/session-attention'
 import type { SubscribeResponse, SubscribeRequest } from '../shared/orchestration-subscribe'
@@ -33,10 +41,13 @@ import {
 } from '../host-runtime/orchestration/mode'
 import type { RecoverOrchestrationSummary } from '../host-runtime/orchestration/recovery'
 import { parseLedgerIntentRouting } from '../host-runtime/orchestration/shadow-routing'
+import { createRecorderEvidenceFinder } from '../host-runtime/orchestration/recorder-evidence'
+import { ledgerLifecycleFor } from './orchestration-intent-status'
+import { TERMINAL_RUN_LIFECYCLES } from '../host-runtime/orchestration/run-transitions'
+import { sessionQueueBlocksDispatch } from './orchestration-dispatch-queue'
+import { createRunIdMappings } from './orchestration-canonical-run-ids'
 
 const DEFAULT_DEFERRED_IMPORT_THRESHOLD = 2_000
-const MAX_LEDGER_CANONICAL_MAP = 4_096
-const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export interface DaemonOrchestrationAuthority {
   readonly fullfsync: boolean
@@ -48,6 +59,9 @@ export interface DaemonOrchestrationAuthority {
   readonly importComplete: Promise<void>
   readonly subscribeHub: SubscribeHub
   createSubscribeHandler(deps: AuthoritySubscribeRuntimeDeps): (peer: string, request: SubscribeRequest, signal?: AbortSignal) => Promise<SubscribeResponse>
+  /** D3: record the lineage of a fork or side chat that already exists natively. */
+  recordSessionLineage(input: Parameters<NonNullable<OrchestrationAuthorityHooks['recordSessionLineage']>>[0]): { status: 'recorded' | 'unavailable'; reason?: string }
+  recordSessionMetadata(input: Parameters<NonNullable<OrchestrationAuthorityHooks['recordSessionMetadata']>>[0]): { status: 'recorded' | 'unavailable'; reason?: string }
   publishHint(event: AppHint): void
   observeNativeTranscript(homeDir: string, run: NativeTranscriptRun): ReturnType<typeof observeNativeRunTranscript> | undefined
   startImport(): void
@@ -69,6 +83,8 @@ export interface AttachDaemonOrchestrationAuthorityOptions<
   deferredImportThreshold?: number
   pauseDeferredImport?: Promise<void>
   attentionSnapshot?: () => SessionAttentionSnapshot
+  /** Retention timer; `null` disables it. */ maintenanceIntervalMs?: number | null
+  /** C4: quotas and restart notes are recorded only when set. */ usageLimits?: UsageLimitScheduler
 }
 
 /**
@@ -83,7 +99,7 @@ export async function attachDaemonOrchestrationAuthority<
   options: AttachDaemonOrchestrationAuthorityOptions<State, Control>
 ): Promise<DaemonOrchestrationAuthority> {
 
-  // Maintainer decision (2026-11-20): macOS defaults fullfsync=ON and checkpoint_fullfsync=ON.
+  // Maintainer decision (2026-11-20): macOS defaults both fullfsync flags ON.
   const fullfsync = parseOrchestrationFullfsync(options.env) ?? true
   const checkpointFullfsync = true
   const pendingTtlMs = parsePendingTtlMs(options.env)
@@ -156,6 +172,9 @@ function buildAuthorityRuntime<
   const { options, fullfsync, checkpointFullfsync, pendingTtlMs, leaseOwner, resolveTurnOrdinal, sink, recovery } = ctx
   let deferredPlan = ctx.deferredPlan
   const { importComplete, resolveImportComplete } = ctx
+  // A3: live-run outcomes read the same committed recorder evidence as startup recovery.
+  const findRecorderEvidence = createRecorderEvidenceFinder(options.userDataDir, sink)
+  const db = sink.handle.db
 
   const engine = new AuthorityEngine({
     sink,
@@ -167,7 +186,6 @@ function buildAuthorityRuntime<
     }
   })
 
-  // Track mapping between the dispatcher run ID and canonical runId when different (conversation turns).
   const ledgerToCanonical = new Map<string, string>()
   const pendingTranscripts = new Map<string, Promise<Evidence<string>>>()
   const transcriptWrites = createRunTranscriptWrites(sink, options.log)
@@ -178,47 +196,8 @@ function buildAuthorityRuntime<
   )
   let progressCounter = 0
 
-  const resolveCanonical = (runId: string): string => ledgerToCanonical.get(runId) ?? runId
-  const resolvePersistedCanonical = (runId: string): string => {
-    const active = ledgerToCanonical.get(runId)
-    if (active || !sink.handle.db.open) return active ?? runId
-    const alias = canonicalForAlias.get(runId) as { run_id: string } | undefined
-    return alias?.run_id ?? runId
-  }
-  const trackCanonical = (ledgerRunId: string, canonicalRunId: string): void => {
-    if (ledgerRunId === canonicalRunId) return
-    if (!sink.isWriteIndeterminate() && sink.handle.db.open) {
-      try {
-        sink.handle.db
-          .prepare('INSERT OR IGNORE INTO orch_legacy_run (ledger_run_id, run_id) VALUES (?, ?)')
-          .run(ledgerRunId, canonicalRunId)
-      } catch {
-        // Ignore if mapping already present or sink fenced.
-      }
-    }
-    ledgerToCanonical.delete(ledgerRunId)
-    ledgerToCanonical.set(ledgerRunId, canonicalRunId)
-    while (ledgerToCanonical.size > MAX_LEDGER_CANONICAL_MAP) {
-      const oldest = ledgerToCanonical.keys().next().value
-      if (oldest === undefined) break
-      ledgerToCanonical.delete(oldest)
-    }
-  }
-
-  const aliasForCanonical = sink.handle.db.prepare(
-    'SELECT ledger_run_id FROM orch_legacy_run WHERE run_id = ?'
-  )
-  const canonicalForAlias = sink.handle.db.prepare('SELECT run_id FROM orch_legacy_run WHERE ledger_run_id = ?')
-  const ledgerIdForSubmit = (runId: string, duplicate: boolean): string => {
-    if (duplicate) {
-      const alias = aliasForCanonical.get(runId) as { ledger_run_id: string } | undefined
-      return alias?.ledger_run_id ?? runId
-    }
-    if (UUID_V4_RE.test(runId)) return runId
-    const ledgerRunId = randomUUID()
-    trackCanonical(ledgerRunId, runId)
-    return ledgerRunId
-  }
+  const canonicalIds = createRunIdMappings(sink, ledgerToCanonical)
+  const { resolveCanonical, resolvePersistedCanonical, ledgerIdForSubmit, ledgerIdForCanonical } = canonicalIds
 
   const readSubmitReceipt = (peer: string, commandId: string) => {
     if (sink.isWriteIndeterminate()) throw new Error('orchestration_write_indeterminate')
@@ -227,10 +206,15 @@ function buildAuthorityRuntime<
   }
 
   const hooks: OrchestrationAuthorityHooks = {
+    outbox: () => createOutboxGate(() => db),
+    recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
+    takeRestartBackgroundNote: (runId) => takeRestartNoteForRun(db, runId),
+    recordSessionMetadata: (input) => recordSessionMetadata(sink, input, Date.now()),
     currentLogId: () => sink.getMeta('log_id'),
     createLedgerStore: () => createAuthorityLedgerStore(sink),
+    ledgerIdForRun: ledgerIdForCanonical,
 
-    submitAsync: async (input) => {
+    submitAsync: async (input, indexCommittedIntent) => {
       const immediateDispatch = input.immediateDispatch
         ? {
             ...input.immediateDispatch,
@@ -243,15 +227,18 @@ function buildAuthorityRuntime<
         grantScope: input.grantScope,
         commandId: input.scopedIntentId,
         detail: input.detail,
+        ...(input.claimMode ? { claimMode: input.claimMode } : {}),
         ...(immediateDispatch ? { immediateDispatch } : {})
+      }, ({ runId }) => {
+        indexCommittedIntent(ledgerIdForSubmit(runId, false))
+        if (!immediateDispatch) {
+          const route = parseLedgerIntentRouting(runId, input.detail)
+          trustGate.prepare(runId, route.provider, route.cwd || sink.getRun(runId)?.cwd)
+        }
       })
       if (res.kind === 'rejected') throw new Error(res.reason)
-      if (!immediateDispatch && res.kind !== 'duplicate') {
-        const routing = parseLedgerIntentRouting(res.runId, input.detail)
-        trustGate.prepare(res.runId, routing.provider, routing.cwd || sink.getRun(res.runId)?.cwd)
-      }
-      const ledgerRunId = ledgerIdForSubmit(res.runId, res.kind === 'duplicate')
-      return { runId: ledgerRunId, status: res.kind === 'duplicate' ? 'duplicate' : 'recorded', seq: res.seq }
+      const duplicate = res.kind === 'duplicate'
+      return { runId: ledgerIdForSubmit(res.runId, duplicate), status: duplicate ? 'duplicate' : 'recorded', seq: res.seq }
     },
 
     submitSync: (input) => {
@@ -285,9 +272,7 @@ function buildAuthorityRuntime<
       const runId = receipt?.result?.runId
       const run = typeof runId === 'string' ? sink.getRun(runId) : undefined
       if (!run) throw new Error('unknown_intent')
-      const state = run.lifecycle === 'admitted' ? 'dispatched'
-        : run.lifecycle === 'interrupted' ? 'cancelled' : run.lifecycle
-      return { runId: ledgerIdForSubmit(run.runId, true), state }
+      return { runId: ledgerIdForSubmit(run.runId, true), state: ledgerLifecycleFor(run.lifecycle) }
     },
 
     compensateSubmitFailure: (runId, reason) => {
@@ -300,8 +285,9 @@ function buildAuthorityRuntime<
     recoveredRunLifecycle: (runId) => {
       const run = sink.getRun(resolvePersistedCanonical(runId))
       if (!run) return undefined
-      if (run.lifecycle === 'settled' || run.lifecycle === 'failed' || run.lifecycle === 'cancelled' || run.lifecycle === 'interrupted') {
-        return run.lifecycle
+      // `rolled_back` is terminal for the log but has no H1 lifecycle: the ledger still says cancelled.
+      if (run.lifecycle !== 'rolled_back' && TERMINAL_RUN_LIFECYCLES.has(run.lifecycle)) {
+        return run.lifecycle as 'settled' | 'failed' | 'cancelled' | 'interrupted'
       }
       return undefined
     },
@@ -315,11 +301,17 @@ function buildAuthorityRuntime<
 
     beforeDispatch: (input) => {
       const canonicalRunId = resolveCanonical(input.runId)
+      // D1: a queued run waits for the session's live run instead of running beside it. The gate
+      // defers (no attempt spent) rather than failing, so the queue drains when the head finishes.
+      if (sessionQueueBlocksDispatch(sink, canonicalRunId)) {
+        return { ok: false as const, action: 'requeue' as const, reason: 'session_run_active', retryAfterMs: 1_000 }
+      }
       const routing = parseLedgerIntentRouting(canonicalRunId, input.detail)
       const actor = input.peerCertSHA256 ? `peer:${input.peerCertSHA256}` : 'system'
       let trustGateDetail: string | undefined
       const res = engine.beforeDispatch({
         runId: canonicalRunId,
+        intentBodyMissing: input.detail === undefined,
         cwd: routing.cwd,
         provider: routing.provider,
         profile: routing.profile,
@@ -359,7 +351,8 @@ function buildAuthorityRuntime<
         runId: resolvePersistedCanonical(input.runId),
         questionId: input.questionId,
         answerId: input.answerId,
-        answerSha256: input.answerSha256
+        answerSha256: input.answerSha256,
+        answerPayload: input.response
       })
       if (res.kind === 'rejected') {
         throw new RemoteInteractionError(res.reason)
@@ -378,23 +371,28 @@ function buildAuthorityRuntime<
         abortLive: input.abortLive
       }),
 
-    onRunTerminal: (runId, step, detail) => {
-      const canonicalRunId = resolveCanonical(runId)
-      const binding = subscribeHub.liveRunMeta(canonicalRunId)
-      engine.recordTerminal({
-        runId: canonicalRunId,
-        step,
-        ...(binding?.admitted && binding.scryRunId ? { appRunId: binding.scryRunId } : {}),
-        ...(detail ? { reason: detail } : {}),
-        evidence: [step === 'cancelled' ? 'host.run_completion' : 'provider']
-      })
-      const transcript = pendingTranscripts.get(canonicalRunId)
-      pendingTranscripts.delete(canonicalRunId)
-      if (transcript) transcriptWrites.enqueue(canonicalRunId, transcript)
-      subscribeHub.noteRunTerminal(canonicalRunId)
-      trustGate.delete(canonicalRunId)
-      ledgerToCanonical.delete(runId)
-    },
+    onRunTerminal: createAuthorityRunTerminalHandler({
+      engine,
+      onProviderFailure: createQuotaFailureHook(() => sink, () => options.usageLimits),
+      liveRunMeta: (runId) => subscribeHub.liveRunMeta(runId),
+      resolveCanonical,
+      findRecorderEvidence,
+      schedule: (fn, ms) => {
+        const timer = setTimeout(fn, ms)
+        timer.unref?.()
+      },
+      evidenceFor: (step) => [step === 'cancelled' ? 'host.run_completion' : 'provider'],
+      // B1/D4: conclude this run's conversation turn now, not at the next restart.
+      onTerminalRecorded: terminalConversationWriteback({ sink: () => sink, conversationStore: options.conversationStore }),
+      releaseRun: (canonicalRunId, dispatchRunId) => {
+        const transcript = pendingTranscripts.get(canonicalRunId)
+        pendingTranscripts.delete(canonicalRunId)
+        if (transcript) transcriptWrites.enqueue(canonicalRunId, transcript)
+        subscribeHub.noteRunTerminal(canonicalRunId)
+        trustGate.delete(canonicalRunId)
+        ledgerToCanonical.delete(dispatchRunId)
+      }
+    }),
 
     isWriteIndeterminate: () => sink.isWriteIndeterminate()
   }
@@ -402,53 +400,37 @@ function buildAuthorityRuntime<
   let closed = false
   const pausedImport = options.pauseDeferredImport
   const startImport = (): void => {
-    const ctrl = ctx.getDeferredControl()
-    if (!deferredPlan || ctrl.deferredStarted || closed || sink.isWriteIndeterminate()) {
+    const plan = deferredPlan
+    if (!plan) {
       resolveImportComplete?.()
       return
     }
-    ctrl.setStarted()
-    const targetPlan = deferredPlan
-    deferredPlan = undefined
-    const handle = startDeferredLegacyImport({
-      sink, userDataDir: options.userDataDir, pendingTtlMs,
-      reconcileOpenRuns: true, shadowOnly: false, plan: targetPlan, resolveTurnOrdinal
+    const began = runDeferredLegacyImport({
+      sink, plan, closed, pendingTtlMs, userDataDir: options.userDataDir, resolveTurnOrdinal,
+      control: ctx.getDeferredControl(), log: options.log, resolveImportComplete
     })
-    ctx.setDeferredControl(handle.cancel)
-    handle.promise
-      .then((s) => {
-        if (closed || sink.isWriteIndeterminate() || s.legacyLedgerSeq < targetPlan.lastSeq) return
-        sink.setMeta(LEGACY_H1_IMPORT_COMPLETE, '1')
-        options.log(`daemon.orchestration-on-import-done importedRuns=${s.importedRuns} importedSessions=${s.importedSessions}`)
-      })
-      .catch((e) => options.log(`daemon.orchestration-on-import-failed ${e instanceof Error ? e.message : String(e)}`))
-      .finally(() => resolveImportComplete?.())
+    if (began) deferredPlan = undefined
   }
 
   options.log(`daemon.orchestration-on-ready fullfsync=${fullfsync} checkpointFullfsync=${checkpointFullfsync} recoveredInterrupted=${recovery.interruptedDispatched} closedQuestions=${recovery.closedOpenQuestions}`)
 
-  const status = (): BackgroundServiceOrchestrationStatus => buildAuthorityStatus(sink)
+  const maintenance = maybeStartOrchestrationMaintenance({
+    sink, log: options.log, maintenanceIntervalMs: options.maintenanceIntervalMs
+  })
 
   return {
     fullfsync, checkpointFullfsync, sink, engine, hooks, recovery, importComplete, subscribeHub,
-    createSubscribeHandler: (deps) => createAuthoritySubscribeHandler(sink, subscribeHub, deps),
-    publishHint: (event) => forwardAppHintToSubscribeHub(subscribeHub, event, resolveCanonical),
-    observeNativeTranscript: (homeDir, run) => {
-      if (!sink.handle.db.open || sink.isWriteIndeterminate()) return undefined
-      const runId = resolveCanonical(run.ledgerRunId ?? run.runId)
-      return observeNativeRunTranscript(homeDir, run, (transcript) => {
-        if (!sink.handle.db.open || sink.isWriteIndeterminate()) return
-        const current = sink.getRun(runId)
-        if (current?.lifecycle === 'dispatched' && current.cwd === run.cwd && current.provider === run.providerId) {
-          pendingTranscripts.set(runId, transcript)
-        }
-      }, options.log)
-    },
+    recordSessionLineage: (input) => recordSessionLineage(sink, input, Date.now()),
+    recordSessionMetadata: (input) => recordSessionMetadata(sink, input, Date.now()),
+    ...createTransportHandlers({ sink, subscribeHub, resolveCanonical }),
+    observeNativeTranscript: (homeDir, run) =>
+      observeAuthorityNativeTranscript({ sink, resolveCanonical, pendingTranscripts, log: options.log }, homeDir, run),
     startImport: pausedImport ? () => { void pausedImport.then(startImport) } : startImport,
-    status,
+    status: () => buildAuthorityStatus(sink),
     close: async () => {
       if (closed) return
       closed = true
+      maintenance?.stop()
       subscribeHub.close()
       sink.setCommitObserver(undefined)
       ctx.getDeferredControl().cancelDeferred?.()

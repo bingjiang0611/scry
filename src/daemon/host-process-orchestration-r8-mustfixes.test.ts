@@ -100,7 +100,8 @@ describe('W9 Round-2 Must-Fixes 1, 4, 5a-c, 6, 7', () => {
           runId: randomUUID(),
           questionId: 'q-nonexistent',
           answerId: randomUUID(),
-          answerSha256: sha256Hex('answer')
+          answerSha256: sha256Hex('answer'),
+          response: { runId: 'q-nonexistent', questionId: 'q-nonexistent', behavior: 'cancelled' }
         })
       ).toThrow()
     } finally {

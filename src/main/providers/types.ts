@@ -83,6 +83,11 @@ export interface ProviderRunHandle {
    * 自动停止升级会据此拒绝发出会波及其他 run 的硬杀。
    */
   forceKillScope: AgentForceKillScope
+  /**
+   * A5：共享 transport 当下的活动计数是否为 1（forceKill 只会回收本 run 的 client/server）。
+   * 只有 adapter 能读到真实计数时才提供；返回 false 时自动升级仍然拒绝硬杀。
+   */
+  exclusiveKillAvailable?: () => boolean
   getExternalSessionId: () => string | undefined
   getProviderTurnId?: () => string | undefined
   getForkTurnId?: () => string | undefined
@@ -152,6 +157,23 @@ export interface ProviderRunRequest {
   recordNative?: (type: string, payload: unknown) => void
   onExternalSessionId?: (sessionId: string) => void
   requestUserInput?: (request: AgentQuestionRequest, signal: AbortSignal) => Promise<AgentQuestionResponse>
+  /**
+   * C3: the answer's run ended while Provider-native background work continued. The host submits an
+   * `origin: 'agent'` wake through D1's queue, so the session reports that work as an agent turn.
+   */
+  onBackgroundWake?: (wake: {
+    taskIds: string[]
+    reason: 'continuation' | 'terminal' | 'cleared'
+    sessionId: string
+    cwd: string | undefined
+  }) => void
+  /** A2：本会话已接受的规则持久副本，重开 Provider 进程时重新带上。 */
+  sessionPermissionRules?: SessionPermissionRuleAccess
+}
+
+export interface SessionPermissionRuleAccess {
+  rules(sessionId: string | undefined): Array<{ toolName: string; ruleContent: string }>
+  record(sessionId: string, rules: readonly { toolName: string; ruleContent: string }[]): void
 }
 
 export interface ProviderForkLastTurnRequest extends AgentForkLastTurn {
@@ -224,6 +246,17 @@ export interface SessionEvidenceFacet {
   enrich(context: ProviderContext, turns: ParsedTurn[]): Promise<ParsedTurn[]>
 }
 
+export interface ProviderSessionCapabilities {
+  /** A second turn can reuse the running process instead of starting a new one. */
+  persistentProcess: boolean
+  /** Input can be injected into a running turn without interrupting it. */
+  nativeSteer: boolean
+  /** Model and effort can change on the live process without a restart. */
+  onlineModelSwitch: boolean
+  /** The permission mode is a launch flag, so a change requires a new process. */
+  permissionModeInLaunchFlags: boolean
+}
+
 export interface ProviderAdapter {
   readonly id: ProviderId
   readonly runtimeProvider: RuntimeProvider
@@ -253,6 +286,12 @@ export interface ProviderAdapter {
   readonly commands?: CommandsFacet
   readonly hookTrust?: HookTrustFacet
   readonly runControls?: RunControlsFacet
+  /**
+   * C1/C2: what this Provider can do *inside* one live session. A Provider that cannot steer
+   * mid-turn must be interrupted and restarted for a follow-up, so the dispatcher reads this
+   * declaration instead of assuming every Provider behaves like Claude.
+   */
+  readonly sessionCapabilities?: ProviderSessionCapabilities
   readonly sessionEvidence?: SessionEvidenceFacet
   invalidateContext?(context: ProviderContext): Promise<void> | void
   dispose?(): Promise<void> | void

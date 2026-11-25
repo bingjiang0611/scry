@@ -1,5 +1,28 @@
-import type { BackgroundWork } from '../../shared/background-work'
+import type { BackgroundTaskStopResult, BackgroundWork } from '../../shared/background-work'
 import type { QoderBackgroundTasks } from './qoder-messages'
+
+/** C3: stopping one background task, and what may honestly be reported about it. */
+export async function stopQoderBackgroundTask(input: {
+  tasks: QoderBackgroundTasks
+  taskId: string
+  /** False once this unit has settled or stopped: the task no longer belongs to a live turn. */
+  live: boolean
+  canStop: boolean
+  stopTask: (taskId: string) => Promise<BackgroundTaskStopResult>
+  refresh: () => void
+}): Promise<BackgroundTaskStopResult> {
+  const task = input.tasks.tasks.find((entry) => entry.taskId === input.taskId)
+  if (!input.live || !task || task.stopState) {
+    return { status: 'rejected', message: '该任务不属于当前活动轮次、已结束或已请求停止。' }
+  }
+  if (!input.canStop) return { status: 'unavailable', message: '当前 Qoder 版本不支持已验证的单任务停止，请使用停止本轮。' }
+  input.tasks.markStop(input.taskId, 'requested')
+  input.refresh()
+  const result = await input.stopTask(input.taskId)
+  input.tasks.markStop(input.taskId, result.status === 'unknown' ? 'unconfirmed' : result.status === 'requested' ? 'requested' : undefined)
+  input.refresh()
+  return result
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' ? value as Record<string, unknown> : {}

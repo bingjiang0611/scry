@@ -169,9 +169,16 @@ export interface HostControllerDependencies {
   // Provider-native slash commands for one authorized workspace context.
   listCommands?(query: RemoteCommandQuery): Promise<RemoteCommandCatalog>
   // Host-owned session metadata writes. The callback must use the host store.
-  sessionAction?(context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void): Promise<boolean> | boolean
+  /** `actor` names the caller that asked for the change, so the recorded event keeps it. */
+  sessionAction?(context: DesktopRemoteContext, action: DesktopRemoteSessionAction, authorize: () => void, actor?: string): Promise<boolean> | boolean
   sessionFork?(request: DesktopRemoteForkSessionRequest, authorize: () => void): Promise<{ externalSessionId: string }>
-  sessionDelete?(request: DesktopRemoteDeleteSessionRequest, authorize: () => void, grantScope?: 'local' | 'remote'): Promise<DeleteSessionResult>
+  sessionDelete?(
+    request: DesktopRemoteDeleteSessionRequest,
+    authorize: () => void,
+    grantScope?: 'local' | 'remote',
+    /** D4: recorded on the tombstone event, so the delete names the device that asked. */
+    actor?: string
+  ): Promise<DeleteSessionResult>
   // Read-only tool panels for the paired device. Production passes the same
   // aggregations the Mac UI shows; nothing here scans or executes.
   toolPanels?: ToolPanelSources

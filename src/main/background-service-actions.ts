@@ -1,3 +1,5 @@
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { BackgroundServiceAction, BackgroundServiceActionResult, BackgroundServiceConnection } from '../shared/background-service'
 import type { DaemonLockRecord } from '../daemon/ledger-lock'
 import type { LoginStartMutationResult } from '../daemon/login-start'
@@ -199,4 +201,44 @@ export async function setHostCliApproval(
     const reason = error instanceof Error && /^[a-z0-9_:]+$/.test(error.message) ? error.message : 'host_admin_failed'
     return failed(reason)
   }
+}
+
+/**
+ * C4: automatic resume spends the user's quota, so it is off until the user turns it on in the settings
+ * section «后台服务». The switch is one small file under userData because two processes need it: main
+ * writes it here, and the daemon reads it when its scheduler decides whether to resume.
+ *
+ * Not in `shared`: the renderer imports those modules, and a file system import there breaks its build.
+ * Read on every decision rather than cached, because a cache would let the App show a switch that no
+ * longer matches what the daemon will do.
+ */
+export const USAGE_LIMIT_RESUME_FILE = 'usage-limit-resume.json'
+
+export interface UsageLimitResumeSwitch {
+  enabled: boolean
+}
+
+export function usageLimitResumePath(userDataDir: string): string {
+  return join(userDataDir, USAGE_LIMIT_RESUME_FILE)
+}
+
+/** A missing, unreadable or shapeless file means off: the default never spends anything. */
+export function readUsageLimitResumeSwitch(userDataDir: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(usageLimitResumePath(userDataDir), 'utf8'))
+    if (parsed === null || typeof parsed !== 'object') return false
+    return (parsed as { enabled?: unknown }).enabled === true
+  } catch {
+    return false
+  }
+}
+
+/** Written under a private mode and renamed into place: a reader sees the old value or the new one. */
+export function writeUsageLimitResumeSwitch(userDataDir: string, enabled: boolean): void {
+  const target = usageLimitResumePath(userDataDir)
+  const temporary = `${target}.${process.pid}.tmp`
+  mkdirSync(dirname(target), { recursive: true })
+  writeFileSync(temporary, `${JSON.stringify({ enabled } satisfies UsageLimitResumeSwitch)}\n`, { mode: 0o600, flag: 'w' })
+  chmodSync(temporary, 0o600)
+  renameSync(temporary, target)
 }

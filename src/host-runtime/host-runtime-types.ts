@@ -40,7 +40,15 @@ export type RemoteRuns = {
   activeStates: () => ActiveRun[]
   get: (runId: string) => { state: ActiveRun } | undefined
 }
-export type DeleteOptions = { confirm: boolean; notifyFailure: boolean; conversationId?: string; runIds?: readonly string[]; authorize?: () => void }
+export type DeleteOptions = {
+  confirm: boolean
+  notifyFailure: boolean
+  conversationId?: string
+  runIds?: readonly string[]
+  authorize?: () => void
+  /** D4: the caller that asked for the delete; the tombstone event records it. */
+  actor?: string
+}
 
 export type RemoteHostRuntime = {
   remoteHostService: RemoteHostService | null
@@ -57,7 +65,14 @@ export type RemoteHostRuntime = {
   forkSessionWithAuthority?: (request: DesktopRemoteForkSessionRequest, authorize?: () => void) => Promise<AgentForkSessionResult>
   deleteOneSession?: (request: SessionDeletionRequest, options: DeleteOptions) => Promise<DeleteSessionResult>
   sessionRefFromRequest?: (value: unknown) => AppSessionRef | null
-  changeLegacySessionMetadata?: (ref: AppSessionRef, change: () => boolean) => Promise<boolean>
+  changeLegacySessionMetadata?: (
+    ref: AppSessionRef,
+    change: () => boolean,
+    meta?: {
+      change: { kind: 'rename'; title: string } | { kind: 'pin'; pinned: boolean } | { kind: 'archive'; archived: boolean }
+      actor: string
+    }
+  ) => Promise<boolean>
   appSessionStore: () => ReturnType<typeof createAppSessionStore>
   knownProjectDirectories: () => Set<string>
   remoteProjectRoots: () => string[]

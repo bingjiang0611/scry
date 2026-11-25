@@ -177,7 +177,7 @@
 ### 4.8 压缩与保留
 
 - projection 表就是快照，不另存快照文件。H1 的「快照 + 保留尾部」机制（`session-ledger.ts:242-268`）不再需要。
-- 事件保留 30 天（决定 C）：删除早于保留期、且 seq ≤ 所有 projection 已应用位置的事件；每个流保留最新一条。`pruned_through` 同事务更新。
+- 事件保留 30 天（决定 C；`orchestration-retention.ts` 的 `DEFAULT_EVENT_RETENTION_MS`，由 `orchestration-maintenance.ts` 定时执行）：删除早于保留期、且 seq ≤ 所有 projection 已应用位置的事件；每个流保留最新一条。`pruned_through` 同事务更新。
 - 回执与墓碑：永久（§4.3）。
-- outbox：`done` 72 h 后删，`voided`/`failed` 30 天。正文见 §4.7。
+- outbox：`done` 72 h 后删，`voided`/`failed` 30 天（`OUTBOX_DONE_RETENTION_MS`、`OUTBOX_DEAD_RETENTION_MS`）。正文见 §4.7。
 - 原始证据（transcript、trace 归档、记录、Provider result）不受影响，仍长期保留。

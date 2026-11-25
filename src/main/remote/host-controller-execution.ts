@@ -1,9 +1,11 @@
+import { prependRestartNoteToDetail } from '../../daemon/restart-background-note'
 import { RemoteGateway } from './remote-gateway'
 import type { RemoteCommandSource, RemoteHistoryPreviewSource, RemoteHistorySource, RemoteHistoryTurnsPageSource, RemoteHistoryVersionSource } from './remote-gateway'
 import { RemoteDispatcher } from './remote-dispatcher'
 import type { RemoteExecutor, RemoteExecutorInput } from './remote-dispatcher'
 import { RemoteRunPolicy, GatedExecutor } from './remote-run-policy'
 import { readRemoteWorkspace } from './remote-workspace'
+import { createControlEffectExecutor } from './host-controller-effects'
 import type { RemoteFileDownloads } from './remote-file-download'
 import type { RemoteInteractionBroker } from './remote-interaction-broker'
 import type { LedgerEvent, SessionLedger } from './session-ledger'
@@ -109,6 +111,8 @@ export function createExecution(input: ExecutionDeps): {
   const gateway = new RemoteGateway({
     authority: input.authority,
     ledger,
+    // R5: a canonical run id reaches the executor while the App holds the ledger run id.
+    ...(deps.orchestration ? { ledgerIdForRun: (runId: string) => deps.orchestration!.ledgerIdForRun(runId) } : {}),
     output,
     ...(deps.listProjects ? { projects: { list: deps.listProjects } } : {}),
     ...(deps.listDirectories ? { directories: { list: deps.listDirectories } } : {}),
@@ -185,6 +189,8 @@ export function createExecution(input: ExecutionDeps): {
   const dispatcher = new RemoteDispatcher({
     ledger,
     ...(deps.orchestration ? {
+      // B1: dispatch claims come from the durable outbox; the ledger still owns intent detail.
+      outbox: deps.orchestration.outbox(),
       beforeDispatch: (runId, detail) => {
         const meta = gateway.runMeta(runId)
         const check = deps.orchestration!.beforeDispatch({
@@ -200,9 +206,20 @@ export function createExecution(input: ExecutionDeps): {
         }
         return check
       },
+      // C4: the one turn that continues a session after a restart is told what the previous process
+      // cancelled. Reading the note removes it, so later turns do not repeat it.
+      rewriteDetail: (runId, detail) => prependRestartNoteToDetail(detail, deps.orchestration?.takeRestartBackgroundNote?.(runId)),
       onSettled: (runId, lifecycle, detail) => {
         deps.orchestration!.onRunTerminal(runId, lifecycle, detail)
-      }
+      },
+      // R5: the outbox row carries the canonical id; the ledger is keyed by the v4 id minted for it.
+      ledgerIdForRun: (runId) => deps.orchestration!.ledgerIdForRun(runId),
+      // B1/A4: stop and answer effects must reach completion from the durable queue, not only
+      // from the in-memory request path, so a restart cannot lose them.
+      effectExecutor: createControlEffectExecutor({
+        stops,
+        answer: (runId, value) => interactions.answer(runId, value)
+      })
     } : {}),
     executor: { execute: async (executorInput) => {
       try {
@@ -230,6 +247,8 @@ export function createExecution(input: ExecutionDeps): {
   })
   const unsubscribeGate = deps.orchestration
     ? gate.onAuthenticationReleased(() => {
+        // The rows deferred because this auth lease was held are exactly the ones to reconsider.
+        dispatcher.wake()
         dispatcher.pump()
       })
     : () => undefined

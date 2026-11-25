@@ -10,6 +10,7 @@ import { qoderExecutable } from './qoder-launch'
 import { readQoderMcpSnapshot, reauthenticateQoderMcp } from './qoder-mcp'
 import { runQoderPluginReload } from './qoder-plugin-reload'
 import { runQoder } from './qoder-run'
+import type { QoderSessionPool } from './qoder-session-pool'
 import { explainQoderSessionAccessError } from './qoder-shared'
 import { qoderContinuationKey } from './host-continuation-identity'
 import type { QoderHookFallbackState } from './qoder-hooks'
@@ -17,7 +18,12 @@ import { completedTranscriptTurnBoundary, isTranscriptUserPrompt } from './sessi
 import { resolveQoderForkUserId } from './qoder-fork-identity'
 import type { ProviderAdapter, ProviderRunRequest } from './types'
 
-export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
+export interface QoderAdapterOptions {
+  /** C1: keeps one CLI session per conversation; without it every turn spawns its own process. */
+  qoderSessions?: QoderSessionPool
+}
+
+export function createQoderAdapter(homeDir = homedir(), options: QoderAdapterOptions = {}): ProviderAdapter {
   const hookFallback: QoderHookFallbackState = { observed: false }
   const controls = createQoderControls()
   const catalog = createQoderCatalog(controls)
@@ -117,7 +123,7 @@ export function createQoderAdapter(homeDir = homedir()): ProviderAdapter {
         /^\/plugins\s+reload\s*$/i.test(request.prompt)) {
         return runQoderPluginReload(request, () => reloaded())
       }
-      return runQoder(request, { homeDir, hookFallback })
+      return runQoder(request, { homeDir, hookFallback, ...(options.qoderSessions ? { qoderSessions: options.qoderSessions } : {}) })
     },
     sessionEvidence: {
       async enrich(context, turns) {

@@ -125,7 +125,14 @@ export const eventApi = {
     ipcRenderer.on('agent:userQuestionClosed', l)
     return () => ipcRenderer.removeListener('agent:userQuestionClosed', l)
   },
-  onError: (cb: (e: { runId: string; message: string; category?: string; hint?: string }) => void): (() => void) => {
+  onError: (cb: (e: {
+    runId: string
+    message: string
+    category?: string
+    hint?: string
+    /** C4: present when the provider named a quota reset time. */
+    usageLimit?: { provider: string; resetAt: number | null; source: string | null; window?: string }
+  }) => void): (() => void) => {
     const l = (_: unknown, e: { runId: string; message: string; category?: string; hint?: string }): void => cb(e)
     ipcRenderer.on('agent:error', l)
     return () => ipcRenderer.removeListener('agent:error', l)

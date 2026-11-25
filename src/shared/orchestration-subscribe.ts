@@ -50,6 +50,8 @@ export interface SubscribeRequest {
   session?: SubscribeSessionRef
   known?: SubscribeKnownCursor
   sessionsCursor?: string
+  /** D6: continue an older page of `detail.turns`; absent asks for the newest page. */
+  detailCursor?: string
   /** Gateway-supplied hint cursor scope. It grants no read authority. */
   subscriptionId?: string
   historyFormat?: 'turns'
@@ -119,7 +121,29 @@ export interface SubscribeActiveRunRow {
   recoveredAt: number | null
   outcome: unknown | null
   revSeq: number
+  /** D1: 1-based slot while this run waits in its session's queue on the host. */
+  queuePosition?: number | null
+  /** D1: the queue entry is held (a stop or an explicit hold) and will not dispatch on its own. */
+  queueHeld?: boolean
+  /** D5: the host has a checkpoint for this run, so rolling it back is possible. */
+  hasCheckpoint?: boolean
 }
+
+/**
+ * The terminal run lifecycles, as plain strings. They live beside the run-row contract because both the
+ * host and the App read them: main may not import `host-runtime/orchestration`, and splitting the list
+ * per layer is how one run kept blocking its session after a rollback.
+ */
+export const TERMINAL_RUN_LIFECYCLE_NAMES: readonly string[] = [
+  'settled',
+  'failed',
+  'cancelled',
+  'interrupted',
+  // D5: a rolled-back run is finished.
+  'rolled_back'
+]
+
+export const TERMINAL_RUN_LIFECYCLE_SQL = `(${TERMINAL_RUN_LIFECYCLE_NAMES.map((state) => `'${state}'`).join(', ')})`
 
 export interface SubscribeEventItem {
   seq: number
@@ -176,6 +200,10 @@ export interface SubscribeSnapshot {
     turns: unknown[]
     legacyBefore?: true
     firstPage?: SubscribeHistoryPage
+    /** Older turns exist; pass as `detailCursor` to read them. */
+    nextCursor?: string
+    /** The page stopped early because one or more turns did not fit the byte budget. */
+    truncated?: true
   }
 }
 

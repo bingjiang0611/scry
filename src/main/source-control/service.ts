@@ -28,9 +28,7 @@ export class SourceControlService {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly active = new Set<string>()
   private readonly pending = new Set<Promise<unknown>>()
-  // Running push/fetch operations a person may cancel, by operation id.
   private readonly cancels = new Map<string, { repositoryId: string; controller: AbortController }>()
-  // Running workspace-preparation starts a person may cancel before Provider handoff.
   private readonly workspaceCancels = new Map<string, { repositoryId: string; controller: AbortController; cancellable: boolean }>()
   private closed = false
   readonly git: ScGit
@@ -103,6 +101,14 @@ export class SourceControlService {
     if (this.active.has(identity.commonDir))
       throw new Error('此仓库正在执行源代码管理操作，请等待操作完成后启动 Agent')
     register()
+  }
+
+  async withCheckpointRollback<T>(cwd: string, restore: () => Promise<T>): Promise<T | undefined> {
+    const identity = await this.git.identity(cwd)
+    return this.exclusive(identity, async () => {
+      if (await this.busy(identity.commonDir, { kind: 'root', root: identity.root })) return undefined
+      return restore()
+    })
   }
 
   private exclusive<T>(identity: GitIdentity, action: () => Promise<T>): Promise<T> {

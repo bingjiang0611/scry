@@ -114,7 +114,7 @@ export function RemoteChatView(props: RemoteChatViewProps) {
         slashReason={slashReason}
         slashSel={slashSel}
         pendingQuestions={activeRun?.pendingQuestions}
-        historyWindow={historyEvidence?.hasOlder && historyEvidence.before !== undefined && sessionId
+        historyWindow={historyEvidence?.hasOlder && (historyEvidence.detailCursor !== undefined || historyEvidence.before !== undefined) && sessionId
           ? { sessionId, offset: 0, totalTurns: displayTurns.length, hasOlder: true, completeness: 'partial' }
           : null}
         historyOlderLoading={historyOlderLoading}

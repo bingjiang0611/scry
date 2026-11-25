@@ -44,6 +44,14 @@ describe('preload backgroundServiceApi boundary', () => {
     expect(electron.invoke.mock.calls[0]).toEqual(['remote:backgroundService:setLoginStart', true])
 
     electron.invoke.mockClear()
+    await callable.usageLimitResume({ enabled: true })
+    expect(electron.invoke.mock.calls[0]).toEqual(['remote:backgroundService:usageLimitResume'])
+
+    electron.invoke.mockClear()
+    await callable.setUsageLimitResume(true, '/etc/evil', { enabled: true })
+    expect(electron.invoke.mock.calls[0]).toEqual(['remote:backgroundService:setUsageLimitResume', true])
+
+    electron.invoke.mockClear()
     await callable.setHostCliApproval(true, '/etc/evil', { confirmed: true })
     expect(electron.invoke.mock.calls[0]).toEqual(['remote:hostAdmin:setCliApproval', true])
   })

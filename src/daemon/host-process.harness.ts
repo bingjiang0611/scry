@@ -35,7 +35,7 @@ const ENV = { SCRY_REMOTE_RELAY_ENABLED: '0', SCRY_ELECTRON_SMOKE_PROVIDER: '1',
 const DEBUG_PORT = '--remote-debugging-port=0'
 
 /** `root`: start again on the userData a disposed test daemon left, as a restart would. */
-export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log' | 'orchestrationBeforeCommitHook'> & {
+export async function startTestDaemon(options: Pick<DaemonHostProcessOptions, 'terminal' | 'log' | 'orchestrationBeforeCommitHook' | 'orchestrationPauseBackfill'> & {
   root?: string
   device?: TestDaemon['device']
 } = {}): Promise<TestDaemon> {

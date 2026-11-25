@@ -13,6 +13,7 @@ import type { RemoteHostRuntime } from '../host-runtime/host-runtime-types'
 import type { RemoteHostService } from '../main/remote/remote-host-service'
 import type { DesktopRemoteTargetAPI } from '../shared/desktop-remote'
 import type { SourceControlService } from '../main/source-control/service'
+import type { SessionLineageRecord } from '../main/remote/orchestration-seam'
 import type { DaemonSessionLinks } from './local-ops/deps'
 import type { ReadProjectedHistorySession } from '../main/bootstrap/history-catalog'
 import type { BridgedShellOps } from './app-execution-target-bridge'
@@ -40,6 +41,8 @@ export interface DaemonRemoteAssemblyDeps {
   isShuttingDown: () => boolean
   desktopRemoteClient?: () => DesktopRemoteTargetAPI
   sessionLinks: DaemonSessionLinks
+  /** D3: the orchestration authority is created after this assembly, so it is read lazily. */
+  getOrchestrationAuthority?: () => { recordSessionLineage?: (input: SessionLineageRecord) => unknown } | undefined
   shellOps?: BridgedShellOps
   log: (line: string) => void
 }
@@ -109,7 +112,10 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     sessionByContext: session.sessionByContext,
     invalidateSessionHistoryLoad: history.invalidateSessionHistoryLoad,
     appSessionStore: catalog.appSessionStore,
-    rememberProject: workspace.rememberProject
+    rememberProject: workspace.rememberProject,
+    // D3: forks record their lineage once the native session exists.
+    recordSessionLineage: (input) => deps.getOrchestrationAuthority?.()?.recordSessionLineage?.(input) ??
+      { status: 'unavailable', reason: 'orchestration_unavailable' }
   })
 
   const runtime: RemoteHostRuntime = {
@@ -126,9 +132,9 @@ export function createDaemonRemoteAssembly(deps: DaemonRemoteAssemblyDeps) {
     requestRunStop: deps.requestRunStop,
     // W17: reuse daemon's local-ops session lifecycle & native fork with identical remote authority.
     sessionRefFromRequest: (value) => deps.sessionLinks.sessionRefFromRequest ? deps.sessionLinks.sessionRefFromRequest(value) : null,
-    changeLegacySessionMetadata: (ref, change) => {
+    changeLegacySessionMetadata: (ref, change, meta) => {
       if (!deps.sessionLinks.changeLegacySessionMetadata) throw new Error('daemon_capability_unavailable:session-metadata')
-      return deps.sessionLinks.changeLegacySessionMetadata(ref, change)
+      return deps.sessionLinks.changeLegacySessionMetadata(ref, change, meta)
     },
     deleteOneSession: (request, options) => {
       if (!deps.sessionLinks.deleteOneSession) throw new Error('daemon_capability_unavailable:session-delete')

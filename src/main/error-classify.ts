@@ -3,10 +3,13 @@
 
 import type { ProviderId } from '../shared/provider'
 import { classifyRunTermination, runTerminationHint } from '../shared/runtime'
+import { parseUsageLimit, type UsageLimit } from './providers/usage-limit'
 
 export interface ClassifiedError {
   category: string
   hint: string
+  /** C4: a quota failure carries its reset time, so the App can offer a timed recovery. */
+  usageLimit?: UsageLimit
 }
 
 export function classifyError(message: string, providerId?: ProviderId): ClassifiedError {
@@ -41,10 +44,13 @@ export function classifyError(message: string, providerId?: ProviderId): Classif
     m.includes('overloaded') ||
     (providerId === 'antigravity' && (m.includes('quota') || m.includes('resource_exhausted')))
   ) {
+    // A parsed reset time turns「稍后重试」into a time the App can count down.
+    const usageLimit = providerId ? parseUsageLimit(message, { provider: providerId, now: Date.now() }) : undefined
+    const limit = usageLimit ? { usageLimit } : {}
     if (providerId === 'antigravity') {
-      return { category: 'rate', hint: 'Antigravity 配额或请求频率受限：稍后重试或切换模型' }
+      return { category: 'rate', hint: 'Antigravity 配额或请求频率受限：稍后重试或切换模型', ...limit }
     }
-    return { category: 'rate', hint: 'API 限流 / 过载：稍后重试' }
+    return { category: 'rate', hint: 'API 限流 / 过载：稍后重试', ...limit }
   }
   if (m.includes('econnrefused') || m.includes('etimedout') || m.includes('network') || m.includes('fetch failed')) {
     return { category: 'network', hint: '网络问题：检查连接 / 代理' }

@@ -20,6 +20,8 @@ export interface RemoteRequestEnvelope {
   intentId?: string
   knownLogId?: string
   detail?: string
+  /** D2: a device chooses how its message reaches the session. */
+  mode?: 'immediate' | 'queue'
   cursor?: number
   before?: number
   limit?: number
@@ -124,8 +126,15 @@ export async function dispatchRemoteRequest(
           (knownLogId !== undefined && (typeof knownLogId !== 'string' || !knownLogId || knownLogId.length > 128))) {
         return { error: 'invalid_request' }
       }
+      // D2: a device may pick the queue mode; steer and restart stay host-local because they
+      // need the live run's control object, which the network endpoint does not own.
+      const claimMode = request.mode === undefined ? undefined
+        : request.mode === 'queue' ? 'queued'
+          : request.mode === 'immediate' ? 'immediate'
+            : 'invalid'
+      if (claimMode === 'invalid') return { error: 'invalid_request' }
       if (request.op === 'submit' || request.op === 'submitAtLog') {
-        return await controller.submitReceivedIntent(fingerprint, { intentId, detail: request.detail, knownLogId })
+        return await controller.submitReceivedIntent(fingerprint, { intentId, detail: request.detail, knownLogId, ...(claimMode ? { claimMode } : {}) })
       }
       return { intent: controller.intentStatus(fingerprint, { intentId, knownLogId }) }
     }

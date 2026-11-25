@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import type { RunRegistry, RunRegistryControl, RunRegistryState } from '../../main/run-registry'
-import { updateRunStartOutbox } from './authority-dispatch'
 import { canonicalJson, sha256Hex } from './canonical-json'
 import type { EventSink } from './event-sink'
-import { OrchestrationStoreError } from './types'
+import type { Evidence } from '../../shared/turn-record-contracts'
+import { LOCAL_USER_ACTOR, OrchestrationStoreError } from './types'
 
 export function resolveIntentWithSink(options: {
   sink: EventSink
@@ -100,7 +100,8 @@ export function answerQuestionWithSink(options: {
     questionId: string
     answerId: string
     answerSha256: string
-    answerPayload?: Record<string, unknown>
+    /** R7: the answer itself. Every caller must supply it or the queued effect has nothing to deliver. */
+    answerPayload: Record<string, unknown>
   }
 }) {
   const { sink, actor, clock, input } = options
@@ -109,8 +110,9 @@ export function answerQuestionWithSink(options: {
     questionId: input.questionId,
     answerId: input.answerId,
     answerSha256: input.answerSha256,
-    answeredBy: actor.startsWith('peer:') ? actor : 'unavailable',
-    ...(input.answerPayload ? { answerPayload: input.answerPayload } : {})
+    // R13: the local user answered it, so the receipt names them instead of 'unavailable'.
+    answeredBy: actor.startsWith('peer:') || actor === LOCAL_USER_ACTOR ? actor : 'unavailable',
+    answerPayload: input.answerPayload
   }
   return sink.execute({
     type: 'question.answer',
@@ -179,24 +181,30 @@ export function recordTerminalWithSink(
     detail?: string
     delivery?: 'accepted' | 'not_sent' | 'unknown'
     evidence?: string[]
+    /** A3: recorder-derived outcome (`exact`); absent falls back to an inferred outcome. */
+    outcome?: Evidence<string>
   }
 ): void {
   if (sink.isWriteIndeterminate()) return
   const at = clock()
   const outcome =
-    input.step === 'interrupted'
-      ? {
-          status: 'unavailable' as const,
-          quality: 'unavailable' as const,
-          source: input.evidence ?? ['host.recovery'],
-          omissionReason: input.reason ?? 'host_restarted'
-        }
-      : {
-          status: 'available' as const,
-          quality: 'exact' as const,
-          source: input.evidence ?? ['provider'],
-          value: input.step
-        }
+    input.outcome
+      ? input.outcome
+      : input.step === 'interrupted'
+        ? {
+            status: 'unavailable' as const,
+            quality: 'unavailable' as const,
+            source: input.evidence ?? ['host.recovery'],
+            omissionReason: input.reason ?? 'host_restarted'
+          }
+        : {
+            // The Provider's own exit is real evidence of how the run ended, but no recorder
+            // archive confirms it: label it `inferred` instead of fabricating `exact`.
+            status: 'available' as const,
+            quality: 'inferred' as const,
+            source: input.evidence ?? ['provider'],
+            value: input.step
+          }
   const payload = {
     runId: input.runId,
     step: input.step,
@@ -218,5 +226,4 @@ export function recordTerminalWithSink(
     payload,
     payloadSha256: sha256Hex(canonicalJson(payload))
   })
-  updateRunStartOutbox(sink, at, input.runId, input.step === 'failed' ? 'failed' : 'done')
 }

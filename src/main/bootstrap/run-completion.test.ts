@@ -131,3 +131,27 @@ describe('session binding signal', () => {
     expect(notifyChanged).toHaveBeenCalled()
   })
 })
+
+// D5: the checkpoint is captured once the diff settled, so it describes what the turn left
+// behind. A capture failure must not fail the run, and a remote run's worktree is not ours.
+describe('checkpoint capture', () => {
+  it('captures the run worktree after the turn diff settles', async () => {
+    const current = await fixture()
+    const order: string[] = []
+    const capture = vi.fn(async () => { order.push('capture') })
+    const ctx = { ...current.ctx, cwd: '/w', captureCheckpoint: capture,
+      finalizeTurnDiff: async () => { order.push('diff') } }
+    await handleRunCompletion({ externalSessionId: 'native-1', status: 'completed' }, ctx)
+    expect(capture).toHaveBeenCalledWith({ runId: 'run-1', cwd: '/w' })
+    expect(order).toEqual(['diff', 'capture'])
+  })
+
+  it('skips a remote run and a run without a cwd', async () => {
+    const current = await fixture()
+    const capture = vi.fn(async () => undefined)
+    await handleRunCompletion({ externalSessionId: 'native-1', status: 'completed' }, { ...current.ctx, isRemoteRun: true, cwd: '/w', captureCheckpoint: capture })
+    const noCwd = await fixture()
+    await handleRunCompletion({ externalSessionId: 'native-1', status: 'completed' }, { ...noCwd.ctx, captureCheckpoint: capture })
+    expect(capture).not.toHaveBeenCalled()
+  })
+})

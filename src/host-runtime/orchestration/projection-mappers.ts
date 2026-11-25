@@ -86,7 +86,13 @@ export function mapRunRow(row: Record<string, unknown>): RunProjectionRow {
     recoveredAt: row.recovered_at === null ? null : Number(row.recovered_at),
     outcome: parseJson<Evidence<string>>(row.outcome as string | null),
     revSeq: Number(row.rev_seq),
-    parentRunId: (row.parent_run_id as string | null) ?? null
+    parentRunId: (row.parent_run_id as string | null) ?? null,
+    ...(row.queue_position === null || row.queue_position === undefined
+      ? {}
+      : { queuePosition: Number(row.queue_position) }),
+    ...(row.queue_held ? { queueHeld: true } : {}),
+    checkpointRef: (row.checkpoint_ref as string | null) ?? null,
+    rolledBackAt: row.rolled_back_at === null || row.rolled_back_at === undefined ? null : Number(row.rolled_back_at)
   }
 }
 

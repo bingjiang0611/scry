@@ -86,7 +86,8 @@ describe('authoritative status parsing and fencing', () => {
       })
       expect(healthy.result.orchestration).toEqual({
         mode: 'on',
-        writeIndeterminate: false
+        writeIndeterminate: false,
+        providerSessions: []
       })
 
       // Trip the storage fence via a commit failure.
