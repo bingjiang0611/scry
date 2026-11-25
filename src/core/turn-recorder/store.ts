@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { type ToolContentRef } from '../../shared/tool-content.js'
 import { type AgentTurnRecord, validateAgentTurnRecord } from '../../shared/turn-record.js'
 import { unwritableOmissionCodes } from '../../shared/turn-evidence-validation.js'
+import { invalidRepositoryLocationStatuses } from '../../shared/turn-repository-location.js'
 import { copyRecorderContent } from './content-store.js'
 import { withDirectoryLock, writeJsonAtomic, mkdirDurable, syncDirectory, readJson, appendRotatingLog } from './io.js'
 import { recordFiles, readRecordFile, invalidateRecordIndex, addContentRefs, parseRecordName } from './store-index.js'
@@ -18,7 +19,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, type C
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.87'
+export const RECORDER_VERSION = '0.2.88'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -94,6 +95,12 @@ export async function commitRecord(
     const unwritableCodes = unwritableOmissionCodes(record)
     if (unwritableCodes.length > 0) {
       throw new Error(`refusing to commit a record with codes this version must not write: ${unwritableCodes.join(', ')}`)
+    }
+    // Readers drop a location status they do not know instead of failing the record; the writer still
+    // has to stay inside the defined values, so a typo cannot masquerade as a newer status.
+    const undefinedStatuses = invalidRepositoryLocationStatuses(record)
+    if (undefinedStatuses.length > 0) {
+      throw new Error(`refusing to commit a record with undefined repository location statuses: ${undefinedStatuses.join(', ')}`)
     }
     // Reserve the number durably before the record exists: a crash may skip a sequence, never reuse one.
     await reserveSequence(dataRoot, sequence)

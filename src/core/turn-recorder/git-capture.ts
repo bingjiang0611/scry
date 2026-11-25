@@ -51,6 +51,13 @@ export interface GitTurnDiffCapture {
   /** HEAD observed by the same layout/status read that starts this capture. */
   head?: string
   branch?: string
+  /**
+   * HEAD this capture's own `status` read observed at the turn start. `head` may be a session
+   * baseline commit instead; this one is what `commitBefore` means, and it costs no extra read.
+   */
+  turnStartHead?: string
+  /** Raw `# branch.head` value, so finish can tell a detached HEAD from a status read that skipped it. */
+  branchHead?: string
   baselineClean?: boolean
   indexPath?: string
   /**
@@ -344,6 +351,8 @@ export async function beginGitTurnDiff(
         beforeTree: baselineTree,
         head: baseline.commit,
         branch,
+        turnStartHead: head,
+        branchHead: branchName,
         repositoryStart: location?.(),
         baselineClean: false,
         indexPath,
@@ -375,6 +384,8 @@ export async function beginGitTurnDiff(
         beforeTree: head,
         head,
         branch,
+        turnStartHead: head,
+        branchHead: branchName,
         repositoryStart: location?.(),
         baselineClean,
         indexPath,
@@ -414,6 +425,8 @@ export async function beginGitTurnDiff(
       beforeTree,
       head,
       branch,
+      turnStartHead: head,
+      branchHead: branchName,
       repositoryStart: location?.(),
       baselineClean,
       indexPath,
