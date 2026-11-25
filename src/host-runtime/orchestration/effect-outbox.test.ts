@@ -27,15 +27,16 @@ function withSink(run: (sink: EventSink) => void): void {
 function enqueue(
   sink: EventSink,
   effectId: string,
-  options: { sessionKey?: string; causationSeq: number; payload?: object; state?: string } = { causationSeq: 1 }
+  options: { runId?: string; sessionKey?: string; causationSeq: number; payload?: object; state?: string } = { causationSeq: 1 }
 ): void {
   sink.handle.db
     .prepare(
       `INSERT INTO orch_outbox (effect_id, kind, policy, run_id, causation_seq, payload, state, session_key)
-       VALUES (?, 'provider.run.start', 'process_bound', NULL, ?, ?, ?, ?)`
+       VALUES (?, 'provider.run.start', 'process_bound', ?, ?, ?, ?, ?)`
     )
     .run(
       effectId,
+      options.runId ?? null,
       options.causationSeq,
       JSON.stringify(options.payload ?? { runId: effectId, sessionKey: options.sessionKey ?? null }),
       options.state ?? 'pending',
@@ -66,6 +67,22 @@ it('keeps one in-flight effect per session so a later effect cannot overtake it'
     expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 12 }).effect).toBeUndefined()
     expect(succeedEffect({ db: sink.handle.db, effectId: 'a1', owner: 'w', now: 13, resultSeq: 5 })).toBe(true)
     expect(claimNextEffect({ db: sink.handle.db, owner: 'w', now: 14 }).effect?.effectId).toBe('a2')
+  })
+})
+
+it('dispatches a second fresh run while the first fresh run waits for provider authentication', () => {
+  withSink((sink) => {
+    const db = sink.handle.db
+    enqueue(sink, 'start-a', { runId: 'fresh-a', causationSeq: 1 })
+    enqueue(sink, 'start-b', { runId: 'fresh-b', causationSeq: 2 })
+    expect(claimNextEffect({ db, owner: 'w', now: 10 }).effect)
+      .toMatchObject({ runId: 'fresh-a', sessionKey: null })
+    expect(deferEffect({ db, effectId: 'start-a', owner: 'w', now: 10, delayMs: 100, reason: 'provider_authenticating' }))
+      .toBe(true)
+    const next = claimNextEffect({ db, owner: 'w', now: 11 }).effect
+    expect(next).toMatchObject({ effectId: 'start-b', runId: 'fresh-b', sessionKey: null })
+    expect(succeedEffect({ db, effectId: 'start-b', owner: 'w', now: 11 })).toBe(true)
+    expect(claimNextEffect({ db, owner: 'w', now: 12 }).effect).toBeUndefined()
   })
 })
 
