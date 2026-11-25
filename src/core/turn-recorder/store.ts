@@ -19,7 +19,7 @@ export { type RecordCommittedNotification, type CommitNotificationStatus, type C
 export { type ArchiveState, readArchiveState, type ArchiveOptions, archiveRecords } from './store-archive.js'
 
 
-export const RECORDER_VERSION = '0.2.88'
+export const RECORDER_VERSION = '0.2.90'
 
 export interface RecorderHealth {
   schemaVersion: 1
@@ -43,6 +43,10 @@ export interface RecorderHealth {
    * evidence is untouched and they are retried hourly; see `session-failures.ts`.
    */
   suspendedSessions?: number
+  /** Oversized lines skipped during anchor scans (repeat visits may count again). */
+  oversizedTranscriptAnchorLines?: number
+  codexTruncatedUnchanged?: number
+  codexTruncatedSealed?: number
   recoveredRecords: number
 }
 
@@ -355,7 +359,7 @@ export async function readHealth(dataRoot: string): Promise<RecorderHealth> {
 export async function updateHealth(
   dataRoot: string,
   update: Partial<Omit<RecorderHealth, 'schemaVersion'>> & {
-    increment?: Partial<Pick<RecorderHealth, 'droppedEvents' | 'orphanEvents' | 'missingStartTerminals' | 'recoveredRecords'>>
+    increment?: Partial<Pick<RecorderHealth, 'droppedEvents' | 'orphanEvents' | 'missingStartTerminals' | 'recoveredRecords' | 'oversizedTranscriptAnchorLines' | 'codexTruncatedUnchanged' | 'codexTruncatedSealed'>>
   }
 ): Promise<RecorderHealth> {
   return withDirectoryLock(join(dataRoot, 'locks', 'health.lock'), async () => {
@@ -368,6 +372,10 @@ export async function updateHealth(
       orphanEvents: current.orphanEvents + (update.increment?.orphanEvents ?? 0),
       missingStartTerminals: current.missingStartTerminals + (update.increment?.missingStartTerminals ?? 0),
       recoveredRecords: current.recoveredRecords + (update.increment?.recoveredRecords ?? 0)
+    }
+    for (const key of ['oversizedTranscriptAnchorLines', 'codexTruncatedUnchanged', 'codexTruncatedSealed'] as const) {
+      const delta = update.increment?.[key]
+      if (delta) next[key] = (current[key] ?? 0) + delta
     }
     delete (next as RecorderHealth & { increment?: unknown }).increment
     await writeJsonAtomic(join(dataRoot, 'health.json'), next)

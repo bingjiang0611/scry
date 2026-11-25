@@ -4,7 +4,7 @@ import type { ProviderId } from '../../shared/provider.js'
 import { parseTranscriptToTurns } from '../../main/normalize.js'
 import { type TranscriptRead, nestedRecord, stringAt, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
 import { partial, unavailable, type TurnEvidence } from '../../shared/turn-record.js'
-import { readTranscriptWindow, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
+import { describeTranscriptTruncation, readTranscriptWindow, type TranscriptSnapshotIdentity } from './recorder-transcript-io.js'
 
 const BACKGROUND_LAUNCH_KINDS = new Set(['backgrounded', 'async_launched'])
 const BACKGROUND_SETTLED_STATUSES = new Set(['completed', 'failed', 'stopped', 'error', 'cancelled'])
@@ -140,6 +140,7 @@ export async function forcedWindowTranscript(args: {
     observed: true,
     // Content bounded by the recorder's own clock instead of the Provider's turn identity.
     complete: false,
+    ...(snapshot.truncation ? { incompleteReasons: [describeTranscriptTruncation(snapshot.truncation)] } : {}),
     ...(turn.userText ? { userText: turn.userText } : {}),
     events: turn.items,
     observable: {

@@ -7,6 +7,7 @@ import { available, partial, type Evidence, type TurnEndReason, type TurnEvidenc
 import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { markSessionAttention, withSessionAttentionLock } from './attention.js'
+import { statTranscript } from './recorder-transcript-fs.js'
 import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
@@ -27,6 +28,22 @@ export interface CaptureClaimIdentity {
   baselineAt?: string
 }
 import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
+
+/**
+ * Byte offset where this turn's own rows begin, read when the turn opens.
+ *
+ * Older builds wrote `0` here for every turn, which readers could only take as "the file starts
+ * here" — for a session transcript that already held gigabytes, that is a claim the recorder never
+ * verified. A size read at open is the honest value; a path that cannot be read, or that only
+ * appears after the turn already produced rows, is `null` (unknown) so no reader mistakes it for 0.
+ */
+async function transcriptStartOffsetAt(path: string): Promise<number | null> {
+  try {
+    return (await statTranscript(path)).size
+  } catch {
+    return null
+  }
+}
 
 export async function nextSessionState(dataRoot: string, root: string, provider: ProviderId, sessionId: string): Promise<SessionState> {
   const cached = await readJson<SessionState>(statePath(root))
@@ -69,7 +86,7 @@ export async function beginOpenTurn(
   const providerTurnId = claim?.providerTurnId ?? providerTurnIdOf(payload, provider)
   const requestSetId = provider === 'qoder' ? stringAt(payload, 'request_set_id', 'requestSetId') : undefined
   const transcriptPath = transcriptPathOf(payload)
-  const transcriptOffset = transcriptPath ? 0 : undefined
+  const transcriptOffset = transcriptPath ? await transcriptStartOffsetAt(transcriptPath) : null
   const piTranscriptAnchor = provider === 'pi' ? piTranscriptAnchorOf(payload) : undefined
   const open: OpenTurnState = {
     ...(isFullToolContentPolicy(enablement.config.capture) ? { toolContentPolicy: {
@@ -103,7 +120,7 @@ export async function beginOpenTurn(
     ...(managedRunId ? { managedRunId } : {}),
     ...(managedPromptHash ? { managedPromptHash } : {}),
     ...(transcriptPath ? { transcriptPath } : {}),
-    ...(transcriptOffset != null ? { transcriptStartOffset: transcriptOffset } : {}),
+    transcriptStartOffset: transcriptOffset,
     ...(piTranscriptAnchor ? { piTranscriptAnchor } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     ...(requestSetId ? { requestSetId } : {}),
@@ -385,10 +402,9 @@ export async function storeLifecycleEvent(
   }
   if (transcriptPath && transcriptPath !== open.transcriptPath) {
     open.transcriptPath = transcriptPath
-    open.transcriptStartOffset = 0
-    await writeJsonAtomic(openPath(root), open, { sync: false })
-  } else if (transcriptPath && open.transcriptStartOffset == null) {
-    open.transcriptStartOffset = 0
+    // The path can appear after this turn opened. The turn's own rows are somewhere earlier in that
+    // file and the recorder cannot prove where, so this is `null` (unknown), not `0` (from the top).
+    open.transcriptStartOffset = null
     await writeJsonAtomic(openPath(root), open, { sync: false })
   }
   return id
