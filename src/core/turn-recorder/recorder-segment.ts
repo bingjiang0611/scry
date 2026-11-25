@@ -97,7 +97,6 @@ export async function refreshSealWindow(root: string, open: OpenTurnState): Prom
   await writeJsonAtomic(openPath(root), open, { sync: false })
 }
 
-/** Revoke the pending boundary without consuming the original baseline. */
 export async function revokeSeal(root: string, open: OpenTurnState): Promise<void> {
   if (open.deferredTerminalEventId) {
     await rm(join(turnRoot(root, open.generation), 'events', `${open.deferredTerminalEventId}.json`), { force: true })

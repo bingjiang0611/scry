@@ -155,7 +155,6 @@ export function registerSuite3(): void {
       workspace: root,
       payload: payload('late-terminal', { timestamp: undefined, tool_name: 'Read', tool_use_id: 'new-tool', tool_response: 'ok' })
     })
-    // Qoder keeps the protection armed after tool activity; identify the actual terminating request.
     const confirmed = provider === 'qoder'
       ? { ...withoutTimestamp(), parent_request_set_id: 'request-new' } : withoutTimestamp()
     await handleRecorderHook({ provider, event: endEvent, workspace: root, payload: confirmed })
@@ -190,7 +189,6 @@ export function registerSuite3(): void {
       provider: 'qoder', event: 'PostToolUse:Read', workspace: root,
       payload: noTime({ tool_name: 'Read', tool_use_id: 'second-tool', tool_response: 'ok' })
     })
-    // Tool activity revokes the candidate but does not make the next anonymous Stop identifiable.
     await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() }))
       .resolves.toMatchObject({ status: 'pending' })
     await handleRecorderHook({

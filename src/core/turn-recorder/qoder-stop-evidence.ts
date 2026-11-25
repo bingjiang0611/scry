@@ -8,7 +8,6 @@ import type { RecorderOpenTurnState, RecorderSessionState } from './runtime-stat
 export type QoderStopAttribution = 'matched' | 'stale' | 'unproven'
 const REQUEST_HISTORY = 32
 
-// Native identifiers are opaque: do not coerce or trim. Bound persisted input from hooks.
 function requestId(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= 256 && value.trim() ? value : undefined
 }
@@ -33,7 +32,6 @@ export function isTopLevelQoderStop(input: RecorderHookInput): boolean {
   ))
 }
 
-/** Qoder 1.1.91 copies the request context into a top-level Stop. Unknowns keep the existing fence. */
 export function qoderRequestStopAttribution(
   payload: Record<string, unknown>, open: RecorderOpenTurnState, state: RecorderSessionState | null
 ): QoderStopAttribution {
@@ -56,7 +54,6 @@ export function readQoderStopTranscript(enablement: Extract<RecorderEnablement, 
     undefined, open.captureTranscriptEndOffset, enablement.dataRoot)
 }
 
-/** Identity only: a reply, its text or its ancestry never authenticates an anonymous Stop. */
 export function qoderNativeStopAttribution(
   open: RecorderOpenTurnState, id: string, read?: TranscriptRead
 ): QoderStopAttribution {

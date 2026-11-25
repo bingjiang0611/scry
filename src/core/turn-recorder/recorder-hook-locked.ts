@@ -205,7 +205,6 @@ export async function applyHookLocked(
   }
   if (attribution === 'stale') return { status: 'duplicate' as const, reason: 'Qoder Stop belongs to an earlier or different turn' }
   const explicitTerminalAt = endEvent && !incomingProviderTurnId ? explicitTimestampOf(input.payload) : undefined
-  // An old terminal must not refresh or revoke the current generation's hold.
   if (!sessionEndEvent && explicitTerminalAt && Date.parse(explicitTerminalAt) < Date.parse(open.startedAt)) {
     return { status: 'duplicate' as const, reason: 'stale unidentified terminal predates the open turn' }
   }
