@@ -6,7 +6,7 @@ import { EventSink } from '../host-runtime/orchestration/event-sink'
 import { listPendingUsageLimits } from '../host-runtime/orchestration/usage-limit-store'
 import { createUsageLimitScheduler } from './usage-limit-scheduler'
 import { usageLimitResumeSettings } from './usage-limit-resume'
-import { writeUsageLimitResumeSwitch } from '../shared/background-service'
+import { writeUsageLimitResumeSwitch } from '../main/background-service-actions'
 
 let dirs: string[] = []
 afterEach(() => {

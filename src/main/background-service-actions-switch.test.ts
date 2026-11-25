@@ -6,7 +6,7 @@ import {
   readUsageLimitResumeSwitch,
   usageLimitResumePath,
   writeUsageLimitResumeSwitch
-} from './background-service'
+} from './background-service-actions'
 
 let dirs: string[] = []
 afterEach(() => {

@@ -2,7 +2,7 @@ import { canonicalJson, sha256Hex } from '../host-runtime/orchestration/canonica
 import type { EventSink } from '../host-runtime/orchestration/event-sink'
 import type { OrchestrationCommand } from '../host-runtime/orchestration/orchestrator-commands'
 import type { UsageLimit } from '../main/providers/usage-limit'
-import { readUsageLimitResumeSwitch } from '../shared/background-service'
+import { readUsageLimitResumeSwitch } from '../main/background-service-actions'
 
 /**
  * C4: a hit usage limit becomes a pending item, and — only when the user turned it on — a queued

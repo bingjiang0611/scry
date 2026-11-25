@@ -34,8 +34,8 @@ import {
   reasonMessage,
   type BackgroundServicePrompt
 } from '../background-service-copy'
-import { readUsageLimitResumeSwitch, writeUsageLimitResumeSwitch } from '../../shared/background-service'
 import { isHostCliExperimentalEnabled } from '../../shared/experimental-host-cli'
+import { readUsageLimitResumeSwitch, writeUsageLimitResumeSwitch } from '../background-service-actions'
 import { createVersionMismatchPrompt, daemonCommandBelongsToCheckout } from '../background-service-mismatch-prompt'
 import { readProcessIdentity, type ProcessRow } from '../process-diagnostics'
 import type { LazyDaemonRunSurface } from './daemon-run-lazy'
