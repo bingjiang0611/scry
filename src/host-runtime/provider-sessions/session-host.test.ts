@@ -179,6 +179,47 @@ it('reuses a session through the alias derived from the native id it just opened
 
 // R14 small issue: an alias is the same session under a second key. Counting both keys against the cap
 // made a host with two live sessions believe it held four and evict one to make room for the third.
+it('wakes a native alias waiter when the fresh owner settles', async () => {
+  const host = new ProviderSessionHost<{ name: string }>()
+  const { open, counts } = fakeSessions()
+  await host.acquire('fresh', () => open('shared'))
+  host.alias('fresh', 'native')
+  const resumed = host.acquire('native', () => open('unexpected'))
+  await host.settle('fresh', { reusable: true })
+  const completed = vi.fn()
+  void resumed.then(completed)
+  await vi.waitFor(() => expect(completed).toHaveBeenCalledWith(expect.objectContaining({ reused: true })), { timeout: 150 })
+  expect(counts).toEqual({ shared: 1 })
+  await host.closeAll()
+})
+
+it('reserves one cold open for concurrent acquires of the same key', async () => {
+  const host = new ProviderSessionHost<{ name: string }>()
+  const { open, counts, closed } = fakeSessions()
+  const first = host.acquire('cold', () => open('first'))
+  const second = host.acquire('cold', () => open('second'))
+  await first
+  await host.settle('cold', { reusable: true })
+  expect(await second).toMatchObject({ reused: true, sessionId: 'native-first' })
+  expect(counts).toEqual({ first: 1 })
+  await host.closeAll()
+  expect(closed).toEqual(['first'])
+})
+
+it('cancels a waiter without settling or closing the active turn', async () => {
+  const host = new ProviderSessionHost<{ name: string }>()
+  const { open, closed } = fakeSessions()
+  await host.acquire('key', () => open('active'))
+  const abort = new AbortController()
+  const waiting = host.acquire('key', () => open('unexpected'), undefined, abort.signal)
+  abort.abort()
+  await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
+  expect(closed).toEqual([])
+  await host.settle('key', { reusable: true })
+  expect(await host.acquire('key', () => open('unexpected'))).toMatchObject({ reused: true })
+  await host.closeAll()
+})
+
 it('does not count an alias toward the session cap', async () => {
   const host = new ProviderSessionHost<{ name: string }>({ now: () => 1_000, maxSessions: 2 })
   const { open, closed } = fakeSessions()

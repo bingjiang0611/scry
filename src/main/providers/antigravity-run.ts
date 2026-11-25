@@ -182,7 +182,7 @@ export function runAntigravity(
     try {
       if (cancelRequested) return emitPreSpawnCancelled()
 
-      // B1: derive `.gemini` root from the exact sanitized launch env that `agy acp` receives.
+      // Resolve `.gemini` from the actual launch environment.
       const sanitizedEnv = buildAntigravityLaunchEnv(baseEnv)
       const userPermCheck = assertUserSettingsWithinRequestedMode(permissionMode, homeDir, sanitizedEnv)
       if (deps.checkWorkspaceTrust) await deps.checkWorkspaceTrust(cwd)
@@ -207,8 +207,7 @@ export function runAntigravity(
           })
         }
       })
-      // C1: a matching Provider session keeps one ACP process across turns; without a host this
-      // stays a per-run process, exactly as before.
+      // Only a matching host session shares its ACP process across turns.
 
       if (deps.sessions) {
         const sessionIdentity = antigravitySessionKey({
@@ -223,7 +222,7 @@ export function runAntigravity(
             const opened = await spawnSession()
             return { value: opened, sessionId: opened.sessionId ?? '', close: () => opened.close() }
           },
-          (entry) => entry.value.isClosed()
+          (entry) => entry.value.isClosed(), queueAbort.signal
         )
         session = acquired.value
       } else {
@@ -257,7 +256,7 @@ export function runAntigravity(
       client = session.client
       session.attach({
         onRawMessage: (direction, rawLine) => {
-          // Record ONLY incoming raw agent JSON-RPC lines verbatim (NEVER maskSecrets!).
+          // Preserve only incoming JSON-RPC verbatim.
           if (direction === 'in') request.recordNative?.('antigravity_acp_message', rawLine)
         },
         onNotification: (method, params) => {
@@ -464,6 +463,7 @@ export function runAntigravity(
         ...(cancelled ? { stopped: true, status: 'cancelled' as const } : { status: 'completed' as const })
       }
     } catch (error) {
+      if (error === queueAbort.signal.reason && queueAbort.signal.aborted) return emitPreSpawnCancelled()
       if (isAuthFailure(error, client?.loginPromptDetected === true)) {
         await forceKillAntigravityProcess(activeIdentityPromise)
         throw new Error(formatAntigravityUnauthenticatedError(rawEnv))
@@ -477,7 +477,7 @@ export function runAntigravity(
       cancelAllPendingPermissions()
       if (deps.sessions) {
         session?.detach()
-        if (sessionKey) {
+        if (session && sessionKey) {
           await deps.sessions.settle(sessionKey, { reusable: !forceKillRequested && !idleTimedOut })
         }
         if (forceKillRequested || idleTimedOut) session?.close()

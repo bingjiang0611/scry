@@ -60,8 +60,9 @@ export class ProviderSessionHost<T> {
   readonly #onOpened?: (record: { key: string; provider: string; at: number }) => void
   readonly #onNativeSessionId?: (record: { key: string; provider: string; nativeSessionId: string; at: number }) => void
   readonly #onReleased?: (record: { key: string; provider: string; reason: ProviderSessionReleaseReason; at: number }) => void
-  /** R4: turns waiting for a busy session, per key. They are woken when it settles or closes. */
-  readonly #waiters = new Map<string, Array<() => void>>()
+  // Opening keys reserve their slot before open() yields; aliases share the entry's waiters.
+  readonly #opening = new Set<string>()
+  readonly #waiters = new Map<string | Entry<T>, Set<() => void>>()
 
   constructor(options: ProviderSessionHostOptions = {}) {
     this.#idleMs = Math.min(30 * 60_000, Math.max(15 * 60_000, options.idleMs ?? DEFAULT_IDLE_MS))
@@ -90,38 +91,62 @@ export class ProviderSessionHost<T> {
   async acquire(
     key: string,
     open: () => Promise<{ value: T; sessionId: string; close: () => Promise<void> | void; closed?: boolean }>,
-    isClosed?: (entry: { value: T; sessionId: string }) => boolean
+    isClosed?: (entry: { value: T; sessionId: string }) => boolean,
+    signal?: AbortSignal
   ): Promise<{ value: T; sessionId: string; reused: boolean }> {
-    let existing = this.#entries.get(key)
-    while (existing) {
-      if (isClosed?.(existing) ?? false) {
-        await this.release(key, 'error')
-        break
+    for (;;) {
+      signal?.throwIfAborted()
+      const existing = this.#entries.get(key)
+      if (existing) {
+        if (isClosed?.(existing)) {
+          await this.release(key, 'error')
+        } else if (existing.busy) {
+          await this.#waitForIdle(existing, signal)
+        } else {
+          existing.busy = true
+          existing.lastUsedAt = this.#now()
+          this.#clearIdle(existing)
+          return { value: existing.value, sessionId: existing.sessionId, reused: true }
+        }
+        continue
       }
-      if (!existing.busy) {
-        existing.busy = true
-        existing.lastUsedAt = this.#now()
-        this.#clearIdle(existing)
-        return { value: existing.value, sessionId: existing.sessionId, reused: true }
+      if (this.#opening.has(key)) {
+        await this.#waitForIdle(key, signal)
+        continue
       }
-      await this.#waitForIdle(key)
-      existing = this.#entries.get(key)
+      if (this.#liveSessions() + this.#opening.size >= this.#maxSessions) {
+        const idle = [...new Set(this.#entries.values())]
+          .filter((entry) => !entry.busy && entry.backgroundTasks === 0)
+          .sort((a, b) => a.lastUsedAt - b.lastUsedAt)[0]
+        if (!idle) throw new ProviderSessionCapExceededError()
+        await this.release(idle.key, 'evicted')
+        continue
+      }
+      this.#opening.add(key)
+      try {
+        const opened = await open()
+        if (signal?.aborted) {
+          await Promise.resolve().then(opened.close).catch(() => undefined)
+          signal.throwIfAborted()
+        }
+        const entry: Entry<T> = {
+          key,
+          value: opened.value,
+          sessionId: opened.sessionId,
+          busy: true,
+          backgroundTasks: 0,
+          openedAt: this.#now(),
+          lastUsedAt: this.#now(),
+          close: opened.close
+        }
+        this.#entries.set(key, entry)
+        this.#onOpened?.({ key, provider: this.#provider, at: entry.openedAt })
+        return { value: entry.value, sessionId: entry.sessionId, reused: false }
+      } finally {
+        this.#opening.delete(key)
+        this.#wakeWaiters(key)
+      }
     }
-    await this.#makeRoom()
-    const opened = await open()
-    const entry: Entry<T> = {
-      key,
-      value: opened.value,
-      sessionId: opened.sessionId,
-      busy: true,
-      backgroundTasks: 0,
-      openedAt: this.#now(),
-      lastUsedAt: this.#now(),
-      close: opened.close
-    }
-    this.#entries.set(key, entry)
-    this.#onOpened?.({ key, provider: this.#provider, at: entry.openedAt })
-    return { value: entry.value, sessionId: entry.sessionId, reused: false }
   }
 
   /**
@@ -131,7 +156,7 @@ export class ProviderSessionHost<T> {
    */
   alias(fromKey: string, toKey: string): boolean {
     const entry = this.#entries.get(fromKey)
-    if (!entry || fromKey === toKey) return false
+    if (!entry || this.#opening.has(toKey) || this.#entries.has(toKey)) return false
     this.#entries.set(toKey, entry)
     return true
   }
@@ -141,7 +166,7 @@ export class ProviderSessionHost<T> {
     const entry = this.#entries.get(key)
     if (!entry) return
     entry.busy = false
-    this.#wakeWaiters(key)
+    this.#wakeWaiters(entry)
     entry.lastUsedAt = this.#now()
     if (options.keepForBackground) {
       entry.backgroundTasks = Math.max(1, entry.backgroundTasks)
@@ -179,15 +204,25 @@ export class ProviderSessionHost<T> {
   }
 
   /** R4: resolves when the entry stops being busy, or when it is released. */
-  #waitForIdle(key: string): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const list = this.#waiters.get(key) ?? []
-      list.push(resolve)
-      this.#waiters.set(key, list)
+  #waitForIdle(key: string | Entry<T>, signal?: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const waiters = this.#waiters.get(key) ?? new Set<() => void>()
+      const ready = (): void => {
+        signal?.removeEventListener('abort', cancel)
+        resolve()
+      }
+      const cancel = (): void => {
+        waiters.delete(ready)
+        if (waiters.size === 0) this.#waiters.delete(key)
+        reject(signal?.reason)
+      }
+      waiters.add(ready)
+      this.#waiters.set(key, waiters)
+      signal?.addEventListener('abort', cancel, { once: true })
     })
   }
 
-  #wakeWaiters(key: string): void {
+  #wakeWaiters(key: string | Entry<T>): void {
     const list = this.#waiters.get(key)
     if (!list) return
     this.#waiters.delete(key)
@@ -203,7 +238,7 @@ export class ProviderSessionHost<T> {
     }
     this.#clearIdle(entry)
     this.#onReleased?.({ key, provider: this.#provider, reason, at: this.#now() })
-    this.#wakeWaiters(key)
+    this.#wakeWaiters(entry)
     try {
       await entry.close()
     } catch {
@@ -235,14 +270,4 @@ export class ProviderSessionHost<T> {
     entry.idleTimer = timer
   }
 
-  /** Evicts least-recently-used idle sessions so a new session fits under the cap. */
-  async #makeRoom(): Promise<void> {
-    while (this.#liveSessions() >= this.#maxSessions) {
-      const idle = [...this.#entries.values()]
-        .filter((entry) => !entry.busy && entry.backgroundTasks === 0)
-        .sort((a, b) => a.lastUsedAt - b.lastUsedAt)[0]
-      if (!idle) throw new ProviderSessionCapExceededError()
-      await this.release(idle.key, 'evicted')
-    }
-  }
 }
