@@ -66,7 +66,6 @@ export async function exerciseNative(contents, win, query, screenshotDir) {
   await click('.analytics-tabs [role="tab"]', '成本与用量')
   await until(`document.querySelector('.analytics-tile.is-hero .analytics-tile-value')?.textContent === '$1.41'`)
   check(await read(() => document.querySelector('.analytics-tile.is-hero .analytics-tile-value').textContent) === '$1.41', 'Credits conversion is missing from the hero tile')
-  // 没有活动的日子画 0，未知价格写「无价格」：两种缺失不混为一谈。
   await hoverDay(data.days.length - 3, data.days.length)
   let detail = await readout()
   check(detail?.text.startsWith(day(data.days.at(-3))), 'Pointer hover did not select the hovered day')

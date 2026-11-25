@@ -43,7 +43,6 @@ describe('aggregateTurnEvidence', () => {
     expect(diffs).toHaveLength(45)
     const located = diffs.filter((diff) => diff.repositoryLocation)
     expect(located).toHaveLength(32)
-    // The three changed repositories appear last in the turn and still keep their location.
     for (const repoRoot of changed) expect(diffs.find((diff) => diff.repoRoot === repoRoot)?.repositoryLocation).toBeDefined()
     // Slots are handed out in appearance order after the changed ones.
     expect(diffs[0].repositoryLocation).toBeDefined()

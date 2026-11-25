@@ -14,7 +14,6 @@ import { PROVIDER_LABELS } from '@shared/provider'
 const seriesColor = (index: number): string => `var(--analytics-series-${index % 7})`
 const agentName = (agent: string): string => PROVIDER_LABELS[agent as keyof typeof PROVIDER_LABELS] ?? agent
 
-/** 每日曲线：按日期补齐所有日子，没有活动的日子画 0，未知值断开。 */
 function DailyChart({ analytics, metric, agent }: { analytics: UsageAnalytics; metric: CostMetric; agent: AgentFilter }) {
   const [active, setActive] = useState<number | null>(null)
   const series = useMemo(() => dailySeries(analytics, metric, agent), [analytics, metric, agent])

@@ -31,7 +31,6 @@ describe('Qoder Credits 的每日补齐', () => {
     expect(daily.map((row) => row.day)).toEqual(['2026-09-07', '2026-09-09'])
     expect(daily[0]).toMatchObject({ costUsd: 0.025, estimatedCostRows: 1, qoderCredits: { credits: 2.5 } })
     expect(daily[1]).toMatchObject({ costUsd: 0.01, turns: 1 })
-    // 补齐的当天只多一行；没有 Credits 的日子仍然没有点。
     expect(enriched.dailyByProvider.filter((row) => row.provider === 'qoder')).toHaveLength(2)
     expect(enriched.dailyByAgent.find((row) => row.agent === 'qoder' && row.day === '2026-09-07')).toMatchObject({ costUsd: 0.025 })
   })

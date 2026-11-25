@@ -246,7 +246,6 @@ export function aggregateTurnEvidence(args: {
       (record.files.length > 0 || hasValue(repositoryLocation) || isFact(repositoryLocation))
     return wanted ? [{ index, record, repositoryLocation: repositoryLocation! }] : []
   })
-  // Stable: changed first, appearance order inside each rank.
   candidates.sort((left, right) => Number(right.record.files.length > 0) - Number(left.record.files.length > 0) || left.index - right.index)
   const locatedRepositories = new Set<string>()
   const granted = new Map<number, TurnRepositoryLocation>()

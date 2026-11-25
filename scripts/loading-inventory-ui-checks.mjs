@@ -1,4 +1,3 @@
-// Inventory loading and retry contracts, split out of the loading campaign.
 export async function exerciseInventoryLoading({ read, wait, check, click, screenshot, settle }) {
   const failures = []
 for (const legacy of [true, false]) for (const kind of ['skills', 'mcp']) {

@@ -40,7 +40,6 @@ export function formatShare(value: number | null, total: number | null): string 
   return `${((value / total) * 100).toFixed(1)}%`
 }
 
-/** 图上的日期刻度：11月24日。 */
 export function formatDay(day: string): string {
   const value = new Date(`${day}T12:00:00`)
   if (Number.isNaN(value.getTime())) return day

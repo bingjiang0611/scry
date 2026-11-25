@@ -113,7 +113,6 @@ export interface UsageAnalyticsCostRow {
   reasoningTokens?: number | null
 }
 
-// 0 Token 的记录没有可展示的量；「没有上报」与「上报了 0」要分开处理。
 type TokenCounters = Pick<UsageAnalyticsCostRow, 'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'reasoningTokens'>
 
 const reportedTokens = (row: TokenCounters): number[] =>
@@ -310,7 +309,6 @@ export function buildUsageAnalytics(args: {
     const inputTokens = uncachedInputTokens(row.inputTokens ?? null, row.cacheReadTokens ?? null, accounting)
     return inputTokens === row.inputTokens ? row : { ...row, inputTokens }
   }
-  // 0 Token 的记录不成行，也不计入轮次：它没有可展示的量。
   const tokens = args.tokens.filter(tokenRowHasUsage).map(normalizeInput)
   for (const row of tokens) {
     const day = localDay(row.tsStart)

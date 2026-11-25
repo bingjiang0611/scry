@@ -17,7 +17,6 @@ export function costRangeFor(hours: PerformanceRange): UsageAnalyticsRangeDays {
   if (hours === 24) return 1
   if (hours === 168) return 7
   if (hours === 720) return 30
-  // 1 小时在成本页没有对应刻度：用成本页自己的默认范围。
   return DEFAULT_COST_RANGE
 }
 export function performanceRangeFor(days: UsageAnalyticsRangeDays): PerformanceRange {

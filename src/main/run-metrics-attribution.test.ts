@@ -8,7 +8,6 @@ import type { TraceEvent } from '../shared/trace'
 import { createLlmPerformanceRecorder } from './bootstrap/run-metrics'
 import { readLlmPerformanceHistory } from './llm-performance-history'
 
-// Q7：失败轮次先用实际观测到的模型，没有就不成行；Q11：多模型归到输出 Token 最多的模型。
 const observedAt = '2026-11-24T06:18:10.224Z'
 const cwd = '/repo'
 

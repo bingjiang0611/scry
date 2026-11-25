@@ -327,7 +327,6 @@ describe('location status follows the value it finally carries', () => {
   const oid = 'a'.repeat(40)
 
   it('reports a value backfilled from status as observed, not unavailable', () => {
-    // The most common case: the 50 ms sample gave up before it published anything usable.
     const location = withRepositoryLocation(snapshot, { remoteStatus: 'unavailable', branchStatus: 'unavailable', commitStatus: 'unavailable' },
       {}, { head: oid, branchHead: 'main' }).repositoryLocation
     expect(location).toEqual({
