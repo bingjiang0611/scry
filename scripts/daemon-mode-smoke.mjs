@@ -153,8 +153,8 @@ try {
   const streamGaps = stream.slice(1).map((event, index) => event.t - stream[index].t).sort((a, b) => a - b)
   const medianGap = streamGaps.length === 0 ? 0 : streamGaps[Math.floor(streamGaps.length / 2)]
   results.steps.streaming = {
-    // The fixture writes 20 chunks 150 ms apart. Fewer arrivals than that means the
-    // message reached the window as fewer, larger pieces.
+    // The fixture aims for 20 chunks at 150 ms intervals. The smoke allows fewer
+    // arrivals and checks their median spacing; it does not diagnose missing arrivals.
     ok: stream.length >= 8 && medianGap >= 80 && medianGap <= 250,
     arrivals: stream.length, medianGap, viewText: streamSettled.text
   }

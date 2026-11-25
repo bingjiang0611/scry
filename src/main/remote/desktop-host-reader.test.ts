@@ -118,7 +118,7 @@ describe('desktop authenticated evidence source', () => {
       changes: [{ index: 1, item: { text: 'edited in place' } }, { index: 2, item: item(2) }] })
     expect(delta.kind === 'trace_delta' && 'items' in delta.run).toBe(false)
     expect(await f.read({ kind: 'trace', context: f.context, runId, delta: { after: { revision: reset.revision, count: 5 } } })).toMatchObject({ kind: 'trace', reset: true })
-    // Authorization runs before any delta work.
+    // A delta request with mismatched context or revoked workspace access is rejected.
     await expect(f.read({ kind: 'trace', context: { ...f.context, providerId: 'claude' }, runId, delta: { after: { revision: reset.revision, count: 2 } } })).rejects.toThrow('run_context_mismatch')
     f.revoke()
     await expect(f.read({ kind: 'trace', context: f.context, runId, delta: {} })).rejects.toThrow('workspace_not_authorized')

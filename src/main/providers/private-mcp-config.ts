@@ -108,7 +108,7 @@ export async function sweepStalePrivateMcpConfigs(
       await rm(path, { recursive: true, force: true })
       removed++
     } catch {
-      // Another sweeper or the owner removed it first.
+      // Cleanup is best effort; the directory may already be gone.
     }
   }
   return removed

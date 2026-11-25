@@ -38,7 +38,7 @@ const withMcp = args.includes('--with-mcp')
 if (mode === 'in-process') throw new Error('in-process mode was removed with S3: the App always runs Agents in its daemon')
 if (mode !== 'daemon') throw new Error(`unknown mode: ${mode}`)
 
-// instead of one burst that any path can only deliver as a single lump.
+// Paced fixture output lets the benchmark observe spacing between arrivals.
 const PROMPT = 'performance paced stream'
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -169,7 +169,7 @@ const measure = async (count, chunkIndex) => {
     cdp = connectCdp(target.webSocketDebuggerUrl)
     const evaluate = createEvaluate(cdp)
     await evaluate(`window.scry.setCwd(${JSON.stringify(workspace)})`)
-    // One subscription for the whole instance: every text event is stamped where the user
+    // One subscription for this instance records model-event arrival times in the renderer.
     await evaluate(`(() => {
       window.__timing = { events: [], done: null }
       window.scry.onTrace((events) => {

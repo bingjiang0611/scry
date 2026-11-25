@@ -9,7 +9,7 @@ import { callDaemonChannel } from '../daemon-channel-gate'
 // nothing). Nothing here reads or caches the App's own copy of those stores, and a
 // daemon that cannot answer refuses the call.
 
-/** main's agent:setCwd test for "names a directory"; anything else clears the selection. */
+/** Checks for a nonblank directory argument without validating the path. */
 export function namesDirectory(dir: unknown): dir is string {
   return typeof dir === 'string' && dir.trim() !== ''
 }

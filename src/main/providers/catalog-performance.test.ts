@@ -8,8 +8,8 @@ import { withProbeFixture } from './pi-rpc.fixture'
 import { ProviderRegistry } from './registry'
 
 const samples: PerformanceSample[] = []
-// A started probe reports its own spawn and exit; a reused probe process reports only the reads it
-// performed on an already-running child, so no spawn/exit stage belongs to that later operation.
+// The cold probe records the spawn. The reused probe records responses from the
+// existing child without a spawn checkpoint. Exit is checked separately on disposal.
 const coldProbeStages = ['environment_ready', 'spawned', 'first_response', 'responses_received']
 const reusedProbeStages = ['environment_ready', 'first_response', 'responses_received']
 

@@ -56,7 +56,7 @@ async function fixture(root) {
   return env
 }
 
-/** Everything the pass reads has to look two hours old, or silence is not yet an answer. */
+/** Backdates recovery fixture timestamps by two hours to model inactive sessions. */
 async function backdate(root) {
   const at = minutesAgo(120)
   const touch = path => utimes(path, at, at).catch(() => undefined)
@@ -78,7 +78,7 @@ async function backdate(root) {
   }
 }
 
-/** What a new event does first: the open state's size and mtime change, so the next pass must look. */
+/** Refreshes open-state timestamps between visit-mode passes without changing file contents. */
 async function nudge(root) {
   const at = new Date()
   for (const provider of await readdir(join(root, '.scry', 'runtime')).catch(() => [])) {

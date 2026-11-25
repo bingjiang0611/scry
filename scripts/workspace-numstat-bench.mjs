@@ -73,8 +73,8 @@ for (const size of [8, 5000]) {
       const elapsedMs = performance.now() - start
       const counters = active
       active = undefined
-      // Also catch accidental writes to the actual repo, not just isolated stores.
-      // Enumeration is instrumentation, outside the API's wall-time sample.
+      // Count newly visible loose objects in the fixture repository's object store.
+      // The object-store scans are outside the API's wall-time sample.
       for (const path of await readdir(repositoryObjectDir, { recursive: true })) {
         if (objectsBefore.has(path) || !/^[a-f0-9]{2}\/[a-f0-9]+$/.test(path)) continue
         const object = inflateSync(await readFile(join(repositoryObjectDir, path)))

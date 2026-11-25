@@ -54,8 +54,8 @@ function poll(target: Session): { projected: TraceEvent[]; peerItems: TraceEvent
   return { projected, peerItems: target.view!.run.items }
 }
 
-// Three items, one poll, then an early tool body rewrite: the store can only learn about index 0
-// by hashing the suffix again. Returns the projection the store hashed and the rebuilt one.
+// Poll once, then rewrite the tool body at index 1. Return the hashed projection
+// and its rebuild so the controls can compare their stamps.
 function seed(target: Session): { before: TraceEvent[]; after: TraceEvent[] } {
   appendCoalescedTrace(target.state.items, textDelta('d-1', 'hello'))
   appendCoalescedTrace(target.state.items, toolResult('t-1', 'aaaa'))

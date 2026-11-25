@@ -52,16 +52,14 @@ export function createTraceRevisions() {
       entry.touched = now
       runs.set(runId, entry)
       while (runs.size > MAX_RUNS) runs.delete(runs.keys().next().value!)
-      // Reuse only what the stamp proves: nothing (no stamp, another generation, a projection this
-      // store never hashed, an inconsistent hint), the whole list (this exact projection was hashed
-      // already), or a suffix (the projection it hashed is the one this one was rebuilt from).
+      // Only stamps from the same generation can justify hash reuse. A matching
+      // revision and length allow full reuse; a matching base revision can allow prefix reuse.
       const stamp = projectionStamp(items)
       const previous = stamp && entry.hint && entry.hint.generation === stamp.generation ? entry.hint : null
       const hashed = (revision: number | null): boolean => revision !== null && previous !== null && previous.revision === revision
       const unchanged = stamp !== undefined && hashed(stamp.revision) && entry.hashes.length === items.length
-      // Compare start: the whole list when it is unchanged (so the loop does not run), the rebuilt
-      // suffix otherwise, and nothing when the kept hashes cannot line up with this list. The
-      // reused prefix is copied and every hash is written into this call's list once, compared once.
+      // Skip hashing on an unchanged projection. Otherwise, copy the reusable
+      // hash prefix and hash the rest. Start at zero if the prefix is unavailable.
       const suffix = stamp !== undefined && hashed(stamp.baseRevision) ? Math.min(stamp.dirtyFrom, items.length) : 0
       const compareFrom = unchanged ? items.length : suffix <= entry.hashes.length ? suffix : 0
       const hashes = unchanged ? entry.hashes : compareFrom === 0 ? [] : entry.hashes.slice(0, compareFrom)

@@ -216,8 +216,8 @@ async function runDataset(mod, spec) {
     const preStart = performance.now()
     const sink = mod.EventSink.open({ userDataDir: root, fullfsync: false, checkpointFullfsync: true })
     const afterOpen = performance.now()
-    // Use monitorEventLoopDelay + a trailing setImmediate tick so structured-clone deserialization
-    // stalls at the end of `loadLegacyLedgerPlanAsync` are ALWAYS captured (W9 Must-Fix 8).
+    // Leave the event-loop delay monitor enabled for one more turn after the plan resolves
+    // so it has a chance to observe delay from deserializing the result.
     const parseMonitor = monitorEventLoopDelay({ resolution: 1 })
     parseMonitor.enable()
     const plan = await mod.loadLegacyLedgerPlanAsync(sink, root)

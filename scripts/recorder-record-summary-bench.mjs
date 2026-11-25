@@ -32,7 +32,7 @@ function round(value) { return Math.round(value * 100) / 100 }
 
 const empty = () => ({ status: 'available', quality: 'exact', source: ['bench'], value: [] })
 
-/** A record the strict commit validator accepts; only the fields the summary reads ever vary. */
+/** Builds a synthetic record with varying identity fields and configurable text padding. */
 function draft(sequence, textBytes) {
   return {
     schemaVersion: 1, recordKind: 'agent_turn', sequence,
@@ -45,8 +45,7 @@ function draft(sequence, textBytes) {
     startedAt: '2026-01-01T00:00:00.000Z', completedAt: '2026-01-01T00:00:01.000Z', durationMs: 1_000,
     status: 'completed',
     user: { status: 'available', quality: 'exact', source: ['bench'], value: { text: 'bench prompt' } },
-    // Padding keeps the record close to a real one (~88 KB in the reporting workspace), because the
-    // cost being measured is per byte parsed.
+    // Text padding sets the approximate serialized record size for the benchmark workload.
     assistant: { status: 'available', quality: 'exact', source: ['bench'], value: { text: 'y'.repeat(textBytes) } },
     tools: empty(), skills: empty(), mcps: empty(), hooks: empty(),
     usage: { status: 'unavailable', quality: 'unavailable', source: [] },

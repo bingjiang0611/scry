@@ -110,8 +110,8 @@ export class ProviderWarmPool<V> {
 
   #arm(key: string, value: V): NodeJS.Timeout {
     const idle = setTimeout(() => {
-      // Expiry races a concurrent take/park; only the entry still owning the key
-      // may close its value, so a renewed entry is never closed by a stale timer.
+      // The key may have been taken or replaced since this timer was armed.
+      // Expire it only if it still holds the same value.
       const current = this.#entries.get(key)
       if (!current || current.value !== value) return
       this.#entries.delete(key)

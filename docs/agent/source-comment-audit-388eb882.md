@@ -4,39 +4,41 @@ All 209 candidates from the seven-report ledger matched exactly by path and comm
 
 The first cleanup batch handles six wording candidates and preserves one adjacent rationale in revised wording. It corrects what a history page proves about I/O, distinguishes redirected daemon output from the consumed child event, describes partial process-table output accurately, and removes a comment that described the spool cap as a sum. The four changed files have matching comment-free source and emitted JavaScript. The comment gate and 30 focused tests passed.
 
+At `906adb081`, the second batch resolved 38 of the 132 remaining wording candidates across 20 files. It distinguishes measured arrivals from inferred causes, fixture actions from assertions, and reused trace hashes from newly hashed suffixes. The 25 comment groups touched 50 source lines before and 45 after. Exact edit replay, comment-free emit, unchanged directives, the ratchet, and 58 focused tests passed. No packaged smoke or benchmark was run for this batch.
+
 ## Candidate locations
 
 Line numbers refer to the pinned commit, not the cleanup result. Review the current blob and adjacent assertions before applying further changes. Follow-ups belong in separate behavior or validation work if confirmed; consolidate them by contract, not per token.
 
-| Path | Keep | Wording pending | Follow-up | Handled in first batch |
+| Path | Keep | Wording pending | Follow-up | Handled |
 |---|---|---|---|---|
 | `scripts/check-staged-file-size.test.ts` | 138 | — | — | — |
-| `scripts/daemon-mode-smoke.mjs` | — | 44, 45, 156, 157 | — | — |
+| `scripts/daemon-mode-smoke.mjs` | — | 44, 45 | — | 156, 157 |
 | `scripts/daemon-mode-smoke/packaged.mjs` | — | 1, 2, 3, 4, 5, 6, 87 | 7, 8 | — |
 | `scripts/daemon-mode-smoke/workers.mjs` | 33 | — | 74 | — |
-| `scripts/daemon-mode-timing.mjs` | 125, 299 | 41, 56, 79, 172, 211, 212 | 45, 46, 147, 148, 149, 189, 190, 191, 280, 281, 282, 283 | — |
+| `scripts/daemon-mode-timing.mjs` | 125, 299 | 56, 79, 211, 212 | 45, 46, 147, 148, 149, 189, 190, 191, 280, 281, 282, 283 | 41, 172 |
 | `scripts/desktop-remote-ui-smoke/scenarios.mjs` | — | 9 | — | — |
 | `scripts/electron-security-native-history.mjs` | — | 114 | 233 | — |
 | `scripts/external-links-smoke.mjs` | — | 10, 11 | — | — |
 | `scripts/history-autoload-ui-smoke.mjs` | 41 | — | — | — |
 | `scripts/login-start-macos-acceptance.mjs` | — | 7, 106, 311 | 146 | — |
-| `scripts/orchestration-import-bench.mjs` | — | 2, 220 | — | — |
-| `scripts/overlays-ui-checks.mjs` | — | 79, 80, 81 | — | — |
+| `scripts/orchestration-import-bench.mjs` | — | 2 | — | 220 |
+| `scripts/overlays-ui-checks.mjs` | — | — | — | 79, 80, 81 |
 | `scripts/owned-app-processes.test.mjs` | — | 45 | — | — |
 | `scripts/publish-cli-internal.test.mjs` | — | 74 | — | — |
 | `scripts/recorder-engine-bench-fixtures.mjs` | — | 2 | — | — |
 | `scripts/recorder-engine-bench-report.mjs` | — | 8 | — | — |
 | `scripts/recorder-engine-bench.mjs` | — | 2 | — | — |
 | `scripts/recorder-engine.measurement.test.ts` | — | 266 | — | — |
-| `scripts/recorder-quiet-revisit-bench.mjs` | — | 2, 59, 81 | — | — |
-| `scripts/recorder-record-summary-bench.mjs` | — | 2, 35, 49 | — | — |
-| `scripts/remote-trace-read-frequency.mjs` | — | 8, 9, 10 | — | — |
+| `scripts/recorder-quiet-revisit-bench.mjs` | — | 2 | — | 59, 81 |
+| `scripts/recorder-record-summary-bench.mjs` | — | 2 | — | 35, 49 |
+| `scripts/remote-trace-read-frequency.mjs` | — | — | — | 8, 9, 10 |
 | `scripts/scry-cli-wrapper.test.mjs` | 22, 23 | — | — | — |
 | `scripts/sidebar-activity-ui-continuation.mjs` | 114 | — | — | — |
 | `scripts/smoke-app-entries.mjs` | 250 | 121 | — | — |
-| `scripts/steer-ui-smoke.mjs` | — | 90 | — | — |
+| `scripts/steer-ui-smoke.mjs` | — | — | — | 90 |
 | `scripts/unified-conversation-smoke.mjs` | 196 | — | — | — |
-| `scripts/workspace-numstat-bench.mjs` | — | 76 | — | — |
+| `scripts/workspace-numstat-bench.mjs` | — | — | — | 76 |
 | `scripts/workspace-session-ui-checks.mjs` | 180 | — | — | — |
 | `src/core/turn-recorder/recorder-quiet-revisit.test.ts` | 119, 135 | 46, 108, 109, 194 | 99 | — |
 | `src/core/turn-recorder/recorder.ts` | — | 325 | — | — |
@@ -49,40 +51,40 @@ Line numbers refer to the pinned commit, not the cleanup result. Review the curr
 | `src/main/bootstrap/daemon-launch.ts` | — | — | — | 78, 79 |
 | `src/main/bootstrap/daemon-run-lazy.ts` | — | — | 17 | — |
 | `src/main/bootstrap/daemon-run-mode.ts` | — | 53 | — | — |
-| `src/main/bootstrap/known-project-daemon.ts` | — | 12 | — | — |
+| `src/main/bootstrap/known-project-daemon.ts` | — | — | — | 12 |
 | `src/main/bootstrap/mcp-channels.ts` | — | 14, 15, 16, 17, 18 | — | — |
 | `src/main/bootstrap/query-channels.ts` | — | 99 | — | — |
 | `src/main/bootstrap/terminal-channels.ts` | — | 6, 7, 8, 9 | — | — |
 | `src/main/bootstrap/terminal-daemon.test.ts` | — | — | 54 | — |
-| `src/main/bootstrap/workspace.ts` | — | 105 | — | — |
+| `src/main/bootstrap/workspace.ts` | — | — | — | 105 |
 | `src/main/providers/acp-client.ts` | 132 | — | — | — |
-| `src/main/providers/antigravity-catalog.ts` | — | 180, 330 | — | — |
-| `src/main/providers/antigravity-events.ts` | — | 27 | — | — |
+| `src/main/providers/antigravity-catalog.ts` | — | — | — | 180, 330 |
+| `src/main/providers/antigravity-events.ts` | — | — | — | 27 |
 | `src/main/providers/antigravity-launch.test.ts` | — | — | 199 | — |
 | `src/main/providers/antigravity-launch.ts` | 298, 330 | 370 | — | — |
 | `src/main/providers/antigravity-mcp-paths.ts` | — | 69, 259 | — | — |
 | `src/main/providers/antigravity-run.test.ts` | — | — | 172 | — |
-| `src/main/providers/catalog-performance.test.ts` | — | 11, 12 | — | — |
+| `src/main/providers/catalog-performance.test.ts` | — | — | — | 11, 12 |
 | `src/main/providers/fixtures/fake-agy-acp.mjs` | 39 | — | — | — |
 | `src/main/providers/host-continuation-identity.ts` | — | 9, 277 | — | — |
-| `src/main/providers/private-mcp-config.ts` | — | 88, 111 | — | — |
-| `src/main/providers/provider-warm-pool.ts` | — | 113, 114 | — | — |
+| `src/main/providers/private-mcp-config.ts` | — | 88 | — | 111 |
+| `src/main/providers/provider-warm-pool.ts` | — | — | — | 113, 114 |
 | `src/main/providers/qoder-launch.ts` | — | — | 68 | — |
 | `src/main/providers/smoke-history-reader.test.ts` | — | — | 76 | — |
 | `src/main/providers/smoke-history-reader.ts` | — | 15 | — | — |
-| `src/main/providers/smoke-scenarios.ts` | — | 82, 83, 84 | — | — |
+| `src/main/providers/smoke-scenarios.ts` | — | — | — | 82, 83, 84 |
 | `src/main/providers/smoke.ts` | — | 70, 71 | — | — |
 | `src/main/remote/desktop-attachments.ts` | — | 194 | — | — |
 | `src/main/remote/desktop-client-trace-delta.test.ts` | — | — | 107 | — |
 | `src/main/remote/desktop-host-reader.fixtures.ts` | 11, 12 | — | — | — |
-| `src/main/remote/desktop-host-reader.test.ts` | — | 121 | — | — |
+| `src/main/remote/desktop-host-reader.test.ts` | — | — | — | 121 |
 | `src/main/remote/desktop-host-reader.ts` | — | — | 222, 223 | — |
 | `src/main/remote/desktop-lane-channel.ts` | — | 20 | — | — |
 | `src/main/remote/desktop-lane-real-host.test.ts` | — | 104, 105, 106 | — | — |
 | `src/main/remote/desktop-lane.ts` | 90, 91, 92, 93, 175, 176, 187, 188 | — | — | — |
 | `src/main/remote/desktop-long-poll.test.ts` | 50 | 49 | — | — |
-| `src/main/remote/desktop-trace-delta-hints-controls.test.ts` | 58 | 57 | — | — |
-| `src/main/remote/desktop-trace-delta.ts` | — | 55, 56, 57, 62, 63, 64 | — | — |
+| `src/main/remote/desktop-trace-delta-hints-controls.test.ts` | 58 | — | — | 57 |
+| `src/main/remote/desktop-trace-delta.ts` | — | — | — | 55, 56, 57, 62, 63, 64 |
 | `src/main/remote/history-reader.ts` | — | — | — | 151, 152 |
 | `src/main/remote/host-controller-surface.ts` | 30 | 27, 28, 29, 31, 254, 255 | — | — |
 | `src/main/remote/host-controller-types.ts` | 20, 21 | 171, 172 | — | — |

@@ -103,9 +103,8 @@ export function registerWorkspaceHandlers(deps: WorkspaceBootstrapDependencies):
 }
 
 /**
- * The known projects (recent folders, project records, session cwds), asked of the
- * daemon that owns them: its project list (records and session projects, removed ones
- * left out) and its recent folders. An answer of the wrong shape refuses.
+ * Combines the daemon's project directories and recent folders. Non-array replies
+ * reject the lookup; missing or empty directory values are skipped.
  */
 async function daemonKnownProjectDirectories(): Promise<string[]> {
   const [projects, recent] = await Promise.all([callDaemonChannel('agent:listProjects', []), callDaemonChannel('agent:recentFolders', [])])

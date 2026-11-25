@@ -175,9 +175,9 @@ export function createAntigravityCatalog(deps: {
   const probeWaitTimeoutMs = deps.probeWaitTimeoutMs ?? DEFAULT_PROBE_WAIT_TIMEOUT_MS
   const cache = new Map<string, CachedAntigravityCatalog>()
   const inFlight = new Map<string, Promise<CachedAntigravityCatalog>>()
-  // B2/D5/N4: Reader-writer gate — concurrent runs NEVER serialize each other, while catalog probes
-  // remain mutually exclusive with active runs on the same profile. Queued runs abort immediately,
-  // and catalog probes wait at most `probeWaitTimeoutMs` instead of hanging indefinitely.
+  // Runs can share the gate, but a catalog probe needs it to itself.
+  // Queued runs can be canceled. A positive probe wait timeout bounds the wait
+  // to acquire the gate, not the probe itself.
   let activeRuns = 0
   let probeActive = false
   const probeWaiters: Array<{ grant: () => void }> = []
@@ -327,7 +327,7 @@ export function createAntigravityCatalog(deps: {
         })
       }
 
-      // Give available_commands_update a brief microtask tick if sent right after session/new.
+      // Wait briefly for a command update that may arrive after session/new.
       await new Promise((resolve) => setTimeout(resolve, 25))
       return {
         observedAt: now(),
