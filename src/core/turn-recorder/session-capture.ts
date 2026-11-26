@@ -153,7 +153,7 @@ export async function startSessionCapture(args: {
     }
     await beginCaptureTurn(
       enablement, provider, sessionId, context, state.transcriptPath, prepared.payload,
-      prepared.ancestryFromPid, prepared.hostChain, prepared.pendingTranscriptPath
+      prepared.ancestryFromPid, prepared.hostChain, prepared.pendingTranscriptPath, !args.sessionLockHeld
     )
     await writeJsonAtomic(statePath, state)
     await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId), captureWireContext(context))
