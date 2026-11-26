@@ -102,7 +102,7 @@ export async function beginOpenTurn(
     status: 'open',
     ...(capture ? { initialization: 'pending' as const } : {}),
     startedAt: claim?.startedAt ?? timestampOf(payload),
-    startFingerprint: capture && !claim?.pendingQoderTranscriptPath
+    startFingerprint: capture && !(claim && provider === 'qoder' && event === 'UserPromptSubmit')
       ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
     ...(capture ? {
       capture: {
@@ -229,7 +229,8 @@ export async function beginCaptureTurn(
     }
     return readJson<OpenTurnState>(openPath(root)).then((value) => value ?? open)
   }
-  const transcript = pendingTranscriptPath ? null : await stableTranscript(
+  const openingPrompt = provider === 'qoder' && payload.hook_event_name === 'UserPromptSubmit'
+  const transcript = openingPrompt || pendingTranscriptPath ? null : await stableTranscript(
     transcriptPath,
     `${provider}:${sessionId}:capture`,
     provider,
@@ -242,7 +243,7 @@ export async function beginCaptureTurn(
   ).catch(() => null)
   const resolved = ancestryFromPid ? await hostProcessChain(ancestryFromPid) : []
   const host = resolved.length ? resolved : claimedHostChain
-  const event = pendingTranscriptPath ? 'UserPromptSubmit' : 'CaptureStart'
+  const event = openingPrompt ? 'UserPromptSubmit' : 'CaptureStart'
   const opened = await beginOpenTurn(enablement, provider, sessionId, event, payload, false, false, undefined, context, {
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
     ...(transcript?.userText ? { userText: transcript.userText } : {}),
@@ -250,7 +251,7 @@ export async function beginCaptureTurn(
     ...(!pendingTranscriptPath || !synchronousClaim ? { baselineAt: new Date().toISOString() } : {}),
     ...(pendingTranscriptPath ? { pendingQoderTranscriptPath: pendingTranscriptPath } : {})
   }, undefined, host?.length ? host : undefined)
-  if (pendingTranscriptPath) await storeLifecycleEvent(enablement, opened, event, payload)
+  if (openingPrompt) await storeLifecycleEvent(enablement, opened, event, payload)
   return opened
 }
 
