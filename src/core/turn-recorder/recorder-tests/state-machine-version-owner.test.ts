@@ -133,7 +133,7 @@ export function registerVersionOwnerSuite(): void {
       expect(owner.statuses).toBeGreaterThan(0)
     })
 
-    it('two hook senders alternating on one session still produce one record per turn', async () => {
+    it('one daemon runs a whole session: one record per turn and no second owner', async () => {
     const root = await workspace()
     const socketPath = socketFor(root)
     const env = envFor(root)
