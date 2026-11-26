@@ -16,8 +16,7 @@ export class RecorderHookRejected extends Error {
   constructor(
     readonly statusCode: number,
     readonly detail: string,
-    readonly replaceDaemon: boolean,
-    readonly daemonVersion?: string
+    readonly replaceDaemon: boolean
   ) {
     super(`recorder daemon rejected hook (${statusCode}): ${detail}`)
   }
@@ -161,8 +160,7 @@ export async function sendRecorderDaemonHook(args: {
     throw new RecorderHookRejected(
       response.statusCode,
       String(response.body.error ?? 'missing ACK'),
-      response.statusCode === 404 || (response.statusCode === 409 && !isNewerRecorderVersion(daemonVersion, RECORDER_VERSION)),
-      daemonVersion
+      response.statusCode === 404 || (response.statusCode === 409 && !isNewerRecorderVersion(daemonVersion, RECORDER_VERSION))
     )
   }
   return response.body

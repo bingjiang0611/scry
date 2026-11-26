@@ -1,10 +1,11 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { sendRecorderDaemonHook, RecorderHookRejected, PROTOCOL_VERSION, startRecorderDaemon } from '../daemon'
+import { listenRecorderDaemon, sendRecorderDaemonHook, RecorderHookRejected, PROTOCOL_VERSION, startRecorderDaemon } from '../daemon'
 import { isNewerRecorderVersion } from '../recorder-version-order'
+import { listRecords } from '../store'
 
 const roots: string[] = []
 const servers: ReturnType<typeof createHttpServer>[] = []
@@ -99,7 +100,7 @@ export function registerVersionOwnerSuite(): void {
         workspace: root, provider: 'pi', event: 'UserPromptSubmit', payload: { session_id: 'newer-owner' }, env: envFor(root)
       }).catch((caught: unknown) => caught)
       expect(error).toBeInstanceOf(RecorderHookRejected)
-      expect(error).toMatchObject({ statusCode: 409, replaceDaemon: false, daemonVersion: '99.0.0' })
+      expect(error).toMatchObject({ statusCode: 409, replaceDaemon: false })
       expect(owner.stops).toBe(0)
     })
 
@@ -109,7 +110,7 @@ export function registerVersionOwnerSuite(): void {
       const error = await sendRecorderDaemonHook({
         workspace: root, provider: 'pi', event: 'UserPromptSubmit', payload: { session_id: 'older-owner' }, env: envFor(root)
       }).catch((caught: unknown) => caught)
-      expect(error).toMatchObject({ statusCode: 409, replaceDaemon: true, daemonVersion: '0.0.1' })
+      expect(error).toMatchObject({ statusCode: 409, replaceDaemon: true })
       expect(owner.stops).toBe(0)
     })
 
@@ -132,7 +133,40 @@ export function registerVersionOwnerSuite(): void {
       expect(owner.statuses).toBeGreaterThan(0)
     })
 
-    it('start still evicts a live owner that is older than the caller', async () => {
+    it('two hook senders alternating on one session still produce one record per turn', async () => {
+    const root = await workspace()
+    const socketPath = socketFor(root)
+    const env = envFor(root)
+    const daemon = await listenRecorderDaemon({ workspace: root, socketPath })
+    const owners = new Set<number>()
+    const send = async (event: string, extra: Record<string, unknown> = {}): Promise<void> => {
+      await sendRecorderDaemonHook({
+        provider: 'claude', event, workspace: root, env,
+        payload: { session_id: 'two-senders', timestamp: new Date().toISOString(), ...extra }
+      })
+      const owner = JSON.parse(await readFile(`${socketPath}.owner.json`, 'utf8').catch(() => 'null'))
+      if (owner?.pid) owners.add(owner.pid)
+    }
+    try {
+      await send('UserPromptSubmit', { prompt: 'first turn' })
+      await send('PreToolUse', { tool_name: 'Bash', tool_use_id: 'tool-1', tool_input: { command: 'printf ok' } })
+      await send('PostToolUse', { tool_name: 'Bash', tool_use_id: 'tool-1', tool_response: 'ok' })
+      await send('Stop')
+      await send('UserPromptSubmit', { prompt: 'second turn' })
+      await send('Stop')
+    } finally {
+      await daemon.close()
+    }
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(2)
+    expect(records.map((record) => record.generation)).toEqual([1, 2])
+    expect(records.map((record) => record.status)).toEqual(['completed', 'completed'])
+    expect(records[0].user.value?.text).toBe('first turn')
+    expect(records[1].user.value?.text).toBe('second turn')
+    expect(owners.size).toBe(1)
+  }, 40_000)
+
+  it('start still evicts a live owner that is older than the caller', async () => {
       const root = await workspace()
       const owner = await fakeOwner(root, '0.0.1')
       await startRecorderDaemon({ workspace: root, scriptPath: join(root, 'missing-cli.js'), waitForReady: false, env: envFor(root) }).catch(() => undefined)
