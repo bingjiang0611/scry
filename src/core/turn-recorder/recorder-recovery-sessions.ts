@@ -23,7 +23,6 @@ export async function recoverySessions(
   if (scope) {
     const sessionDir = recorderSessionRoot(dataRoot, scope.provider, scope.sessionId)
     if (!incremental) await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
-    // An explicit scope is the operator asking for that session by name: suspension never hides it.
     return { sessions: [{ provider: scope.provider, sessionDir }], failures }
   }
   const initialized = await attentionIndexPresent(dataRoot)

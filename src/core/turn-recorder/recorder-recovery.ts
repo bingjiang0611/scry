@@ -154,8 +154,6 @@ export async function recoverRecorder(
                 enablement.dataRoot, item.sessionDir, open, transcript
               ))
               if (capped?.terminalStatus && capped.completedAt) {
-                // An exact terminal proves the turn ended, but not its missing body or Git baseline.
-                // Keep this as an open-turn retry until commit succeeds; the durable cursor holds proof.
                 open.closingAt = capped.completedAt
                 open.endReason = 'provider_terminal'
                 const finalized = await finalizeOpenTurn(enablement, open, { timestamp: capped.completedAt }, capped.terminalStatus, {
@@ -261,8 +259,6 @@ export async function recoverRecorder(
         )
         if (result.status === 'managed') {
           managedPresent = true
-          // Managed turns are recovered by their own pass, which only runs because this loop saw one.
-          // Skipping that sighting would stop managed recovery silently, so these never defer.
           managedTurn = true
         } else if (result.status === 'pending') pending++
         else if (result.status === 'committed' || result.status === 'duplicate') {
@@ -279,7 +275,6 @@ export async function recoverRecorder(
         const message = `recovery ${item.provider}/${basename(item.sessionDir)}: ${error instanceof Error ? error.message : String(error)}`
         if (!isLockTimeout(error)) {
           await updateHealth(enablement.dataRoot, { lastError: { at: new Date().toISOString(), message } }).catch(() => undefined)
-          // A busy peer is not a broken session: it clears itself as soon as the lock is released.
           await noteSessionFailure(enablement.dataRoot, item.provider, basename(item.sessionDir), error, 'turn').catch(() => undefined)
         }
         await appendRotatingLog(
