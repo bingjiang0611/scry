@@ -13,6 +13,7 @@ import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-h
 import { hostProcessChain } from './host-process.js'
 import { forgetSessionVisit } from './session-visit.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
+import { managedOrphanVerdict, orphanClosingState } from './managed-orphan.js'
 import { sealUnreadableTurn } from './recorder-hook-seal.js'
 import { isTopLevelQoderStop, logQoderStopAttribution, logQoderStopHold, qoderNativeStopAttribution, qoderRequestStopAttribution, readQoderStopTranscript, QODER_STOP_TRANSCRIPT_WAIT_MS, type QoderStopAttribution } from './qoder-stop-evidence.js'
 
@@ -76,8 +77,22 @@ export async function applyHookLocked(
     )) return { status: 'duplicate' as const }
     if (open) {
       if (open.managedByScry && !input.managed) {
-        return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
+        const orphan = await managedOrphanVerdict({ root, open })
+        if (!orphan) return { status: 'recorded' as const, reason: 'managed lifecycle start ignored' }
+        const closing = orphanClosingState(open, orphan)
+        await writeJsonAtomic(openPath(root), closing, { sync: false })
+        try {
+          await finalizeOpenTurn(enablement, closing, input.payload, orphan.status, {
+            allowUnstableTranscript: true,
+            forcedReason: orphan.reason
+          })
+        } catch (error) {
+          await sealUnreadableTurn(enablement, closing, input, orphan.status, error)
+        }
+        open = null
       }
+    }
+    if (open) {
       if (open.managedByScry || input.managed) {
         await quarantineOpenTurn(
           enablement.dataRoot,

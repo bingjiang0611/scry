@@ -1,5 +1,6 @@
 import { basename, join } from 'node:path'
 import { staleOpenTurnVerdict } from './recorder-stale-open.js'
+import { managedOrphanVerdict, orphanClosingState, sealExpiredQuarantinedTurns } from './managed-orphan.js'
 import { appendRotatingLog, readJson, writeJsonAtomic } from './io.js'
 import { recoverManagedRecorderTurns } from './managed.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
@@ -87,6 +88,13 @@ export async function recoverRecorder(
             () => replayQueuedHooks(enablement, item.provider, sessionKey, true, scope?.sessionId, options.qoderStopRecoveryScheduled), { waitMs: SESSION_LOCK_WAIT_MS })
         }
         const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
+        const quarantine = await sealExpiredQuarantinedTurns(enablement, item.sessionDir)
+        if (quarantine.sealed) {
+          recovered += quarantine.sealed
+          expired += quarantine.sealed
+          settled = true
+        }
+        pending += quarantine.pending
         if (!initial) {
           await releaseStaleAttention(enablement.dataRoot, item.provider, item.sessionDir).catch(() => undefined)
           continue
@@ -109,7 +117,17 @@ export async function recoverRecorder(
             } else if (open.provider !== item.provider || open.sessionId !== initial.sessionId) {
               return { status: 'idle' as const }
             }
-            if (open.managedByScry) return { status: 'managed' as const }
+            if (open.managedByScry) {
+              const orphan = await managedOrphanVerdict({ root: item.sessionDir, open })
+              if (!orphan) return { status: 'managed' as const }
+              const closing = orphanClosingState(open, orphan)
+              await writeJsonAtomic(openPath(item.sessionDir), closing, { sync: false })
+              forcedExpiry = true
+              return finalizeOpenTurn(enablement, closing, { timestamp: orphan.at }, orphan.status, {
+                allowUnstableTranscript: true,
+                forcedReason: orphan.reason
+              })
+            }
             await probe?.(open)
             const wasAlreadyClosing = open.status === 'closing'
             if (open.status === 'open') {
