@@ -18,6 +18,7 @@ export interface RecorderHookInput {
   queueOnly?: boolean
   capture?: import('./session-capture-contract.js').SessionCaptureContext
   deferDelivery?: boolean
+  qoderStopRecoveryScheduled?: boolean
   captureMode?: boolean
   ancestryFromPid?: number
 }
@@ -67,6 +68,7 @@ export interface TranscriptRead {
     sourceCompleteness: 'complete' | 'partial'
   }
   observed: boolean
+  transcriptUnread?: true
   identityMatched?: boolean
   pendingBackgroundTasks?: string[]
   providerTurnId?: string

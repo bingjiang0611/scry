@@ -276,6 +276,7 @@ export async function applySessionCaptureHook(args: {
   payload: Record<string, unknown>
   queueOnly?: boolean
   deferDelivery?: boolean
+  qoderStopRecoveryScheduled?: boolean
   captureMode?: boolean
   env?: NodeJS.ProcessEnv
   ancestryFromPid?: number
@@ -338,6 +339,7 @@ export async function applySessionCaptureHook(args: {
     capture: captureStateContext(state),
     ...(args.queueOnly ? { queueOnly: true, captureMode: true } : {}),
     deferDelivery: args.deferDelivery,
+    qoderStopRecoveryScheduled: args.qoderStopRecoveryScheduled,
     env: args.env,
     ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
   })

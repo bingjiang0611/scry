@@ -22,6 +22,8 @@ import { CLOSING_TURN_EXPIRED_REASON, closingTurnStalled } from './recorder-clos
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
+import { logQoderStopHold, qoderNativeStopAttribution, readQoderStopTranscript } from './qoder-stop-evidence.js'
+import { revokeSeal } from './recorder-segment.js'
 import { CODEX_TRUNCATED_RECOVERY_REASON, rememberCodexTranscriptMiss, resumeCodexTranscriptMiss } from './recorder-codex-recovery.js'
 
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
@@ -73,7 +75,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     try {
       result = await withRecorderSessionLock(enablement.dataRoot, input.provider, sessionId, async () => {
         entered = true
-        await replayQueuedHooks(enablement, input.provider, safeKey(sessionId))
+        await replayQueuedHooks(enablement, input.provider, safeKey(sessionId), false, undefined, input.qoderStopRecoveryScheduled)
         return applyHookLocked(enablement, input, sessionId)
       }, { waitMs: HOOK_LOCK_WAIT_MS })
     } catch (error) {
@@ -189,6 +191,7 @@ export async function recoverRecorder(
   options: {
     expireOpen?: boolean
     incremental?: boolean
+    qoderStopRecoveryScheduled?: boolean
     expireSessions?: readonly string[]
   } = {}
 ): Promise<{ recovered: number; pending: number; expired: number }> {
@@ -216,7 +219,7 @@ export async function recoverRecorder(
         if ((await recorderInboxEntries(item.sessionDir)).length) {
           const sessionKey = basename(item.sessionDir)
           await withRecorderSessionKeyLock(enablement.dataRoot, item.provider, sessionKey,
-            () => replayQueuedHooks(enablement, item.provider, sessionKey, true, scope?.sessionId), { waitMs: SESSION_LOCK_WAIT_MS })
+            () => replayQueuedHooks(enablement, item.provider, sessionKey, true, scope?.sessionId, options.qoderStopRecoveryScheduled), { waitMs: SESSION_LOCK_WAIT_MS })
         }
         const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
         if (!initial) {
@@ -309,16 +312,53 @@ export async function recoverRecorder(
               }
             }
             if (open.status !== 'closing') return { status: 'idle' as const }
+            let matchedNativeStop = false
+            if (open.deferredQoderNativeStopId) {
+              await observePendingQoderTranscript(open)
+              const read = open.requestSetId ? await readQoderStopTranscript(enablement, open) : undefined
+              const attribution = qoderNativeStopAttribution(open, open.deferredQoderNativeStopId, read)
+              if (attribution === 'stale') {
+                await logQoderStopHold(enablement.dataRoot, open, 'native_id_mismatch', 'stale')
+                await revokeSeal(item.sessionDir, open)
+                return { status: 'idle' as const }
+              }
+              if (attribution === 'unproven') {
+                if (!wasAlreadyClosing || !await closingTurnStalled(openPath(item.sessionDir), expiryMs)) {
+                  return { status: 'pending' as const, reason: 'Qoder Stop awaits native turn identity' }
+                }
+                await logQoderStopHold(enablement.dataRoot, open, 'native_id_expired')
+                await revokeSeal(item.sessionDir, open, false)
+                forcedExpiry = true
+                return finalizeOpenTurn(enablement, open, {}, 'interrupted', {
+                  allowUnstableTranscript: true,
+                  forcedReason: `${CLOSING_TURN_EXPIRED_REASON}; Qoder Stop native turn identity was never confirmed`
+                })
+              }
+              matchedNativeStop = true
+              if (read?.pendingBackgroundTasks?.length) {
+                await logQoderStopHold(enablement.dataRoot, open, 'native_id_matched', 'matched')
+                open.stopObservedAt = open.terminalAt
+                open.stopObservedAtSource = open.terminalAtSource
+                open.deferredTerminalReason = 'pending_background_tasks'
+                open.deferredQoderStopAttribution = 'matched'
+                delete open.deferredQoderNativeStopId
+                open.deferredTerminalAt = new Date().toISOString()
+                open.deferredTerminalFirstAt = open.deferredTerminalAt
+                await writeJsonAtomic(openPath(item.sessionDir), open, { sync: false })
+                await logQoderStopHold(enablement.dataRoot, open, 'deferred')
+                matchedNativeStop = false
+              }
+            }
             if (open.deferredTerminalAt) {
               const deferredAt = Date.parse(open.deferredTerminalAt)
-              if (Number.isFinite(deferredAt) && Date.now() - deferredAt < DEFERRED_TERMINAL_GRACE_MS) {
+              if (!matchedNativeStop && Number.isFinite(deferredAt) && Date.now() - deferredAt < DEFERRED_TERMINAL_GRACE_MS) {
                 return { status: 'pending' as const, reason: 'unidentified terminal grace period is still active' }
               }
             }
             const closingExpired = wasAlreadyClosing &&
               await closingTurnStalled(openPath(item.sessionDir), expiryMs)
             if (closingExpired) forcedExpiry = true
-            return finalizeOpenTurn(
+            const finalized = await finalizeOpenTurn(
               enablement,
               open,
               { timestamp: open.closingAt ?? new Date().toISOString() },
@@ -328,6 +368,11 @@ export async function recoverRecorder(
                 ...(closingExpired ? { forcedReason: CLOSING_TURN_EXPIRED_REASON } : {})
               }
             )
+            if (finalized.status === 'committed' || finalized.status === 'duplicate') {
+              await logQoderStopHold(enablement.dataRoot, open, matchedNativeStop ? 'native_id_matched' : 'grace_elapsed',
+                matchedNativeStop ? 'matched' : undefined)
+            }
+            return finalized
           },
           { waitMs: SESSION_LOCK_WAIT_MS }
         )

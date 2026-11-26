@@ -56,7 +56,7 @@ function rows(sessionId: string, cwd: string, promptId: string, requestSetId: st
     },
     {
       sessionId, cwd, type: 'assistant', uuid: `${promptId}-answer`, parentUuid: `${promptId}-result`, promptId,
-      message: { id: `${promptId}-answer-message`, content: [{ type: 'text', text: `${promptId} answer` }], usage: { input_tokens: 3, output_tokens: 2 } }
+      message: { id: `${promptId}-answer-message`, stop_reason: 'end_turn', content: [{ type: 'text', text: `${promptId} answer` }], usage: { input_tokens: 3, output_tokens: 2 } }
     }
   ]
 }

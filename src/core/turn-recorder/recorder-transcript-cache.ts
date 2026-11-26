@@ -450,6 +450,7 @@ function missingTranscript(providerTurnId?: string, promptHash?: string): Transc
   return {
     stable: true,
     observed: false,
+    transcriptUnread: true,
     ...(providerTurnId || promptHash ? { identityMatched: false } : {}),
     complete: true,
     events: [],
