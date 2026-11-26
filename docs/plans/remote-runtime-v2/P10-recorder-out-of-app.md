@@ -55,8 +55,6 @@ App 还借用了记录器目录里的**通用代码**：
 - `store` 里的 `safeKey`、`stableHash`；
 - `config`、`aggregate`。
 
-`src/cli/mcpguard-core.ts` 是 App 自己的功能（MCP 信任检查），只是文件放在 CLI 目录里。
-
 ## 3. 目标状态（App 侧）
 
 1. **所有工作区都走现在的禁用路径**。`managedRecorderMode` 以及所有 `managedRecorder*` 参数、分支，都从 App 里删掉。
@@ -64,7 +62,7 @@ App 还借用了记录器目录里的**通用代码**：
 3. **删除托管封存和提交回调相关的代码**：`managed-turn-commit`、`commit-hook-startup`、`commit-hook-trust`，以及运行收尾、失败和启动路径上的相关调用。由此留下的职责，按 §7 交给记录器。
 4. **不再打包 CLI**：删除 `electron-builder.yml` 里的 `scry-cli` 和 `bin/scry` 两项，以及 `build/scry-cli`。`bin/scry-host` 不动，它是 P5 的宿主 CLI。
 5. **通用代码复制进 App 自己的目录**：放到 `src/shared/` 或 `src/host-runtime/` 下合适的位置，按用途命名。记录器保留自己的副本，两边从此各自演进。出处按 §8 记录。
-6. **`mcpguard-core` 搬到 `src/shared/`**，`src/cli/mcpguard.ts` 改成从新位置引用。
+6. **`mcpguard-core`（App 自己的 MCP 信任检查，只是放在 CLI 目录里）搬到 `src/shared/`**，`src/cli/mcpguard.ts` 改成从新位置引用。
 7. **静态边界**：`src/main`、`src/daemon`、`src/host-runtime`、`src/shared`、`src/preload`、`src/renderer` 都不得 import `src/core/turn-recorder` 或 `src/cli`，检查违反就失败。
 8. **Qoder 复用放开**：撤销 `e4dfbab6` 的「一轮即关」。
 9. **项目规则同步**：`AGENTS.md`、`docs/agent/change-checklists.md`、`docs/agent/architecture.md` 里关于 App 私有 CLI 和托管两阶段提交的说法，改成新的边界。
@@ -144,7 +142,7 @@ W23 用测试证明这三条。如果现有的 handler 标记和守护进程所�
 
 ## 6. 发布顺序与 PR
 
-1. **记录器先行，单独提 PR 合进 main。** 记录器的改动会随 CodeLens 自带的版本到达所有 CodeLens 用户，而且和最近的 #201–#205 改的是同一片状态机代码，评审方要对照着读。所以：
+1. **记录器先行，单独提 PR 合进 main。** 记录器的改动会随 CodeLens 到达所有 CodeLens 用户，又和 #201–#208 是同一片状态机代码，评审方要对照着读。所以：
    - 本地 agent 从 main 拉独立分支，开 PR，可以拆成两三个；
    - 范围包括：§4 的过期规则和封存、§7 的回调重投、§5.3 要求的修复、§9 记录器侧的来源字段。§5.4 只测量，不修；
    - PR 描述写明改动前后的状态迁移和测试，§4 的那几点逐条说明；
@@ -174,10 +172,7 @@ W23 用测试证明这三条。如果现有的 handler 标记和守护进程所�
 S3 把通用代码复制进 App 时，要写一份出处清单 `docs/plans/remote-runtime-v2/recorder-split-provenance.md`，内容包括：
 - 来源提交；
 - 每个文件的「原路径 → 新路径」，以及复制时的内容哈希；
-- 最近几项需要两边关注的修复：
-  - 转录和锚点扫描的读取上限；
-  - 符号链接挂载仓库的发现；
-  - 基线晚于写入时不报 0 改动。
+- 最近几项需要两边关注的修复：转录和锚点扫描的读取上限、符号链接挂载仓库的发现、基线晚于写入时不报 0 改动。
 
 之后任何一边修了这批模块，都要在清单里登记，并判断另一边是否需要同步。
 
@@ -205,7 +200,7 @@ S3 把通用代码复制进 App 时，要写一份出处清单 `docs/plans/remot
 
 - §3 的九条全部做到；静态边界检查能拦住违规引用（故意加一条违规 import，检查要失败）。
 - `rg "SCRY_RECORDER_MANAGED|SCRY_MANAGED_|managedRecorder|SCRY_CLI_PATH|commitManagedRecorderTurn" src/main src/daemon src/host-runtime src/shared` 没有命中，测试和注释说明除外。
-- 打包产物里没有 `scry-cli/` 和 `bin/scry`，`bin/scry-host` 还在。
+- 打包产物里没有 `scry-cli/`、`bin/scry`，`bin/scry-host` 还在。
 - §4 的每条规则都有测试：open、closing、隔离项各自按规则封存；旧版 App 还在托管时不被打断；同一会话的非托管开场不再被永久忽略；每条记录只投递一次回调。
 - §9：App 启动的会话带上 `SCRY_LAUNCH_CLIENT=scry-app`；记录器记下来源，但在服务端验证之前不进入上传内容。有测试证明。
 - 记录器侧的改动已经通过独立 PR 合入 main（§6）。
