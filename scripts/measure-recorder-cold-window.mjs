@@ -84,12 +84,26 @@ async function recordSummary(workspace) {
     if (!name.startsWith('recorder.log')) continue
     logText.push(await readFile(join(workspace, '.scry', 'logs', name), 'utf8').catch(() => ''))
   }
+  const skipLog = await readFile(join(workspace, '.scry', 'logs', 'hook-skip.log'), 'utf8').catch(() => '')
+  const inbox = await queuedEntries(join(workspace, '.scry', 'sessions'))
   return {
     records,
     health: health ? JSON.parse(health) : null,
-    captureUncertain: existsSync(join(workspace, '.scry', 'capture', 'uncertain')),
+    hookSkips: skipLog.trim() ? skipLog.trim().split('\n').length : 0,
+    queuedForReplay: inbox.length,
     logTail: logText.join('\n').trim().split('\n').slice(-12)
   }
+}
+
+async function queuedEntries(dir) {
+  const names = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  const found = []
+  for (const entry of names) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) found.push(...await queuedEntries(path))
+    else if (entry.name.endsWith('.json') && dir.endsWith('inbox')) found.push(path)
+  }
+  return found
 }
 
 async function ownerOf(workspace) {
@@ -132,7 +146,8 @@ async function coldWindow(runIndex) {
     events: events.map(({ event, code, elapsedMs }) => ({ event, code, elapsedMs })),
     records: summary.records,
     health: summary.health,
-    captureUncertain: summary.captureUncertain,
+    hookSkips: summary.hookSkips,
+    queuedForReplay: summary.queuedForReplay,
     daemonOwner: owner,
     logTail: summary.logTail,
     root: site.root
@@ -253,7 +268,8 @@ async function main() {
       daemonUpMs: item.daemonUpMs,
       records: item.records.length,
       statuses: item.records.map((record) => record.status),
-      captureUncertain: item.captureUncertain
+      hookSkips: item.hookSkips,
+      queuedForReplay: item.queuedForReplay
     })),
     warm: { events: warm.events, records: warm.records.length },
     twoHooks: {
