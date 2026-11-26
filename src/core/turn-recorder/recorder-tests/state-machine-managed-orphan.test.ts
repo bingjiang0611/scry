@@ -203,6 +203,34 @@ export function registerManagedOrphanSuite(): void {
     await expect(listRecords(join(root, '.scry'))).resolves.toHaveLength(1)
   }, 40_000)
 
+  it('封存隔离项不把会话指针退回旧记录', async () => {
+    const root = await managedWorkspace()
+    await startManaged(root, 'orphan-pointer')
+    await startManaged(root, 'orphan-pointer', 'turn-2')
+    await backdateSession(root, 'orphan-pointer', 31)
+    await recoverRecorder(root)
+    const committed = await listRecords(join(root, '.scry'))
+    expect(committed).toHaveLength(1)
+    expect(committed[0].status).toBe('interrupted')
+    const sessionDir = join(root, '.scry', 'runtime', 'codex', safeKey('orphan-pointer'))
+    await rm(openPathOf(root, 'orphan-pointer'), { force: true })
+
+    const at = new Date(Date.now() - 25 * HOUR)
+    for (const turn of await readdir(join(sessionDir, 'turns'))) {
+      const path = join(sessionDir, 'turns', turn, 'pending-open.json')
+      const quarantined = await readFile(path, 'utf8').catch(() => undefined)
+      if (!quarantined) continue
+      await utimes(path, at, at)
+      await writeFile(path, JSON.stringify({ ...JSON.parse(quarantined), quarantinedAt: at.toISOString() }))
+    }
+
+    await recoverRecorder(root, undefined, undefined, undefined, {})
+    const records = await listRecords(join(root, '.scry'))
+    expect(records).toHaveLength(2)
+    const state = JSON.parse(await readFile(join(sessionDir, 'session.json'), 'utf8')) as Record<string, unknown>
+    expect(state.lastCommittedRecordId).toBe(committed[0].recordId)
+  }, 40_000)
+
   it('隔离项还在保留窗口内：不收尾，等它自己的保留期结束', async () => {
     const root = await managedWorkspace()
     await startManaged(root, 'orphan-recent')

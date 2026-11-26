@@ -7,8 +7,8 @@ import { readJson, writeJsonAtomic } from './io.js'
 import { clearRuntimeTurn } from './store.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import {
-  openTurnQuiet, recorderOpenPath, recorderQuarantineIndexPath, recorderQuarantinedOpenTurns, recorderTurnRoot,
-  withRecorderSessionLock, type RecorderOpenTurnState
+  openTurnQuiet, recorderOpenPath, recorderQuarantineIndexPath, recorderQuarantinedOpenTurns, recorderStatePath,
+  recorderTurnRoot, withRecorderSessionLock, type RecorderOpenTurnState, type RecorderSessionState
 } from './runtime-state.js'
 
 export const MANAGED_TURN_ORPHAN_MS = 30 * 60 * 1_000
@@ -106,6 +106,7 @@ export async function sealExpiredQuarantinedTurns(
     const reason = `${MANAGED_ORPHAN_REASON}: this turn was replaced by a managed successor ${Math.round((now - since) / 3_600_000)} hours ago and nothing can still seal it`
     const result = await withRecorderSessionLock(enablement.dataRoot, item.provider, item.sessionId, async () => {
       if (await readJson(recorderOpenPath(sessionDir))) return 'pending' as const
+      const stateBefore = await readJson<RecorderSessionState>(recorderStatePath(sessionDir))
       const closing = orphanClosingState(item, { status: 'interrupted', at })
       const finalized = await finalizeOpenTurn(enablement, closing, { timestamp: at }, 'interrupted', {
         allowUnstableTranscript: true,
@@ -118,6 +119,15 @@ export async function sealExpiredQuarantinedTurns(
         sealedAt: at,
         sealedRecordId: finalized.record?.recordId
       })
+      if (stateBefore?.lastCommittedRecordId && stateBefore.lastCommittedRecordId !== finalized.record?.recordId) {
+        await writeJsonAtomic(recorderStatePath(sessionDir), {
+          ...stateBefore,
+          committedProviderTurnIds: [...new Set([
+            ...(stateBefore.committedProviderTurnIds ?? []),
+            ...(item.providerTurnId ? [item.providerTurnId] : [])
+          ])].slice(-200)
+        }, { sync: false })
+      }
       return 'sealed' as const
     })
     if (result === 'sealed') sealed++

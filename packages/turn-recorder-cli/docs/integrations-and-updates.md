@@ -134,7 +134,7 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 - 最后活动超过 30 分钟（轮次事件、Provider transcript 与 `open.json` 里最新的那个时间）且记录的宿主进程都不在了，就当作没有管理者；
 - 宿主进程还活着时不动这一轮，旧版 App 仍在托管的情况下不会被打断；
 - 没有管理者的 open 轮次按 `interrupted` 封存，closing 轮次按 `terminalFallbackStatus`（默认 `completed`）封存，两种都只保留还能观测到的证据，缺失的正文、usage 与 diff 标为 unavailable，不补造；
-- 被替换掉的托管轮次（`managed_replaced` 隔离项）超过 24 小时、且同一会话没有别的 open 轮次时，按 `interrupted` 封存并从隔离索引移除；
+- 被替换掉的托管轮次（`managed_replaced` 隔离项）超过 24 小时、且同一会话没有别的 open 轮次时，按 `interrupted` 封存；原始文件再保留 24 小时后随索引一起清理；
 - 过期之后，同一会话的非托管开场会先封存旧轮次再正常开新轮次，不再被永久忽略。
 
 判断不了宿主状态时只按时间判定，宁可把已经静默 30 分钟的托管轮次标 partial 封箱，也不让整个会话从此不再记录。这些封存的记录照常投递提交回调，重复投递由投递账本拦住。
@@ -163,7 +163,6 @@ daemon 每次启动先跑一次巡检，再对最近一条已提交记录补投�
 | `SCRY_RECORDER_IDLE_MS` | daemon 空闲退出窗口(默认 30 分钟) |
 | `SCRY_CLI_PATH` | hook 必须使用的 CLI 绝对路径 |
 | `SCRY_LAUNCH_CLIENT` | 启动 Provider 的客户端标识（小写标识符，最长 32 字符），只写本地来源标记，不上传 |
-| `SCRY_LAUNCH_CLIENT` | 启动 Provider 的客户端标识（小写标识符，最长 32 字符）。只写本地来源标记，不上传 |
 | `SCRY_GRANT_DIR` | commit hook 授权记录目录 |
 | `SCRY_AUTO_UPDATE` | 未设置即开启;`0`/`false`/`no` 关闭自动安装 |
 | `SCRY_NO_UPDATE_CHECK=1` | 连更新检查一起关闭 |
