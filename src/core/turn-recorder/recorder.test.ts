@@ -32,6 +32,7 @@ import { registerSuite25 } from './recorder-tests/worktree-creation-old.test'
 import { registerStopVerdictSuite } from './recorder-tests/state-machine-stop-verdict.test'
 import { registerDiffPrefilterSuite } from './recorder-tests/state-machine-diff-prefilter.test'
 import { registerStaleOpenTurnSuite } from './recorder-tests/state-machine-stale-open.test'
+import { registerVersionOwnerSuite } from './recorder-tests/state-machine-version-owner.test'
 
 describe('turn recorder state machine', () => {
   registerSuite1()
@@ -48,6 +49,7 @@ describe('turn recorder state machine', () => {
   registerStopVerdictSuite()
   registerDiffPrefilterSuite()
   registerStaleOpenTurnSuite()
+  registerVersionOwnerSuite()
 })
 
 registerSuite8()

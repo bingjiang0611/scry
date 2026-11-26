@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, resolve, join } from 'node:path'
 import { type ProviderId } from '../../shared/provider.js'
 import { RECORDER_VERSION } from './store.js'
+import { isNewerRecorderVersion } from './recorder-version-order.js'
 
 
 export const PROTOCOL_VERSION = '2'
@@ -15,7 +16,8 @@ export class RecorderHookRejected extends Error {
   constructor(
     readonly statusCode: number,
     readonly detail: string,
-    readonly replaceDaemon: boolean
+    readonly replaceDaemon: boolean,
+    readonly daemonVersion?: string
   ) {
     super(`recorder daemon rejected hook (${statusCode}): ${detail}`)
   }
@@ -155,10 +157,12 @@ export async function sendRecorderDaemonHook(args: {
     body: encodeHookEnvironment(args.env ?? process.env, args.payload)
   })
   if (response.statusCode < 200 || response.statusCode >= 300 || response.body.ok !== true) {
+    const daemonVersion = typeof response.body.recorderVersion === 'string' ? response.body.recorderVersion : undefined
     throw new RecorderHookRejected(
       response.statusCode,
       String(response.body.error ?? 'missing ACK'),
-      response.statusCode === 404 || response.statusCode === 409
+      response.statusCode === 404 || (response.statusCode === 409 && !isNewerRecorderVersion(daemonVersion, RECORDER_VERSION)),
+      daemonVersion
     )
   }
   return response.body
