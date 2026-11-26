@@ -135,7 +135,9 @@ export function registerSuite3(): void {
     ['opencode', 'chat.message', 'session.idle']
   ] as const)('%s 无 turn id 时延迟 terminal 不关闭替换后的新轮', async (provider, startEvent, endEvent) => {
     const root = await workspace()
-    const withoutTimestamp = (prompt?: string) => payload('late-terminal', { timestamp: undefined, ...(prompt ? { prompt } : {}) })
+    const withoutTimestamp = (prompt?: string) => payload('late-terminal', {
+      timestamp: undefined, ...(prompt ? { prompt, ...(provider === 'qoder' ? { promptId: `native-${prompt}` } : {}) } : {})
+    })
     await handleRecorderHook({ provider, event: startEvent, workspace: root, payload: withoutTimestamp('old') })
     await handleRecorderHook({ provider, event: startEvent, workspace: root, payload: withoutTimestamp('new') })
 
@@ -153,7 +155,9 @@ export function registerSuite3(): void {
       workspace: root,
       payload: payload('late-terminal', { timestamp: undefined, tool_name: 'Read', tool_use_id: 'new-tool', tool_response: 'ok' })
     })
-    await handleRecorderHook({ provider, event: endEvent, workspace: root, payload: withoutTimestamp() })
+    const confirmed = provider === 'qoder'
+      ? { ...withoutTimestamp(), promptId: 'native-new' } : withoutTimestamp()
+    await handleRecorderHook({ provider, event: endEvent, workspace: root, payload: confirmed })
 
     const records = await listRecords(join(root, '.scry'))
     expect(records.map((record) => [record.turnIndex, record.status, record.tools.value?.length ?? 0])).toEqual([
@@ -174,7 +178,7 @@ export function registerSuite3(): void {
       payload: payload('q-duplicate-stop', { timestamp: '2026-07-19T12:00:31.000Z' })
     })
     const noTime = (extra: Record<string, unknown> = {}) => payload('q-duplicate-stop', { timestamp: undefined, ...extra })
-    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime({ prompt: 'second' }) })
+    await handleRecorderHook({ provider: 'qoder', event: 'UserPromptSubmit', workspace: root, payload: noTime({ prompt: 'second', promptId: 'native-second' }) })
     await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() }))
       .resolves.toMatchObject({ status: 'pending' })
     await handleRecorderHook({
@@ -185,7 +189,11 @@ export function registerSuite3(): void {
       provider: 'qoder', event: 'PostToolUse:Read', workspace: root,
       payload: noTime({ tool_name: 'Read', tool_use_id: 'second-tool', tool_response: 'ok' })
     })
-    await handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() })
+    await expect(handleRecorderHook({ provider: 'qoder', event: 'Stop', workspace: root, payload: noTime() }))
+      .resolves.toMatchObject({ status: 'pending' })
+    await handleRecorderHook({
+      provider: 'qoder', event: 'Stop', workspace: root, payload: noTime({ promptId: 'native-second' })
+    })
 
     expect((await listRecords(join(root, '.scry'))).map((record) => [record.turnIndex, record.status, record.tools.value?.length ?? 0])).toEqual([
       [1, 'completed', 0],

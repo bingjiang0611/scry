@@ -90,10 +90,10 @@ describe('Scry CLI arguments', () => {
       provider: 'qoder', event: 'UserPromptSubmit', workspace: root, env: {},
       payload: { session_id: 'pending-session', transcript_path: transcript, request_set_id: 'pending-request', prompt: 'retained prompt', timestamp: '2026-10-24T12:00:00.000Z' }
     })
-    await handleRecorderHook({
+    await expect(handleRecorderHook({
       provider: 'qoder', event: 'Stop', workspace: root, env: {},
-      payload: { session_id: 'pending-session', transcript_path: transcript, parent_request_set_id: 'pending-request', timestamp: '2026-10-24T12:00:01.000Z' }
-    })
+      payload: { session_id: 'pending-session', transcript_path: transcript, timestamp: '2026-10-24T12:00:01.000Z' }
+    })).resolves.toMatchObject({ status: 'pending' })
     const stdout = captureStdout()
     await expect(runScryCli(['recorder', 'recover', '--workspace', root, '--provider', 'qoder', '--session-id', sessionId]))
       .resolves.toBe(exitCode)

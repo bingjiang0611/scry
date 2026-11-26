@@ -27,6 +27,7 @@ export async function serveCaptureRequest(args: {
       payload: args.payload,
       env: args.env,
       deferDelivery: true,
+      qoderStopRecoveryScheduled: true,
       ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
     })).ack
   } catch (error) {
