@@ -12,10 +12,7 @@
 
 **目标**：Scry App（Electron 主进程、daemon、supervisor）不再打包、启动、调用或读取轮次记录器（`scry` CLI，包名 `scry-turn-recorder`）。在 App 里开的会话，只以 App 自己的采集链为准：Provider 适配器事件、App 的 git capture 和 daemon 的检查点。这和 t3code 的做法一致。
 
-**收益**：
-- 托管身份不用再通过 env 逐轮传递，Qoder 和 Claude 复用进程的障碍消失。
-- 不再要求 CLI 版本和 App 一致，也不会再有 hook 事件和运行对不上号的问题。
-- App 主进程的模块数和打包体积都会下降。
+**收益**：Qoder 和 Claude 复用进程的障碍消失；不再要求 CLI 版本和 App 一致，也不会再有 hook 事件和运行对不上号的问题；主进程模块数和打包体积下降。
 
 **非目标**：
 - 本阶段不把 CLI 搬到新仓库。迁出、`exports` 契约和消费方测试放到 W24。
@@ -70,7 +67,7 @@ App 还借用了记录器目录里的**通用代码**：
 6. **`mcpguard-core` 搬到 `src/shared/`**，`src/cli/mcpguard.ts` 改成从新位置引用。
 7. **静态边界**：`src/main`、`src/daemon`、`src/host-runtime`、`src/shared`、`src/preload`、`src/renderer` 都不得 import `src/core/turn-recorder` 或 `src/cli`，检查违反就失败。
 8. **Qoder 复用放开**：撤销 `e4dfbab6` 的「一轮即关」。
-9. **项目规则同步**：`AGENTS.md` 和 `docs/agent/change-checklists.md` 里「App 私有 CLI 与全局 npm CLI 是两个分发面」「managed recorder 两阶段提交」等说法，以及 `docs/agent/architecture.md` 的相关段落，改成新的边界。
+9. **项目规则同步**：`AGENTS.md`、`docs/agent/change-checklists.md`、`docs/agent/architecture.md` 里关于 App 私有 CLI 和托管两阶段提交的说法，改成新的边界。
 
 ## 4. 遗留的托管状态（必须收尾，不能永久挂起）
 
@@ -201,7 +198,7 @@ S3 把通用代码复制进 App 时，要写一份出处清单 `docs/plans/remot
 
 - **前置**（已满足，2026-11-26）：记录器的 Qoder Stop 归属修复 #205（按原生请求身份 `parent_request_set_id` 归属）已合进 main，之后又合了 #206、#208 两项 Qoder 首认领修复，main 上的记录器版本是 0.2.93。W23 的记录器 PR 基于最新 main。
 - **Inbox v2 草案**（#209）：§5.4 的测量结果交给它，W23 不碰它的范围。
-- **W24**：把 CLI 迁到独立仓库，补上 `exports` 契约、兼容别名和消费方测试，并解决记录器对 `src/main/normalize`、`src/main/danger` 的反向依赖。CLI 的 doctor 要能识别 §5.2 的情况：hook 指向的路径已经不存在。
+- **W24**：CLI 迁到独立仓库，补 `exports` 契约、兼容别名和消费方测试，解决对 `src/main/normalize`、`src/main/danger` 的反向依赖；doctor 识别 §5.2 的失效路径。
 - **之后**：Claude 常驻会话可以单独开工。
 
 ## 11. 验收
