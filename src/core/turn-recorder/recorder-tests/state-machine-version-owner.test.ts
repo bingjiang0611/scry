@@ -149,6 +149,8 @@ export function registerVersionOwnerSuite(): void {
     }
     try {
       await send('UserPromptSubmit', { prompt: 'first turn' })
+      const second = await startRecorderDaemon({ workspace: root, scriptPath: join(root, 'missing-cli.js'), env })
+      expect(second.started).toBe(false)
       await send('PreToolUse', { tool_name: 'Bash', tool_use_id: 'tool-1', tool_input: { command: 'printf ok' } })
       await send('PostToolUse', { tool_name: 'Bash', tool_use_id: 'tool-1', tool_response: 'ok' })
       await send('Stop')

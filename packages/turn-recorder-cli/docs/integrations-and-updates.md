@@ -145,6 +145,6 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 
 hook 和 daemon 必须同一版本：版本不符时 daemon 不回 200，而是 409 `recorder version mismatch`。
 
-旧规则是“任何版本不符都换掉当前 daemon”。两套 hook 指向不同版本时（例如一套固定版本的第三方 hook），每跨一次就重启一次 daemon。实测同一会话 6 个事件里换了 4 次 owner，第一个跨版本事件要 1.1 秒。
+旧规则是“任何版本不符都换掉当前 daemon”。两套 hook 指向不同版本时（例如一套固定版本的第三方 hook），每跨一次就重启一次 daemon。实测同一会话 6 个事件里换了 4 次 owner，第一个跨版本事件要 0.6 秒。
 
 现在只认新旧：调用方比当前 owner 更新才替换，遇到更旧的 owner 就在本进程处理这次事件，owner 保持不变。升级路径不变（升级后的 hook 比旧 daemon 新，照样接管），同一个会话不会再在两个版本之间来回翻。
