@@ -77,7 +77,7 @@ async function recordSummary(workspace) {
     const record = JSON.parse(await readFile(join(recordsDir, name), 'utf8'))
     records.push({ recordId: record.recordId, status: record.status, generation: record.generation, recorderVersion: record.recorderVersion })
   }
-  const health = await readFile(join(workspace, '.scry', 'state', 'health.json'), 'utf8').catch(() => undefined)
+  const health = await readFile(join(workspace, '.scry', 'health.json'), 'utf8').catch(() => undefined)
   const logs = await readdir(join(workspace, '.scry', 'logs')).catch(() => [])
   const logText = []
   for (const name of logs) {
@@ -85,7 +85,7 @@ async function recordSummary(workspace) {
     logText.push(await readFile(join(workspace, '.scry', 'logs', name), 'utf8').catch(() => ''))
   }
   const skipLog = await readFile(join(workspace, '.scry', 'logs', 'hook-skip.log'), 'utf8').catch(() => '')
-  const inbox = await queuedEntries(join(workspace, '.scry', 'sessions'))
+  const inbox = await queuedEntries(join(workspace, '.scry', 'runtime'))
   return {
     records,
     health: health ? JSON.parse(health) : null,
