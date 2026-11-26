@@ -35,7 +35,7 @@ for (const [build, dist] of realClock ? [['candidate', candidate]] : [['baseline
       message: { role: 'user', content: `synthetic ${id}` } })
     const reply = id => row({ type: 'assistant', uuid: `reply-${id}`, parentUuid: id,
       message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'synthetic answer' }] } })
-    const hook = (event, payload = {}) => handleRecorderHook({ provider: 'qoder', event, workspace, env, deferDelivery: true,
+    const hook = (event, payload = {}) => handleRecorderHook({ provider: 'qoder', event, workspace, env, deferDelivery: true, qoderStopRecoveryScheduled: true,
       payload: { session_id: sessionId, transcript_path: transcript, cwd: workspace, hook_event_name: event,
         workspace_dirs: [workspace], permission_mode: 'default', ...payload } })
     const start = id => hook('UserPromptSubmit', { request_set_id: `request-${id}`, prompt: `synthetic ${id}` })
