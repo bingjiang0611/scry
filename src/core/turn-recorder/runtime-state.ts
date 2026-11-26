@@ -84,6 +84,8 @@ export interface RecorderOpenTurnState {
   managedRunId?: string
   managedPromptHash?: string
   startFingerprint: string
+  sealedAt?: string
+  sealedRecordId?: string
   transcriptPath?: string
   /** Pinned first Qoder transcript path; not readable evidence until a regular file appears. */
   pendingQoderTranscriptPath?: string

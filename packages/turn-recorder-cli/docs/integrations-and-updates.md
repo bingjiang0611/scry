@@ -149,6 +149,8 @@ daemon 每次启动先跑一次巡检，再对最近一条已提交记录补投�
 
 `SCRY_LAUNCH_CLIENT` 只表示“这一轮由哪个客户端启动 Provider”，值固定、不含会话或用户身份。记录器在非托管开场读取它，符合小写标识符规则才接受，不合规时静默丢弃、不影响记录。
 
+这个变量由 hook 转发给 daemon，取的是发事件那一侧的值。daemon 自己环境里的同名变量不算数——否则 daemon 启动时继承到的值会给之后所有轮次打错标。`scry init` 生成的 hook 脚本才会转发它，旧脚本需要重新 init。
+
 这个值**不进 canonical record、也不进投递内容**：它写在 `.scry/local/launch-client/<recordId>.json`（`schemaVersion`、`provider`、`sessionId`、`generation`、`client`）。服务端是否接受新值还没验证，验证通过后才考虑把它提升为记录里上传的 `client` 字段；在那之前本地文件是唯一的来源证据。
 
 ## 环境变量

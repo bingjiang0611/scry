@@ -82,10 +82,11 @@ export async function applyHookLocked(
         const closing = orphanClosingState(open, orphan)
         await writeJsonAtomic(openPath(root), closing, { sync: false })
         try {
-          await finalizeOpenTurn(enablement, closing, input.payload, orphan.status, {
+          const finalized = await finalizeOpenTurn(enablement, closing, input.payload, orphan.status, {
             allowUnstableTranscript: true,
             forcedReason: orphan.reason
           })
+          if (finalized.status === 'pending') return finalized
         } catch (error) {
           await sealUnreadableTurn(enablement, closing, input, orphan.status, error)
         }

@@ -36,6 +36,7 @@ export async function finalizeOpenTurn(
     transcriptUnavailable?: string
     /** Already verified from an exact Codex terminal row; do not reparse the capped window. */
     terminalOnlyTranscript?: TranscriptRead
+    retainTurnRoot?: boolean
   } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
@@ -312,7 +313,7 @@ export async function finalizeOpenTurn(
     ...(chainStores ? { chainStores } : {})
   }, { sync: false })
   await rm(openPath(root), { force: true })
-  await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
+  if (!options.retainTurnRoot) await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
   await releaseStaleAttention(enablement.dataRoot, open.provider, root).catch(error => appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
     `${new Date().toISOString()} WARN attention cleanup: ${error instanceof Error ? error.message : String(error)}`

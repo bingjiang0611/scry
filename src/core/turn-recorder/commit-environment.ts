@@ -7,7 +7,7 @@ export const UPLOAD_ENV_KEYS = [
   'SCRY_INSTALLATION_ID', 'SCRY_INSTALLATION_ID_FILE',
   'TMCP_TRACE_URL', 'RATE_NATIVE_ASYNC_QUEUE_DIR'
 ] as const
-export const HOOK_ENV_KEYS = [...UPLOAD_ENV_KEYS, 'SCRY_RECORDER_ENABLED'] as const
+export const HOOK_ENV_KEYS = [...UPLOAD_ENV_KEYS, 'SCRY_RECORDER_ENABLED', 'SCRY_LAUNCH_CLIENT'] as const
 export type UploadEnvironment = Partial<Record<typeof UPLOAD_ENV_KEYS[number], string>>
 
 export function captureUploadEnvironment(env: NodeJS.ProcessEnv): UploadEnvironment {

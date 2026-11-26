@@ -1,4 +1,5 @@
 import { readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { handleRecorderHook, recoverRecorder } from '../recorder'
@@ -155,7 +156,7 @@ export function registerManagedOrphanSuite(): void {
     expect(records[1].user.value?.text).toBe('start the next turn')
   }, 40_000)
 
-  it('隔离项超过保留窗口：按 interrupted 加 partial 封存，并从隔离索引移除', async () => {
+  it('隔离项超过保留窗口：按 interrupted 加 partial 封存，原始文件留到保留期结束再清理', async () => {
     const root = await managedWorkspace()
     await startManaged(root, 'orphan-quarantine')
     await handleRecorderHook({
@@ -185,7 +186,21 @@ export function registerManagedOrphanSuite(): void {
     expect(records).toHaveLength(1)
     expect(records[0].status).toBe('interrupted')
     expect(records[0].termination?.omissionReason).toContain('replaced by a managed successor')
+    const sealedTurn = (await readdir(join(sessionDir, 'turns'))).find(turn =>
+      !existsSync(join(sessionDir, 'turns', turn, 'pending-open.json')))
+    const kept = (await recorderQuarantinedOpenTurns(sessionDir))[0]
+    expect(kept.sealedAt).toBeTruthy()
+    expect(kept.sealedRecordId).toBe(records[0].recordId)
+    expect(existsSync(join(sessionDir, 'turns', String(kept.generation).padStart(8, '0')))).toBe(true)
+    expect(sealedTurn).toBeUndefined()
+
+    const sealedPath = join(sessionDir, 'turns', String(kept.generation).padStart(8, '0'), 'pending-open.json')
+    const sealedAt = new Date(Date.now() - 25 * HOUR).toISOString()
+    await writeFile(sealedPath, JSON.stringify({ ...JSON.parse(await readFile(sealedPath, 'utf8')), sealedAt }))
+    await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 0 })
     await expect(recorderQuarantinedOpenTurns(sessionDir)).resolves.toEqual([])
+    expect(existsSync(join(sessionDir, 'turns', String(kept.generation).padStart(8, '0')))).toBe(false)
+    await expect(listRecords(join(root, '.scry'))).resolves.toHaveLength(1)
   }, 40_000)
 
   it('隔离项还在保留窗口内：不收尾，等它自己的保留期结束', async () => {

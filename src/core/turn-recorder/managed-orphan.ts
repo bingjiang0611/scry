@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import type { AgentTurnRecord } from '../../shared/turn-record.js'
 import type { RecorderEnablement } from './config.js'
 import { hostProcessState } from './host-process.js'
-import { readJson } from './io.js'
+import { readJson, writeJsonAtomic } from './io.js'
+import { clearRuntimeTurn } from './store.js'
 import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import {
   openTurnQuiet, recorderOpenPath, recorderQuarantineIndexPath, recorderQuarantinedOpenTurns, recorderTurnRoot,
@@ -66,6 +67,7 @@ export function orphanClosingState(
 export interface QuarantineSealResult {
   sealed: number
   pending: number
+  pruned: number
 }
 
 export async function sealExpiredQuarantinedTurns(
@@ -76,11 +78,20 @@ export async function sealExpiredQuarantinedTurns(
   const now = options.now ?? Date.now()
   const threshold = options.thresholdMs ?? MANAGED_QUARANTINE_EXPIRY_MS
   const indexed = await readJson<string[]>(recorderQuarantineIndexPath(sessionDir))
-  if (!Array.isArray(indexed) || indexed.length === 0) return { sealed: 0, pending: 0 }
+  if (!Array.isArray(indexed) || indexed.length === 0) return { sealed: 0, pending: 0, pruned: 0 }
   let sealed = 0
   let pending = 0
+  let pruned = 0
   for (const item of await recorderQuarantinedOpenTurns(sessionDir)) {
     if ((item as { reason?: string }).reason !== 'managed_replaced') continue
+    if (item.sealedAt) {
+      const sealedFor = now - Date.parse(item.sealedAt)
+      if (Number.isFinite(sealedFor) && sealedFor >= threshold) {
+        await clearRuntimeTurn(enablement.dataRoot, recorderTurnRoot(sessionDir, item.generation))
+        pruned++
+      }
+      continue
+    }
     const quarantinedAt = Date.parse((item as { quarantinedAt?: string }).quarantinedAt ?? '')
     const since = Number.isFinite(quarantinedAt)
       ? quarantinedAt
@@ -98,13 +109,20 @@ export async function sealExpiredQuarantinedTurns(
       const closing = orphanClosingState(item, { status: 'interrupted', at })
       const finalized = await finalizeOpenTurn(enablement, closing, { timestamp: at }, 'interrupted', {
         allowUnstableTranscript: true,
-        forcedReason: reason
+        forcedReason: reason,
+        retainTurnRoot: true
       })
-      return finalized.status === 'committed' || finalized.status === 'duplicate' ? 'sealed' as const : 'pending' as const
+      if (finalized.status !== 'committed' && finalized.status !== 'duplicate') return 'pending' as const
+      await writeJsonAtomic(join(recorderTurnRoot(sessionDir, item.generation), 'pending-open.json'), {
+        ...item,
+        sealedAt: at,
+        sealedRecordId: finalized.record?.recordId
+      })
+      return 'sealed' as const
     })
     if (result === 'sealed') sealed++
     else pending++
   }
-  if (sealed > 0) await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
-  return { sealed, pending }
+  if (sealed > 0 || pruned > 0) await recorderQuarantinedOpenTurns(sessionDir, { reconcile: true })
+  return { sealed, pending, pruned }
 }

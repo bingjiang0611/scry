@@ -1,7 +1,11 @@
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { afterAll, beforeAll, expect, it } from 'vitest'
 import { handleRecorderHook, redeliverRecorderCommitNotification } from '../recorder'
+import { applyHookEnvironment, decodeHookEnvironment, encodeHookEnvironment } from '../commit-environment'
+import { listenRecorderDaemon, sendRecorderDaemonHook } from '../daemon'
+import { recorderSocketPath } from '../daemon-transport'
 import { listRecords, readHealth, safeKey } from '../store'
 import { launchClientSourcePath } from '../launch-client'
 import { commitHook, completeTurn, payload, workspace } from './fixture.test'
@@ -22,6 +26,47 @@ async function commitWorkspaceRecord(root: string, env: NodeJS.ProcessEnv): Prom
 }
 
 export function registerRedeliverySuite(): void {
+  let grantDir: string | undefined
+  let previousGrantDir: string | undefined
+
+  beforeAll(async () => {
+    grantDir = await mkdtemp(join(tmpdir(), 'scry-launch-client-grants-'))
+    previousGrantDir = process.env.SCRY_GRANT_DIR
+    process.env.SCRY_GRANT_DIR = grantDir
+  })
+
+  afterAll(async () => {
+    if (previousGrantDir === undefined) delete process.env.SCRY_GRANT_DIR
+    else process.env.SCRY_GRANT_DIR = previousGrantDir
+    if (grantDir) await rm(grantDir, { recursive: true, force: true })
+  })
+
+  it('carries the launch client through the hook envelope and drops an inherited one', () => {
+    const envelope = encodeHookEnvironment({ SCRY_LAUNCH_CLIENT: 'scry-app' }, { event: 'Stop' })
+    expect(decodeHookEnvironment(envelope).env).toMatchObject({ SCRY_LAUNCH_CLIENT: 'scry-app' })
+    expect(applyHookEnvironment({ SCRY_LAUNCH_CLIENT: 'scry-app', PATH: '/bin' }, {}))
+      .toEqual({ PATH: '/bin' })
+    expect(applyHookEnvironment({ PATH: '/bin' }, { SCRY_LAUNCH_CLIENT: 'codelens' }))
+      .toMatchObject({ SCRY_LAUNCH_CLIENT: 'codelens' })
+  })
+
+  it('tags a turn relayed by a daemon with the client that sent the hook', async () => {
+    const root = await workspace()
+    const socketPath = recorderSocketPath(root)
+    const daemon = await listenRecorderDaemon({ workspace: root, socketPath })
+    try {
+      const env = { ...process.env, SCRY_LAUNCH_CLIENT: 'scry-app', SCRY_RECORDER_SOCKET: socketPath }
+      await sendRecorderDaemonHook({
+        provider: 'claude', event: 'UserPromptSubmit', workspace: root, env,
+        payload: payload('daemon-source', { prompt: 'relayed by the daemon' })
+      })
+      const sessionDir = join(root, '.scry', 'runtime', 'claude', safeKey('daemon-source'))
+      const open = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8')) as Record<string, unknown>
+      expect(open.launchClient).toBe('scry-app')
+    } finally {
+      await daemon.close()
+    }
+  }, 40_000)
   it('daemon start posts the latest committed record again, exactly once per start', async () => {
     const root = await workspace()
     const hook = await commitHook(root)
