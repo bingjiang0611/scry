@@ -107,7 +107,9 @@ export async function applyHookLocked(
           announce: false
         })
         try {
-          const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, { allowUnstableTranscript: true })
+          const finalized = await finalizeOpenTurn(enablement, open, input.payload, fallback, {
+            allowUnstableTranscript: true, superseded: true
+          })
           if (finalized.status === 'pending') return finalized
         } catch (error) {
           await sealUnreadableTurn(enablement, open, input, fallback, error)
@@ -238,7 +240,11 @@ export async function applyHookLocked(
 
   if (requestConfirmed) {
     open.qoderRequestStopConfirmed = true
-    open.qoderStopTranscriptDeadlineMs ??= Date.now() + QODER_STOP_TRANSCRIPT_WAIT_MS
+    if (input.qoderStopRecoveryScheduled) {
+      open.qoderStopTranscriptDeadlineMs ??= Date.now() + QODER_STOP_TRANSCRIPT_WAIT_MS
+    } else {
+      delete open.qoderStopTranscriptDeadlineMs
+    }
   }
   if (endEvent && !sessionEndEvent) {
     const held = await holdStopForBackgroundWork({
@@ -357,7 +363,8 @@ export async function replayQueuedHooks(
   provider: ProviderId,
   sessionKey: string,
   includeFailed = false,
-  expectedSessionId?: string
+  expectedSessionId?: string,
+  qoderStopRecoveryScheduled?: boolean
 ): Promise<number> {
   const root = join(enablement.dataRoot, 'runtime', provider, sessionKey)
   if (expectedSessionId !== undefined) {
@@ -436,6 +443,7 @@ export async function replayQueuedHooks(
                 workspace: enablement.workspaceRoot,
                 payload,
                 managed: queued.managed,
+                qoderStopRecoveryScheduled,
                 uploadEnvironment: queued.uploadEnvironment,
                 ...(capture ? { capture } : {})
               }, queued.sessionId)

@@ -30,6 +30,7 @@ export async function finalizeOpenTurn(
   fallbackStatus: AgentTurnRecord['status'],
   options: {
     allowUnstableTranscript?: boolean
+    superseded?: boolean
     forcedReason?: string
     transcriptUnavailable?: string
     /** Already verified from an exact Codex terminal row; do not reparse the capped window. */
@@ -75,6 +76,7 @@ export async function finalizeOpenTurn(
         )
       : {
           ...unobservedTranscript,
+          transcriptUnread: true,
           complete: !pendingTranscript,
           ...(pendingTranscript ? { incompleteReasons: [PENDING_QODER_TRANSCRIPT_REASON] } : {})
         })
@@ -83,22 +85,31 @@ export async function finalizeOpenTurn(
   const matchedStop = open.provider === 'qoder' && open.qoderRequestStopConfirmed && !options.forcedReason
   const lacksMatchedQoderTranscript = matchedStop && transcript.identityMatched !== true
   const lacksFinalQoderReply = matchedStop && transcript.identityMatched === true && !qoderTranscriptReplyComplete(transcript)
-  const waitElapsed = Date.now() >= (open.qoderStopTranscriptDeadlineMs ?? 0)
-  if (lacksFinalQoderReply && !waitElapsed) {
+  const waitEnd = options.superseded ? 'the next prompt arrived'
+    : open.qoderStopTranscriptDeadlineMs == null ? 'no recovery poll was scheduled'
+    : Date.now() >= open.qoderStopTranscriptDeadlineMs ? 'the 10-second wait expired' : undefined
+  if (lacksMatchedQoderTranscript && !waitEnd) {
+    return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
+  }
+  if (lacksFinalQoderReply && !waitEnd) {
     return { status: 'pending', reason: 'Qoder matched Stop is waiting for its final transcript reply' }
   }
-  if (lacksFinalQoderReply) {
+  const unreadReason = lacksMatchedQoderTranscript && transcript.transcriptUnread
+    ? `Qoder matched Stop: transcript was not readable when ${waitEnd}` : undefined
+  const incompleteReplyReason = lacksFinalQoderReply
+    ? `Qoder matched Stop: final reply was missing when ${waitEnd}` : undefined
+  if (incompleteReplyReason || unreadReason) {
     transcript = {
       ...transcript,
       complete: false,
-      incompleteReasons: [...(transcript.incompleteReasons ?? []), 'Qoder matched Stop: final reply did not appear before the 10-second wait expired']
+      incompleteReasons: [...(transcript.incompleteReasons ?? []), (incompleteReplyReason ?? unreadReason)!]
     }
   }
   const unmatchedReason = options.transcriptUnavailable ?? unmatchedIdentityReason(open, options.forcedReason) ??
-    (lacksMatchedQoderTranscript && waitElapsed
-      ? 'Qoder matched Stop: transcript identity did not appear before the 10-second wait expired' : undefined)
+    (lacksMatchedQoderTranscript && !unreadReason ? `Qoder matched Stop: transcript identity did not match when ${waitEnd}` : undefined)
   let retainedWindow = false
-  if (!options.terminalOnlyTranscript && (transcript.identityMatched === false || lacksMatchedQoderTranscript || options.transcriptUnavailable)) {
+  if (!options.terminalOnlyTranscript && (!unreadReason &&
+    (transcript.identityMatched === false || lacksMatchedQoderTranscript) || options.transcriptUnavailable)) {
     if (!unmatchedReason) return { status: 'pending', reason: 'target turn is not present in transcript snapshot' }
     identityUnmatched = true
     if (open.qoderRequestStopConfirmed) transcript = unobservedTranscript
@@ -245,6 +256,7 @@ export async function finalizeOpenTurn(
   }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
   const transcriptEvidence: NonNullable<TurnEvidence['transcript']> = await (async (): Promise<NonNullable<TurnEvidence['transcript']>> => {
+    if (unreadReason) return unavailable(unreadReason)
     if (!open.transcriptPath) return unavailable(pendingTranscript
       ? PENDING_QODER_TRANSCRIPT_REASON : 'provider transcript path was not observable')
     if (!enablement.config.capture.prompt || !enablement.config.capture.assistant || !isFullToolContentPolicy(contentPolicy)) {
@@ -267,7 +279,7 @@ export async function finalizeOpenTurn(
       identity: source.identity,
       sourceCompleteness: source.sourceCompleteness
     }
-    return source.sourceCompleteness === 'complete'
+    return source.sourceCompleteness === 'complete' && !incompleteReplyReason
       ? available(value, ['provider_transcript'])
       : partial(value, ['provider_transcript'],
         transcript.incompleteReasons?.join('; ') || 'transcript parser window started after an incomplete source line', 'exact')

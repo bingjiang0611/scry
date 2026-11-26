@@ -44,7 +44,7 @@ async function fixture(diff = false) {
     message: { role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'same reply' }] }
   })
   const hook = (event: string, payload: object = {}) => handleRecorderHook({
-    provider: 'qoder', event, workspace: root, deferDelivery: true,
+    provider: 'qoder', event, workspace: root, deferDelivery: true, qoderStopRecoveryScheduled: true,
     payload: { session_id: sessionId, transcript_path: transcript, cwd: root, hook_event_name: event,
       permission_mode: 'default', workspace_dirs: [root], ...payload }
   })
@@ -120,9 +120,46 @@ it('degrades a matched Stop only after the ten-second transcript deadline', asyn
   vi.setSystemTime(stoppedAt + QODER_STOP_TRANSCRIPT_WAIT_MS)
   expect(await f.poll()).toMatchObject({ recovered: 1, pending: 0 })
   expect(await f.records()).toMatchObject([{
-    status: 'completed', transcript: { status: 'unavailable' }, diff: { status: 'unavailable' }
+    status: 'completed', transcript: { status: 'unavailable', omissionReason: expect.stringContaining('10-second wait expired') },
+    diff: { status: 'available' }
   }])
-  expect((await f.records())[0].diff.omissionReason).toContain('10-second wait expired')
+})
+
+it('discards the diff after the deadline if a readable transcript belongs to another turn', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const stoppedAt = Date.now()
+  const f = await fixture(true)
+  await f.user('other', null, 'request-other')
+  await f.reply('other')
+  await f.start('short', 'request-short')
+  await f.edit()
+  expect(await f.stop({ parent_request_set_id: 'request-short' })).toMatchObject({ status: 'pending' })
+  vi.setSystemTime(stoppedAt + QODER_STOP_TRANSCRIPT_WAIT_MS)
+  expect(await f.poll()).toMatchObject({ recovered: 1 })
+  expect(await f.records()).toMatchObject([{
+    status: 'completed', diff: { status: 'unavailable', omissionReason: expect.stringContaining('10-second wait expired') },
+    transcript: { status: 'unavailable' }
+  }])
+})
+
+it('opens and baselines the next prompt 100 ms after a matched Stop pending its final reply', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const stoppedAt = Date.now()
+  const f = await fixture(true)
+  await f.user('first', null, 'request-first')
+  await f.start('first', 'request-first')
+  await f.edit()
+  expect(await f.stop({ parent_request_set_id: 'request-first' })).toMatchObject({ status: 'pending' })
+  vi.setSystemTime(stoppedAt + 100)
+  expect(await f.start('next', 'request-next')).toMatchObject({ status: 'started' })
+  expect(await f.state()).toMatchObject({
+    startedAt: new Date(stoppedAt + 100).toISOString(), status: 'open',
+    requestSetId: 'request-next', captures: [{ capture: { status: 'ready' } }]
+  })
+  expect(await f.records()).toMatchObject([{
+    status: 'completed', diff: { status: 'available' },
+    transcript: { status: 'partial', omissionReason: expect.stringContaining('the next prompt arrived') }
+  }])
 })
 
 it('rejects the interrupted request Stop even after the replacement has the same final reply and a complete parent chain', async () => {

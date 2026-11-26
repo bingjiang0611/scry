@@ -75,7 +75,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
     try {
       result = await withRecorderSessionLock(enablement.dataRoot, input.provider, sessionId, async () => {
         entered = true
-        await replayQueuedHooks(enablement, input.provider, safeKey(sessionId))
+        await replayQueuedHooks(enablement, input.provider, safeKey(sessionId), false, undefined, input.qoderStopRecoveryScheduled)
         return applyHookLocked(enablement, input, sessionId)
       }, { waitMs: HOOK_LOCK_WAIT_MS })
     } catch (error) {
@@ -191,6 +191,7 @@ export async function recoverRecorder(
   options: {
     expireOpen?: boolean
     incremental?: boolean
+    qoderStopRecoveryScheduled?: boolean
     expireSessions?: readonly string[]
   } = {}
 ): Promise<{ recovered: number; pending: number; expired: number }> {
@@ -218,7 +219,7 @@ export async function recoverRecorder(
         if ((await recorderInboxEntries(item.sessionDir)).length) {
           const sessionKey = basename(item.sessionDir)
           await withRecorderSessionKeyLock(enablement.dataRoot, item.provider, sessionKey,
-            () => replayQueuedHooks(enablement, item.provider, sessionKey, true, scope?.sessionId), { waitMs: SESSION_LOCK_WAIT_MS })
+            () => replayQueuedHooks(enablement, item.provider, sessionKey, true, scope?.sessionId, options.qoderStopRecoveryScheduled), { waitMs: SESSION_LOCK_WAIT_MS })
         }
         const initial = await readJson<OpenTurnState>(openPath(item.sessionDir))
         if (!initial) {
