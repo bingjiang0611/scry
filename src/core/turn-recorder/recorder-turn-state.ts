@@ -206,7 +206,8 @@ export async function beginCaptureTurn(
   payload: Record<string, unknown>,
   ancestryFromPid?: number,
   claimedHostChain?: import('./host-process.js').HostProcess[],
-  pendingTranscriptPath?: string
+  pendingTranscriptPath?: string,
+  synchronousClaim = false
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<OpenTurnState>(openPath(root))
@@ -245,7 +246,7 @@ export async function beginCaptureTurn(
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
     ...(transcript?.userText ? { userText: transcript.userText } : {}),
     ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
-    baselineAt: new Date().toISOString(),
+    ...(!pendingTranscriptPath || !synchronousClaim ? { baselineAt: new Date().toISOString() } : {}),
     ...(pendingTranscriptPath ? { pendingQoderTranscriptPath: pendingTranscriptPath } : {})
   }, undefined, host?.length ? host : undefined)
   if (pendingTranscriptPath) await storeLifecycleEvent(enablement, opened, event, payload)
