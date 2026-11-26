@@ -21,6 +21,7 @@ export interface RecorderHookInput {
   qoderStopRecoveryScheduled?: boolean
   captureMode?: boolean
   ancestryFromPid?: number
+  launchClient?: string
 }
 
 export interface RecorderHookResult {

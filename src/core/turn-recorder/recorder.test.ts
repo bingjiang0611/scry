@@ -33,6 +33,7 @@ import { registerStopVerdictSuite } from './recorder-tests/state-machine-stop-ve
 import { registerDiffPrefilterSuite } from './recorder-tests/state-machine-diff-prefilter.test'
 import { registerStaleOpenTurnSuite } from './recorder-tests/state-machine-stale-open.test'
 import { registerManagedOrphanSuite } from './recorder-tests/state-machine-managed-orphan.test'
+import { registerRedeliverySuite } from './recorder-tests/state-machine-redelivery-source.test'
 
 describe('turn recorder state machine', () => {
   registerSuite1()
@@ -50,6 +51,7 @@ describe('turn recorder state machine', () => {
   registerDiffPrefilterSuite()
   registerStaleOpenTurnSuite()
   registerManagedOrphanSuite()
+  registerRedeliverySuite()
 })
 
 registerSuite8()

@@ -127,6 +127,30 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 
 `SCRY_NO_UPDATE_CHECK=1` 或 `--no-update-check` 关闭检查;`SCRY_CLI_REGISTRY` 覆盖 registry(必须 HTTPS),未设置时用本机 npm 配置。App 内置 CLI、recorder、daemon 与 CI 不触发后台检查。
 
+## 托管轮次没有托管方时由记录器收尾
+
+托管轮次（`managedByScry`）等的是 App 侧来封存。App 不再托管之后，记录器自己判断这轮还有没有管理者：
+
+- 最后活动超过 30 分钟（轮次事件、Provider transcript 与 `open.json` 里最新的那个时间）且记录的宿主进程都不在了，就当作没有管理者；
+- 宿主进程还活着时不动这一轮，旧版 App 仍在托管的情况下不会被打断；
+- 没有管理者的 open 轮次按 `interrupted` 封存，closing 轮次按 `terminalFallbackStatus`（默认 `completed`）封存，两种都只保留还能观测到的证据，缺失的正文、usage 与 diff 标为 unavailable，不补造；
+- 被替换掉的托管轮次（`managed_replaced` 隔离项）超过 24 小时、且同一会话没有别的 open 轮次时，按 `interrupted` 封存并从隔离索引移除；
+- 过期之后，同一会话的非托管开场会先封存旧轮次再正常开新轮次，不再被永久忽略。
+
+判断不了宿主状态时只按时间判定，宁可把已经静默 30 分钟的托管轮次标 partial 封箱，也不让整个会话从此不再记录。这些封存的记录照常投递提交回调，重复投递由投递账本拦住。
+
+## daemon 启动补投最近一轮
+
+daemon 每次启动先跑一次巡检，再对最近一条已提交记录补投一次回调（`redeliverLatestCommitNotification`）。这是给“App 不再替 CLI 重投”之后留的入口：App 关闭期间投递失败的记录，daemon 起来时会再试一次。
+
+补投不绕过投递账本：已有退避中的失败、或已成为死信的号不会被提前重投，普通积压仍由常规 drain 处理。每次 daemon 启动补投一次，不按 hook 重复触发；接收方按 `recordId` 去重。
+
+## 来源标记只看本地
+
+`SCRY_LAUNCH_CLIENT` 只表示“这一轮由哪个客户端启动 Provider”，值固定、不含会话或用户身份。记录器在非托管开场读取它，符合小写标识符规则才接受，不合规时静默丢弃、不影响记录。
+
+这个值**不进 canonical record、也不进投递内容**：它写在 `.scry/local/launch-client/<recordId>.json`（`schemaVersion`、`provider`、`sessionId`、`generation`、`client`）。服务端是否接受新值还没验证，验证通过后才考虑把它提升为记录里上传的 `client` 字段；在那之前本地文件是唯一的来源证据。
+
 ## 环境变量
 
 | 变量 | 作用 |
@@ -136,6 +160,8 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 | `SCRY_RECORDER_SOCKET` | 覆盖 daemon socket 路径 |
 | `SCRY_RECORDER_IDLE_MS` | daemon 空闲退出窗口(默认 30 分钟) |
 | `SCRY_CLI_PATH` | hook 必须使用的 CLI 绝对路径 |
+| `SCRY_LAUNCH_CLIENT` | 启动 Provider 的客户端标识（小写标识符，最长 32 字符），只写本地来源标记，不上传 |
+| `SCRY_LAUNCH_CLIENT` | 启动 Provider 的客户端标识（小写标识符，最长 32 字符）。只写本地来源标记，不上传 |
 | `SCRY_GRANT_DIR` | commit hook 授权记录目录 |
 | `SCRY_AUTO_UPDATE` | 未设置即开启;`0`/`false`/`no` 关闭自动安装 |
 | `SCRY_NO_UPDATE_CHECK=1` | 连更新检查一起关闭 |

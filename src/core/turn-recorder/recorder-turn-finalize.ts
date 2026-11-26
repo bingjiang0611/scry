@@ -22,6 +22,7 @@ import { rm } from 'node:fs/promises'
 import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence } from './record-capture-metadata.js'
 import { transcriptTurnEvidence } from './recorder-transcript-evidence.js'
 import { turnRecordDraft } from './recorder-record-draft.js'
+import { recordLaunchClientSource } from './launch-client.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -279,6 +280,16 @@ export async function finalizeOpenTurn(
     ...(effectiveProviderTurnId ? { effectiveProviderTurnId } : {})
   })
   const committed = await commitRecord(enablement.dataRoot, draft, open.uploadEnvironment)
+  if (open.launchClient) {
+    await recordLaunchClientSource(enablement.dataRoot, {
+      schemaVersion: 1,
+      recordId: committed.record.recordId,
+      provider: open.provider,
+      sessionId: open.sessionId,
+      generation: open.generation,
+      client: open.launchClient
+    })
+  }
   const session = await nextSessionState(enablement.dataRoot, root, open.provider, open.sessionId)
   const committedProviderTurnIds = effectiveProviderTurnId
     ? [...new Set([...(session.committedProviderTurnIds ?? []), effectiveProviderTurnId])].slice(-200)

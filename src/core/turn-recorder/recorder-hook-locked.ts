@@ -136,7 +136,8 @@ export async function applyHookLocked(
       protectNextStart,
       input.uploadEnvironment, input.capture,
       undefined, undefined,
-      input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
+      input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined,
+      input.launchClient
     )
     if (supersededStart) await rm(supersededStart, { force: true })
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)

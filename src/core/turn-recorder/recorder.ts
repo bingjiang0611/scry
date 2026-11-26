@@ -14,6 +14,7 @@ import { queueHook } from './recorder-hook-queue.js'
 import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexInternalTurn, trustedManagedIdentityPayload, isTaskNotificationPrompt } from './recorder-hook-support.js'
 import { activatedCommitHookEnv } from './recorder-recovery.js'
 import { pendingHealth } from './recorder-recovery-sessions.js'
+import { launchClientOf } from './launch-client.js'
 
 export type { RecorderHookInput, RecorderHookResult, RecorderRecoveryProbe } from './recorder-contracts.js'
 export { OPEN_TURN_EXPIRY_MS, resolveModelIdentity, subagentScopedPayload } from './recorder-contracts.js'
@@ -22,7 +23,7 @@ export { readTranscriptWindow, transcriptReadStats, resetTranscriptReadStats, ty
 export { transcriptSnapshotCacheStats, resetTranscriptSnapshotCache } from './recorder-transcript-cache.js'
 export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
 export { CLOSING_TURN_EXPIRED_REASON } from './recorder-closing-window.js'
-export { recoverRecorder, drainRecorderDelivery, recorderEnablement } from './recorder-recovery.js'
+export { recoverRecorder, drainRecorderDelivery, redeliverRecorderCommitNotification, recorderEnablement } from './recorder-recovery.js'
 export { type RecorderRecoveryScope } from './recorder-recovery-sessions.js'
 export { refreshRecorderPendingHealth } from './recorder-recovery-sessions.js'
 
@@ -31,6 +32,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
   input = {
     ...input,
     uploadEnvironment: captureUploadEnvironment(input.env ?? process.env),
+    ...(input.managed === true ? {} : { launchClient: launchClientOf(input.env ?? process.env) }),
     payload: trustedManagedIdentityPayload(input.payload, input.managed, input.env ?? process.env)
   }
   const enablement = await resolveRecorderEnablement(input.workspace, input.env, input.capture == null && input.captureMode !== true)

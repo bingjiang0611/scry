@@ -95,6 +95,7 @@ export interface RecorderOpenTurnState {
   terminalDiffs?: Array<{ repository: string; snapshot: TurnDiffSnapshot }>
   continuationProviderTurnIds?: string[]
   managedByScry?: boolean
+  launchClient?: string
   host?: import('./host-process.js').HostProcess[]
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
