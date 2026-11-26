@@ -1,99 +1,114 @@
 # Recorder Inbox v2 契约草案
 
-状态：待评审，未实现。目标是让已经获准的宿主集成在开场钩子里不启动 Node，也能可靠提交认领请求。落盘只代表接受请求，不代表开启采集、建立 Git 基线、封箱或上传。v2 不改变晚基线证据规则，也不迁移现有 v1 条目。
+**待评审，未实现。** 目标是让已获准的常开宿主在首条事件上不启动 Node，也能把认领和首事件交给 recorder。落盘不表示认领、Git 基线、封箱或上传已经完成。v2 不迁移现存 v1 条目，也不改变晚基线的证据规则。
 
-## 1. 目录和条目
+## 1. 位置：推荐工作区外的用户私有目录
 
-收件箱放在 canonical 工作区下的 `.scry/inbox-v2/`。它与旧版 `.scry/runtime/`、`.scry/locks/` 分开；即使已配置其他 `dataDir`，新收件箱仍在这个位置，消费后的运行态仍写入经验证的配置目录。若该工作区的 v1 `dataDir` 选了这个目录或它的子目录，拒绝 v2，避免路径重叠。不要把新目录链接到旧目录，也不要写入 v1 的 attention 索引。
+| 方案 | 安全与工作区副作用 | 沙箱可写性 | 多工作区发现与清理 |
+| --- | --- | --- | --- |
+| 工作区内 `.scry/inbox-v2/` | 不可信仓库可以预置同名目录、链接或条目。冷启动必须额外验证；Git exclude 建好前会出现未跟踪目录。 | 工作区写入模式下更可能可用，仍取决于宿主。 | `recover <workspace>` 可直接定位；跨工作区仍需已知工作区列表。搬动或删除工作区会连带移动或丢弃积压。 |
+| 工作区外的私有状态根 | checkout 内容不能预置入口，不污染 Git；仍须验证所有者、权限、路径与独立授权，不能把同一 OS 用户进程当作隔离边界。 | 普通宿主进程通常可写自己的状态根；受限工具或 hook 沙箱可能只允许写工作区。不能用普通终端测试代替真实 hook；不可写就回退，不放宽沙箱、不改回工作区内。 | 后台可从受信任的已授权工作区目录簿发现多个工作区，单工作区 recover 可直接算摘要。工作区迁移后旧队列不会自动改归属；诊断列出滞留项。清理只删已确认的收据和过期临时文件，不以工作区消失为理由删积压或隔离条目。 |
+
+建议由受信任的集成安装器创建私有根（目录 `0700`、文件 `0600`），例如 macOS 用户的 `~/Library/Application Support/Scry/recorder-inbox-v2/`，Linux 的 `$XDG_STATE_HOME/scry/recorder-inbox-v2/`（默认 `~/.local/state`）。路径由安装运行时注入，不取仓库自报值。`workspaceKey` 是 canonical 工作区绝对路径的 UTF-8 字节 SHA-256 小写十六进制；`sessionKey` 同样由原始 `sessionId` 计算。两者都不做额外 Unicode 正规化。目录簿位于可信状态根，不靠条目反向授权一个工作区。
 
 ```text
-.scry/inbox-v2/
+<private-root>/workspaces/<workspaceKey>/
+  consumer.json
   sessions/<provider>/<sessionKey>/
-    inbox/<sequence>-<entryId>.json
-    failed/<sequence>-<entryId>.json
-    failure/<sequence>-<entryId>.json
-    next-sequence
-  locks/<provider>/<sessionKey>.lock/
-  attention/<provider>/<sessionKey>
+    slots/<sequence>.json
+    overflow/<entryId>.json
+    failed/<entryId>.json
+    attention
 ```
 
-- `provider` 使用 recorder 已支持的标识；`sessionKey` 是原始 `sessionId` 的 UTF-8 字节的 SHA-256 小写十六进制，不做 Unicode 正规化。路径不使用原始 ID；消费者重新计算并与条目核对。不依赖 v1 的 `safeKey`。`entryId` 是小写标准 UUID，重试沿用同一 ID。
-- v2 使用 UTF-8 JSON 对象。公共字段为 `schemaVersion: 2`、`entryId`、`provider`、`sessionId`、`workspace`（canonical 绝对路径）、`arrivedAt`（UTC ISO 8601，仅供观测）、`kind`。拒绝重复键、超限字段和未识别的版本或种类，不落入普通 hook 处理。上限建议为单项 1 MiB，超限返回明确失败，不静默截断；正式冻结前用真实样本确认。
-- `kind: "capture"` 另外带 `action: "start" | "stop"`、`capture`（现有 `codelens.session-capture.v1` 上下文）、`event`、`payload`、`authorityRef`。`event` 是实际宿主事件或显式认领命令的 `CaptureStart`/`CaptureStop`，不得按转录是否存在重新命名。`payload` 是原始宿主对象。`authorityRef` 是受信任集成安装授予的引用，不是授权内容。`start` 连同触发它的事件是一条请求；消费者只应用该事件一次。`stop` 必须引用同一 capture，不能创建工作区或采集。
-- `kind: "hook"` 另外带 `captureId`、`event`、`payload`，只对同批或已生效的认领有效。普通 hook 不能触发初始化。一个会话不能把 start 写到 v2、后续事件写到 v1；在首次接收前选择通道，并维持到会话结束。迁移或故障回退不得重投已落盘的同一事件。
+旧 recorder 只从配置 `dataDir` 下的 runtime/attention 路径找工作，不扫描这个根。拒绝私有根落在任何已知 v1 数据根内、同名链接或路径重叠；即使旧消费者不扫描 v2，也不允许新旧消费者同时应用同一工作区的条目。
 
-### 持久化、顺序与唤醒
+## 2. 条目、超限与写入顺序
 
-生产、消费和清理 attention 共用该会话的目录锁。互操作锁需要相同的目录创建、所有者标记和过期/恢复协议；不得仅按文件年龄抢活锁。锁忙时返回可区分的未写入结果，不写未排序的条目。序号是固定 20 位十进制字符，严格按其数值排序，不按宿主时钟。序号先持久预留再写条目；崩溃可留空号，不可复用。达到序号上限时失败，不回绕。
+条目是 UTF-8 JSON 对象。公共字段为 `schemaVersion: 2`、`entryId`（稳定 UUID）、`provider`、`sessionId`、`workspace`、`arrivedAt`（仅用于观测）、`kind`、`sequence`（固定 20 位十进制字符串）。`kind: "capture"` 还带 `action: "start" | "stop"`、`capture`（现有 `codelens.session-capture.v1` 上下文）、实际宿主 `event`、`payload`、`authorityRef`。`kind: "hook"` 带 `captureId`、实际 `event`、`payload`。首条 `capture/start` 包含触发它的首事件，消费者只应用一次。`capture/stop` 不能创建采集。未知版本、kind、重复键、越界身份或冲突的同 ID 内容明确拒绝，不能走普通 hook 分支。
 
-在目标目录写同文件系统独占临时文件，权限仅本机用户可读写；文件 `fsync` 后原子发布，随后同步父目录。不得覆盖已落盘文件；同 `entryId` 同内容的重试返回既有结果，冲突拒绝。消费者只读最终文件名，核对身份并验证内容；应用成功后才确认并删除。进程崩溃后重放靠持久的 `entryId`/`captureId` 状态收据幂等，不能靠序号猜测业务成功。失败条目和脱敏原因分开保留。同会话前置认领未应用时，后续条目不可越过；永久拒绝后明确隔离依赖该认领的条目。
+### 大小依据与超限策略
 
-条目发布后，在同一把锁下持久化 attention。唤醒可以由已验证支持 v2 的 daemon 接口触发，也可以由受信任集成的后台任务启动消费；它是提示，不是投递保证。`serve` 启动与显式 `recover` 必须发现“条目已落盘、未写 attention”这一崩溃窗口。清除 attention 前，在同一把锁下确认没有可处理条目。禁止通过伪造 v1 attention 或向旧 daemon 提交 v2 请求唤醒。
+实测于 macOS 隔离的 **Qoder CLI 1.1.93**。两次真实宿主启动，共 14 条原生 hook。一次是纯问答，一次运行了三个不同大小的 Bash stdout（16、4096、131072 字符）和一个非零退出命令。探针只记录收到的 UTF-8 字节数和事件类型，不保留 payload；原生 JSON 字节数与紧凑序列化大小相同。下表不含 v2 包装开销。这是试点容量证据，不是生产分位数；其中 131072 字符是命令输出，不等于 hook 一定收到同样大小的正文。
 
-## 2. 受限冷启动入口
+| 事件 | 样本数 | 原始 hook 字节数（升序） |
+| --- | ---: | --- |
+| `SessionStart` | 2 | 426、429 |
+| `UserPromptSubmit` | 2 | 495、722 |
+| `PreToolUse` | 4 | 568、586、590、594 |
+| `PostToolUse` | 3 | 836、4920、37228 |
+| `PostToolUseFailure` | 1 | 598 |
+| `Stop` | 2 | 721、724 |
+| `SubagentStart` / `SubagentStop` | 0 | 未采到 |
 
-`serve` / `recover` 增加一个只读发现入口，可在配置不存在时检查固定 v2 路径，但只有通过下列验证的 `capture/start` 才能开始初始化：
+建议先把 **1 MiB 作为含包装的 inline 上限**，不是丢弃阈值。观测尾部集中在工具输出，37,228 B 不能代表更长正文、子 agent 或 Codex。正式冻结容量前采集两种宿主、含子 agent 的各类事件，报告样本量、p50/p95/p99/max、超阈比例和对可用空间的压力；也测超大单条的写入与恢复。
 
-1. canonical 工作区和实际条目、数据根都匹配；拒绝相对路径、路径穿越、符号链接跳转或越出工作区。不从条目接受任意数据根。
-2. 条目目录、载荷、capture 上下文中的宿主和会话全部一致，并按现有宿主规则核验转录路径与宿主证据；不得扩大 Qoder 尚未落盘例外或读取其他会话的转录。
-3. 独立于仓库和队列内容核对已有的宿主集成授权及其指纹、工作区范围与有效性。`authorityRef` 是查找键，不凭字符串本身放行。不具备可验证授权、指纹变化、非开场指令、普通 hook、任意文件或身份冲突，都拒绝。该授权解决仓库不可信问题，不宣称能隔离同一 OS 用户内的恶意进程。
-4. 仍尊重禁用 sentinel、禁用环境、配置禁用或无效配置。缺配置仅允许上述授权路径按现有 `capture start` 默认值初始化；已有不同配置不能被覆盖。复用幂等的目录/配置、Git exclude 和接收器初始化。提交钩子必须独立通过现有 canonical cwd、可执行文件/配置指纹及 trust 校验；没有合格授权就不激活，见第 4 节。
+- 完整迁移模式：超过 inline 上限时，原始 payload 字节放入同一私有工作区根的旁路文件，条目只带固定相对标识、字节数和 SHA-256。先持久化旁路，再发布条目；读取时验证身份、大小、摘要，不能跟随链接，也不截断。确认成功后才回收。损坏、有引用但缺旁路文件、空间或独立磁盘配额耗尽，都归到可见失败；没有可靠落盘证据就不能报已入队。旁路总量与单文件硬上限要在上述样本和配额试验后确定。
+- 只迁移首条的试点可先不实现旁路：在**本会话尚无任何持久 v2 条目、能证明本次未发布**时，整个首事件带原文走现行 v1 通道；一旦选择并写入 v2，不因单条过大把这条突兀塞进 v1。不允许“失败即丢”或用缩短的事件冒充原事件。
 
-冷启动与已初始化路径共用现有 session-lock 和认领幂等语义；不能同时用独立的 v1、v2 消费锁打开同一会话。未初始化且未获授权的条目不能产生 `started` 或成功收据。
+### 独占发布不是因果排序
 
-## 3. 无 Node 能力检查
+候选方案不让 Python 与 Node 共用带租约的目录锁。生产者在目标槽目录写独占临时文件，限制权限并 `fsync` 内容，硬链接到**仅以序号命名**的最终槽（不能附 UUID 绕过碰撞），然后 `fsync` 目录并清理临时文件。目标已存在时比较 `entryId` 与摘要；本次发布结论不明时，先查已占槽和持久收据中是否有该 ID。只有确认是另一个条目占槽、且不会越过待确认的前驱时，才重试下一个槽；同 ID 不同内容则拒绝。若平台/文件系统不支持所需硬链接和同步语义，不直写；不换非原子写法。retry/unknown 必须查原 `entryId`，不能重复写另一份认领。
 
-在 recorder 包根（与 `package.json` 同级）随发布构件提供 `recorder-capabilities.json`，初始字段建议为 `schemaVersion: 1`、`recorderVersion`、`entrypoint`（相对包根）、`entrypointSha256`、`inboxContract: 2`。清单由制包流程生成，放在可校验构件里；安装器校验整个包，不能用工作区自报的清单代替。
+- **硬链接只保证一个槽一个获胜者，不保证谁先发。** `capture/start` 连首事件占槽 `1`；后续事件只能在读到同会话同认领的已发布首槽、并核对其持久收据后选择序号。无前置证据要缓存在已选通道，不先占后续槽。多个独立 writer 的宿主事件若还要求原发生顺序，必须有宿主提供且可验证的前驱/事件序号，或单写者串行提交；两者皆无时，分配到的顺序只是发布顺序，不得据此宣称还原完整顺序。
+- 消费者只按连续前缀推进，不跳过没有明确终态收据的空槽。已确认槽要原子换成小收据（保留 ID、摘要及结果）而不是释放槽，避免滞后的生产者复用被消费序号。先持久应用及去重状态，再确认/清除载荷。已有普通 Node session-lock 仍串行化 `serve`、显式 `recover` 和生命周期更新；这是消费者锁，不是 Python/Node 跨语言序号锁。完整迁移若无法证明前驱，不应靠去掉锁或盲目跳洞上线；首认领试点只需单槽，不引入通用序号分配器。
+- 崩溃窗口：一步中临时文件尚未链接时未发布；已链接、目录未同步时不能报已耐久，消费者处理前也要保证槽目录已同步；同步后通知前崩溃须靠扫描恢复。消费方应用后、清槽前崩溃靠持久收据/应用状态去重。过期临时文件和已确认收据只在无活跃写入、保留期满足时回收；未知结果、失败原文和仍未接管的工作不能按时间泛删。
+- `attention` 只作提示。消费方先清提示再扫描本会话；发布方在记录持久后设置提示。扫描期间新提示保留，不在扫描结束时擦除。启动及显式 `recover` 都要扫描授权范围内全部 v2 待处理槽，不依赖提示文件；增量消费需有有界兜底扫描以补“已写槽、未发提示”。唤醒只发给核验过的消费者，不伪造 v1 attention；提示或唤醒成功不证明接管。
 
-Python 先按既有优先级解析实际选中的 CLI canonical 路径，再从其可信安装包根读取清单，不启动 Node。核对 `package.json` 版本、入口文件及摘要与选中的路径一致；无法证明某个自定义 CLI 路径与可信安装构件绑定，就不直写。版本下限等第一个通过 v1/v2 混版本测试的正式版发布后再固定，不能仅凭版本号或 `latest` 认定有能力。
+## 3. 受限冷启动与当前消费者
 
-清单缺失、未知版本或能力、路径/摘要不一致，一律在首条落盘前回退原 CLI。若对应工作区已有旧 daemon，或无法确定实际消费者版本，也回退；不能把新包路径当成旧 daemon 已退出的证据。发现无 daemon 时只有在受信任 launcher 能启动同一 v2 构件时才允许直写。不能自动杀旧进程；已落盘的 v2 工作留给相容消费者并报告等待，不通过 v1 重写。即使版本检查遇到竞争，独立目录仍不被旧版消费；新旧 daemon 并存不是可运行模式，必须按工作区验明唯一消费者和同一 session-lock。
+只有通过以下检查的 `capture/start` 才能在缺配置时进入初始化。检查 canonical 工作区、数据根及队列路径、所有者和权限；重算目录键；核对条目、原始载荷和上下文的宿主与会话；按现有合同核验转录路径与身份。独立于仓库及队列核对安装器预置的 authority、范围、指纹与有效性。`authorityRef` 只用于查找，不是批准。错工作区、路径逃逸、链接、禁用 sentinel、禁用环境、无效或禁用配置、无授权或指纹改变均拒绝。**普通 hook、任意文件和 `capture/stop` 永远不能开采集。** 初始化可复用现有配置、Git exclude、接收器逻辑；提交钩子仍独立验证，见下节。
 
-## 4. 可随条目携带的上传环境
+无 Node 检测要核对 **包与进程两份证据**：
 
-沿用现有 `UPLOAD_ENV_KEYS`，逐项限制类型、大小、语义与 scope：
+1. 可信安装包根与 `package.json` 同级的静态 `recorder-capabilities.json`：`schemaVersion`、`recorderVersion`、`entrypoint`、`entrypointSha256`、`inboxContract: 2`。Python 解析实际选择的 CLI canonical 路径并核对版本及摘要；不能读到或无法绑定则走旧 CLI。版本下限等首个实测兼容的正式版再固定，不凭 registry `latest` 猜测。
+2. 已获授权的后台在私有工作区槽原子发布 `consumer.json`，字段含 `schemaVersion`、`workspaceKey`、`pid`、**OS 进程启动标识**、`instanceId`、`state: starting|ready`、`recorderVersion`、`supportedInboxContracts`、canonical `socketPath` 和构件摘要。ready 只在持有工作区唯一消费者身份、socket 已就绪后发布；退出只清本实例的状态。Python 无需 Node：核对文件权限路径、进程 UID、PID/启动标识（防 PID 复用）、实例身份与配套 socket 的既有 owner；可用有界 Unix socket 探测交叉核对实例，但失败不推断“没有 daemon”。
 
-- `SCRY_TURN_UPLOAD_ENABLED`、`SCRY_UPLOAD_DEADLINE_SECONDS`、`SCRY_UPLOAD_LOCK_WAIT_SECONDS`、`SCRY_MANAGED_UPLOAD_WAIT_SECONDS`；
-- `SCRY_INSTALLATION_ID`、`SCRY_INSTALLATION_ID_FILE`、`TMCP_TRACE_URL`、`RATE_NATIVE_ASYNC_QUEUE_DIR`。
+现有旧 daemon 会写 `<socket>.owner.json`（含版本和实例，不声明 v2），更老的可能只留 socket/启动标记。只要缺 `consumer.json` 或发现旧 owner、socket 仍可连接、版本未知、权限不足、正在启动或不一致，就按“可能有旧消费者”在首条落盘前回退。**冷启动例外不是“没文件就猜没进程”**：只有安装器/受信任 launcher 已证明工作区的旧实例排空、预留唯一的 v2 接管权并能唤起同一构件时，允许无 ready 文件先落盘；最小试点可以只认 ready，崩溃冷启动仍走旧路径。
 
-含路径或 URL 的值仍受安装授权规定的范围限制；未知键、非字符串、冲突或超限值拒绝。值不写诊断日志，不改变 daemon 的全局环境。不携带凭据、`PATH`、任意 shell 变量或 `SCRY_RECORDER_COMMIT_HOOK`。
+检查后进程仍可能退出；不能用文件检查消除这个竞争。消费者需再次验 workspace/instance 并取得唯一路由权；写入真正受版本隔离保护的是独立目录。推迟接管时保留 v2 字节和失败原因，不启动第二个消费者抢占，不因为 PID 消失改往 v1 重发已落盘条目；已存在实例不由 hook 强行结束。
 
-提交钩子授权待评审，两种备选：以 `authorityRef` 查找由可信安装器登记的 callback 和指纹；或由宿主启动器预先通过现有验证入口登记一次 grant，条目只引用 grant 和摘要。两种都要重验可执行文件与 canonical cwd；不从队列直接取信路径，不在本草案选定。
+## 4. 上传环境和提交钩子
 
-## 5. `recover --json` 统计
+沿用 `UPLOAD_ENV_KEYS`：`SCRY_TURN_UPLOAD_ENABLED`、`SCRY_UPLOAD_DEADLINE_SECONDS`、`SCRY_UPLOAD_LOCK_WAIT_SECONDS`、`SCRY_MANAGED_UPLOAD_WAIT_SECONDS`、`SCRY_INSTALLATION_ID`、`SCRY_INSTALLATION_ID_FILE`、`TMCP_TRACE_URL`、`RATE_NATIVE_ASYNC_QUEUE_DIR`。验证字符串大小和语义，路径/URL 仍受安装授权限制。只对当前认领生效，不改 daemon 全局环境，不记录值。不携带凭据、`PATH` 或 `SCRY_RECORDER_COMMIT_HOOK`。
 
-保留 `recovered`、`pending`、`expired` 的轮次含义。另加版本化的 `inbox` 对象，按实际处理到的 `workspace/provider/session` 范围报告：
+提交钩子授权**待评审**：可用 `authorityRef` 查可信安装器登记的 callback 与指纹，或由可信宿主 launcher 预先走现有验证入口登记 grant，条目只引用 grant 和摘要。两者都要重验 canonical cwd 和可执行文件/配置指纹，不能把队列中的路径当作授权。
 
-| 字段 | 含义 |
+## 5. 恢复统计与混版本
+
+`recover --json` 保留现有 `recovered`、`pending`、`expired` 的轮次语义，增加版本化 `inbox`：`schemaVersion`、`scope`、`scanComplete`、`consumed`（新应用并持久确认）、`deduplicated`、`quarantined`（本次新增隔离）、`remaining`（尚待处理）、`failedRemaining`（仍保留的终态失败）。枚举不完整时余量为 `null`，不能报 `0`。消费不等于轮次封箱或上传。
+
+| 组合 | 行为与必测 |
 | --- | --- |
-| `schemaVersion` | 统计 schema 版本，初始为 `1`，与收件箱版本分开。 |
-| `scope` | 工作区或指定宿主/会话；不在公开日志打印会话 ID。 |
-| `scanComplete` | 是否枚举完所求范围；无配置且不能确认 v2 范围、读取错误或时间预算用尽都不能报 true。 |
-| `consumed` | 本次新应用且持久确认的条目数；重放同一条目不再计一次业务成功。 |
-| `deduplicated` | 本次经已应用收据确认的重复条目数。 |
-| `quarantined` | 本次新隔离的条目数，不等于重试次数。 |
-| `remaining` | 此次结束时所求范围内尚未确认、可重试条目数；没有完全枚举时为 `null`，不能报 `0`。 |
-| `failedRemaining` | 所求范围内仍保留的终态失败条目数，枚举不全时为 `null`。 |
+| 新 Python + 旧 recorder | 插件能力或旧进程检查未通过，走 v1；验证未知/错误清单、PID 复用和回退只提交一次。 |
+| 旧 Python + 新 recorder | 维持 v1，无冷启动特权；验证原顺序及无隐式迁移。 |
+| 新 Python + 新 recorder | 只消费已授权通道；验证宿主沙箱、多个工作区、硬链接冲突、认领前缀、跨进程崩溃、无 attention 恢复及超限保真。 |
+| 新安装 + 旧 daemon / 受控交接 | 不按安装版本猜活进程；测试旧 `serve` 及 `recover` 不触碰 v2 sentinel，版本探测、落盘及接管之间的退出竞争，以及新实例只消费积压一次。 |
 
-`consumed` 不表示轮次封箱，更不表示上传成功。现有退出码和诊断不因增加统计而降格；失败不得混入成功条目。
+## 6. 最小上线切片与分阶段建议
 
-## 6. 混版本与必测矩阵
+估算只给相对工作量与模块数，含故障测试，不是交期。
 
-| 场景 | 预期 | 必测内容 |
-| --- | --- | --- |
-| 新 Python + 旧 recorder | 能力拒绝，只走 v1 CLI；不写 v2。 | 缺/错清单、自定义二进制、旧 daemon + 新安装、回退只投递一次。 |
-| 旧 Python + 新 recorder | 新 recorder 继续消费 v1；v1 不具备冷启动特权。 | 旧认领与后续事件顺序、旧 workspace 配置、不生成或迁移 v2 条目。 |
-| 新 Python + 新 recorder | 支持 v2，获准的 `capture/start` 可冷启动。 | 双语言序号、相同时间多进程、跨会话隔离、锁竞争、各原子写窗口崩溃、恢复幂等、无 attention 自愈、真实宿主完整链路。 |
-| 新旧 daemon 可能同时存在 | 先回退或等受控交接；不并发消费同一工作区。v2 字节对旧 walker 不可见。 | 启动真实的旧 `serve`，手动 `recover` 和增量扫描均不触碰 v2 sentinel 条目；旧进程已接管时不向 v2 写，交接后新程序能消费遗留条目一次。 |
-
-额外必须测试：禁用或无效配置、假授权、错误工作区与宿主身份、路径逃逸与符号链接、未知 schema/kind、提交钩子指纹变化、作用域恢复与不完整扫描计数。旧进程实测不扫描新目录之前，不宣称混版本安全，不冻结正式契约。
-
-## 7. 已知风险（0.2.92 隔离实测）
-
-| 写到旧路径的内容 | 实际结果 |
+| 阶段 | 改动量与收益 |
 | --- | --- |
-| 有配置，条目显式写 `schemaVersion: 2` | 原条目移入 `inbox-failed`，但旧 `recover` 返回全 0。 |
-| 有配置，伪装 v1、`kind` 未知，其余是旧版可识别的 `SessionEnd` 形状 | 落入普通 hook 分支，条目被删除，没有建立采集或隔离记录。 |
-| 无配置 | `recover` 返回全 0，队列文件原地未读。 |
+| 0. 预热和看见失败 | 小：CodeLens launcher 和诊断约两个模块。让常开客户端先在受控后台启动 recorder、验证 ready；必要时在授权后增加脱敏失败计数。缩小冷启动窗口，不声称消除丢会话。 |
+| 1. 只直写首认领的受限试点 | 中：Python 写入/选路、静态能力清单和进程状态、Node 单槽接管/收据、诊断与主机测试，约 4–5 个模块。工作区外私有根、已验证 ready 的唯一消费者、单槽原子发布、原始首事件、权限校验和恢复扫描都不可省。首钩子不启动 Node；其后在**认领接管 ACK（含 capture 身份和接收能力）持久化后**沿用 v1 的既有活动会话通道。从首槽落盘到 ACK 间的事件必须按序暂存，不能先送 v1 或丢弃。 |
+| 2. 冷启和整会话迁移 | 大：再加入 launcher 排空/接管权、受限无配置初始化、多 writer 的前驱/槽位合同、旁路大载荷、混版本观测和清理。完成后才能覆盖无 ready daemon 的首事件，并让整轮不再依赖 v1。 |
 
-v2 必须使用旧 walker 不扫描的新目录，且失败和滞留必须可见。“旧 recover 返回 0”不是队列已清空的证据。本草案没有对候选 v2 模块执行混版本测试，因为它尚未实现。
+“不能混用”指不能让 v1、v2 **独立接管同一会话**，并不是必须一次实现两个阶段。第 1 阶段的折中是一条明确的 v2→v1 路由交接：同一消费者、一个持久的认领、首事件不转发第二次、ACK 前有序缓冲、失败可见。代价是还要维护交接/缓冲，接管前不能靠旧通道止损，并且必须先预热。若跨语言交接及缓冲成本接近整套、或目标是从一开始就支持真正无 daemon 的冷启动，则不要把这个试点当作解决方案 4 已上线。
+
+## 7. 不做会怎样
+
+目前未确认的冷启动保存在 CodeLens `capture/uncertain`，本机 `doctor` 和 `health --json` 可见计数及原因；已有 heartbeat 不带这部分诊断，远端看不到。现有 24 小时过期清理不重放认领，能看见失败不等于能补回漏采。
+
+**更低成本的缓解是预热**：从长期运行的、已授权的 launcher 提前保持 recorder ready，并可在本地告警 hint 变差时报告，不在首钩子的时限内等待启动。它对“Node 冷启动排队”有效，但不能保证机器睡眠后、daemon 退出/升级、后台未运行、沙箱限制或资源耗尽时接住首事件；不持久化的首事件仍可能丢。应先测预热前后的未确认比例、ready 覆盖和常驻资源成本。只有在失败集中于冷窗且预热后可接受时，才足以延后 v2；若仍存在不可见或无法恢复的丢失，继续做独立耐久收件箱。若要上报本地 uncertain，只报经授权的聚合计数/原因，不上报会话 ID、路径或载荷。
+
+## 8. 已知风险（0.2.92 隔离实测）
+
+| 写旧路径的内容 | 实际结果 |
+| --- | --- |
+| 有配置、显式 `schemaVersion: 2` | 移入 `inbox-failed`；旧 `recover` 统计仍全 0。 |
+| 有配置、冒称 v1、`kind` 未知而其余是可识别的 `SessionEnd` | 落入普通 hook，条目被删除，既未认领也未隔离。 |
+| 无配置 | 返回全 0，条目原地未读。 |
+
+不能把旧 `recover` 的全 0 当作空队列。另做了工作区外目录的 0.2.92 隔离对照：无配置时 `recover` 未触碰 v2 槽；初始化后，旧 `serve` 接受唤醒、v1 对照条目被消费，随后显式 `recover` 结束，v2 槽字节仍不变。这只验证旧版不发现该路径，未验证 v2 原子性、新旧交接或受限沙箱可写性。本文不批准任何实现或上线。
