@@ -13,6 +13,7 @@ import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
 import { hostProcessChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
+import { rememberQoderRequest } from './qoder-stop-evidence.js'
 import { readJson, writeJsonAtomic } from './io.js'
 import { listRecordSummaries, stableHash, updateHealth } from './store.js'
 import { publishQuarantinedOpenTurn, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState, type RecorderSessionState as SessionState } from './runtime-state.js'
@@ -101,7 +102,7 @@ export async function beginOpenTurn(
     status: 'open',
     ...(capture ? { initialization: 'pending' as const } : {}),
     startedAt: claim?.startedAt ?? timestampOf(payload),
-    startFingerprint: capture && !claim?.pendingQoderTranscriptPath
+    startFingerprint: capture && !(claim && provider === 'qoder' && event === 'UserPromptSubmit')
       ? `capture:${capture.captureId}` : startFingerprintOf(provider, event, payload),
     ...(capture ? {
       capture: {
@@ -136,7 +137,7 @@ export async function beginOpenTurn(
     await markSessionAttention(enablement.dataRoot, provider, safeKey(sessionId))
     await writeJsonAtomic(openPath(root), open)
   })
-  await writeJsonAtomic(statePath(root), { ...session, lastGeneration: generation, lastTurnIndex: turnIndex })
+  await writeJsonAtomic(statePath(root), rememberQoderRequest({ ...session, lastGeneration: generation, lastTurnIndex: turnIndex }, open))
   if (!managedByScry && continuation && enablement.config.capture.diff) {
     open.captures = await continuationCaptures({
       frozen: session.lastSegment?.frozenDiffs,
@@ -206,7 +207,8 @@ export async function beginCaptureTurn(
   payload: Record<string, unknown>,
   ancestryFromPid?: number,
   claimedHostChain?: import('./host-process.js').HostProcess[],
-  pendingTranscriptPath?: string
+  pendingTranscriptPath?: string,
+  synchronousClaim = false
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const open = await readJson<OpenTurnState>(openPath(root))
@@ -227,7 +229,8 @@ export async function beginCaptureTurn(
     }
     return readJson<OpenTurnState>(openPath(root)).then((value) => value ?? open)
   }
-  const transcript = pendingTranscriptPath ? null : await stableTranscript(
+  const openingPrompt = provider === 'qoder' && payload.hook_event_name === 'UserPromptSubmit'
+  const transcript = openingPrompt || pendingTranscriptPath ? null : await stableTranscript(
     transcriptPath,
     `${provider}:${sessionId}:capture`,
     provider,
@@ -240,15 +243,15 @@ export async function beginCaptureTurn(
   ).catch(() => null)
   const resolved = ancestryFromPid ? await hostProcessChain(ancestryFromPid) : []
   const host = resolved.length ? resolved : claimedHostChain
-  const event = pendingTranscriptPath ? 'UserPromptSubmit' : 'CaptureStart'
+  const event = openingPrompt ? 'UserPromptSubmit' : 'CaptureStart'
   const opened = await beginOpenTurn(enablement, provider, sessionId, event, payload, false, false, undefined, context, {
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
     ...(transcript?.userText ? { userText: transcript.userText } : {}),
     ...(transcript?.providerTurnId ? { providerTurnId: transcript.providerTurnId } : {}),
-    baselineAt: new Date().toISOString(),
+    ...(!pendingTranscriptPath || !synchronousClaim ? { baselineAt: new Date().toISOString() } : {}),
     ...(pendingTranscriptPath ? { pendingQoderTranscriptPath: pendingTranscriptPath } : {})
   }, undefined, host?.length ? host : undefined)
-  if (pendingTranscriptPath) await storeLifecycleEvent(enablement, opened, event, payload)
+  if (openingPrompt) await storeLifecycleEvent(enablement, opened, event, payload)
   return opened
 }
 

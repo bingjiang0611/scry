@@ -1,23 +1,37 @@
 import { lstat, realpath } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import type { RecorderOpenTurnState } from './runtime-state.js'
 
 export const PENDING_QODER_TRANSCRIPT_REASON = 'the claimed Qoder transcript did not become available as a regular file'
 
-/** Admit a missing leaf, not a broken symlink or an unresolvable parent. */
+const MAX_MISSING_QODER_TRANSCRIPT_DIRECTORIES = 3
+
 export async function pendingQoderTranscriptPath(path: string): Promise<string | undefined> {
-  if (!isAbsolute(path)) return undefined
-  try {
-    const parent = await realpath(dirname(path))
-    if (!(await lstat(parent)).isDirectory()) return undefined
-    const candidate = join(parent, basename(path))
-    try { await lstat(candidate) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate
+  if (!isAbsolute(path) || path.split(sep).includes('..') || path.endsWith(sep)) return undefined
+  const tail = [basename(path)]
+  let directory = dirname(path)
+  while (tail.length <= MAX_MISSING_QODER_TRANSCRIPT_DIRECTORIES + 1) {
+    try {
+      await lstat(directory)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return undefined
+      tail.unshift(basename(directory))
+      directory = dirname(directory)
+      continue
+    }
+    try {
+      const ancestor = await realpath(directory)
+      if (!(await lstat(ancestor)).isDirectory()) return undefined
+      const candidate = join(ancestor, ...tail)
+      try { await lstat(candidate) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return candidate
+      }
+    } catch {
+      return undefined
     }
     return undefined
-  } catch {
-    return undefined
   }
+  return undefined
 }
 
 /** Use only the pinned path. Keep checking until its normal file has appeared. */

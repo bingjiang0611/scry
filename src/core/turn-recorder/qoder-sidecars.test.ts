@@ -24,7 +24,7 @@ async function fixture() {
       toolUseResult: { kind: 'agent-result', agentId: 'child', state: 'completed', transcriptPath: '/untrusted/path/must-not-be-opened.jsonl' },
       message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'spawn', content: 'child finished' }] } },
     { ...identity, type: 'assistant', uuid: 'done', parentUuid: 'r',
-      message: { id: 'main-answer', content: [{ type: 'text', text: 'root answer' }], usage: { input_tokens: 5, output_tokens: 2 } } }
+      message: { id: 'main-answer', stop_reason: 'end_turn', content: [{ type: 'text', text: 'root answer' }], usage: { input_tokens: 5, output_tokens: 2 } } }
   ]
   const childIdentity = { ...identity, agentId: 'child', parent_tool_use_id: 'spawn', isSidechain: true }
   const childRows = [

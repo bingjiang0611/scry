@@ -136,3 +136,34 @@ it('a stale socket (curl rc=7) applies hooks directly and requests daemon startu
   expect.soft(start).toHaveBeenCalledTimes(2)
   expect(handle).toHaveBeenCalledTimes(2)
 }, 15_000)
+
+it.each(['direct', 'startup failure'])('commits a matched Qoder Stop without a later hook: %s', async mode => {
+  const root = await mkdtemp(join(tmpdir(), 'scry-qoder-inline-'))
+  roots.push(root)
+  const transcript = join(root, 'qoder.jsonl')
+  await writeFile(join(root, 'scry.config.json'), JSON.stringify({
+    schemaVersion: 1, enabled: true, workspaceId: 'inline-fixture', capture: { diff: false, toolOutput: 'full' }
+  }))
+  vi.stubEnv('SCRY_RECORDER_TRANSPORT', mode === 'direct' ? 'direct' : '')
+  vi.stubEnv('SCRY_RECORDER_DAEMON_TRIED', '')
+  vi.stubEnv('SCRY_RECORDER_SOCKET', join(root, 'missing.sock'))
+  const startDaemon = vi.spyOn(daemon, 'startRecorderDaemon').mockRejectedValue(new Error('fixture startup failed'))
+  const send = vi.spyOn(daemon, 'sendRecorderDaemonHook').mockRejectedValue(Object.assign(new Error('no socket'), { code: 'ENOENT' }))
+  let payload = {}
+  vi.spyOn(process.stdin, Symbol.asyncIterator).mockImplementation(async function* () { yield Buffer.from(JSON.stringify(payload)) })
+  const base = { session_id: 'inline-session', transcript_path: transcript, cwd: root }
+  payload = { ...base, request_set_id: 'R', prompt: 'fixture question' }
+  const args = ['recorder', 'hook', '--provider', 'qoder', '--workspace', root, '--quiet', '--event']
+  await expect(runScryCli([...args, 'UserPromptSubmit'])).resolves.toBe(0)
+  await writeFile(transcript, [
+    { sessionId: base.session_id, type: 'user', promptId: 'P', requestSetId: 'R', message: { role: 'user', content: 'fixture question' } },
+    { sessionId: base.session_id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'partial reply' }] } }
+  ].map(row => JSON.stringify(row)).join('\n') + '\n')
+  payload = { ...base, parent_request_set_id: 'R' }
+  await expect(runScryCli([...args, 'Stop'])).resolves.toBe(0)
+  expect(await listRecords(join(root, '.scry'))).toMatchObject([{
+    status: 'completed', providerTurnId: 'P', transcript: { status: 'partial', omissionReason: expect.stringContaining('no recovery poll was scheduled') }
+  }])
+  expect(startDaemon).toHaveBeenCalledTimes(mode === 'direct' ? 0 : 2)
+  expect(send).toHaveBeenCalledTimes(mode === 'direct' ? 0 : 2)
+})

@@ -48,7 +48,7 @@ describe('Qoder credits canonical recording', () => {
     await writeFile(transcript, [
       { type: 'user', uuid: 'u', sessionId: 'session', cwd: root, requestSetId: 'R', promptId: 'P', message: { content: 'same text' } },
       { type: 'assistant', uuid: 'a', parentUuid: 'u', sessionId: 'session', cwd: root,
-        message: { id: 'm', content: [{ type: 'text', text: 'done' }], usage: { request_id: 'credit-1', credits: 4.5, billable: true } } }
+        message: { id: 'm', stop_reason: 'end_turn', content: [{ type: 'text', text: 'done' }], usage: { request_id: 'credit-1', credits: 4.5, billable: true } } }
     ].map((row) => JSON.stringify(row)).join('\n') + '\n')
     await handleRecorderHook({
       provider: 'qoder', event: 'Stop', workspace: root,

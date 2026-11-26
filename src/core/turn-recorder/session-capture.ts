@@ -153,7 +153,7 @@ export async function startSessionCapture(args: {
     }
     await beginCaptureTurn(
       enablement, provider, sessionId, context, state.transcriptPath, prepared.payload,
-      prepared.ancestryFromPid, prepared.hostChain, prepared.pendingTranscriptPath
+      prepared.ancestryFromPid, prepared.hostChain, prepared.pendingTranscriptPath, !args.sessionLockHeld
     )
     await writeJsonAtomic(statePath, state)
     await writeJsonAtomic(captureContextPath(enablement.dataRoot, provider, sessionId), captureWireContext(context))
@@ -276,6 +276,7 @@ export async function applySessionCaptureHook(args: {
   payload: Record<string, unknown>
   queueOnly?: boolean
   deferDelivery?: boolean
+  qoderStopRecoveryScheduled?: boolean
   captureMode?: boolean
   env?: NodeJS.ProcessEnv
   ancestryFromPid?: number
@@ -338,6 +339,7 @@ export async function applySessionCaptureHook(args: {
     capture: captureStateContext(state),
     ...(args.queueOnly ? { queueOnly: true, captureMode: true } : {}),
     deferDelivery: args.deferDelivery,
+    qoderStopRecoveryScheduled: args.qoderStopRecoveryScheduled,
     env: args.env,
     ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
   })

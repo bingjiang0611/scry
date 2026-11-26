@@ -45,6 +45,7 @@ export interface RecorderSessionState {
   lastTurnIndex: number
   lastCommittedRecordId?: string
   committedProviderTurnIds?: string[]
+  recentQoderRequests?: { generation: number; id: string }[]
   chainStores?: string[]
   captureRepositories?: string[]
   lastSegment?: RecorderSealedSegment
@@ -95,8 +96,13 @@ export interface RecorderOpenTurnState {
   host?: import('./host-process.js').HostProcess[]
   staleTerminalProtection?: boolean
   deferredTerminalAt?: string
+  deferredTerminalFirstAt?: string
   deferredTerminalEventId?: string
-  deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks'
+  deferredTerminalReason?: 'stale_terminal' | 'pending_background_tasks' | 'qoder_native_id_unproven'
+  deferredQoderStopAttribution?: 'matched' | 'unproven'
+  deferredQoderNativeStopId?: string
+  qoderRequestStopConfirmed?: true
+  qoderStopTranscriptDeadlineMs?: number
   continuation?: RecorderContinuation
   frozenDiffs?: RecorderFrozenDiff[]
   terminalIdentityConfirmedBySessionEnd?: boolean

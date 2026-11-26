@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, expect, it } from 'vitest'
 import { applySessionCaptureHook, startSessionCapture } from './session-capture'
@@ -13,11 +13,11 @@ const exec = promisify(execFile)
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
-async function fixture(provider: 'qoder' | 'codex') {
+async function fixture(provider: 'qoder' | 'codex', transcript = 'session.jsonl') {
   const root = await mkdtemp(join(tmpdir(), 'scry-early-claim-'))
   roots.push(root)
   const dataDir = join(root, '.scry')
-  const transcriptPath = join(root, 'session.jsonl')
+  const transcriptPath = join(root, transcript)
   const timestamp = new Date(Date.now() - 5_000).toISOString()
   const payload = { session_id: 'fixture', transcript_path: transcriptPath, cwd: root, timestamp }
   const base = { workspace: root, dataDir, provider, sessionId: 'fixture', context: {
@@ -85,6 +85,63 @@ it.each([true, false])('claims a first Qoder prompt before transcript creation (
       ? { status: 'available', value: { sourcePath: expect.stringMatching(/\/session\.jsonl$/) } }
       : { status: 'unavailable', omissionReason: expect.stringContaining('did not become available') }
   })
+})
+
+it('claims the first Qoder prompt and baselines Git before its three missing directories appear', async () => {
+  const f = await fixture('qoder', '.qoder/projects/project/session.jsonl')
+  await f.initRepo()
+  const prompt = { ...f.payload, hook_event_name: 'UserPromptSubmit', prompt: 'first prompt', prompt_id: 'one' }
+  expect(await startSessionCapture({ ...f.base, payload: prompt, cli: {} })).toMatchObject({ status: 'started' })
+  expect(await readJson<RecorderOpenTurnState>(f.openPath)).toMatchObject({
+    pendingQoderTranscriptPath: join(await realpath(f.root), '.qoder/projects/project/session.jsonl'),
+    captures: [{ capture: { status: 'ready' } }]
+  })
+  await writeFile(join(f.root, 'tracked.txt'), 'after\n')
+  await mkdir(dirname(f.transcriptPath), { recursive: true })
+  await writeFile(f.transcriptPath, JSON.stringify({ type: 'user', promptId: 'one', timestamp: f.timestamp,
+    message: { role: 'user', content: 'first prompt' } }) + '\n')
+  await f.hook('Stop', { prompt_id: 'one', timestamp: new Date().toISOString() })
+  expect(await listRecords(f.dataDir)).toMatchObject([{
+    transcript: { status: 'available' }, diff: { status: 'available', value: [{ files: [{ change: 'modified' }] }] }
+  }])
+})
+
+it('pins an existing ancestor symlink to its real directory before the Qoder child directory exists', async () => {
+  const f = await fixture('qoder', 'alias/project/session.jsonl')
+  const real = join(f.root, 'real')
+  await mkdir(real)
+  await symlink(real, join(f.root, 'alias'))
+  const prompt = { ...f.payload, hook_event_name: 'UserPromptSubmit', prompt_id: 'one' }
+  expect(await startSessionCapture({ ...f.base, payload: prompt, cli: {} })).toMatchObject({ status: 'started' })
+  expect(await readJson<RecorderOpenTurnState>(f.openPath)).toMatchObject({
+    pendingQoderTranscriptPath: join(await realpath(real), 'project/session.jsonl')
+  })
+})
+
+it.each(['parent', 'file'])('does not adopt a Qoder transcript when the %s later appears as a symlink', async link => {
+  const f = await fixture('qoder', 'projects/project/session.jsonl')
+  const prompt = { ...f.payload, hook_event_name: 'UserPromptSubmit', prompt_id: 'one' }
+  expect(await startSessionCapture({ ...f.base, payload: prompt, cli: {} })).toMatchObject({ status: 'started' })
+  const foreign = join(f.root, 'foreign')
+  await mkdir(foreign)
+  await writeFile(join(foreign, 'session.jsonl'), '{"type":"user"}\n')
+  if (link === 'parent') {
+    await mkdir(join(f.root, 'projects'))
+    await symlink(foreign, dirname(f.transcriptPath))
+  } else {
+    await mkdir(dirname(f.transcriptPath), { recursive: true })
+    await symlink(join(foreign, 'session.jsonl'), f.transcriptPath)
+  }
+  await f.hook('Stop', { prompt_id: 'one', timestamp: new Date().toISOString() })
+  expect(await listRecords(f.dataDir)).toMatchObject([{
+    transcript: { status: 'unavailable', omissionReason: expect.stringContaining('did not become available') }
+  }])
+})
+
+it('rejects a missing Qoder transcript with more than three missing directories', async () => {
+  const f = await fixture('qoder', 'one/two/three/four/session.jsonl')
+  await expect(startSessionCapture({ ...f.base, payload: { ...f.payload, hook_event_name: 'UserPromptSubmit' }, cli: {} }))
+    .rejects.toMatchObject({ code: 'recorder_unavailable' })
 })
 
 it('does not give the missing-first-file exception to a broken symlink', async () => {

@@ -88,7 +88,7 @@ async function startRecorderDaemon(
     if (recoveryInFlight) return recoveryInFlight
     recoveryInFlight = Promise.resolve()
       .then(() => args.recoveryProbe?.())
-      .then(() => recoverRecorder(enablement.workspaceRoot, env, undefined, undefined, { incremental: true }))
+      .then(() => recoverRecorder(enablement.workspaceRoot, env, undefined, undefined, { incremental: true, qoderStopRecoveryScheduled: true }))
       .catch(async (error) => {
         const message = error instanceof Error ? error.message : String(error)
         await appendRotatingLog(daemonLog, `${new Date().toISOString()} ERROR recovery: ${message}`).catch(() => undefined)
@@ -264,7 +264,7 @@ async function startRecorderDaemon(
       }
       const result = await handleRecorderHook({
         provider, event, workspace: enablement.workspaceRoot, payload,
-        env: hookEnv, deferDelivery: true,
+        env: hookEnv, deferDelivery: true, qoderStopRecoveryScheduled: true,
         ...(clientPid !== undefined ? { ancestryFromPid: clientPid } : {})
       })
       scheduleRecovery(true)
@@ -340,7 +340,7 @@ export async function serveRecorderDaemon(args: {
   idleUpdate?: () => Promise<string | null>
 }): Promise<void> {
   const handle = await listenRecorderDaemon(args)
-  await recoverRecorder(args.workspace, args.env).catch(() => undefined)
+  await recoverRecorder(args.workspace, args.env, undefined, undefined, { qoderStopRecoveryScheduled: true }).catch(() => undefined)
   const shutdown = (): void => { void handle.close() }
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)
