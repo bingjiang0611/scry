@@ -157,19 +157,47 @@ try {
     SCRY_RECORDER_COMMIT_HOOK: callback, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: fingerprint })
   const drainArgs = ['recorder', 'notify-drain', '--workspace', workspace]
   const execute = promisify(execFile)
-  const deliveries = await Promise.allSettled(['cli', 'app', 'cli'].map(fingerprint =>
-    execute(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint), encoding: 'utf8', timeout: 60_000 })))
-  for (const delivery of deliveries) assert.equal(delivery.status, 'fulfilled', String(delivery.reason))
-  assert.deepEqual(deliveries.map(delivery => JSON.parse(delivery.value.stdout).delivered).sort(), [0, 0, 2])
-  assert.equal(readFileSync(capture, 'utf8').trim().split('\n').length, 2)
+  // Records committed before any callback are owed, but never backfilled: an untriggered drain reports the
+  // backlog (exit 3) and still sends nothing to a hook identity that has no checkpoint.
+  const silentDrain = async fingerprint => {
+    const failure = await execute(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint), encoding: 'utf8', timeout: 60_000 })
+      .then(value => { throw new Error(`expected a pending backlog, got ${value.stdout}`) }, error => error)
+    assert.equal(failure.code, 3, String(failure.stderr))
+    const report = JSON.parse(failure.stdout)
+    assert.equal(report.delivered, 0)
+    assert.ok(report.pending > 0, 'a workspace that owes records must not report an empty backlog')
+  }
+  await silentDrain('cli')
+  await silentDrain('app')
+  assert.equal(existsSync(capture) ? readFileSync(capture, 'utf8') : '', '', 'no callback may receive pre-hook records')
+  // A commit made while the callback is configured is delivered exactly once, by that commit.
+  const beforeDelivery = JSON.parse(run(bin, ['turns', 'list', '--workspace', workspace], { cwd: installRoot })).length
+  for (const event of [['claude', 'UserPromptSubmit', { session_id: 'package-smoke-delivery', prompt: 'deliver me', cwd: workspace }],
+    ['claude', 'Stop', { session_id: 'package-smoke-delivery', assistant_response: 'delivered', cwd: workspace }]]) {
+    run(hook, [event[0], event[1]], { cwd: workspace, env: deliveryEnv('cli'), input: JSON.stringify(event[2]) })
+  }
+  const callbackLines = () => (existsSync(capture) ? readFileSync(capture, 'utf8').trim() : '')
+  const deadline = Date.now() + 20_000
+  while (callbackLines() === '' && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50)
+  }
+  assert.notEqual(callbackLines(), '', 'a commit made while the callback is configured must reach it')
+  const delivered = callbackLines().split('\n').map((line) => JSON.parse(line))
+  assert.deepEqual(delivered.map((notification) => notification.sequence), [beforeDelivery + 1])
+  assert.equal(JSON.parse(run(bin, drainArgs, { cwd: workspace, env: deliveryEnv('cli') })).delivered, 0)
+  // A second identity owes nothing: it neither replays that record nor borrows the first identity's position.
+  await silentDrain('app')
+  assert.equal(readFileSync(capture, 'utf8').trim().split('\n').length, 1)
   const { commitNotificationStatus } = await import(pathToFileURL(join(installedRoot, 'dist/core/turn-recorder/store.js')).href)
   const legacyPath = join(workspace, '.scry/notifications/commit-hook-state.json')
   const legacy = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'old-app', ackedThrough: 1 })
   writeFileSync(legacyPath, legacy)
+  assert.deepEqual(await commitNotificationStatus(join(workspace, '.scry'), deliveryEnv('cli')),
+    { ackedThrough: beforeDelivery + 1, notifyBacklog: 0 })
+  assert.equal(await commitNotificationStatus(join(workspace, '.scry'), deliveryEnv('app')).then((status) => status.ackedThrough), null)
   for (const fingerprint of ['cli', 'app']) {
-    assert.deepEqual(await commitNotificationStatus(join(workspace, '.scry'), deliveryEnv(fingerprint)),
-      { ackedThrough: 2, notifyBacklog: 0 })
-    assert.equal(JSON.parse(run(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint) })).delivered, 0)
+    await execute(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint), encoding: 'utf8', timeout: 60_000 })
+      .then(value => value, error => error)
     assert.equal(readFileSync(legacyPath, 'utf8'), legacy, 'new CLI must not overwrite the old App cursor')
   }
 
