@@ -1,13 +1,13 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { Readable } from 'node:stream'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as daemon from '../core/turn-recorder/daemon'
 import { recorderInboxEntries } from '../core/turn-recorder/inbox'
 import { captureStatePath } from '../core/turn-recorder/session-capture-contract'
-import { recorderSessionRoot } from '../core/turn-recorder/runtime-state'
+import { recorderOpenPath, recorderSessionRoot, type RecorderOpenTurnState } from '../core/turn-recorder/runtime-state'
 import { recoverRecorder } from '../core/turn-recorder/recorder'
 import { listRecords } from '../core/turn-recorder/store'
 import { runScryCli } from './scry'
@@ -153,3 +153,95 @@ it('refuses to defer a claim the recorder could not apply, and writes no inbox e
   expect(JSON.parse(result.output)).toMatchObject({ status: 'error', code: 'recorder_unavailable' })
   expect(await readdir(join(f.root, '.scry')).catch(() => [])).toEqual([])
 })
+
+it.each(['before-enqueue', 'before-replay', 'after-replay'] as const)(
+  'replays a CLI-deferred Qoder claim and paired first UserPromptSubmit as one turn (transcript: %s)',
+  async timing => {
+    const f = await fixture()
+    const transcriptPath = join(f.root, 'projects', 'new-workspace', 'qoder-cli.jsonl')
+    const writeTranscript = async () => {
+      await mkdir(dirname(transcriptPath), { recursive: true })
+      const rows = [
+        {
+          type: 'user',
+          promptId: 'qoder-cli-native',
+          requestSetId: 'qoder-cli-req-1',
+          timestamp: f.timestamp,
+          message: { role: 'user', content: 'cli paired prompt' }
+        },
+        {
+          type: 'assistant',
+          promptId: 'qoder-cli-native',
+          timestamp: f.timestamp,
+          message: { role: 'assistant', content: [{ type: 'text', text: 'cli paired answer' }], stop_reason: 'end_turn' }
+        }
+      ]
+      await writeFile(transcriptPath, `${rows.map(row => JSON.stringify(row)).join('\n')}\n`)
+    }
+    const payload = {
+      hook_event_name: 'UserPromptSubmit',
+      session_id: 'qoder-cli-session',
+      cwd: f.root,
+      transcript_path: transcriptPath,
+      request_set_id: 'qoder-cli-req-1',
+      prompt: 'cli paired prompt',
+      permission_mode: 'default'
+    }
+    const context = {
+      protocol: 'codelens.session-capture.v1',
+      captureId: 'qoder-cli-capture',
+      sessionId: 'qoder-cli-session',
+      cwd: f.root,
+      host: 'qoder',
+      transcript_path: transcriptPath,
+      openedAt: f.timestamp,
+      source: 'always-dir',
+      task: null,
+      client: '3eye'
+    }
+    if (timing === 'before-enqueue') await writeTranscript()
+    const deferred = await cli(JSON.stringify({ capture: context, payload }), [
+      'recorder', 'capture', 'start', '--defer', '--event', 'UserPromptSubmit',
+      '--workspace', f.root, '--provider', 'qoder', '--session-id', 'qoder-cli-session',
+      '--data-dir', f.dataRoot, '--request-id', 'qoder-cli-capture',
+      '--host-chain', JSON.stringify([{ pid: 424242, token: 'Fri Nov 27 10:00:00 2026' }]),
+      '--stdin'
+    ])
+    expect(deferred.code).toBe(0)
+    const ack = JSON.parse(deferred.output)
+    expect(ack).toMatchObject({ status: 'queued', sessionId: 'qoder-cli-session' })
+    expect(ack.inbox.eventEntry).toBeTruthy()
+    const sessionRoot = recorderSessionRoot(f.dataRoot, 'qoder', 'qoder-cli-session')
+    expect((await readdir(ack.inbox.directory)).sort()).toEqual([ack.inbox.entry, ack.inbox.eventEntry])
+
+    if (timing === 'before-replay') await writeTranscript()
+    await recoverRecorder(f.root)
+    expect(await listRecords(f.dataRoot)).toEqual([])
+    const open = JSON.parse(await readFile(recorderOpenPath(sessionRoot), 'utf8')) as RecorderOpenTurnState
+    expect(open).toMatchObject({
+      generation: 1,
+      requestSetId: 'qoder-cli-req-1',
+      initialization: 'complete'
+    })
+
+    if (timing === 'after-replay') await writeTranscript()
+    const stop = await cli(JSON.stringify({
+      hook_event_name: 'Stop',
+      session_id: 'qoder-cli-session',
+      cwd: f.root,
+      transcript_path: transcriptPath,
+      parent_request_set_id: 'qoder-cli-req-1'
+    }), [
+      'recorder', 'hook', '--capture-mode', 'session', '--event', 'Stop', '--queue-only',
+      '--workspace', f.root, '--provider', 'qoder', '--session-id', 'qoder-cli-session',
+      '--data-dir', f.dataRoot, '--stdin'
+    ])
+    expect(stop.code).toBe(0)
+    await recoverRecorder(f.root)
+    expect(await listRecords(f.dataRoot)).toMatchObject([{
+      generation: 1,
+      status: 'completed',
+      providerTurnId: 'qoder-cli-native'
+    }])
+  }
+)
