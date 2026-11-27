@@ -92,7 +92,7 @@ describe('recorder daemon version handshake', () => {
       )) as { host?: Array<{ pid: number; token?: string }> }
       const known = await readOpen('client-pid-known')
       expect(known.host?.[0]?.pid).toBe(process.pid)
-      expect(known.host?.length).toBeLessThanOrEqual(3)
+      expect(known.host?.length).toBeLessThanOrEqual(8)
       expect((await readOpen('client-pid-absent')).host).toBeUndefined()
       expect((await readOpen('client-pid-invalid')).host).toBeUndefined()
     } finally {

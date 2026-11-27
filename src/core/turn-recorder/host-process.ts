@@ -10,11 +10,28 @@ export interface ProcessTableEntry extends HostProcess {
   ppid: number
 }
 
-const MAX_DEPTH = 3
+export const MAX_HOST_CHAIN_DEPTH = 8
 const C_LSTART = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) {1,2}\d{1,2} \d{2}:\d{2}:\d{2} \d{4}$/
 
-export async function hostProcessChain(seed: number, depth = MAX_DEPTH): Promise<HostProcess[]> {
-  const table = await processTable()
+export function validHostChain(value: unknown): HostProcess[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) return undefined
+  const chain: HostProcess[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') return undefined
+    const { pid, token } = item as { pid?: unknown; token?: unknown }
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1) return undefined
+    if (token !== undefined && (typeof token !== 'string' || !token.trim() || token.length > 128 || /[\r\n]/.test(token))) return undefined
+    chain.push({ pid, ...(typeof token === 'string' ? { token: token.trim() } : {}) })
+  }
+  return chain
+}
+
+export async function hostProcessChain(
+  seed: number,
+  depth = MAX_HOST_CHAIN_DEPTH,
+  known?: Map<number, ProcessTableEntry>
+): Promise<HostProcess[]> {
+  const table = known ?? await processTable()
   if (!table) return []
   const chain: HostProcess[] = []
   const seen = new Set<number>()

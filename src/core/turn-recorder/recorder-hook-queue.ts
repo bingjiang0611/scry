@@ -5,8 +5,8 @@ import { markSessionAttention, withSessionAttentionLock } from './attention.js'
 import type { RecorderEnablement } from './config.js'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, writeJsonAtomic } from './io.js'
-import type { HostProcess } from './host-process.js'
-import type { QueuedCaptureCommand, QueuedHook, RecorderHookInput } from './recorder-contracts.js'
+import { hostProcessChain, validHostChain, type HostProcess } from './host-process.js'
+import { START_EVENTS, type QueuedCaptureCommand, type QueuedHook, type RecorderHookInput } from './recorder-contracts.js'
 import { recorderSessionRoot } from './runtime-state.js'
 import { safeKey, stableHash } from './store.js'
 import type { SessionCaptureContext } from './session-capture-contract.js'
@@ -45,6 +45,12 @@ export async function queueHook(
   arrivedAt: string,
   options: { reason?: string; announce?: boolean } = {}
 ): Promise<string> {
+  const explicitHost = validHostChain(input.hostChain)
+  const hostChain = explicitHost ?? (
+    START_EVENTS.has(input.event) && input.ancestryFromPid
+      ? validHostChain(await hostProcessChain(input.ancestryFromPid))
+      : undefined
+  )
   const entry: QueuedHook = {
     schemaVersion: 1,
     provider: input.provider,
@@ -55,6 +61,7 @@ export async function queueHook(
     ...(input.managed ? { managed: true } : {}),
     ...(input.capture ? { capture: input.capture } : {}),
     ...(input.captureMode ? { captureMode: true } : {}),
+    ...(hostChain ? { hostChain } : {}),
     arrivedAt
   }
   const root = recorderSessionRoot(enablement.dataRoot, input.provider, sessionId)
@@ -72,19 +79,6 @@ export async function queueHook(
     ).catch(() => undefined)
   }
   return path
-}
-
-function validHostChain(value: unknown): HostProcess[] | undefined {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 64) return undefined
-  const chain: HostProcess[] = []
-  for (const item of value) {
-    if (!item || typeof item !== 'object') return undefined
-    const { pid, token } = item as { pid?: unknown; token?: unknown }
-    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1) return undefined
-    if (token !== undefined && (typeof token !== 'string' || token.length > 128 || /[\r\n]/.test(token))) return undefined
-    chain.push({ pid, ...(typeof token === 'string' ? { token } : {}) })
-  }
-  return chain
 }
 
 export async function queueCaptureCommand(

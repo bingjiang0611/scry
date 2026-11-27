@@ -280,6 +280,7 @@ export async function applySessionCaptureHook(args: {
   captureMode?: boolean
   env?: NodeJS.ProcessEnv
   ancestryFromPid?: number
+  hostChain?: import('./host-process.js').HostProcess[]
 }): Promise<CaptureAck & { reason?: string }> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
   const sessionId = args.sessionId ?? sessionIdOf(args.payload)
@@ -304,7 +305,8 @@ export async function applySessionCaptureHook(args: {
       captureMode: true,
       deferDelivery: true,
       env: args.env,
-      ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
+      ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {}),
+      ...(args.hostChain ? { hostChain: args.hostChain } : {})
     })
     return {
       status: 'accepted',
@@ -341,7 +343,8 @@ export async function applySessionCaptureHook(args: {
     deferDelivery: args.deferDelivery,
     qoderStopRecoveryScheduled: args.qoderStopRecoveryScheduled,
     env: args.env,
-    ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {})
+    ...(args.ancestryFromPid ? { ancestryFromPid: args.ancestryFromPid } : {}),
+    ...(args.hostChain ? { hostChain: args.hostChain } : {})
   })
   if (args.event === 'PreToolUse') await recordCaptureRepositories(enablement, args.provider, sessionId, args.payload)
   return {

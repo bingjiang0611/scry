@@ -15,7 +15,7 @@ import {
   type RecorderHookInput, type RecorderHookResult, type TranscriptRead
 } from './recorder-contracts.js'
 import { beginOpenTurn, degradeEvidenceSections, storeLifecycleEvent } from './recorder-turn-state.js'
-import { hostProcessChain } from './host-process.js'
+import { hostProcessChain, validHostChain } from './host-process.js'
 import { degradeUnmatchedIdentity, emptyTranscript, retainedWindowTranscript } from './recorder-transcript-background.js'
 import { resumeAfterStorage, snapshotSessionNetDiff } from './git.js'
 import { segmentFreeze } from './recorder-segment-diff.js'
@@ -151,7 +151,7 @@ export async function beginContinuationTurn(
       ...(previous.providerTurnId ? { providerTurnId: previous.providerTurnId } : {}),
       ...(requestSetId ? { requestSetId } : {})
     },
-    input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
+    validHostChain(input.hostChain) ?? (input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined)
   )
   if (transcriptPath && open.transcriptPath !== transcriptPath) {
     open.transcriptPath = transcriptPath

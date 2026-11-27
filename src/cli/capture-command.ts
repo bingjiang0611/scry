@@ -31,6 +31,7 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
     const dataDir = flag(args, 'data-dir')
     if (!dataDir) throw new CaptureRequestError('invalid_request', '--data-dir is required for session capture')
     const queueOnly = args.flags.has('queue-only') || process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
+    const hostChain = hostChainOf(args)
     const result = await applySessionCaptureHook({
       workspace: workspaceOf(args),
       provider,
@@ -40,7 +41,8 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
       payload,
       queueOnly,
       captureMode: true,
-      ancestryFromPid: process.ppid
+      ancestryFromPid: process.ppid,
+      ...(hostChain !== undefined ? { hostChain: hostChain as never } : {})
     })
     if (queueOnly) {
       await notifyRecorderInbox({ workspace: workspaceOf(args), scriptPath: process.argv[1] })
@@ -128,7 +130,8 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
             workspace: prepared.workspaceRoot,
             payload: envelope.payload,
             captureMode: true,
-            deferDelivery: true
+            deferDelivery: true,
+            ...(prepared.hostChain ? { hostChain: prepared.hostChain } : {})
           }, sessionId, arrivedAt, { announce: false }))
         : undefined
       await notifyRecorderInbox({ workspace: prepared.workspaceRoot, scriptPath: process.argv[1] })
@@ -153,6 +156,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
       return 0
     }
     if (action === 'start') {
+      const hostChain = hostChainOf(args)
       const result = await startSessionCapture({
         workspace,
         provider,
@@ -161,6 +165,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         context,
         payload: envelope.payload,
         ancestryFromPid: process.ppid,
+        ...(hostChain !== undefined ? { hostChain: hostChain as never } : {}),
         cli: {
           ...(process.argv[1] ? { entry: process.argv[1] } : {}),
           nodeDir: dirname(process.execPath)
