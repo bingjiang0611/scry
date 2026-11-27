@@ -34,6 +34,7 @@ import { registerDiffPrefilterSuite } from './recorder-tests/state-machine-diff-
 import { registerStaleOpenTurnSuite } from './recorder-tests/state-machine-stale-open.test'
 import { registerManagedOrphanSuite } from './recorder-tests/state-machine-managed-orphan.test'
 import { registerRedeliverySuite } from './recorder-tests/state-machine-redelivery-source.test'
+import { registerVersionOwnerSuite } from './recorder-tests/state-machine-version-owner.test'
 
 describe('turn recorder state machine', () => {
   registerSuite1()
@@ -52,6 +53,7 @@ describe('turn recorder state machine', () => {
   registerStaleOpenTurnSuite()
   registerManagedOrphanSuite()
   registerRedeliverySuite()
+  registerVersionOwnerSuite()
 })
 
 registerSuite8()

@@ -7,6 +7,7 @@ import { withDirectoryLock, readJson } from './io.js'
 import { RECORDER_VERSION } from './store.js'
 import { type RecorderDaemonStatus, PROTOCOL_VERSION, recorderDaemonStatus, daemonRequest, recorderSocketPath } from './daemon-transport.js'
 import { OWNER_TOKEN_ENV } from './daemon-listen.js'
+import { isNewerRecorderVersion } from './recorder-version-order.js'
 import { ownerPath, type DaemonOwner, processAlive, stopOwner, legacyStartingPath, waitForOwner, removeOwnedMarker, waitForProcessExit, STOP_WAIT_MS } from './daemon-owner.js'
 export { PROTOCOL_VERSION, HOOK_EVENT_PATH, RECORDER_VERSION_HEADER, RecorderHookRejected, type RecorderDaemonStatus, recorderSocketPath, recorderDaemonStatus, sendRecorderDaemonHook } from './daemon-transport.js'
 export { listenRecorderDaemon, serveRecorderDaemon, OWNER_TOKEN_ENV, type RecorderDaemonHandle } from './daemon-listen.js'
@@ -52,6 +53,7 @@ export async function startRecorderDaemon(args: {
   return withDirectoryLock(lockPath, async () => {
     const existing = await recorderDaemonStatus(enablement.workspaceRoot, env)
     if (existing.running && existing.recorderVersion === RECORDER_VERSION) return { started: false, status: existing }
+    if (existing.running && isNewerRecorderVersion(existing.recorderVersion, RECORDER_VERSION)) return { started: false, status: existing }
     if (existing.running) {
       await stopRecorderDaemon(enablement.workspaceRoot, env)
       if (!await waitForSocketRelease(socketPath, 1_000)) throw new Error('previous recorder daemon did not stop within 1000ms')

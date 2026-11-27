@@ -10,6 +10,7 @@ import type { RecorderEnablement } from './config.js'
 import { hasSymlinkComponent } from './config.js'
 import { recorderHasOpenTurn } from './runtime-state.js'
 import { RECORDER_VERSION, listRecordSummaries } from './store.js'
+import { isNewerRecorderVersion } from './recorder-version-order.js'
 import { pruneStaleTemps } from './temp-prune.js'
 import {
   PROTOCOL_VERSION, HOOK_EVENT_PATH, RECORDER_VERSION_HEADER, daemonRequest, writeJson, header, readJsonBody, recorderSocketPath
@@ -226,12 +227,13 @@ async function startRecorderDaemon(
         writeJson(response, 409, { ok: false, error: 'protocol mismatch' })
         return
       }
-      if (request.url === HOOK_EVENT_PATH && header(request, RECORDER_VERSION_HEADER) !== RECORDER_VERSION) {
+      const hookVersion = header(request, RECORDER_VERSION_HEADER)
+      if (request.url === HOOK_EVENT_PATH && isNewerRecorderVersion(hookVersion, RECORDER_VERSION)) {
         writeJson(response, 409, {
           ok: false,
           error: 'recorder version mismatch',
           recorderVersion: RECORDER_VERSION,
-          expected: header(request, RECORDER_VERSION_HEADER) ?? null
+          expected: hookVersion ?? null
         })
         return
       }
