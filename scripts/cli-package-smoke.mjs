@@ -148,7 +148,7 @@ try {
     run(bin, ['recorder', 'stop', '--workspace', workspace], { cwd: installRoot })
   }
 
-  // Real installed CLI processes share the production lock but retain separate identities.
+  // Real installed CLI processes share the production lock; a second identity starts at the current record and does not replay the first one's deliveries.
   const callback = join(workspace, 'callback.sh')
   const capture = join(workspace, 'notifications.jsonl')
   writeFileSync(callback, `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
@@ -160,8 +160,8 @@ try {
   const deliveries = await Promise.allSettled(['cli', 'app', 'cli'].map(fingerprint =>
     execute(bin, drainArgs, { cwd: workspace, env: deliveryEnv(fingerprint), encoding: 'utf8', timeout: 60_000 })))
   for (const delivery of deliveries) assert.equal(delivery.status, 'fulfilled', String(delivery.reason))
-  assert.deepEqual(deliveries.map(delivery => JSON.parse(delivery.value.stdout).delivered).sort(), [0, 2, 2])
-  assert.equal(readFileSync(capture, 'utf8').trim().split('\n').length, 4)
+  assert.deepEqual(deliveries.map(delivery => JSON.parse(delivery.value.stdout).delivered).sort(), [0, 0, 2])
+  assert.equal(readFileSync(capture, 'utf8').trim().split('\n').length, 2)
   const { commitNotificationStatus } = await import(pathToFileURL(join(installedRoot, 'dist/core/turn-recorder/store.js')).href)
   const legacyPath = join(workspace, '.scry/notifications/commit-hook-state.json')
   const legacy = JSON.stringify({ schemaVersion: 1, hookFingerprint: 'old-app', ackedThrough: 1 })
