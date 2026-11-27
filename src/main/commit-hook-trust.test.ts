@@ -221,6 +221,23 @@ describe('commit hook bundle trust', () => {
     await expect(access(capture)).rejects.toThrow()
   })
 
+  it('冷启动遇到没有检查点的回调：不补投历史，也不报错', async () => {
+    const value = await fixture()
+    const capture = join(value.workspace, 'capture.jsonl')
+    await writeFile(join(value.workspace, value.descriptor.entry), `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
+    await enableRecorder(value.workspace, value.descriptor)
+    await completeTurn(value.workspace, 'cold-1')
+    const inspection = await inspectCommitHookBundle(value.workspace, value.descriptor)
+    const store = createCommitHookTrustStore(value.userData)
+    await store.grant(value.workspace, inspection.fingerprint)
+    await store.materialize(inspection)
+
+    await expect(redeliverGrantedCommitHooksAtStartup(value.userData)).resolves.toEqual({
+      redelivered: 0, skipped: 1, errors: []
+    })
+    await expect(access(capture)).rejects.toThrow()
+  })
+
   it('冷启动只对当前指纹匹配的冻结 callback 重投未确认的 record', async () => {
     const value = await fixture()
     const capture = join(value.workspace, 'capture.jsonl')
@@ -232,7 +249,7 @@ describe('commit hook bundle trust', () => {
     const store = createCommitHookTrustStore(value.userData)
     await store.grant(value.workspace, inspection.fingerprint)
     const capability = await store.materialize(inspection)
-    await drainCommitNotifications(join(value.workspace, '.scry'), { ...process.env, ...capability.env })
+    await drainCommitNotifications(join(value.workspace, '.scry'), { ...process.env, ...capability.env }, { triggerSequence: 1 })
     await writeFile(capture, '')
     await completeTurn(value.workspace, 'startup-3')
 
