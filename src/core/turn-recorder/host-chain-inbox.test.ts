@@ -1,8 +1,10 @@
+import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { hostProcessState } from './host-process'
 import { recorderInboxEntries } from './inbox'
 import { readJson } from './io'
 import { recoverRecorder } from './recorder'
@@ -11,7 +13,13 @@ import { applySessionCaptureHook, startSessionCapture } from './session-capture'
 import type { CaptureInboxContract, SessionCaptureContext } from './session-capture-contract'
 
 const roots: string[] = []
+const spawned: ChildProcess[] = []
 afterEach(async () => {
+  for (const child of spawned.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { child.kill('SIGKILL') } catch {}
+    }
+  }
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -197,7 +205,84 @@ it('preserves hostChain on queued hooks and never reuses it across turns', async
   expect(turn3?.host).toBeUndefined()
 })
 
-it('samples ancestryFromPid into queued UserPromptSubmit hooks before the caller exits', async () => {
+it('samples ancestryFromPid truncated to the provider host so a surviving shell ancestor reports gone after host exit', async () => {
+  const f = await fixture()
+  const hostScript = join(f.root, 'codex.mjs')
+  await writeFile(hostScript, 'console.log(process.pid); setInterval(() => {}, 60_000)\n')
+  const shell = spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} ${JSON.stringify(hostScript)} & sleep 30`], {
+    stdio: ['ignore', 'pipe', 'ignore']
+  })
+  spawned.push(shell)
+  const hostPid = await new Promise<number>((resolvePid, rejectPid) => {
+    let out = ''
+    shell.stdout.on('data', (chunk) => {
+      out += chunk.toString('utf8')
+      const parsed = Number(out.trim().split('\n')[0])
+      if (Number.isInteger(parsed) && parsed > 1) resolvePid(parsed)
+    })
+    shell.once('error', rejectPid)
+    shell.once('exit', () => rejectPid(new Error('shell exited before reporting codex pid')))
+  })
+
+  try {
+    await startSessionCapture({
+      workspace: f.root,
+      provider: 'codex',
+      sessionId: 'session',
+      dataDir: f.dataRoot,
+      context: f.context,
+      payload: f.claimPayload,
+      cli: {}
+    })
+    await applySessionCaptureHook({
+      workspace: f.root,
+      provider: 'codex',
+      event: 'Stop',
+      sessionId: 'session',
+      dataDir: f.dataRoot,
+      payload: f.stopPayload
+    })
+    await applySessionCaptureHook({
+      workspace: f.root,
+      provider: 'codex',
+      event: 'UserPromptSubmit',
+      sessionId: 'session',
+      dataDir: f.dataRoot,
+      payload: {
+        session_id: 'session',
+        prompt: 'queued turn sampled at enqueue time',
+        transcript_path: f.transcriptPath,
+        timestamp: new Date().toISOString()
+      },
+      queueOnly: true,
+      captureMode: true,
+      ancestryFromPid: hostPid
+    })
+    const entries = await recorderInboxEntries(f.sessionRoot, false)
+    expect(entries).toHaveLength(1)
+    const queued = JSON.parse(await readFile(entries[0].path, 'utf8')) as { hostChain?: Array<{ pid: number }> }
+    expect(queued.hostChain?.map((item) => item.pid)).toEqual([hostPid])
+    expect(queued.hostChain?.some((item) => item.pid === shell.pid)).toBe(false)
+
+    await recoverRecorder(f.root)
+    const open = await readJson<RecorderOpenTurnState>(f.openPath)
+    expect(open?.host?.map((item) => item.pid)).toEqual([hostPid])
+    expect(await hostProcessState(open?.host)).toBe('running')
+
+    process.kill(hostPid, 'SIGKILL')
+    for (let attempt = 0; attempt < 40; attempt++) {
+      if (await hostProcessState(open?.host) === 'gone') break
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    expect(shell.exitCode).toBeNull()
+    expect(await hostProcessState(open?.host)).toBe('gone')
+  } finally {
+    try { process.kill(hostPid, 'SIGKILL') } catch {}
+    try { shell.kill('SIGKILL') } catch {}
+  }
+}, 20_000)
+
+it('leaves queued hostChain unset (unknown) when sampled ancestry contains no matching provider host', async () => {
   const f = await fixture()
   await startSessionCapture({
     workspace: f.root,
@@ -224,7 +309,7 @@ it('samples ancestryFromPid into queued UserPromptSubmit hooks before the caller
     dataDir: f.dataRoot,
     payload: {
       session_id: 'session',
-      prompt: 'queued turn sampled at enqueue time',
+      prompt: 'queued turn with unrecognized host',
       transcript_path: f.transcriptPath,
       timestamp: new Date().toISOString()
     },
@@ -235,8 +320,9 @@ it('samples ancestryFromPid into queued UserPromptSubmit hooks before the caller
   const entries = await recorderInboxEntries(f.sessionRoot, false)
   expect(entries).toHaveLength(1)
   const queued = JSON.parse(await readFile(entries[0].path, 'utf8')) as { hostChain?: Array<{ pid: number }> }
-  expect(queued.hostChain?.[0]?.pid).toBe(process.pid)
+  expect(queued.hostChain).toBeUndefined()
   await recoverRecorder(f.root)
   const open = await readJson<RecorderOpenTurnState>(f.openPath)
-  expect(open?.host?.[0]?.pid).toBe(process.pid)
+  expect(open?.host).toBeUndefined()
+  expect(await hostProcessState(open?.host)).toBe('unknown')
 })

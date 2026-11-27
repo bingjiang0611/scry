@@ -5,7 +5,7 @@ import { markSessionAttention, withSessionAttentionLock } from './attention.js'
 import type { RecorderEnablement } from './config.js'
 import type { ProviderId } from '../../shared/provider.js'
 import { appendRotatingLog, writeJsonAtomic } from './io.js'
-import { hostProcessChain, validHostChain, type HostProcess } from './host-process.js'
+import { QUEUE_HOST_SAMPLE_TIMEOUT_MS, hostProcessChain, validHostChain, type HostProcess } from './host-process.js'
 import { START_EVENTS, type QueuedCaptureCommand, type QueuedHook, type RecorderHookInput } from './recorder-contracts.js'
 import { recorderSessionRoot } from './runtime-state.js'
 import { safeKey, stableHash } from './store.js'
@@ -48,7 +48,10 @@ export async function queueHook(
   const explicitHost = validHostChain(input.hostChain)
   const hostChain = explicitHost ?? (
     START_EVENTS.has(input.event) && input.ancestryFromPid
-      ? validHostChain(await hostProcessChain(input.ancestryFromPid))
+      ? validHostChain(await hostProcessChain(input.ancestryFromPid, {
+          provider: input.provider,
+          timeoutMs: QUEUE_HOST_SAMPLE_TIMEOUT_MS
+        }))
       : undefined
   )
   const entry: QueuedHook = {

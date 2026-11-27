@@ -151,7 +151,7 @@ export async function beginContinuationTurn(
       ...(previous.providerTurnId ? { providerTurnId: previous.providerTurnId } : {}),
       ...(requestSetId ? { requestSetId } : {})
     },
-    validHostChain(input.hostChain) ?? (input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined)
+    validHostChain(input.hostChain) ?? (input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid, { provider }) : undefined)
   )
   if (transcriptPath && open.transcriptPath !== transcriptPath) {
     open.transcriptPath = transcriptPath

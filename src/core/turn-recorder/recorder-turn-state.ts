@@ -242,7 +242,7 @@ export async function beginCaptureTurn(
     enablement.workspaceRoot
   ).catch(() => null)
   const explicitHost = validHostChain(claimedHostChain)
-  const host = explicitHost ?? (ancestryFromPid ? await hostProcessChain(ancestryFromPid) : undefined)
+  const host = explicitHost ?? (ancestryFromPid ? await hostProcessChain(ancestryFromPid, { provider }) : undefined)
   const event = openingPrompt ? 'UserPromptSubmit' : 'CaptureStart'
   const opened = await beginOpenTurn(enablement, provider, sessionId, event, payload, false, false, undefined, context, {
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),
