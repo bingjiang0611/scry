@@ -211,7 +211,18 @@ async function startRecorderDaemon(
         return
       }
       if (request.method === 'POST' && request.url === WAKE_PATH) {
+        const wakeVersion = header(request, RECORDER_VERSION_HEADER)
+        if (isNewerRecorderVersion(wakeVersion, RECORDER_VERSION)) {
+          writeJson(response, 409, {
+            ok: false,
+            error: 'recorder version mismatch',
+            recorderVersion: RECORDER_VERSION,
+            expected: wakeVersion ?? null
+          })
+          return
+        }
         scheduleRecovery(true)
+        if (header(request, 'x-scry-wake-drain') === '1') await runRecovery()
         writeJson(response, 200, { ok: true, queued: true })
         return
       }
@@ -229,7 +240,7 @@ async function startRecorderDaemon(
         return
       }
       const hookVersion = header(request, RECORDER_VERSION_HEADER)
-      if (request.url === HOOK_EVENT_PATH && isNewerRecorderVersion(hookVersion, RECORDER_VERSION)) {
+      if (isNewerRecorderVersion(hookVersion, RECORDER_VERSION)) {
         writeJson(response, 409, {
           ok: false,
           error: 'recorder version mismatch',

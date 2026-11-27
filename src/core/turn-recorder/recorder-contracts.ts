@@ -22,6 +22,7 @@ export interface RecorderHookInput {
   captureMode?: boolean
   ancestryFromPid?: number
   launchClient?: string
+  hostChain?: import('./host-process.js').HostProcess[]
 }
 
 export function committedDeliveryTrigger(result: RecorderHookResult): { triggerSequence?: number } {
@@ -316,6 +317,7 @@ export interface QueuedHook {
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   capture?: import('./session-capture-contract.js').SessionCaptureContext
   captureMode?: boolean
+  hostChain?: import('./host-process.js').HostProcess[]
   arrivedAt: string
 }
 

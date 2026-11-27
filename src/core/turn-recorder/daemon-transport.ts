@@ -98,6 +98,7 @@ export async function daemonRequest(
       method: options.method,
       path: options.path,
       headers: {
+        connection: 'close',
         ...(options.body ? { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(options.body)) } : {}),
         ...options.headers
       }
@@ -122,10 +123,14 @@ export async function daemonRequest(
   })
 }
 
-export async function recorderDaemonStatus(workspace: string, env: NodeJS.ProcessEnv = process.env): Promise<RecorderDaemonStatus> {
+export async function recorderDaemonStatus(
+  workspace: string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs = 500
+): Promise<RecorderDaemonStatus> {
   const socketPath = recorderSocketPath(workspace, env)
   try {
-    const response = await daemonRequest(socketPath, { method: 'GET', path: '/v1/status', timeoutMs: 500 })
+    const response = await daemonRequest(socketPath, { method: 'GET', path: '/v1/status', timeoutMs })
     if (response.statusCode !== 200 || response.body.protocol !== PROTOCOL_VERSION) return { running: false, protocol: PROTOCOL_VERSION, socketPath }
     return { ...response.body, running: true, protocol: PROTOCOL_VERSION, socketPath } as RecorderDaemonStatus
   } catch {

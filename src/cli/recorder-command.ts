@@ -1,7 +1,11 @@
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { type ParsedArgs, workspaceOf, readStdin, flag, intFlag, providerOf, print, listFlags } from './command-args.js'
-import { sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon, RecorderHookRejected } from '../core/turn-recorder/daemon.js'
+import {
+  sendRecorderDaemonHook, startRecorderDaemon, serveRecorderDaemon, recorderDaemonStatus, stopRecorderDaemon,
+  RecorderHookRejected, recorderSocketPath, resolveTargetRecorderVersion, shouldReplaceDaemon
+} from '../core/turn-recorder/daemon.js'
+import { daemonRequest } from '../core/turn-recorder/daemon-transport.js'
 import { captureCommand, sessionHookCommand } from './capture-command.js'
 import { handleRecorderHook, recorderEnablement, recoverRecorder, refreshRecorderPendingHealth, type RecorderRecoveryScope } from '../core/turn-recorder/recorder.js'
 import { recordError, drainCommitNotifications, retryCommitNotifications, RECORDER_VERSION, readHealth, commitNotificationStatus } from '../core/turn-recorder/store.js'
@@ -31,17 +35,65 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
     let daemonUnknownDelivery = false
     let daemonRefusedEvent = false
+    const sendBudgetMs = event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
     const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
       provider,
       event,
       workspace,
       payload,
-      timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
+      timeoutMs: sendBudgetMs
     })
-    const replaceDaemon = async (): Promise<boolean> => {
+    const startHandoff = async (): Promise<boolean> => {
       const scriptPath = process.argv[1]
       if (!scriptPath) return false
-      return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
+      return startRecorderDaemon({
+        workspace,
+        scriptPath,
+        waitForReady: false,
+        detachReplace: true
+      }).then(() => true, () => false)
+    }
+    const queueBeforeHandoff = async (): Promise<boolean> => {
+      delegatedToCore = true
+      const queued = await handleRecorderHook({
+        provider,
+        event,
+        workspace,
+        payload,
+        managed,
+        queueOnly: true,
+        ancestryFromPid: process.ppid
+      })
+      if (verbose) print(queued)
+      return queued.status !== 'disabled'
+    }
+    const waitForHandoffDrain = async (targetVersion: string, budgetMs: number): Promise<boolean> => {
+      const deadline = Date.now() + budgetMs
+      const socketPath = recorderSocketPath(workspace)
+      while (Date.now() < deadline) {
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) break
+        const status = await recorderDaemonStatus(workspace, process.env, Math.min(500, Math.max(50, remaining)))
+        if (status.running && !shouldReplaceDaemon(status.recorderVersion, targetVersion)) {
+          const drainBudget = deadline - Date.now()
+          if (drainBudget <= 50) return false
+          try {
+            const response = await daemonRequest(socketPath, {
+              method: 'POST',
+              path: '/v1/wake',
+              headers: { 'x-scry-wake-drain': '1' },
+              timeoutMs: drainBudget
+            })
+            return response.statusCode === 200
+          } catch {
+            return false
+          }
+        }
+        const sleepMs = Math.min(50, Math.max(0, deadline - Date.now()))
+        if (sleepMs <= 0) break
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, sleepMs))
+      }
+      return false
     }
     type SendOutcome = 'delivered' | 'not-applied' | 'unknown'
     const classify = (error: unknown): SendOutcome => {
@@ -53,7 +105,15 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     }
     if (daemonEnabled && !daemonTried) {
       const redeliver = async (): Promise<SendOutcome> => {
-        if (daemonRejected && !await replaceDaemon()) return 'not-applied'
+        if (daemonRejected) {
+          const existing = await recorderDaemonStatus(workspace)
+          const targetVersion = await resolveTargetRecorderVersion(process.argv[1])
+          if (!existing.running || shouldReplaceDaemon(existing.recorderVersion, targetVersion)) {
+            if (!await queueBeforeHandoff()) return 'delivered'
+            if (await startHandoff()) await waitForHandoffDrain(targetVersion, sendBudgetMs)
+            return 'delivered'
+          }
+        }
         let outcome: SendOutcome
         try {
           const result = await send()
@@ -64,14 +124,12 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
           outcome = classify(error)
           if (daemonRejected || outcome === 'unknown') return outcome
           if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return outcome
-          if (!await replaceDaemon()) return 'not-applied'
-          try {
-            const result = await send()
-            if (verbose) print(result)
-            return 'delivered'
-          } catch (retryError) {
-            return classify(retryError)
-          }
+          const existing = await recorderDaemonStatus(workspace)
+          const targetVersion = await resolveTargetRecorderVersion(process.argv[1])
+          if (existing.running && !shouldReplaceDaemon(existing.recorderVersion, targetVersion)) return outcome
+          if (!await queueBeforeHandoff()) return 'delivered'
+          if (await startHandoff()) await waitForHandoffDrain(targetVersion, sendBudgetMs)
+          return 'delivered'
         }
       }
       const outcome = await redeliver()
@@ -90,7 +148,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     })
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
       const scriptPath = process.argv[1]
-      if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false }).catch(() => undefined)
+      if (scriptPath) await startRecorderDaemon({ workspace, scriptPath, waitForReady: false, detachReplace: true }).catch(() => undefined)
     }
     if (verbose) print(result)
   } catch (error) {

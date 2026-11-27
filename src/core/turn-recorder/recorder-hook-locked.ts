@@ -10,7 +10,7 @@ import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn } from './recorder-hook-support.js'
 import { holdSeal, refreshSealWindow, revokeSeal } from './recorder-segment.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
-import { hostProcessChain } from './host-process.js'
+import { hostProcessChain, validHostChain } from './host-process.js'
 import { forgetSessionVisit } from './session-visit.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
 import { managedOrphanVerdict, orphanClosingState } from './managed-orphan.js'
@@ -137,7 +137,7 @@ export async function applyHookLocked(
       protectNextStart,
       input.uploadEnvironment, input.capture,
       undefined, undefined,
-      input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined,
+      validHostChain(input.hostChain) ?? (input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid, { provider: input.provider }) : undefined),
       input.launchClient
     )
     if (supersededStart) await rm(supersededStart, { force: true })

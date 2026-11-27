@@ -9,6 +9,7 @@ import type { QueuedCaptureCommand, QueuedHook } from './recorder-contracts.js'
 import { captureStateContext, parseSessionCaptureContext, readCaptureState, START_EVENT_NAMES } from './session-capture-contract.js'
 import { recordCaptureRepositories } from './session-capture-discovery.js'
 import { BACKGROUND_WAKE_PROVIDERS, CODEX_SUBAGENT_MARKER, START_EVENTS, hookArrival, providerTurnIdOf } from './recorder-contracts.js'
+import { validHostChain } from './host-process.js'
 import { recorderOpenPath as openPath, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import { applyHookLocked } from './recorder-hook-locked.js'
 import { codexSubagentTranscript, isSynthetic, isCodexInternalPrompt, markCodexInternalTurn, trustedManagedIdentityPayload, isTaskNotificationPrompt } from './recorder-hook-support.js'
@@ -129,6 +130,7 @@ export async function replayQueuedHooks(
             if (provider === 'codex' && await codexSubagentTranscript(payload, queued.sessionId)) {
               payload = { ...payload, [CODEX_SUBAGENT_MARKER]: true }
             }
+            const queuedHostChain = validHostChain(queued.hostChain)
             await hookArrival.run(queued.arrivedAt, async () => {
               await applyHookLocked(enablement, {
                 provider,
@@ -138,7 +140,8 @@ export async function replayQueuedHooks(
                 managed: queued.managed,
                 qoderStopRecoveryScheduled,
                 uploadEnvironment: queued.uploadEnvironment,
-                ...(capture ? { capture } : {})
+                ...(capture ? { capture } : {}),
+                ...(queuedHostChain ? { hostChain: queuedHostChain } : {})
               }, queued.sessionId)
               if (queued.captureMode && queued.event === 'PreToolUse' && capture) {
                 await recordCaptureRepositories(enablement, provider, queued.sessionId, payload)
