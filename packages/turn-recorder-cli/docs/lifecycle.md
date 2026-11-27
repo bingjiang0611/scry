@@ -174,26 +174,26 @@
 
 > ⚠️ **Connection reset 不会触发 SessionEnd。** 连接断开但会话仍在时，靠的是上一节“不再借用下一次输入时间”；SessionEnd 只能让真正结束的会话更早收口。
 
-**同时满足**「超过 24 小时」与「transcript 已停止增长」的轮次判定为不可能再收敛,由 `scry recorder recover`(daemon 空闲时自动跑)收敛为 `interrupted`。两个判据都必需:只看年龄会把跑了 30 小时的长任务误判为中断,而长任务会持续追加 transcript。
+没有终态事件且回复未结束的 `open` 轮次**不会**因静默满 24 小时而被自动收敛为 `interrupted`：默认 `scry recorder recover` 与后台巡检不会在仅凭静默时长的情况下关闭仍处于 `open` 的轮次；只有当回复已结束且静默满 30 分钟，或执行 `scry recorder recover --expire-open` 并证明记录的宿主进程链全部退出时才会收尾（详见上节“没有终态事件的开放轮次如何收尾”）。`24 小时`（`OPEN_TURN_EXPIRY_MS`）只用于 `scry doctor` 列出超长静默的 `open` 轮次，以及下文 `closing` 轮次的过期窗口。
 
 ```bash
-scry doctor            # 退出 5，turns.stale 报出数量与最久时长
-scry recorder recover  # {"recovered":1,"pending":0,"expired":1}
+scry doctor                              # 退出 5，turns.stale 报出数量、静默时长与宿主状态
+scry recorder recover --expire-open      # 仅在静默满 30 分钟且已证宿主全部退出时收尾
 ```
 
-收敛后的记录:`status` 为 `interrupted`,已观测的证据段降级 `partial` 并说明原因,未观测的段保持 `unavailable`。`diff` 段固定 `unavailable` —— 基线可能是几天前的,发布它等于把之后所有改动(包括别的轮次的工作)算到这一轮头上。
+按 `--expire-open` 收敛后的记录：`status` 为 `interrupted`，已观测的证据段降级 `partial` 并说明原因，未观测的段保持 `unavailable`。`diff` 段固定 `unavailable` —— 基线可能是很久以前的，发布它等于把之后所有改动（包括别的轮次的工作）算到这一轮头上。
 
 ### 结束事件到了却写不出记录
 
-另一种卡法:结束事件**已经到达**(轮次进入 `closing`),但写最终记录时在 transcript 里找不到这一轮 —— Provider 已经把它轮转掉了。这种轮次原本会无限期停在 `closing`,每次 recovery 重试、每次都失败。
+另一种卡法：结束事件**已经到达**（轮次进入 `closing`），但写最终记录时在 transcript 里找不到这一轮 —— Provider 已经把它轮转掉了。这种轮次原本会无限期停在 `closing`，每次 recovery 重试、每次都失败。
 
-超过同一个窗口(以 recorder **最后一次写状态**的时间计,不用 Provider 给的时间戳,避免时钟偏移触发破坏性判定)后不再重试:
+超过 24 小时窗口（`OPEN_TURN_EXPIRY_MS`，以 recorder **最后一次写状态**的时间计，不用 Provider 给的时间戳，避免时钟偏移触发破坏性判定）后不再重试：
 
 | | `status` | 正文 | `diff` |
 |---|---|---|---|
-| 结束事件从未到达 | `interrupted` | `unavailable` | `unavailable` |
-| **结束事件到了但正文已丢** | **`completed`** | `unavailable` | `unavailable` |
+| 结束事件从未到达（`--expire-open` 且已证宿主退出） | `interrupted` | 已有证据 / `unavailable` | `unavailable` |
+| **结束事件到了但正文已丢（`closing` 超 24h）** | **`completed`** | `unavailable` | `unavailable` |
 
-`completed` 是诚实的:终态确实观测到了(这才是它进 `closing` 的原因),丢的只是内容,所以降级的是证据而不是生命周期结论。
+`completed` 是诚实的：终态确实观测到了（这才是它进 `closing` 的原因），丢的只是内容，所以降级的是证据而不是生命周期结论。
 
-两类卡住的轮次都会让 daemon 长期不退出(有活干时不退场),收敛后它才会正常空闲退出 —— 也才轮到 daemon 侧的自动更新。窗口固定 24 小时,不可配置:调小会把仍在工作的轮次误判为中断,并丢弃它的 diff 归因。
+未收尾的 `open` 轮次、卡住的 `closing` 轮次和 `pending-open.json` 隔离项都会让 `recorderHasOpenTurn` 持续为真，从而挡住 daemon 的 30 分钟空闲退出（`open` 轮次没有 24 小时自动上限，在收尾前会一直保活后台进程）。升级切换不应等待空闲退出，而是通过版本交接优雅排空并替换。

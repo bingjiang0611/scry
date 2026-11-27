@@ -33,6 +33,7 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
     if (!dataDir) throw new CaptureRequestError('invalid_request', '--data-dir is required for session capture')
     const daemonRejected = process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
     const queueOnly = args.flags.has('queue-only') || process.env.SCRY_RECORDER_DAEMON_TRIED === '1' || daemonRejected
+    const hostChain = hostChainOf(args)
     const result = await applySessionCaptureHook({
       workspace: workspaceOf(args),
       provider,
@@ -43,6 +44,7 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
       queueOnly,
       captureMode: true,
       ancestryFromPid: process.ppid,
+      ...(hostChain !== undefined ? { hostChain: hostChain as never } : {}),
       ...(process.argv[1] ? { cli: { entry: process.argv[1], nodeDir: dirname(process.execPath) } } : {})
     })
     if (queueOnly) {
@@ -133,7 +135,8 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
             workspace: prepared.workspaceRoot,
             payload: envelope.payload,
             captureMode: true,
-            deferDelivery: true
+            deferDelivery: true,
+            ...(prepared.hostChain ? { hostChain: prepared.hostChain } : {})
           }, sessionId, arrivedAt, { announce: false }))
         : undefined
       if (process.argv[1]) {
@@ -166,6 +169,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
       return 0
     }
     if (action === 'start') {
+      const hostChain = hostChainOf(args)
       const result = await startSessionCapture({
         workspace,
         provider,
@@ -174,6 +178,7 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
         context,
         payload: envelope.payload,
         ancestryFromPid: process.ppid,
+        ...(hostChain !== undefined ? { hostChain: hostChain as never } : {}),
         cli: {
           ...(process.argv[1] ? { entry: process.argv[1] } : {}),
           nodeDir: dirname(process.execPath)

@@ -221,6 +221,7 @@ async function startRecorderDaemon(
           return
         }
         scheduleRecovery(true)
+        if (header(request, 'x-scry-wake-drain') === '1') await runRecovery()
         writeJson(response, 200, { ok: true, queued: true })
         return
       }

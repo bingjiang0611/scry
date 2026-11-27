@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -102,6 +103,9 @@ describe('recorder daemon version handshake', () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
+    const qoderScript = join(root, 'qoder.mjs')
+    await writeFile(qoderScript, 'setInterval(() => {}, 60_000)\n')
+    const qoderHost = spawn(process.execPath, [qoderScript], { stdio: 'ignore' })
     try {
       const send = (headers: Record<string, string>, sessionId: string) => daemonRequest(socketPath(root), {
         method: 'POST',
@@ -116,7 +120,8 @@ describe('recorder daemon version handshake', () => {
         },
         body: encodeHookEnvironment(env, { session_id: sessionId, cwd: root, prompt: 'where is the host' })
       })
-      expect((await send({ 'x-scry-client-pid': String(process.pid) }, 'client-pid-known')).statusCode).toBe(200)
+      expect((await send({ 'x-scry-client-pid': String(qoderHost.pid) }, 'client-pid-known')).statusCode).toBe(200)
+      expect((await send({ 'x-scry-client-pid': String(process.pid) }, 'client-pid-unrecognized')).statusCode).toBe(200)
       expect((await send({}, 'client-pid-absent')).statusCode).toBe(200)
       expect((await send({ 'x-scry-client-pid': 'abc' }, 'client-pid-invalid')).statusCode).toBe(200)
       expect((await send({ 'x-scry-client-pid': '1' }, 'client-pid-init')).statusCode).toBe(400)
@@ -125,11 +130,12 @@ describe('recorder daemon version handshake', () => {
         join(root, '.scry', 'runtime', 'qoder', safeKey(sessionId), 'open.json'), 'utf8'
       )) as { host?: Array<{ pid: number; token?: string }> }
       const known = await readOpen('client-pid-known')
-      expect(known.host?.[0]?.pid).toBe(process.pid)
-      expect(known.host?.length).toBeLessThanOrEqual(3)
+      expect(known.host?.map((item) => item.pid)).toEqual([qoderHost.pid])
+      expect((await readOpen('client-pid-unrecognized')).host).toBeUndefined()
       expect((await readOpen('client-pid-absent')).host).toBeUndefined()
       expect((await readOpen('client-pid-invalid')).host).toBeUndefined()
     } finally {
+      try { qoderHost.kill('SIGKILL') } catch {}
       await daemon.close()
     }
   })

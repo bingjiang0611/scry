@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -47,6 +48,9 @@ it('delivers a captured session straight to the daemon socket and publishes the 
     { timestamp: '2026-07-19T12:00:00.010Z', type: 'event_msg', payload: { type: 'user_message', message: 'claim from the daemon' } }
   ].map((line) => JSON.stringify(line)).join('\n')}\n`)
   const env = { ...process.env, SCRY_RECORDER_SOCKET: join(tmpdir(), `${basename(root)}.sock`) }
+  const codexScript = join(root, 'codex.mjs')
+  await writeFile(codexScript, 'setInterval(() => {}, 60_000)\n')
+  const codexHost = spawn(process.execPath, [codexScript], { stdio: 'ignore' })
   const started = await startSessionCapture({
     workspace: root,
     provider: 'codex',
@@ -54,7 +58,7 @@ it('delivers a captured session straight to the daemon socket and publishes the 
     dataDir: join(root, '.scry'),
     context: context(transcriptPath),
     cli: { entry: join(root, 'dist', 'cli', 'scry.js'), nodeDir: join(root, 'node-bin') },
-    ancestryFromPid: process.pid,
+    ancestryFromPid: codexHost.pid,
     payload: {
       session_id: 'sess-d',
       hook_event_name: 'PreToolUse',
@@ -83,8 +87,7 @@ it('delivers a captured session straight to the daemon socket and publishes the 
 
   const sessionDir = join(root, '.scry', 'runtime', 'codex', safeKey('sess-d'))
   const claimOpen = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8'))
-  expect(claimOpen.host[0].pid).toBe(process.pid)
-  expect(claimOpen.host.length).toBeGreaterThan(0)
+  expect(claimOpen.host.map((item: { pid: number }) => item.pid)).toEqual([codexHost.pid])
 
   const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
   try {
@@ -141,15 +144,16 @@ it('delivers a captured session straight to the daemon socket and publishes the 
         'x-scry-capture-mode': 'session',
         'x-scry-provider': 'codex',
         'x-scry-event': 'UserPromptSubmit',
-        'x-scry-client-pid': String(process.pid),
+        'x-scry-client-pid': String(codexHost.pid),
         'content-type': 'application/octet-stream'
       },
       body: nextBody
     })
     expect(next.statusCode).toBe(200)
     const nextOpen = JSON.parse(await readFile(join(sessionDir, 'open.json'), 'utf8'))
-    expect(nextOpen.host[0].pid).toBe(process.pid)
+    expect(nextOpen.host.map((item: { pid: number }) => item.pid)).toEqual([codexHost.pid])
   } finally {
+    try { codexHost.kill('SIGKILL') } catch {}
     await chmod(receiver, 0o600).catch(() => undefined)
     await daemon.close()
   }
