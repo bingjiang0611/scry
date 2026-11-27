@@ -120,6 +120,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 - [按会话恢复：隔离范围与历史证据限制](docs/scoped-recovery.md)
 - [工具正文、存储容量、归档与性能](docs/storage-and-performance.md)
 - [Commit hook、managed 模式、更新与环境变量](docs/integrations-and-updates.md)
+- [提交回调的投递账本：检查点、换指纹与冷启动](docs/commit-delivery-ledger.md)
 
 ## 多仓库覆盖与诊断
 
