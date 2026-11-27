@@ -118,29 +118,39 @@ export async function startRecorderDaemon(args: {
   const lockPath = join(enablement.dataRoot, 'locks', 'daemon-start.lock')
   const targetVersion = await resolveTargetRecorderVersion(args.scriptPath)
   if (args.detachReplace) {
+    const spawnDetachedStart = (): { started: boolean; status: RecorderDaemonStatus } => {
+      const handoff = spawn(process.execPath, [args.scriptPath, 'recorder', 'start', '--workspace', enablement.workspaceRoot, '--quiet'], {
+        cwd: enablement.workspaceRoot,
+        detached: true,
+        env: { ...env, SCRY_RECORDER_SOCKET: socketPath },
+        stdio: 'ignore'
+      })
+      handoff.unref()
+      return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
+    }
     const existing = await recorderDaemonStatus(enablement.workspaceRoot, env)
     if (existing.running) {
       if (!shouldReplaceDaemon(existing.recorderVersion, targetVersion)) return { started: false, status: existing }
       if (await lockActive(lockPath)) {
         return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
       }
-      if (await pathExists(args.scriptPath)) {
-        const handoff = spawn(process.execPath, [args.scriptPath, 'recorder', 'start', '--workspace', enablement.workspaceRoot, '--quiet'], {
-          cwd: enablement.workspaceRoot,
-          detached: true,
-          env: { ...env, SCRY_RECORDER_SOCKET: socketPath },
-          stdio: 'ignore'
-        })
-        handoff.unref()
+      if (await pathExists(args.scriptPath)) return spawnDetachedStart()
+    } else if (args.waitForReady === false) {
+      if (await lockActive(lockPath)) {
         return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
       }
-    } else if (args.waitForReady === false && await lockActive(lockPath)) {
-      return { started: true, status: { running: false, protocol: PROTOCOL_VERSION, socketPath } }
+      const existingMarker = await readJson<DaemonOwner>(ownerPath(socketPath))
+      if (existingMarker && processAlive(existingMarker.pid) && await pathExists(args.scriptPath)) {
+        return spawnDetachedStart()
+      }
     }
   }
   const drainWaitMs = args.drainWaitMs ?? GRACEFUL_STOP_WAIT_MS
   const sigtermWaitMs = args.sigtermWaitMs ?? SIGTERM_WAIT_MS
   const sigkillWaitMs = args.sigkillWaitMs ?? SIGKILL_WAIT_MS
+  const lockWaitMs = args.waitForReady === false
+    ? 500
+    : Math.max(3_000, drainWaitMs + sigtermWaitMs + sigkillWaitMs + 2_000)
   return withDirectoryLock(lockPath, async () => {
     const existing = await recorderDaemonStatus(enablement.workspaceRoot, env)
     if (existing.running && !shouldReplaceDaemon(existing.recorderVersion, targetVersion)) {
@@ -209,7 +219,7 @@ export async function startRecorderDaemon(args: {
       throw new Error(`recorder daemon did not become ready within ${READY_WAIT_MS}ms`)
     }
     return { started: true, status }
-  }, { waitMs: Math.max(3_000, drainWaitMs + sigtermWaitMs + sigkillWaitMs + 2_000) })
+  }, { waitMs: lockWaitMs })
 }
 
 export async function notifyRecorderInbox(args: {

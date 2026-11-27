@@ -35,17 +35,23 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
     let daemonUnknownDelivery = false
     let daemonRefusedEvent = false
+    const sendBudgetMs = event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
     const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
       provider,
       event,
       workspace,
       payload,
-      timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_000
+      timeoutMs: sendBudgetMs
     })
-    const replaceDaemon = async (): Promise<boolean> => {
+    const startHandoff = async (): Promise<boolean> => {
       const scriptPath = process.argv[1]
       if (!scriptPath) return false
-      return startRecorderDaemon({ workspace, scriptPath }).then(() => true, () => false)
+      return startRecorderDaemon({
+        workspace,
+        scriptPath,
+        waitForReady: false,
+        detachReplace: true
+      }).then(() => true, () => false)
     }
     const queueBeforeHandoff = async (): Promise<boolean> => {
       delegatedToCore = true
@@ -61,19 +67,33 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       if (verbose) print(queued)
       return queued.status !== 'disabled'
     }
-    const drainReplacedDaemon = async (): Promise<boolean> => {
+    const waitForHandoffDrain = async (targetVersion: string, budgetMs: number): Promise<boolean> => {
+      const deadline = Date.now() + budgetMs
       const socketPath = recorderSocketPath(workspace)
-      try {
-        const response = await daemonRequest(socketPath, {
-          method: 'POST',
-          path: '/v1/wake',
-          headers: { 'x-scry-wake-drain': '1' },
-          timeoutMs: event === 'UserPromptSubmit' || event === 'Stop' ? 4_000 : 1_500
-        })
-        return response.statusCode === 200
-      } catch {
-        return false
+      while (Date.now() < deadline) {
+        const remaining = deadline - Date.now()
+        if (remaining <= 0) break
+        const status = await recorderDaemonStatus(workspace, process.env, Math.min(500, Math.max(50, remaining)))
+        if (status.running && !shouldReplaceDaemon(status.recorderVersion, targetVersion)) {
+          const drainBudget = deadline - Date.now()
+          if (drainBudget <= 50) return false
+          try {
+            const response = await daemonRequest(socketPath, {
+              method: 'POST',
+              path: '/v1/wake',
+              headers: { 'x-scry-wake-drain': '1' },
+              timeoutMs: drainBudget
+            })
+            return response.statusCode === 200
+          } catch {
+            return false
+          }
+        }
+        const sleepMs = Math.min(50, Math.max(0, deadline - Date.now()))
+        if (sleepMs <= 0) break
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, sleepMs))
       }
+      return false
     }
     type SendOutcome = 'delivered' | 'not-applied' | 'unknown'
     const classify = (error: unknown): SendOutcome => {
@@ -88,12 +108,11 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
         if (daemonRejected) {
           const existing = await recorderDaemonStatus(workspace)
           const targetVersion = await resolveTargetRecorderVersion(process.argv[1])
-          if (existing.running && shouldReplaceDaemon(existing.recorderVersion, targetVersion)) {
+          if (!existing.running || shouldReplaceDaemon(existing.recorderVersion, targetVersion)) {
             if (!await queueBeforeHandoff()) return 'delivered'
-            if (await replaceDaemon()) await drainReplacedDaemon()
+            if (await startHandoff()) await waitForHandoffDrain(targetVersion, sendBudgetMs)
             return 'delivered'
           }
-          if (!existing.running && !await replaceDaemon()) return 'not-applied'
         }
         let outcome: SendOutcome
         try {
@@ -109,7 +128,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
           const targetVersion = await resolveTargetRecorderVersion(process.argv[1])
           if (existing.running && !shouldReplaceDaemon(existing.recorderVersion, targetVersion)) return outcome
           if (!await queueBeforeHandoff()) return 'delivered'
-          if (await replaceDaemon()) await drainReplacedDaemon()
+          if (await startHandoff()) await waitForHandoffDrain(targetVersion, sendBudgetMs)
           return 'delivered'
         }
       }

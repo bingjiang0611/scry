@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { build } from 'esbuild'
@@ -403,5 +403,113 @@ describe('recorder daemon handoff', () => {
     expect(records[0].user.value?.text).toBe('started on 0.2.91')
     expect(records[0].recorderVersion).toBe(RECORDER_VERSION)
     expect(await recorderInboxEntries(sessionRoot)).toEqual([])
+  }, 45_000)
+
+  it('returns within Stop budget while a busy older daemon drains for over 3s and hands off cleanly', async () => {
+    const { root, socketPath, env } = await createWorkspace('scry-busy-budget-')
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: { session_id: 'busy-budget', prompt: 'opened before busy stop' },
+      env
+    })
+
+    const { exited } = await spawnStubDaemon({
+      root,
+      socketPath,
+      version: '0.2.91',
+      mode: 'graceful-delay',
+      delayMs: 3_500
+    })
+
+    const startedAt = Date.now()
+    await new Promise<void>((resolveHook, rejectHook) => {
+      const child = spawn(process.execPath, [cliEntry, 'recorder', 'hook', '--provider', 'claude', '--event', 'Stop', '--workspace', root], {
+        env, stdio: ['pipe', 'ignore', 'pipe']
+      })
+      let stderr = ''
+      child.stderr.on('data', (c) => { stderr += c })
+      child.on('error', rejectHook)
+      child.on('exit', (code) => code === 0 ? resolveHook() : rejectHook(new Error(`hook exit ${code}: ${stderr}`)))
+      child.stdin.end(JSON.stringify({ session_id: 'busy-budget' }))
+    })
+    const hookElapsedMs = Date.now() - startedAt
+    expect(hookElapsedMs).toBeLessThan(5_000)
+
+    expect(await exited).toEqual({ code: 0, signal: null })
+    const afterStatus = await waitFor(async () => {
+      const current = await recorderDaemonStatus(root, env)
+      return current.running && current.recorderVersion === RECORDER_VERSION ? current : null
+    }, 15_000)
+    expect(afterStatus.recorderVersion).toBe(RECORDER_VERSION)
+
+    const sessionRoot = join(root, '.scry', 'runtime', 'claude', safeKey('busy-budget'))
+    const records = await waitFor(async () => {
+      const list = await listRecords(join(root, '.scry')).catch(() => [])
+      return list.length > 0 && (await recorderInboxEntries(sessionRoot)).length === 0 ? list : null
+    }, 15_000)
+    expect(records).toHaveLength(1)
+    expect(records[0].status).toBe('completed')
+    expect(records[0].recorderVersion).toBe(RECORDER_VERSION)
+    const log = await readFile(join(root, '.scry', 'logs', 'recorder.log'), 'utf8').catch(() => '')
+    expect(log).not.toContain('daemon_handoff_forced_stop')
+  }, 45_000)
+
+  it('completes detached handoff and consumes the queued Stop event even if the hook is SIGKILLed immediately', async () => {
+    const { root, socketPath, env } = await createWorkspace('scry-hook-killed-')
+    await handleRecorderHook({
+      provider: 'claude',
+      event: 'UserPromptSubmit',
+      workspace: root,
+      payload: { session_id: 'killed-hook', prompt: 'survives hook sigkill' },
+      env
+    })
+
+    const { exited } = await spawnStubDaemon({
+      root,
+      socketPath,
+      version: '0.2.91',
+      mode: 'graceful-delay',
+      delayMs: 1_800
+    })
+
+    const lockPath = join(root, '.scry', 'locks', 'daemon-start.lock')
+    const hookChild = spawn(process.execPath, [cliEntry, 'recorder', 'hook', '--provider', 'claude', '--event', 'Stop', '--workspace', root], {
+      env, stdio: ['pipe', 'ignore', 'pipe']
+    })
+    children.push(hookChild)
+    const hookExited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolveExit) => {
+      hookChild.once('exit', (code, signal) => resolveExit({ code, signal }))
+    })
+    hookChild.stdin.end(JSON.stringify({ session_id: 'killed-hook' }))
+
+    await waitFor(async () => {
+      try {
+        await access(lockPath)
+        return true
+      } catch {
+        return null
+      }
+    }, 5_000)
+    hookChild.kill('SIGKILL')
+    expect((await hookExited).signal).toBe('SIGKILL')
+
+    expect(await exited).toEqual({ code: 0, signal: null })
+    const afterStatus = await waitFor(async () => {
+      const current = await recorderDaemonStatus(root, env)
+      return current.running && current.recorderVersion === RECORDER_VERSION ? current : null
+    }, 15_000)
+    expect(afterStatus.recorderVersion).toBe(RECORDER_VERSION)
+
+    const sessionRoot = join(root, '.scry', 'runtime', 'claude', safeKey('killed-hook'))
+    const records = await waitFor(async () => {
+      const list = await listRecords(join(root, '.scry')).catch(() => [])
+      return list.length > 0 && (await recorderInboxEntries(sessionRoot)).length === 0 ? list : null
+    }, 15_000)
+    expect(records).toHaveLength(1)
+    expect(records[0].status).toBe('completed')
+    expect(records[0].user.value?.text).toBe('survives hook sigkill')
+    expect(records[0].recorderVersion).toBe(RECORDER_VERSION)
   }, 45_000)
 })
