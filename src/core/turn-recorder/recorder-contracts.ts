@@ -21,6 +21,7 @@ export interface RecorderHookInput {
   qoderStopRecoveryScheduled?: boolean
   captureMode?: boolean
   ancestryFromPid?: number
+  hostChain?: import('./host-process.js').HostProcess[]
 }
 
 export interface RecorderHookResult {
@@ -311,6 +312,7 @@ export interface QueuedHook {
   uploadEnvironment?: import('./commit-environment.js').UploadEnvironment
   capture?: import('./session-capture-contract.js').SessionCaptureContext
   captureMode?: boolean
+  hostChain?: import('./host-process.js').HostProcess[]
   arrivedAt: string
 }
 

@@ -11,7 +11,7 @@ import { statTranscript } from './recorder-transcript-fs.js'
 import { safeKey } from './store-index.js'
 import { discoverRepositories, type RecorderEnablement } from './config.js'
 import { beginGitTurnDiff } from './git.js'
-import { hostProcessChain } from './host-process.js'
+import { hostProcessChain, validHostChain } from './host-process.js'
 import { continuationCaptures, segmentCaptureDir } from './recorder-segment-diff.js'
 import { rememberQoderRequest } from './qoder-stop-evidence.js'
 import { readJson, writeJsonAtomic } from './io.js'
@@ -241,8 +241,8 @@ export async function beginCaptureTurn(
     sessionId,
     enablement.workspaceRoot
   ).catch(() => null)
-  const resolved = ancestryFromPid ? await hostProcessChain(ancestryFromPid) : []
-  const host = resolved.length ? resolved : claimedHostChain
+  const explicitHost = validHostChain(claimedHostChain)
+  const host = explicitHost ?? (ancestryFromPid ? await hostProcessChain(ancestryFromPid, { provider }) : undefined)
   const event = openingPrompt ? 'UserPromptSubmit' : 'CaptureStart'
   const opened = await beginOpenTurn(enablement, provider, sessionId, event, payload, false, false, undefined, context, {
     ...(transcript?.startedAt ? { startedAt: transcript.startedAt } : {}),

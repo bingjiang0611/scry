@@ -16,7 +16,7 @@ import { finalizeOpenTurn } from './recorder-turn-finalize.js'
 import { codexSubagentTranscript, isCodexInternalPrompt, isSynthetic, isTaskNotificationPrompt, isCommittedProviderTurn, isContinuationProviderTurn, isLateQoderTerminalDuplicate, markCodexInternalTurn, recordTaskNotificationWake, storeOrphanEvent, continuationProviderTurnIds, consumeCodexInternalTurn, trustedManagedIdentityPayload } from './recorder-hook-support.js'
 import { holdSeal, refreshSealWindow, revokeSeal } from './recorder-segment.js'
 import { holdStopForBackgroundWork, openContinuationSegment } from './recorder-hook-segment.js'
-import { hostProcessChain } from './host-process.js'
+import { hostProcessChain, validHostChain } from './host-process.js'
 import { forgetSessionVisit } from './session-visit.js'
 import { observePendingQoderTranscript } from './pending-qoder-transcript.js'
 import { isTopLevelQoderStop, logQoderStopAttribution, logQoderStopHold, qoderNativeStopAttribution, qoderRequestStopAttribution, readQoderStopTranscript, QODER_STOP_TRANSCRIPT_WAIT_MS, type QoderStopAttribution } from './qoder-stop-evidence.js'
@@ -126,7 +126,7 @@ export async function applyHookLocked(
       protectNextStart,
       input.uploadEnvironment, input.capture,
       undefined, undefined,
-      input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid) : undefined
+      validHostChain(input.hostChain) ?? (input.ancestryFromPid ? await hostProcessChain(input.ancestryFromPid, { provider: input.provider }) : undefined)
     )
     if (supersededStart) await rm(supersededStart, { force: true })
     if (!open.managedByScry) await storeLifecycleEvent(enablement, open, input.event, input.payload)
@@ -436,6 +436,7 @@ export async function replayQueuedHooks(
             if (provider === 'codex' && await codexSubagentTranscript(payload, queued.sessionId)) {
               payload = { ...payload, [CODEX_SUBAGENT_MARKER]: true }
             }
+            const queuedHostChain = validHostChain(queued.hostChain)
             await hookArrival.run(queued.arrivedAt, async () => {
               await applyHookLocked(enablement, {
                 provider,
@@ -445,7 +446,8 @@ export async function replayQueuedHooks(
                 managed: queued.managed,
                 qoderStopRecoveryScheduled,
                 uploadEnvironment: queued.uploadEnvironment,
-                ...(capture ? { capture } : {})
+                ...(capture ? { capture } : {}),
+                ...(queuedHostChain ? { hostChain: queuedHostChain } : {})
               }, queued.sessionId)
               if (queued.captureMode && queued.event === 'PreToolUse' && capture) {
                 await recordCaptureRepositories(enablement, provider, queued.sessionId, payload)
