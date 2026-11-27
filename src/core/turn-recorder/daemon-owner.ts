@@ -3,6 +3,11 @@ import { join, dirname } from 'node:path'
 import { readJson } from './io.js'
 
 export const STOP_WAIT_MS = 1_000
+export const GRACEFUL_STOP_WAIT_MS = 10_000
+export const SIGTERM_WAIT_MS = 2_000
+export const SIGKILL_WAIT_MS = 1_000
+
+export type ForcedStopSignal = 'SIGTERM' | 'SIGKILL'
 
 export interface DaemonOwner {
   schemaVersion: 1
@@ -64,10 +69,16 @@ export async function removeOwnedMarker(path: string, instanceId: string): Promi
   if (current?.instanceId === instanceId) await rm(path, { force: true })
 }
 
-export async function stopOwner(owner: DaemonOwner): Promise<void> {
-  if (!processAlive(owner.pid)) return
-  try { process.kill(owner.pid, 'SIGTERM') } catch { return }
-  if (await waitForProcessExit(owner.pid, STOP_WAIT_MS)) return
-  try { process.kill(owner.pid, 'SIGKILL') } catch { return }
-  await waitForProcessExit(owner.pid, STOP_WAIT_MS)
+export async function stopOwner(
+  owner: DaemonOwner,
+  options: { sigtermWaitMs?: number; sigkillWaitMs?: number } = {}
+): Promise<ForcedStopSignal | null> {
+  if (!processAlive(owner.pid)) return null
+  const sigtermWaitMs = options.sigtermWaitMs ?? SIGTERM_WAIT_MS
+  const sigkillWaitMs = options.sigkillWaitMs ?? SIGKILL_WAIT_MS
+  try { process.kill(owner.pid, 'SIGTERM') } catch { return null }
+  if (await waitForProcessExit(owner.pid, sigtermWaitMs)) return 'SIGTERM'
+  try { process.kill(owner.pid, 'SIGKILL') } catch { return 'SIGTERM' }
+  await waitForProcessExit(owner.pid, sigkillWaitMs)
+  return 'SIGKILL'
 }
