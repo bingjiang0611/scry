@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { handleRecorderHook } from './recorder.js'
+import { saveOutcome } from './commit-delivery-ledger.js'
+import { COMMIT_NOTIFICATION_MAX_FAILURES } from './commit-delivery-state.js'
 import { commitNotificationStatus, drainCommitNotifications, redeliverLatestCommitNotification } from './store.js'
 
 const roots: string[] = []
@@ -113,6 +115,30 @@ describe('latest commit redelivery', () => {
     })
     await expect(drainCommitNotifications(f.dataRoot, f.env)).resolves.toMatchObject({ delivered: 0 })
     expect(await f.readCalls()).toEqual([1, 2])
+  }, 20_000)
+
+  it('leaves scheduled retries and dead letters to the normal drain', async () => {
+    const f = await fixture(1)
+    await commitTurns(f, 1)
+    const first = await redeliverLatestCommitNotification(f.dataRoot, f.env)
+    await expect(redeliverLatestCommitNotification(f.dataRoot, f.env)).resolves.toMatchObject({
+      delivered: false, sequence: 1, reason: 'scheduled retry; use normal notification drain'
+    })
+    expect(await f.readCalls()).toEqual([1])
+
+    const recordId = first.recordId as string
+    const failure = { sequence: 1, recordId, attempts: COMMIT_NOTIFICATION_MAX_FAILURES,
+      lastFailureAt: new Date().toISOString(), reason: 'spawn_error' }
+    await saveOutcome(f.dataRoot, 'redelivery-policy-v1', { sequence: 1, recordId, status: 'dead', failure })
+    await expect(redeliverLatestCommitNotification(f.dataRoot, f.env)).resolves.toMatchObject({
+      delivered: false, sequence: 1, reason: 'recorder dead letter; automatic redelivery disabled'
+    })
+    await saveOutcome(f.dataRoot, 'redelivery-policy-v1', { sequence: 1, recordId, status: 'retry', failure })
+    await expect(redeliverLatestCommitNotification(f.dataRoot, f.env)).resolves.toMatchObject({
+      delivered: false, sequence: 1, reason: 'recorder dead letter; automatic redelivery disabled'
+    })
+    expect(await f.readCalls()).toEqual([1])
+    expect((await commitNotificationStatus(f.dataRoot, f.env)).ackedThrough).toBe(null)
   }, 20_000)
 
   it('still delivers records committed after a fingerprint change', async () => {
