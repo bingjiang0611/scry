@@ -1,4 +1,4 @@
-import { chmod, realpath, stat } from 'node:fs/promises'
+import { chmod, readFile, realpath, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pendingQoderTranscriptPath } from './pending-qoder-transcript.js'
 import type { ProviderId } from '../../shared/provider.js'
@@ -11,7 +11,8 @@ import { recorderSocketPath, PROTOCOL_VERSION, HOOK_EVENT_PATH } from './daemon-
 import { recorderOpenPath, recorderSessionRoot, withRecorderSessionLock, type RecorderOpenTurnState } from './runtime-state.js'
 import { captureTurnInitializationIssue, beginCaptureTurn } from './recorder-turn-state.js'
 import { sessionIdOf, transcriptPathOf } from './recorder-contracts.js'
-import { captureReceiverSource } from './session-capture-receiver.js'
+import { captureReceiverSource, parseCaptureReceiverVersion } from './session-capture-receiver.js'
+import { isNewerRecorderVersion } from './recorder-version-order.js'
 import { recorderInboxHasCaptureCommand } from './inbox.js'
 import { recordCaptureRepositories } from './session-capture-discovery.js'
 import { canonicalDataRoot, canonicalWorkspaceRoot, ensureWorkspaceConfig } from './session-capture-workspace.js'
@@ -209,6 +210,9 @@ async function ensureReceiver(
   env: NodeJS.ProcessEnv = process.env
 ): Promise<void> {
   const path = captureReceiverPath(enablement.dataRoot)
+  const existing = await readFile(path, 'utf8').catch(() => null)
+  const existingVersion = existing ? parseCaptureReceiverVersion(existing) : undefined
+  if (existingVersion && isNewerRecorderVersion(existingVersion, RECORDER_VERSION)) return
   const source = captureReceiverSource({
     socketPath: recorderSocketPath(workspaceRoot, env),
     workspace: workspaceRoot,
@@ -220,6 +224,32 @@ async function ensureReceiver(
   })
   await writeTextAtomic(path, source, { sync: false })
   await chmod(path, 0o700).catch(() => undefined)
+}
+
+export async function refreshCaptureReceiverIfOlder(
+  enablement: Extract<RecorderEnablement, { enabled: true }>,
+  workspaceRoot: string,
+  provider: ProviderId,
+  cli: { entry?: string; nodeDir?: string },
+  env: NodeJS.ProcessEnv = process.env
+): Promise<boolean> {
+  const path = captureReceiverPath(enablement.dataRoot)
+  const existing = await readFile(path, 'utf8').catch(() => null)
+  if (existing === null) return false
+  const existingVersion = parseCaptureReceiverVersion(existing)
+  if (existingVersion && !isNewerRecorderVersion(RECORDER_VERSION, existingVersion)) return false
+  const source = captureReceiverSource({
+    socketPath: recorderSocketPath(workspaceRoot, env),
+    workspace: workspaceRoot,
+    provider,
+    dataDir: enablement.dataRoot,
+    eventPath: HOOK_EVENT_PATH,
+    recorderVersion: RECORDER_VERSION,
+    cli
+  })
+  await writeTextAtomic(path, source, { sync: false })
+  await chmod(path, 0o700).catch(() => undefined)
+  return true
 }
 
 export async function stopSessionCapture(args: {
@@ -281,6 +311,7 @@ export async function applySessionCaptureHook(args: {
   env?: NodeJS.ProcessEnv
   ancestryFromPid?: number
   hostChain?: import('./host-process.js').HostProcess[]
+  cli?: { entry?: string; nodeDir?: string }
 }): Promise<CaptureAck & { reason?: string }> {
   const dataRoot = await canonicalDataRoot(args.workspace, args.dataDir)
   const sessionId = args.sessionId ?? sessionIdOf(args.payload)
@@ -347,6 +378,9 @@ export async function applySessionCaptureHook(args: {
     ...(args.hostChain ? { hostChain: args.hostChain } : {})
   })
   if (args.event === 'PreToolUse') await recordCaptureRepositories(enablement, args.provider, sessionId, args.payload)
+  if (args.cli?.entry) {
+    await refreshCaptureReceiverIfOlder(enablement, enablement.workspaceRoot, args.provider, args.cli, args.env).catch(() => undefined)
+  }
   return {
     status: 'accepted',
     ack: {

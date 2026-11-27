@@ -14,6 +14,7 @@ import {
 import {
   applySessionCaptureHook,
   prepareCaptureStart,
+  refreshCaptureReceiverIfOlder,
   startSessionCapture,
   stopSessionCapture
 } from '../core/turn-recorder/session-capture.js'
@@ -30,7 +31,8 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
     const payload = parseHookPayload(await readStdin())
     const dataDir = flag(args, 'data-dir')
     if (!dataDir) throw new CaptureRequestError('invalid_request', '--data-dir is required for session capture')
-    const queueOnly = args.flags.has('queue-only') || process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
+    const daemonRejected = process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
+    const queueOnly = args.flags.has('queue-only') || process.env.SCRY_RECORDER_DAEMON_TRIED === '1' || daemonRejected
     const hostChain = hostChainOf(args)
     const result = await applySessionCaptureHook({
       workspace: workspaceOf(args),
@@ -42,10 +44,13 @@ export async function sessionHookCommand(args: ParsedArgs): Promise<number> {
       queueOnly,
       captureMode: true,
       ancestryFromPid: process.ppid,
-      ...(hostChain !== undefined ? { hostChain: hostChain as never } : {})
+      ...(hostChain !== undefined ? { hostChain: hostChain as never } : {}),
+      ...(process.argv[1] ? { cli: { entry: process.argv[1], nodeDir: dirname(process.execPath) } } : {})
     })
     if (queueOnly) {
-      await notifyRecorderInbox({ workspace: workspaceOf(args), scriptPath: process.argv[1] })
+      if (result.status !== 'ignored') {
+        await notifyRecorderInbox({ workspace: workspaceOf(args), scriptPath: process.argv[1] })
+      }
     } else {
       const daemonEnabled = process.env.SCRY_RECORDER_TRANSPORT !== 'direct'
       if (daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED !== '1'
@@ -134,6 +139,14 @@ export async function captureCommand(args: ParsedArgs): Promise<number> {
             ...(prepared.hostChain ? { hostChain: prepared.hostChain } : {})
           }, sessionId, arrivedAt, { announce: false }))
         : undefined
+      if (process.argv[1]) {
+        await refreshCaptureReceiverIfOlder(
+          prepared.enablement,
+          prepared.workspaceRoot,
+          provider,
+          { entry: process.argv[1], nodeDir: dirname(process.execPath) }
+        ).catch(() => undefined)
+      }
       await notifyRecorderInbox({ workspace: prepared.workspaceRoot, scriptPath: process.argv[1] })
       process.stdout.write(`${JSON.stringify({
         protocol: SESSION_CAPTURE_PROTOCOL,

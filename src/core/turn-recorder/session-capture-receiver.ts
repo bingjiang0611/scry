@@ -1,3 +1,8 @@
+export function parseCaptureReceiverVersion(source: string): string | undefined {
+  const match = /x-scry-recorder-version:\s*([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/.exec(source)
+  return match?.[1]
+}
+
 export function captureReceiverSource(args: {
   socketPath: string
   workspace: string
@@ -22,6 +27,7 @@ fi
 # Usage: receiver.sh <host> <event>
 set -u
 unset SCRY_RECORDER_DAEMON_TRIED
+unset SCRY_RECORDER_DAEMON_REJECTED
 capture_provider=${quote(args.provider)}
 scry_node=${node}
 state_dir=${quote(args.dataDir)}/capture
