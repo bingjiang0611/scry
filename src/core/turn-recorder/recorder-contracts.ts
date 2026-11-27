@@ -21,7 +21,12 @@ export interface RecorderHookInput {
   qoderStopRecoveryScheduled?: boolean
   captureMode?: boolean
   ancestryFromPid?: number
+  launchClient?: string
   hostChain?: import('./host-process.js').HostProcess[]
+}
+
+export function committedDeliveryTrigger(result: RecorderHookResult): { triggerSequence?: number } {
+  return result.status === 'committed' && result.record ? { triggerSequence: result.record.sequence } : {}
 }
 
 export interface RecorderHookResult {

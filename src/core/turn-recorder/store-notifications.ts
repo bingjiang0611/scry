@@ -9,7 +9,7 @@ import { recordFiles, parseRecordFile } from './store-index.js'
 import { readArchiveState } from './store-archive.js'
 import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitNotificationFailure, recordName, readCommitHookAck, pendingCommitFiles, publishDeadLetter, readDeadLetter, readDeadLetters } from './commit-delivery-state.js'
 
-import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, loadScopedDeliveryState, nextRetryAt, outcomes, readOutcome, requeueDeadLetters, requeueLostOutcome, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
+import { type RetryDiagnostic, UnresolvedDeliveryPrefixError, advanceAck, finishReplay, ledgerStatus, loadDeliveryState, loadScopedDeliveryState, nextRetryAt, noDeliveryCheckpoint, outcomes, readOutcome, requeueDeadLetters, requeueLostOutcome, saveOutcome, saveProgress } from './commit-delivery-ledger.js'
 
 export interface RecordCommittedNotification {
   schemaVersion: 2
@@ -87,6 +87,7 @@ export interface DrainOptions {
   budgetMs?: number
   now?: () => number
   scope?: CommitNotificationScope
+  triggerSequence?: number
 }
 
 export interface DrainResult {
@@ -111,11 +112,16 @@ export async function drainCommitNotifications(
       return { delivered: 0, pending, truncated: false, hookConfigured: false }
     }
     return await withDirectoryLock(join(dataRoot, 'locks', 'commit-notification.lock'), async () => {
+      const noCheckpoint = await noDeliveryCheckpoint(dataRoot, fingerprint)
+      if (options.triggerSequence === undefined && noCheckpoint) {
+        return { delivered: 0, pending: await pendingCount().catch(() => null), truncated: false }
+      }
       const state = options.scope
         ? await loadScopedDeliveryState(dataRoot, fingerprint)
-        : await loadDeliveryState(dataRoot, fingerprint)
-      let savedAck = state.ackedThrough
-      let savedProgress = state.processedThrough
+        : await loadDeliveryState(dataRoot, fingerprint, options.triggerSequence)
+      const seedPending = noCheckpoint && !options.scope && options.triggerSequence !== undefined
+      let savedAck = seedPending ? -1 : state.ackedThrough
+      let savedProgress = seedPending ? -1 : state.processedThrough
       const persistProgress = async () => {
         if (state.ackedThrough === savedAck && state.processedThrough === savedProgress) return
         await saveProgress(dataRoot, state)
@@ -264,7 +270,7 @@ async function attemptCommitNotification(
 export async function redeliverLatestCommitNotification(
   dataRoot: string,
   env: NodeJS.ProcessEnv = process.env
-): Promise<{ delivered: boolean; recordId?: string; sequence?: number; reason?: string }> {
+): Promise<{ delivered: boolean; recordId?: string; sequence?: number; reason?: string; noCheckpoint?: boolean }> {
   let hook: string | null
   try {
     hook = await configuredCommitHook(env)
@@ -280,22 +286,32 @@ export async function redeliverLatestCommitNotification(
       const latest = (await recordFiles(dataRoot)).at(-1)
       if (!latest) return { delivered: false, reason: 'no committed record' }
       const fingerprint = configuredCommitHookFingerprint(env)
-      const checkpoint = await loadDeliveryState(dataRoot, fingerprint)
+      const acknowledged = await readCommitHookAck(dataRoot, fingerprint)
+      if (acknowledged.isolatedAck === null && acknowledged.legacyAck === null) {
+        return { delivered: false, recordId: latest.recordId, sequence: latest.sequence, noCheckpoint: true,
+          reason: 'delivery has no checkpoint for this hook; existing records are treated as acknowledged' }
+      }
+      if (acknowledged.ackedThrough !== null && latest.sequence <= acknowledged.ackedThrough) {
+        return { delivered: false, recordId: latest.recordId, sequence: latest.sequence, reason: 'already acknowledged; no redelivery' }
+      }
+      await loadDeliveryState(dataRoot, fingerprint)
       const outcome = await readOutcome(dataRoot, fingerprint, latest.sequence)
-      if (outcome && outcome.status !== 'delivered') {
+      if (outcome?.status === 'delivered') {
+        return { delivered: false, recordId: latest.recordId, sequence: latest.sequence, reason: 'already acknowledged; no redelivery' }
+      }
+      if (outcome) {
         return { delivered: false, recordId: latest.recordId, sequence: latest.sequence,
           reason: outcome.status === 'dead' || (outcome.status === 'retry' && outcome.failure.attempts === COMMIT_NOTIFICATION_MAX_FAILURES)
             ? 'recorder dead letter; automatic redelivery disabled' : 'scheduled retry; use normal notification drain' }
       }
       const result = await attemptCommitNotification(hook, dataRoot, latest.name, env)
       const delivered = result.acknowledged
+      if (delivered) await saveOutcome(dataRoot, fingerprint, { sequence: latest.sequence, recordId: latest.recordId, status: 'delivered' })
       if (!delivered) {
-        if (latest.sequence > checkpoint.ackedThrough) {
-          const { acknowledged: _ack, ...diagnostic } = result
-          const failure: CommitNotificationFailure = { sequence: latest.sequence, recordId: latest.recordId, attempts: 1,
-            lastFailureAt: new Date(Date.now()).toISOString(), ...diagnostic }
-          await saveOutcome(dataRoot, fingerprint, { sequence: latest.sequence, recordId: latest.recordId, status: 'retry', failure })
-        }
+        const { acknowledged: _ack, ...diagnostic } = result
+        const failure: CommitNotificationFailure = { sequence: latest.sequence, recordId: latest.recordId, attempts: 1,
+          lastFailureAt: new Date(Date.now()).toISOString(), ...diagnostic }
+        await saveOutcome(dataRoot, fingerprint, { sequence: latest.sequence, recordId: latest.recordId, status: 'retry', failure })
         await appendRotatingLog(join(dataRoot, 'logs', 'recorder.log'),
           `${new Date().toISOString()} ERROR latest commit redelivery: commit hook did not ACK sequence ${latest.sequence}; diagnostic=${JSON.stringify({ ...result, recorderPid: process.pid })}`
         ).catch(() => undefined)

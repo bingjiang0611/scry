@@ -47,7 +47,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 
 命令先验证配置与 trust，再将原死信诊断保存到 `notifications/dead-letter-history/<fingerprint-hash>/`，持久化重放请求后移出当前死信、清零计数并正常 drain。`--sequence N` 还接受另一种可恢复状态：该号的 record 文件仍在，但 `delivery-outcomes/<fingerprint-hash>/` 里的投递结果丢失（例如被手工删除）。此时自动 drain 与 ACK 都 fail closed，`doctor` 的 `commitHook.delivery` 会报 `status: error` 并写出 `sequence N` 与具体命令。显式重放只为该号写入一条 `status: replay`、无死信历史的请求，下一次 drain 重新投递它（接收方按 `recordId` 去重）；成功后 ACK 才能继续前进。既不是活动死信、也没有丢失结果的号会被拒绝。原始 record 与原会话环境仍复用。中断后，已持久化的单条请求由 drain 恢复；尚未持久化的条目仍是死信，需查看状态再明确选择，不猜测整批是否完成。若再次失败，从第 1 次和 1 分钟间隔重新开始；没有真实成功就不推进 ACK。指定的 sequence 必须是当前身份的活动死信。`--all-dead` 无活动死信时不制造重放；命令也可处理其他已到期的普通积压，但不会提前执行仍在退避的项。不要编辑 ACK 或删除队列元数据来绕过保护。
 
-冷启动的“最新记录唤醒”跳过已有重试/死信；尚未 ACK 的最新记录首次失败也进入同一退避状态。已经 ACK 的唤醒不倒退 ACK，不能代替外部 uploader 的 outbox 重试。指纹变化仍是独立身份：新身份按既有规则重投全部仍保留记录，旧身份的死信不被悄悄清除；`notify-retry` 不跨身份操作。稳定 `commitHook.id` 未引入，trust/内容指纹校验不变。
+指纹变化是独立身份，但投递位置接着旧身份：旧身份已确认的不再发，之后的记录（含刚提交这一条和旧身份的积压）照常投；死信不复活，计划重试按原节奏；多份旧身份取最近有投递活动的那份。基线与逐条对照见[投递账本](commit-delivery-ledger.md)。稳定 `commitHook.id` 未引入，trust/内容指纹校验不变。
 
 旧 E 检查点在投递锁内迁移，已有次数和死信保留，不伪造历史等待间隔。旧的 5 次失败/死信需用上述命令显式重放。升级时重启对应 workspace 的 daemon；不要让旧 CLI/daemon 与新队列格式并发运行或降级写入。`delivery-outcomes` 的成功凭据和死信历史目前不会自动回收；有大量历史缺口时目录扫描会增加，需评估增量索引/分段回收，而不是删除未 ACK 的证据。
 
@@ -127,6 +127,32 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 
 `SCRY_NO_UPDATE_CHECK=1` 或 `--no-update-check` 关闭检查;`SCRY_CLI_REGISTRY` 覆盖 registry(必须 HTTPS),未设置时用本机 npm 配置。App 内置 CLI、recorder、daemon 与 CI 不触发后台检查。
 
+## 托管轮次没有托管方时由记录器收尾
+
+托管轮次（`managedByScry`）等的是 App 侧来封存。App 不再托管之后，记录器自己判断这轮还有没有管理者：
+
+- 最后活动超过 30 分钟（轮次事件、Provider transcript 与 `open.json` 里最新的那个时间）且记录的宿主进程都不在了，就当作没有管理者；
+- 宿主进程还活着时不动这一轮，旧版 App 仍在托管的情况下不会被打断；
+- 没有管理者的 open 轮次按 `interrupted` 封存，closing 轮次按 `terminalFallbackStatus`（默认 `completed`）封存，两种都只保留还能观测到的证据，缺失的正文、usage 与 diff 标为 unavailable，不补造；
+- 被替换掉的托管轮次（`managed_replaced` 隔离项）超过 24 小时、且同一会话没有别的 open 轮次时，按 `interrupted` 封存；原始文件再保留 24 小时后随索引一起清理；
+- 过期之后，同一会话的非托管开场会先封存旧轮次再正常开新轮次，不再被永久忽略。
+
+有宿主记录时只认“确认已退出”：进程表临时读不到（`unknown`）不算退出，这一轮保持原样。只有连宿主记录都没有的历史遗留托管轮次才退回纯时间判断——那些轮次没有可确认的对象，靠静默时限清理。这些封存的记录照常投递提交回调，重复投递由投递账本拦住。
+
+## daemon 启动按账本排空
+
+daemon 启动只跑一次巡检，排空由巡检收尾时的普通 drain 完成，没有第二条“补投最新一条”的旁路。账本决定投谁：已确认的不再发，未确认的按顺序和退避排空，死信不提前重投；没有检查点时启动与恢复什么都不投。
+
+App 需要知道最新状态时自己查 `scry recorder notify-status`，不靠向回调方再推一次。
+
+## 来源标记只看本地
+
+`SCRY_LAUNCH_CLIENT` 只表示“这一轮由哪个客户端启动 Provider”，值固定、不含会话或用户身份。记录器在非托管开场读取它，符合小写标识符规则才接受，不合规时静默丢弃、不影响记录。
+
+这个变量由 hook 转发给 daemon，取的是发事件那一侧的值。daemon 自己环境里的同名变量不算数——否则 daemon 启动时继承到的值会给之后所有轮次打错标。`scry init` 生成的 hook 脚本才会转发它，旧脚本需要重新 init。
+
+这个值**不进 canonical record、也不进投递内容**：它写在 `.scry/local/launch-client/<recordId>.json`（`schemaVersion`、`provider`、`sessionId`、`generation`、`client`）。服务端是否接受新值还没验证，验证通过后才考虑把它提升为记录里上传的 `client` 字段；在那之前本地文件是唯一的来源证据。
+
 ## 环境变量
 
 | 变量 | 作用 |
@@ -136,6 +162,7 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 | `SCRY_RECORDER_SOCKET` | 覆盖 daemon socket 路径 |
 | `SCRY_RECORDER_IDLE_MS` | daemon 空闲退出窗口(默认 30 分钟) |
 | `SCRY_CLI_PATH` | hook 必须使用的 CLI 绝对路径 |
+| `SCRY_LAUNCH_CLIENT` | 启动 Provider 的客户端标识（小写标识符，最长 32 字符），只写本地来源标记，不上传 |
 | `SCRY_GRANT_DIR` | commit hook 授权记录目录 |
 | `SCRY_AUTO_UPDATE` | 未设置即开启;`0`/`false`/`no` 关闭自动安装 |
 | `SCRY_NO_UPDATE_CHECK=1` | 连更新检查一起关闭 |

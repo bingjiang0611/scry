@@ -47,7 +47,7 @@ export async function redeliverGrantedCommitHooksAtStartup(
       if (redelivery.delivered) result.redelivered++
       else {
         result.skipped++
-        if (redelivery.reason && redelivery.reason !== 'no committed record') {
+        if (redelivery.reason && redelivery.reason !== 'no committed record' && !redelivery.noCheckpoint) {
           result.errors.push(`${workspace}: ${redelivery.reason}`)
         }
       }

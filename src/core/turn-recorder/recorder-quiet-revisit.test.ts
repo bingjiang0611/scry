@@ -174,6 +174,10 @@ it('never defers a managed session: its recovery pass only runs because the loop
   })
   const dataRoot = join(root, '.scry')
   const sessionDir = join(dataRoot, 'runtime', 'codex', safeKey('managed-quiet'))
+  const openPath = join(sessionDir, 'open.json')
+  const open = JSON.parse(await readFile(openPath, 'utf8')) as Record<string, unknown>
+  open.host = [{ pid: process.pid }]
+  await writeFile(openPath, JSON.stringify(open))
   const turns = await readdir(join(sessionDir, 'turns')).catch(() => [] as string[])
   await backdate([
     sessionDir,

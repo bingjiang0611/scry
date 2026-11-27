@@ -110,6 +110,9 @@ describe('turn recorder daemon', () => {
       await expect(timeouts.fireNext()).resolves.toBeGreaterThan(0)
       expect(await readFile(join(dir, 'logs', 'daemon.log'), 'utf8')).toContain(`injected ${failure} recovery failure`)
       expect(await recorderDaemonStatus(root, env)).toMatchObject({ running: true })
+      await expect(sendRecorderDaemonHook({ workspace: root, provider: 'pi', event: 'Stop', env,
+        payload: { session_id: 'recovery-error', assistant_response: 'still recording' } })).resolves.toMatchObject({ ok: true })
+      expect(await listRecords(join(root, '.scry'))).toHaveLength(1)
     } finally {
       await daemon.close()
     }

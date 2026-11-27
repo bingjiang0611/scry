@@ -29,12 +29,15 @@ it.each(['drain', 'redeliver'] as const)('%s binds schema v2 to exact file bytes
   const hook = join(root, 'capture.cjs')
   await writeFile(hook, `#!${process.execPath}\nconst fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(capture)}, fs.readFileSync(0))\n`, { mode: 0o700 })
   const hookEnv = { ...env, SCRY_RECORDER_COMMIT_HOOK: hook }
-  if (mode === 'drain') await expect(drainCommitNotifications(dataRoot, hookEnv)).resolves.toMatchObject({ delivered: 1 })
-  else await expect(redeliverLatestCommitNotification(dataRoot, hookEnv)).resolves.toMatchObject({ delivered: true })
+  if (mode === 'drain') await expect(drainCommitNotifications(dataRoot, hookEnv, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1 })
+  else {
+    await drainCommitNotifications(dataRoot, hookEnv, { triggerSequence: 1, maxRecords: 0 })
+    await expect(redeliverLatestCommitNotification(dataRoot, hookEnv)).resolves.toMatchObject({ delivered: true })
+  }
   const notification = JSON.parse(await readFile(capture, 'utf8'))
   expect(notification).toEqual({ schemaVersion: 2, event: 'record-committed', workspace: root, provider: 'pi', sessionId: 'notification',
     recordId: record.recordId, sequence: 1, recordPath: `records/${name}`, sha256: createHash('sha256').update(bytes).digest('hex') })
   expect(JSON.stringify(notification)).not.toContain('private fixture prompt')
   expect(await readFile(join(dataRoot, notification.recordPath))).toEqual(bytes)
-  expect((await commitNotificationStatus(dataRoot, hookEnv)).ackedThrough).toBe(mode === 'drain' ? 1 : null)
+  expect((await commitNotificationStatus(dataRoot, hookEnv)).ackedThrough).toBe(mode === 'drain' ? 1 : 0)
 }, 15_000)

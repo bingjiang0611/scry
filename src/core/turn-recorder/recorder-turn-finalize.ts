@@ -1,27 +1,28 @@
 import { join } from 'node:path'
 import type { TraceEvent, TurnDiffSnapshot } from '../../shared/trace.js'
-import { available, disabled, partial, unavailable, type AgentTurnRecord, type TurnEvidence } from '../../shared/turn-record.js'
+import { disabled, unavailable, type AgentTurnRecord } from '../../shared/turn-record.js'
 import { aggregateTurnEvidence } from './aggregate.js'
 import { isCodexAppContextInput } from './recorder-codex-user-input.js'
-import { isFullToolContentPolicy } from './tool-content.js'
-import { writeRecorderContent } from './content-store.js'
 import { cancelGitTurnDiff } from './git.js'
 import { appendRotatingLog, writeJsonAtomic } from './io.js'
-import { RECORDER_VERSION, commitRecord, clearRuntimeTurn, stableHash } from './store.js'
+import { commitRecord, clearRuntimeTurn, stableHash } from './store.js'
 import { releaseStaleAttention, recorderOpenPath as openPath, recorderSessionRoot as sessionRoot, recorderStatePath as statePath, recorderTurnRoot as turnRoot, type RecorderOpenTurnState as OpenTurnState } from './runtime-state.js'
 import type { RecorderEnablement } from './config.js'
-import { terminalStatus, type RecorderHookResult, type TranscriptRead, resolveModelIdentity } from './recorder-contracts.js'
+import type { RecorderHookResult, TranscriptRead } from './recorder-contracts.js'
 import { readStoredEvents, mergeTurnTraceEvents, dedupeTraceEvents } from './recorder-trace-merge.js'
 import { stableTranscript } from './recorder-transcript-cache.js'
 import { observePendingQoderTranscript, PENDING_QODER_TRANSCRIPT_REASON } from './pending-qoder-transcript.js'
 import { captureTurnInitializationIssue, degradeEvidenceSections, persistRecorderEventContent, resolveTurnEnd, nextSessionState } from './recorder-turn-state.js'
 import { unmatchedIdentityReason } from './recorder-transcript-background.js'
-import { applyContinuationEvidence, applyForcedEvidence, continuationRole, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
+import { applyContinuationEvidence, applyForcedEvidence, forcedIdentityWindow, recordStartedAt, sealedSegment, segmentTranscriptView, transcriptSourceEvents } from './recorder-segment.js'
 import { newWorktreeTurnDiffs } from './recorder-worktree-diff.js'
 import { collectTurnDiffs, releaseSegmentChain, segmentFreeze } from './recorder-segment-diff.js'
 import { qoderTranscriptReplyComplete, rememberQoderRequest } from './qoder-stop-evidence.js'
 import { rm } from 'node:fs/promises'
-import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence, captureRecordMetadata } from './record-capture-metadata.js'
+import { applyCaptureBaselineCaveat, applyDiffExcludeEvidence } from './record-capture-metadata.js'
+import { transcriptTurnEvidence } from './recorder-transcript-evidence.js'
+import { turnRecordDraft } from './recorder-record-draft.js'
+import { recordLaunchClientSource } from './launch-client.js'
 
 export async function finalizeOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
@@ -35,6 +36,7 @@ export async function finalizeOpenTurn(
     transcriptUnavailable?: string
     /** Already verified from an exact Codex terminal row; do not reparse the capped window. */
     terminalOnlyTranscript?: TranscriptRead
+    retainTurnRoot?: boolean
   } = {}
 ): Promise<RecorderHookResult> {
   const root = sessionRoot(enablement.dataRoot, open.provider, open.sessionId)
@@ -255,35 +257,17 @@ export async function finalizeOpenTurn(
     evidence.modelSegments = disabled('assistant capture disabled by config')
   }
   if (!enablement.config.capture.hooks) evidence.hooks = disabled('hook capture disabled by config')
-  const transcriptEvidence: NonNullable<TurnEvidence['transcript']> = await (async (): Promise<NonNullable<TurnEvidence['transcript']>> => {
-    if (unreadReason) return unavailable(unreadReason)
-    if (!open.transcriptPath) return unavailable(pendingTranscript
-      ? PENDING_QODER_TRANSCRIPT_REASON : 'provider transcript path was not observable')
-    if (!enablement.config.capture.prompt || !enablement.config.capture.assistant || !isFullToolContentPolicy(contentPolicy)) {
-      return disabled('raw transcript capture disabled by content policy')
-    }
-    if (!transcript.source) {
-      return unavailable(options.transcriptUnavailable ?? options.terminalOnlyTranscript?.incompleteReasons?.join('; ') ??
-        'stable transcript bytes were not available for this turn')
-    }
-    const source = transcript.source
-    if (Buffer.byteLength(source.content) !== source.endOffset - source.startOffset) {
-      return unavailable('transcript range was not valid UTF-8 and could not be stored exactly')
-    }
-    const contentRef = await writeRecorderContent(enablement.dataRoot, source.content, 'utf8')
-    const value = {
-      contentRef,
-      sourcePath: source.sourcePath,
-      startOffset: source.startOffset,
-      endOffset: source.endOffset,
-      identity: source.identity,
-      sourceCompleteness: source.sourceCompleteness
-    }
-    return source.sourceCompleteness === 'complete' && !incompleteReplyReason
-      ? available(value, ['provider_transcript'])
-      : partial(value, ['provider_transcript'],
-        transcript.incompleteReasons?.join('; ') || 'transcript parser window started after an incomplete source line', 'exact')
-  })()
+  const transcriptEvidence = await transcriptTurnEvidence({
+    open,
+    enablement,
+    transcript,
+    contentPolicy,
+    pendingTranscript,
+    ...(unreadReason ? { unreadReason } : {}),
+    ...(incompleteReplyReason ? { incompleteReplyReason } : {}),
+    ...(options.transcriptUnavailable ? { transcriptUnavailable: options.transcriptUnavailable } : {}),
+    ...(options.terminalOnlyTranscript ? { terminalOnlyTranscript: options.terminalOnlyTranscript } : {})
+  })
   const recordId = stableHash({
     workspace: enablement.config.workspaceId,
     provider: open.provider,
@@ -291,72 +275,22 @@ export async function finalizeOpenTurn(
     generation: open.generation,
     startedAt: open.startedAt
   }).slice(0, 32)
-  const taskEvents = storedEvents.filter((event) => event.stage === 'task_context' && event.kind === 'harness')
-  const taskContexts = new Map(taskEvents.map((event) => [stableHash([
-    event.runtimeMetadata?.invalid, event.runtimeMetadata?.taskId, event.runtimeMetadata?.taskGeneration
-  ]), event.runtimeMetadata]))
-  const taskContext = taskContexts.size === 1 ? [...taskContexts.values()][0] : undefined
-  const boundTask = taskContext && taskContext.invalid !== true && typeof taskContext.taskId === 'string' &&
-    typeof taskContext.taskGeneration === 'string' ? taskContext : undefined
-  const modelEvents = storedEvents.filter((event) => event.stage === 'provider_model' && event.kind === 'harness')
-  const models = new Set(modelEvents.flatMap((event) => {
-    const ids = event.runtimeMetadata?.modelIds
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
-  }))
-  const modelIdentity = resolveModelIdentity(modelEvents, models, evidence.usage.value?.model)
-  const model = modelIdentity.model
-  const turnRoleEvents = storedEvents.filter((event) => event.stage === 'turn_role' && event.kind === 'harness')
-  const turnRoles = new Map(turnRoleEvents.map((event) => [stableHash([
-    event.runtimeMetadata?.invalid, event.runtimeMetadata?.role, event.runtimeMetadata?.roleSource,
-    event.runtimeMetadata?.roleParentId, event.runtimeMetadata?.reviewedSessionId
-  ]), event.runtimeMetadata]))
-  const turnRoleMetadata = turnRoles.size === 1 ? [...turnRoles.values()][0] : undefined
-  const observedTurnRole = continuationRole(open) ?? (turnRoleMetadata && turnRoleMetadata.invalid !== true &&
-    typeof turnRoleMetadata.role === 'string' && typeof turnRoleMetadata.roleSource === 'string'
-    ? {
-        role: String(turnRoleMetadata.role),
-        source: String(turnRoleMetadata.roleSource),
-        ...(typeof turnRoleMetadata.roleParentId === 'string' ? { parentId: String(turnRoleMetadata.roleParentId) } : {}),
-        ...(typeof turnRoleMetadata.reviewedSessionId === 'string'
-          ? { reviewedSessionId: String(turnRoleMetadata.reviewedSessionId) }
-          : {})
-      }
-    : undefined)
-  const draft: Omit<AgentTurnRecord, 'sequence'> = {
-    schemaVersion: 1,
-    recordKind: 'agent_turn',
-    recordId,
-    recorderVersion: RECORDER_VERSION,
-    workspace: { id: enablement.config.workspaceId, root: enablement.workspaceRoot },
-    provider: {
-      id: open.provider,
-      ...(model ? { model } : {}),
-      ...(modelIdentity.modelTier ? { modelTier: modelIdentity.modelTier } : {}),
-      modelStatus: modelIdentity.status,
-      ...(modelIdentity.source ? { modelSource: modelIdentity.source } : {}),
-      ...(modelIdentity.omissionReason ? { modelOmissionReason: modelIdentity.omissionReason } : {})
-    },
-    linkedTaskId: boundTask ? String(boundTask.taskId) : null,
-    ...(boundTask ? { linkedTaskGeneration: String(boundTask.taskGeneration) } : {}),
-    taskLinkStatus: boundTask ? 'bound' : taskEvents.length ? 'conflict' : 'unbound',
-    ...captureRecordMetadata(open.capture),
-    turnRoleStatus: observedTurnRole ? 'observed' : turnRoleEvents.length ? 'conflict' : 'unobserved',
-    ...(observedTurnRole ? { turnRole: observedTurnRole } : {}),
-    sessionId: open.sessionId,
-    ...(effectiveProviderTurnId ? { providerTurnId: effectiveProviderTurnId } : {}),
-    generation: open.generation,
-    turnIndex: open.turnIndex,
-    startedAt,
-    completedAt,
-    durationMs: (end.termination.value?.completedAtSource === 'provider_transcript' ? transcript.durationMs : undefined) ?? (
-      Number.isFinite(startedMs) && Number.isFinite(completedMs) ? Math.max(0, completedMs - startedMs) : 0
-    ),
-    status: transcript.terminalStatus ?? terminalStatus(payload, fallbackStatus),
-    termination: end.termination,
-    transcript: transcriptEvidence,
-    ...evidence
-  }
+  const draft = turnRecordDraft({
+    open, enablement, storedEvents, evidence, transcript, transcriptEvidence, end, startedAt, completedAt,
+    startedMs, completedMs, recordId, payload, fallbackStatus,
+    ...(effectiveProviderTurnId ? { effectiveProviderTurnId } : {})
+  })
   const committed = await commitRecord(enablement.dataRoot, draft, open.uploadEnvironment)
+  if (open.launchClient) {
+    await recordLaunchClientSource(enablement.dataRoot, {
+      schemaVersion: 1,
+      recordId: committed.record.recordId,
+      provider: open.provider,
+      sessionId: open.sessionId,
+      generation: open.generation,
+      client: open.launchClient
+    })
+  }
   const session = await nextSessionState(enablement.dataRoot, root, open.provider, open.sessionId)
   const committedProviderTurnIds = effectiveProviderTurnId
     ? [...new Set([...(session.committedProviderTurnIds ?? []), effectiveProviderTurnId])].slice(-200)
@@ -379,7 +313,7 @@ export async function finalizeOpenTurn(
     ...(chainStores ? { chainStores } : {})
   }, { sync: false })
   await rm(openPath(root), { force: true })
-  await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
+  if (!options.retainTurnRoot) await clearRuntimeTurn(enablement.dataRoot, turnRoot(root, open.generation))
   await releaseStaleAttention(enablement.dataRoot, open.provider, root).catch(error => appendRotatingLog(
     join(enablement.dataRoot, 'logs', 'recorder.log'),
     `${new Date().toISOString()} WARN attention cleanup: ${error instanceof Error ? error.message : String(error)}`

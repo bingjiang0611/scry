@@ -3,7 +3,7 @@ import { realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { ProviderId } from '../../shared/provider.js'
 import type { TraceEvent } from '../../shared/trace.js'
-import { available, partial, type Evidence, type TurnEndReason, type TurnEvidence, type TurnTermination } from '../../shared/turn-record.js'
+import { partial, type TurnEvidence } from '../../shared/turn-record.js'
 import { captureToolContent, isFullToolContentPolicy, persistModelEventContent, persistToolEventContent, type ToolContentPolicy } from './tool-content.js'
 import { writeRecorderContent } from './content-store.js'
 import { markSessionAttention, withSessionAttentionLock } from './attention.js'
@@ -28,7 +28,7 @@ export interface CaptureClaimIdentity {
   baselineAt?: string
   pendingQoderTranscriptPath?: string
 }
-import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf, TERMINAL_CLOCK_SKEW_MS } from './recorder-contracts.js'
+import { type StoredLifecycleEvent, observedNow, piTranscriptAnchorOf, promptOf, startFingerprintOf, stringAt, subagentScopedPayload, timestampOf, transcriptPathOf, providerTurnIdOf } from './recorder-contracts.js'
 
 /**
  * Byte offset where this turn's own rows begin, read when the turn opens.
@@ -55,6 +55,8 @@ export async function nextSessionState(dataRoot: string, root: string, provider:
   return { schemaVersion: 1, lastGeneration: maxGeneration, lastTurnIndex: maxTurnIndex }
 }
 
+export { resolveTurnEnd } from './recorder-turn-end.js'
+
 export async function beginOpenTurn(
   enablement: Extract<RecorderEnablement, { enabled: true }>,
   provider: ProviderId,
@@ -67,7 +69,8 @@ export async function beginOpenTurn(
   capture?: SessionCaptureContext,
   claim?: CaptureClaimIdentity,
   continuation?: import('./runtime-state.js').RecorderContinuation,
-  host?: import('./host-process.js').HostProcess[]
+  host?: import('./host-process.js').HostProcess[],
+  launchClient?: string
 ): Promise<OpenTurnState> {
   const root = sessionRoot(enablement.dataRoot, provider, sessionId)
   const session = await nextSessionState(enablement.dataRoot, root, provider, sessionId)
@@ -128,6 +131,7 @@ export async function beginOpenTurn(
     ...(requestSetId ? { requestSetId } : {}),
     ...(host?.length ? { host } : {}),
     ...(managedByScry ? { managedByScry: true } : {}),
+    ...(!managedByScry && launchClient ? { launchClient } : {}),
     ...(staleTerminalProtection ? { staleTerminalProtection: true } : {}),
     ...(continuation ? { continuation } : {}),
     uploadEnvironment,
@@ -253,87 +257,6 @@ export async function beginCaptureTurn(
   }, undefined, host?.length ? host : undefined)
   if (openingPrompt) await storeLifecycleEvent(enablement, opened, event, payload)
   return opened
-}
-
-function credibleAt(value: string | undefined, startedMs: number, ceilingMs: number): string | undefined {
-  if (!value) return undefined
-  const ms = Date.parse(value)
-  if (!Number.isFinite(ms) || ms < startedMs || ms > ceilingMs) return undefined
-  return new Date(ms).toISOString()
-}
-
-export function resolveTurnEnd(
-  open: OpenTurnState,
-  startedAt: string,
-  transcript: { completedAt?: string },
-  events: TraceEvent[],
-  forced?: 'expired',
-  forcedNote?: string
-): { completedAt: string; termination: Evidence<TurnTermination> } {
-  const startedMs = Date.parse(startedAt)
-  const ceilingMs = Date.now() + TERMINAL_CLOCK_SKEW_MS
-  const reason: TurnEndReason = open.endReason ?? forced ?? 'provider_terminal'
-  const observedAt = open.closingAt ? { observedAt: open.closingAt } : {}
-  const transcriptEnd = credibleAt(transcript.completedAt, startedMs, ceilingMs)
-  if (transcriptEnd) {
-    return {
-      completedAt: transcriptEnd,
-      termination: available({ reason, completedAtSource: 'provider_transcript', ...observedAt }, ['provider_transcript'])
-    }
-  }
-  const lastActivity = events
-    .map((event) => credibleAt(event.ts, startedMs, ceilingMs))
-    .filter((value): value is string => !!value)
-    .sort()
-    .at(-1)
-  const stopEnd = credibleAt(open.stopObservedAt, startedMs, ceilingMs)
-  const workAfterStop = events.some((event) =>
-    !(event.kind === 'hook' && event.stage === 'hook_delivery') &&
-    credibleAt(event.ts, startedMs, ceilingMs) != null &&
-    !!stopEnd && Date.parse(event.ts) > Date.parse(stopEnd)
-  )
-  if (stopEnd && !workAfterStop) {
-    const completedAtSource = open.stopObservedAtSource ?? 'recorder_observed_terminal'
-    return {
-      completedAt: stopEnd,
-      termination: available({ reason, completedAtSource, ...observedAt }, ['lifecycle_hooks'])
-    }
-  }
-  const terminalEnd = credibleAt(open.terminalAt, startedMs, ceilingMs)
-  if (terminalEnd) {
-    const completedAtSource = open.terminalAtSource ?? 'provider_terminal_event'
-    return {
-      completedAt: terminalEnd,
-      termination: available(
-        { reason, completedAtSource, ...observedAt },
-        ['lifecycle_hooks'],
-        completedAtSource === 'provider_terminal_event' ? 'exact' : 'estimated'
-      )
-    }
-  }
-  if (lastActivity) {
-    return {
-      completedAt: lastActivity,
-      termination: partial(
-        { reason, completedAtSource: 'last_observed_activity', ...observedAt },
-        ['lifecycle_hooks'],
-        forcedNote
-          ? `${forcedNote}; completedAt is the last observed activity and is a lower bound`
-          : 'no terminal event was observed; completedAt is the last observed activity and is a lower bound',
-        'estimated'
-      )
-    }
-  }
-  return {
-    completedAt: startedAt,
-    termination: partial(
-      { reason, completedAtSource: 'turn_start', ...observedAt },
-      ['recorder_open_turn'],
-      forcedNote
-        ? `${forcedNote}; no activity was observed either, so this turn has no known end time or duration`
-        : 'no terminal event and no activity were observed, so this turn has no known end time or duration'
-    )
-  }
 }
 
 export async function quarantineOpenTurn(
