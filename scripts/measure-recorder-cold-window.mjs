@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile, spawn } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -12,6 +12,8 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const cli = join(repo, 'packages/turn-recorder-cli/dist/cli/scry.js')
 const outDir = process.env.SCRY_W23_OUT ?? join(process.env.HOME ?? tmpdir(), '.local/state/scry-handoff-evidence/W23')
 const RUNS = Number(process.env.SCRY_W23_RUNS ?? 3)
+const releaseVersion = process.env.SCRY_W23_RELEASE_VERSION ?? '0.2.94'
+const only = process.env.SCRY_W23_ONLY ?? ''
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
@@ -184,12 +186,12 @@ async function warmWindow() {
   }
 }
 
-async function twoHookSets(secondEntry) {
+async function twoHookSets(newEntry, secondEntry, oldFirst = false) {
   const env = { ...process.env }
   delete env.SCRY_RECORDER_TRANSPORT
-  const site = await makeWorkspace('two-hooks', cli, env)
+  const site = await makeWorkspace('two-hooks', oldFirst ? secondEntry : newEntry, env)
   const second = join(site.root, 'hook-other.sh')
-  await hookScript(second, secondEntry, site.workspace)
+  await hookScript(second, oldFirst ? newEntry : secondEntry, site.workspace)
   const session = 'two-hook-session'
   const base = { session_id: session, cwd: site.workspace, timestamp: new Date().toISOString() }
   const events = []
@@ -202,6 +204,9 @@ async function twoHookSets(secondEntry) {
     return result
   }
   await step(site.script, 'UserPromptSubmit', { ...base, prompt: 'two hook sets' })
+  if (env.SCRY_W23_PREWARM === 'old' || env.SCRY_W23_PREWARM === 'new') {
+    await run(process.execPath, [env.SCRY_W23_PREWARM === 'old' ? secondEntry : newEntry, 'recorder', 'start', '--workspace', site.workspace], { env: site.env })
+  }
   await daemonUp(site.workspace, site.env)
   await step(second, 'PreToolUse', {
     ...base, tool_name: 'Bash', tool_use_id: 'tool-1', tool_input: { command: 'printf ok' }
@@ -230,39 +235,94 @@ async function twoHookSets(secondEntry) {
   }
 }
 
-async function secondRecorderEntry() {
-  const copy = await mkdtemp(join(tmpdir(), 'scry-w23-recorder-copy-'))
-  const target = join(copy, 'dist')
-  await cp(join(repo, 'packages/turn-recorder-cli/dist'), target, { recursive: true })
-  const storePath = join(target, 'core/turn-recorder/store.js')
+async function stampVersion(entry, version) {
+  const dist = join(dirname(resolve(entry)), '..')
+  const copy = await mkdtemp(join(tmpdir(), 'scry-w23-stamped-'))
+  await cp(dist, join(copy, 'dist'), { recursive: true })
+  const storePath = join(copy, 'dist/core/turn-recorder/store.js')
   const source = await readFile(storePath, 'utf8')
-  await writeFile(storePath, source.replace(/RECORDER_VERSION = '([0-9.]+)'/, "RECORDER_VERSION = '0.2.92'"))
-  return join(target, 'cli/scry.js')
+  if (!/RECORDER_VERSION = '[0-9.]+'/.test(source)) throw new Error(`cannot stamp a version into ${storePath}`)
+  await writeFile(storePath, source.replace(/RECORDER_VERSION = '[0-9.]+'/, `RECORDER_VERSION = '${version}'`))
+  return join(copy, 'dist/cli/scry.js')
+}
+
+async function oldRecorderEntry() {
+  const entry = process.env.SCRY_W23_OLD_CLI
+  if (!entry) throw new Error('set SCRY_W23_OLD_CLI to a recorder CLI built from main (0.2.93)')
+  const dist = join(dirname(resolve(entry)), '..')
+  const store = await readFile(join(dist, 'core/turn-recorder/store.js'), 'utf8')
+  const version = store.match(/RECORDER_VERSION = '([0-9.]+)'/)?.[1]
+  const patched = await access(join(dist, 'core/turn-recorder/recorder-version-order.js')).then(() => true, () => false)
+  if (patched) throw new Error(`${entry} ships recorder-version-order, so it is not the build main released`)
+  if (version !== '0.2.93') throw new Error(`${entry} reports ${version}, expected the released 0.2.93`)
+  return { entry, version }
+}
+
+async function startReplacement(newEntry, oldEntry, first) {
+  const env = { ...process.env }
+  delete env.SCRY_RECORDER_TRANSPORT
+  const site = await makeWorkspace('old-start', newEntry, env)
+  await run(process.execPath, [first === 'old' ? oldEntry : newEntry, 'recorder', 'start', '--workspace', site.workspace], { env: site.env })
+  const marker = join(site.workspace, '.scry', 'recorder-socket-path')
+  const before = JSON.parse(await readFile(`${(await readFile(marker, 'utf8')).trim()}.owner.json`, 'utf8'))
+  const started = await run(process.execPath, [first === 'old' ? newEntry : oldEntry, 'recorder', 'start', '--workspace', site.workspace], { env: site.env })
+    .then(() => true, (error) => String(error?.stderr ?? error))
+  await sleep(400)
+  const after = JSON.parse(await readFile(`${(await readFile(marker, 'utf8')).trim()}.owner.json`, 'utf8'))
+  await stopDaemon(site.workspace, site.env)
+  await sleep(200)
+  return { before: { version: before.recorderVersion, pid: before.pid }, after: { version: after.recorderVersion, pid: after.pid }, started, root: site.root }
 }
 
 async function main() {
   if (!existsSync(cli)) throw new Error(`build the recorder CLI first: ${cli}`)
   await mkdir(outDir, { recursive: true })
-  const cold = []
-  for (let index = 1; index <= RUNS; index++) cold.push(await coldWindow(index))
-  const warm = await warmWindow()
-  const otherEntry = await secondRecorderEntry()
-  const twoHooks = await twoHookSets(otherEntry)
+  const newEntry = await stampVersion(process.env.SCRY_W23_NEW_CLI ?? cli, releaseVersion)
+  const old = await oldRecorderEntry()
   const report = {
     measuredAt: new Date().toISOString(),
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
-    recorderEntry: cli,
-    recorderVersion: (await readFile(join(repo, 'packages/turn-recorder-cli/package.json'), 'utf8')).match(/"version": "([^"]+)"/)?.[1],
-    cold,
-    warm,
-    twoHooks
+    newEntry,
+    releaseVersion,
+    oldEntry: old.entry,
+    oldVersion: old.version,
+    cold: [],
+    warm: undefined,
+    twoHooks: undefined
   }
+  if (only === 'oldStart' || only === 'newStart') {
+    const first = only === 'oldStart' ? 'new' : 'old'
+    const result = await startReplacement(newEntry, old.entry, first)
+    const path = join(outDir, `start-replacement-${only}-${Date.now()}.json`)
+    await writeFile(path, `${JSON.stringify({ measuredAt: new Date().toISOString(), oldVersion: old.version, releaseVersion, ...result }, null, 2)}\n`)
+    console.log(JSON.stringify({ evidence: path, mode: only, ...result }, null, 2))
+    return
+  }
+  if (only === 'oldFirst') {
+    const result = await twoHookSets(newEntry, old.entry, true)
+    const path = join(outDir, `old-first-${Date.now()}.json`)
+    await writeFile(path, `${JSON.stringify({ measuredAt: new Date().toISOString(), oldVersion: old.version, releaseVersion, twoHooks: result }, null, 2)}\n`)
+    console.log(JSON.stringify({ evidence: path, records: result.records.length, ownerVersionsSeen: result.ownerVersionsSeen,
+      daemonRestarts: result.daemonRestarts, events: result.events.map((e) => [e.event, e.ownerVersion]) }, null, 2))
+    return
+  }
+  if (only !== 'twoHooks') {
+    for (let index = 1; index <= RUNS; index++) {
+      report.cold.push(await coldWindow(index))
+      console.error(`cold run ${index} done`)
+    }
+    report.warm = await warmWindow()
+  }
+  report.twoHooks = await twoHookSets(newEntry, old.entry)
+  if (only === 'twoHooksAgain') report.twoHooksOldFirst = await twoHookSets(newEntry, old.entry, true)
   const path = join(outDir, `cold-window-${Date.now()}.json`)
   await writeFile(path, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({
     evidence: path,
-    cold: cold.map((item) => ({
+    oldVersion: old.version,
+    releaseVersion,
+    cold: report.cold.map((item) => ({
       run: item.run,
       firstEventMs: item.firstEventElapsedMs,
       daemonUpMs: item.daemonUpMs,
@@ -271,16 +331,16 @@ async function main() {
       hookSkips: item.hookSkips,
       queuedForReplay: item.queuedForReplay
     })),
-    warm: { events: warm.events, records: warm.records.length },
+    warm: report.warm ? { events: report.warm.events, records: report.warm.records.length } : null,
     twoHooks: {
-      records: twoHooks.records.length,
-      versions: [...new Set(twoHooks.records.map((record) => record.recorderVersion))],
-      ownerVersions: twoHooks.ownerVersions
+      records: report.twoHooks.records.length,
+      ownerVersions: report.twoHooks.ownerVersions,
+      ownerVersionsSeen: report.twoHooks.ownerVersionsSeen,
+      daemonRestarts: report.twoHooks.daemonRestarts,
+      events: report.twoHooks.events.map((item) => ({ event: item.event, code: item.code, elapsedMs: item.elapsedMs, ownerVersion: item.ownerVersion }))
     }
   }, null, 2))
-  for (const item of [...cold, warm, twoHooks]) {
-    console.error(`run data kept at ${item.root}`)
-  }
+  for (const item of [report.twoHooks]) console.error(`run data kept at ${item.root}`)
 }
 
 main().catch((error) => {
