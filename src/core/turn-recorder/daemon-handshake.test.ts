@@ -49,7 +49,8 @@ describe('recorder daemon version handshake', () => {
           'x-scry-event': 'UserPromptSubmit',
           'content-type': 'application/octet-stream'
         },
-        body: encodeHookEnvironment(env, { session_id: session, prompt: 'apply' })
+        body: encodeHookEnvironment(env, { session_id: session, prompt: 'apply' }),
+        timeoutMs: 5_000
       })
     try {
       for (const [version, session] of [['0.2.65', 'older-patch'], ['0.2.64', 'much-older'], [undefined, 'unversioned']] as const) {
