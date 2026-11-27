@@ -143,8 +143,10 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 
 ## daemon 归属按版本判定
 
-hook 和 daemon 必须同一版本：版本不符时 daemon 不回 200，而是 409 `recorder version mismatch`。
+同一个 protocol 下，daemon 只拒绝比自己更新的 hook。更旧或同版本的 hook 由 daemon 直接处理，不回 409。
 
-旧规则是“任何版本不符都换掉当前 daemon”。两套 hook 指向不同版本时（例如一套固定版本的第三方 hook），每跨一次就重启一次 daemon。实测同一会话 6 个事件里换了 4 次 owner，第一个跨版本事件要 0.6 秒。
+旧规则是“任何版本不符都换掉当前 daemon”。两套 hook 指向不同版本时，每跨一次就重启一次 daemon：实测同一会话 6 个事件里换了 4 次 owner。只在调用方判断新旧挡不住这件事——已经装在旧客户端里的 hook 会把 409 一律当成“该我接管”，所以判定必须放在 daemon 侧。
 
-现在只认新旧：调用方比当前 owner 更新才替换，遇到更旧的 owner 就在本进程处理这次事件，owner 保持不变。升级路径不变（升级后的 hook 比旧 daemon 新，照样接管），同一个会话不会再在两个版本之间来回翻。
+- daemon 收到版本比自己旧的 hook：处理这次事件，不回 409。
+- daemon 收到版本比自己新的 hook：回 409，升级路径照旧由新 hook 接管。
+- protocol 不一致：仍回 409。protocol 自 daemon 出现起就是 `2`，没有发布过 protocol 1 的 hook。
