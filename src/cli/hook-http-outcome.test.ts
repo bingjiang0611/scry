@@ -113,6 +113,39 @@ it('queues the event instead of applying it in-process when the daemon response 
   await expect(readFile(join(sessionRoot, 'open.json'), 'utf8')).rejects.toThrow()
 }, 60_000)
 
+it('queues an event the daemon refuses instead of applying it in-process', async () => {
+  const f = await fixture()
+  const entry = join(f.root, 'cli.mjs')
+  await build({ entryPoints: [resolve('src/cli/scry.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
+  await writeFile(f.cli, `${f.capture}exec ${JSON.stringify(process.execPath)} ${JSON.stringify(entry)} "$@"\n`, { mode: 0o700 })
+  let hookRequests = 0
+  let stops = 0
+  const newer: HttpServer = createHttpServer((request, response) => {
+    request.resume()
+    const json = (code: number, body: unknown): void => {
+      response.writeHead(code, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(body))
+    }
+    if (request.url === HOOK_EVENT_PATH) {
+      hookRequests++
+      json(409, { ok: false, error: 'recorder version mismatch', recorderVersion: '99.0.0', expected: RECORDER_VERSION })
+      return
+    }
+    if (request.url === '/v1/status') { json(200, { running: true, protocol: '2', recorderVersion: '99.0.0', pid: process.pid, socketPath: f.socket }); return }
+    if (request.url === '/v1/stop') { stops++; json(200, { ok: true }); return }
+    json(404, { ok: false, error: 'not found' })
+  })
+  servers.push(newer)
+  await new Promise<void>(resolve => newer.listen(f.socket, resolve))
+  await shell(f.script, f.env)
+  expect(hookRequests).toBe(2)
+  expect(stops).toBe(0)
+  expect(await readFile(f.rejectedMarker, 'utf8')).toBe('409')
+  const sessionRoot = join(f.root, '.scry/runtime/pi', safeKey('protocol'))
+  expect((await recorderInboxEntries(sessionRoot)).length).toBe(1)
+  await expect(readFile(join(sessionRoot, 'open.json'), 'utf8')).rejects.toThrow()
+}, 60_000)
+
 it('replaces a running 0.2.66 daemon that answers 404 on the versioned path, then applies the event once', async () => {
   const f = await fixture()
   const entry = join(f.root, 'cli.mjs')

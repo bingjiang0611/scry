@@ -30,6 +30,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
     const daemonTried = daemonEnabled && process.env.SCRY_RECORDER_DAEMON_TRIED === '1'
     const daemonRejected = daemonEnabled && !daemonTried && process.env.SCRY_RECORDER_DAEMON_REJECTED !== undefined
     let daemonUnknownDelivery = false
+    let daemonRefusedEvent = false
     const send = (): Promise<Record<string, unknown>> => sendRecorderDaemonHook({
       provider,
       event,
@@ -59,6 +60,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
           if (verbose) print(result)
           return 'delivered'
         } catch (error) {
+          if (error instanceof RecorderHookRejected && error.statusCode === 409) daemonRefusedEvent = true
           outcome = classify(error)
           if (daemonRejected || outcome === 'unknown') return outcome
           if (!(error instanceof RecorderHookRejected) || !error.replaceDaemon) return outcome
@@ -83,7 +85,7 @@ export async function hookCommand(args: ParsedArgs): Promise<number> {
       workspace,
       payload,
       managed,
-      queueOnly: daemonTried || daemonUnknownDelivery,
+      queueOnly: daemonTried || daemonUnknownDelivery || daemonRefusedEvent,
       ancestryFromPid: process.ppid
     })
     if (daemonEnabled && !daemonTried && result.status !== 'disabled') {
