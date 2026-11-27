@@ -23,7 +23,7 @@ export { readTranscriptWindow, transcriptReadStats, resetTranscriptReadStats, ty
 export { transcriptSnapshotCacheStats, resetTranscriptSnapshotCache } from './recorder-transcript-cache.js'
 export { mergeTurnTraceEvents } from './recorder-trace-merge.js'
 export { CLOSING_TURN_EXPIRED_REASON } from './recorder-closing-window.js'
-export { recoverRecorder, drainRecorderDelivery, redeliverRecorderCommitNotification, recorderEnablement } from './recorder-recovery.js'
+export { recoverRecorder, drainRecorderDelivery, recorderEnablement } from './recorder-recovery.js'
 export { type RecorderRecoveryScope } from './recorder-recovery-sessions.js'
 export { refreshRecorderPendingHealth } from './recorder-recovery-sessions.js'
 

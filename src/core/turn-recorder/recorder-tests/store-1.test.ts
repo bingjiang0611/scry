@@ -224,7 +224,7 @@ export function registerSuite13(): void {
     expect(await readFile(statePath, 'utf8')).toBe(failedState)
   })
 
-  it('independent hook identities retain their own ACK across successful alternating deliveries', async () => {
+  it('a hook identity that appears later starts from the current ACK and both deliver new records', async () => {
     const root = await workspace()
     await completeTurn(root, 'identity-a')
     await completeTurn(root, 'identity-b')
@@ -233,11 +233,14 @@ export function registerSuite13(): void {
     const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'cli-bundle' }
     const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'sha256:app-bundle' }
     await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 2, pending: 0 })
-    await expect(drainCommitNotifications(dataRoot, b, { maxRecords: 1 })).resolves.toMatchObject({ delivered: 1, pending: 1 })
+    await expect(drainCommitNotifications(dataRoot, b, { maxRecords: 1 })).resolves.toMatchObject({ delivered: 0, pending: 0 })
     await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
-    await expect(commitNotificationStatus(dataRoot, b)).resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
-    await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 0, pending: 0 })
+    await expect(commitNotificationStatus(dataRoot, b)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
+    await completeTurn(root, 'identity-c')
+    await expect(drainCommitNotifications(dataRoot, a, { maxRecords: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
     await expect(drainCommitNotifications(dataRoot, b)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 3, notifyBacklog: 0 })
+    await expect(commitNotificationStatus(dataRoot, b)).resolves.toEqual({ ackedThrough: 3, notifyBacklog: 0 })
     expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(4)
   })
 }

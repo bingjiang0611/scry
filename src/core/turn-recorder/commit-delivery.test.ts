@@ -119,10 +119,17 @@ describe('persistent commit notification failures', () => {
     }
     await drainCommitNotifications(f.dataRoot, f.env)
     expect(await f.readCalls()).toEqual([1, 2, 3, 1, 1, 1, 1])
-    const other = { ...f.env, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'independent-hook' }
+    const other = { ...f.env, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'other-hook' }
+    await expect(drainCommitNotifications(f.dataRoot, other)).resolves.toMatchObject({ delivered: 0 })
+    expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ ackedThrough: 3, notifyBacklog: 0 })
+    await writeFile(f.blocked, '[4]')
+    for (const event of ['UserPromptSubmit', 'Stop']) {
+      await handleRecorderHook({ workspace: f.root, provider: 'pi', event, deferDelivery: true,
+        payload: { session_id: 'session', turn_id: 'turn-4', prompt: 'fixture' } }, f.env)
+    }
     await drainCommitNotifications(f.dataRoot, other)
-    expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ failure: { sequence: 1, attempts: 1 } })
-    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ deadLetterCount: 1, notifyBacklog: 0 })
+    expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ failure: { sequence: 4, attempts: 1 } })
+    expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ deadLetterCount: 1, notifyBacklog: 1 })
   }, 15_000)
 
   it('starts an independent counter for the next failed sequence and reports both dead and blocked work', async () => {

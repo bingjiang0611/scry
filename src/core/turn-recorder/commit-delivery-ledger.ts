@@ -151,8 +151,32 @@ export async function saveProgress(dataRoot: string, state: CommitHookState): Pr
   await writeJsonAtomic(commitHookStatePath(dataRoot, state.hookFingerprint), state)
 }
 
+export async function replacedCommitHookFingerprint(dataRoot: string, fingerprint: string): Promise<boolean> {
+  const own = `${stableHash(fingerprint)}.json`
+  let entries: AsyncIterable<{ name: string; isFile(): boolean }>
+  try {
+    entries = await opendir(join(dataRoot, 'notifications', 'commit-hooks'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
+  for await (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith('.json') && entry.name !== own) return true
+  }
+  return false
+}
+
 export async function loadDeliveryState(dataRoot: string, fingerprint: string): Promise<CommitHookState> {
   const old = await readCommitHookAck(dataRoot, fingerprint)
+  if (old.ackedThrough === null && await replacedCommitHookFingerprint(dataRoot, fingerprint)) {
+    const latest = (await recordFiles(dataRoot)).at(-1)
+    if (latest) {
+      const baseline: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: latest.sequence,
+        processedThrough: latest.sequence, queueVersion: 2 }
+      await saveProgress(dataRoot, baseline)
+      return baseline
+    }
+  }
   const state: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: old.ackedThrough ?? 0,
     processedThrough: old.processedThrough, queueVersion: 2 }
   if (old.queueVersion !== 2) {

@@ -2,28 +2,15 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import { handleRecorderHook, redeliverRecorderCommitNotification } from '../recorder'
+import { handleRecorderHook } from '../recorder'
 import { applyHookEnvironment, decodeHookEnvironment, encodeHookEnvironment } from '../commit-environment'
 import { listenRecorderDaemon, sendRecorderDaemonHook } from '../daemon'
 import { recorderSocketPath } from '../daemon-transport'
 import { listRecords, readHealth, safeKey } from '../store'
 import { launchClientSourcePath } from '../launch-client'
-import { commitHook, completeTurn, payload, workspace } from './fixture.test'
+import { commitHook, payload, workspace } from './fixture.test'
 
 const SESSION = 'redelivery-and-source'
-
-async function commitWorkspaceRecord(root: string, env: NodeJS.ProcessEnv): Promise<string> {
-  await handleRecorderHook({
-    provider: 'claude',
-    event: 'UserPromptSubmit',
-    workspace: root,
-    env,
-    payload: payload(SESSION, { prompt: 'record one turn' })
-  })
-  await handleRecorderHook({ provider: 'claude', event: 'Stop', workspace: root, env, payload: payload(SESSION) })
-  const [record] = await listRecords(join(root, '.scry'))
-  return record.recordId
-}
 
 export function registerRedeliverySuite(): void {
   let grantDir: string | undefined
@@ -67,42 +54,6 @@ export function registerRedeliverySuite(): void {
       await daemon.close()
     }
   }, 40_000)
-  it('daemon start posts the latest committed record again, exactly once per start', async () => {
-    const root = await workspace()
-    const hook = await commitHook(root)
-    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
-    const recordId = await commitWorkspaceRecord(root, env)
-    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
-
-    await expect(redeliverRecorderCommitNotification(root, env)).resolves.toMatchObject({ delivered: true, recordId })
-    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(2)
-
-    await redeliverRecorderCommitNotification(root, env)
-    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(3)
-    const deliveries = (await readFile(hook.capture, 'utf8')).trim().split('\n')
-      .map((line) => JSON.parse(line) as { recordId: string; sequence: number })
-    expect(deliveries.every((delivery) => delivery.recordId === recordId)).toBe(true)
-  }, 40_000)
-
-  it('redelivery stays quiet without a configured commit hook', async () => {
-    const root = await workspace()
-    await completeTurn(root, SESSION)
-    const redelivery = await redeliverRecorderCommitNotification(root, { ...process.env, SCRY_RECORDER_COMMIT_HOOK: '' })
-    expect(redelivery).toMatchObject({ delivered: false, reason: 'commit hook is not configured' })
-  }, 40_000)
-
-  it('redelivery never bypasses an already scheduled retry', async () => {
-    const root = await workspace()
-    const failing = await commitHook(root, 1)
-    const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: failing.path }
-    await commitWorkspaceRecord(root, env)
-    const retry = await redeliverRecorderCommitNotification(root, env)
-    expect(retry.delivered).toBe(false)
-    await expect(redeliverRecorderCommitNotification(root, env)).resolves.toMatchObject({
-      delivered: false, reason: 'scheduled retry; use normal notification drain'
-    })
-  }, 40_000)
-
   it('records the launch client only in the local source tag, never in the record or its upload', async () => {
     const root = await workspace()
     const hook = await commitHook(root)

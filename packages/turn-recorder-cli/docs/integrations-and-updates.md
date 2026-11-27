@@ -47,7 +47,7 @@ scry recorder notify-retry --all-dead --workspace "$PWD"
 
 命令先验证配置与 trust，再将原死信诊断保存到 `notifications/dead-letter-history/<fingerprint-hash>/`，持久化重放请求后移出当前死信、清零计数并正常 drain。`--sequence N` 还接受另一种可恢复状态：该号的 record 文件仍在，但 `delivery-outcomes/<fingerprint-hash>/` 里的投递结果丢失（例如被手工删除）。此时自动 drain 与 ACK 都 fail closed，`doctor` 的 `commitHook.delivery` 会报 `status: error` 并写出 `sequence N` 与具体命令。显式重放只为该号写入一条 `status: replay`、无死信历史的请求，下一次 drain 重新投递它（接收方按 `recordId` 去重）；成功后 ACK 才能继续前进。既不是活动死信、也没有丢失结果的号会被拒绝。原始 record 与原会话环境仍复用。中断后，已持久化的单条请求由 drain 恢复；尚未持久化的条目仍是死信，需查看状态再明确选择，不猜测整批是否完成。若再次失败，从第 1 次和 1 分钟间隔重新开始；没有真实成功就不推进 ACK。指定的 sequence 必须是当前身份的活动死信。`--all-dead` 无活动死信时不制造重放；命令也可处理其他已到期的普通积压，但不会提前执行仍在退避的项。不要编辑 ACK 或删除队列元数据来绕过保护。
 
-冷启动的“最新记录唤醒”跳过已有重试/死信；尚未 ACK 的最新记录首次失败也进入同一退避状态。已经 ACK 的唤醒不倒退 ACK，不能代替外部 uploader 的 outbox 重试。指纹变化仍是独立身份：新身份按既有规则重投全部仍保留记录，旧身份的死信不被悄悄清除；`notify-retry` 不跨身份操作。稳定 `commitHook.id` 未引入，trust/内容指纹校验不变。
+冷启动的“最新记录唤醒”只处理尚未确认的记录：序号不大于检查点的直接跳过，已经 ACK 的不再唤醒，不能代替外部 uploader 的 outbox 重试。尚未 ACK 的最新记录只补投一次，失败照常进入退避；已有重试或死信的号不由这条路径触发。指纹变化仍算独立身份，旧身份的死信不被悄悄清除，`notify-retry` 不跨身份操作；但新身份从当前记录位置起步，不重投它出现前已提交的记录——历史记录不补传是项目约定，需要重放就显式 `notify-retry`。稳定 `commitHook.id` 未引入，trust/内容指纹校验不变。
 
 旧 E 检查点在投递锁内迁移，已有次数和死信保留，不伪造历史等待间隔。旧的 5 次失败/死信需用上述命令显式重放。升级时重启对应 workspace 的 daemon；不要让旧 CLI/daemon 与新队列格式并发运行或降级写入。`delivery-outcomes` 的成功凭据和死信历史目前不会自动回收；有大量历史缺口时目录扫描会增加，需评估增量索引/分段回收，而不是删除未 ACK 的证据。
 
@@ -139,11 +139,11 @@ hook 投递事件走带版本号的 `POST /v2/hook`，并带 `x-scry-recorder-ve
 
 判断不了宿主状态时只按时间判定，宁可把已经静默 30 分钟的托管轮次标 partial 封箱，也不让整个会话从此不再记录。这些封存的记录照常投递提交回调，重复投递由投递账本拦住。
 
-## daemon 启动补投最近一轮
+## daemon 启动按账本排空
 
-daemon 每次启动先跑一次巡检，再对最近一条已提交记录补投一次回调（`redeliverLatestCommitNotification`）。这是给“App 不再替 CLI 重投”之后留的入口：App 关闭期间投递失败的记录，daemon 起来时会再试一次。
+daemon 启动只跑一次巡检，排空由巡检收尾时的普通 drain 完成，没有第二条“补投最新一条”的旁路。投递账本决定投谁：已确认的号不再发，未确认的按顺序、按退避和预算排空，死信不提前重投。
 
-补投不绕过投递账本：已有退避中的失败、或已成为死信的号不会被提前重投，普通积压仍由常规 drain 处理。每次 daemon 启动补投一次，不按 hook 重复触发；接收方按 `recordId` 去重。
+App 需要知道最新状态时自己查 `scry recorder notify-status`，不靠向回调方再推一次。
 
 ## 来源标记只看本地
 

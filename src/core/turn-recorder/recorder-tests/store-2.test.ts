@@ -56,7 +56,7 @@ export function registerSuite14(): void {
     expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
   })
 
-  it('concurrent same and different identities do not duplicate or erase acknowledged deliveries', async () => {
+  it('concurrent same and different identities neither duplicate nor replay records an identity missed', async () => {
     const root = await workspace()
     await completeTurn(root, 'concurrent-a')
     await completeTurn(root, 'concurrent-b')
@@ -68,17 +68,17 @@ export function registerSuite14(): void {
     if (results.some(result => result.pending > 0)) {
       expect(await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')).toContain('lock timeout:')
     } else {
-      expect(results.map(result => result.delivered).sort()).toEqual([0, 2, 2])
+      expect(results.map(result => result.delivered).sort()).toEqual([0, 0, 2])
     }
     const recovered = []
     for (const env of [a, b]) recovered.push(await drainCommitNotifications(dataRoot, env))
     expect(recovered.every(result => result.pending === 0)).toBe(true)
     expect([...results, ...recovered].every(result => result.truncated === false)).toBe(true)
-    expect([...results, ...recovered].map(result => result.delivered).sort()).toEqual([0, 0, 0, 2, 2])
+    expect([...results, ...recovered].map(result => result.delivered).sort()).toEqual([0, 0, 0, 0, 2])
     for (const env of [a, b]) {
       await expect(commitNotificationStatus(dataRoot, env)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
     }
-    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(4)
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(2)
     await expect(access(join(dataRoot, 'notifications', 'commit-hook-state.json'))).rejects.toThrow()
   })
 
@@ -173,7 +173,7 @@ export function registerSuite14(): void {
     await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 0, pending: 0, truncated: false })
   })
 
-  it('冷启动只重投最新正式 record，不改写已推进的 ACK', async () => {
+  it('已确认的 record 不再补投，未确认的只补投一次且不改写已推进的 ACK', async () => {
     const root = await workspace()
     await completeTurn(root, 'redeliver-1')
     await completeTurn(root, 'redeliver-2')
@@ -188,12 +188,18 @@ export function registerSuite14(): void {
     const before = await readFile(statePath, 'utf8')
     await writeFile(hook.capture, '')
 
-    await expect(redeliverLatestCommitNotification(join(root, '.scry'), env)).resolves.toMatchObject({
-      delivered: true,
-      sequence: 2
-    })
+    await expect(redeliverLatestCommitNotification(join(root, '.scry'), env))
+      .resolves.toMatchObject({ delivered: false, sequence: 2, reason: 'already acknowledged; no redelivery' })
+    expect(await readFile(hook.capture, 'utf8')).toBe('')
+    expect(await readFile(statePath, 'utf8')).toBe(before)
+
+    await completeTurn(root, 'redeliver-3')
+    await expect(redeliverLatestCommitNotification(join(root, '.scry'), env)).resolves.toMatchObject({ delivered: true, sequence: 3 })
     const notifications = (await readFile(hook.capture, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
-    expect(notifications).toEqual([expect.objectContaining({ sessionId: 'redeliver-2', sequence: 2 })])
+    expect(notifications).toEqual([expect.objectContaining({ sessionId: 'redeliver-3', sequence: 3 })])
+    await expect(redeliverLatestCommitNotification(join(root, '.scry'), env))
+      .resolves.toMatchObject({ delivered: false, reason: 'already acknowledged; no redelivery' })
+    expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(1)
     expect(await readFile(statePath, 'utf8')).toBe(before)
   })
 

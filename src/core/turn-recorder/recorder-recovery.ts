@@ -6,7 +6,7 @@ import { recoverManagedRecorderTurns } from './managed.js'
 import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.js'
 import { resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { recorderInboxEntries } from './inbox.js'
-import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, redeliverLatestCommitNotification, updateHealth } from './store.js'
+import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, updateHealth } from './store.js'
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, releaseStaleAttention, type RecorderOpenTurnState as OpenTurnState, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { clearSessionFailure, noteSessionFailure, sessionFailureKey } from './session-failures.js'
 import { deferQuietSession, recordSessionVisit } from './session-visit.js'
@@ -316,15 +316,6 @@ export async function recoverRecorder(
       ...(scope ? { scope } : {})
     })
   }
-}
-
-export async function redeliverRecorderCommitNotification(
-  workspace: string,
-  env: NodeJS.ProcessEnv = process.env
-): Promise<{ delivered: boolean; recordId?: string; sequence?: number; reason?: string }> {
-  const enablement = await resolveRecorderEnablement(workspace, env)
-  if (!enablement.enabled) return { delivered: false, reason: `recorder is disabled: ${enablement.reason}` }
-  return redeliverLatestCommitNotification(enablement.dataRoot, await activatedCommitHookEnv(enablement, env))
 }
 
 export async function drainRecorderDelivery(
