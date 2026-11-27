@@ -67,7 +67,7 @@ async function backdateSession(root: string, session: string, minutes: number): 
   }
 }
 
-async function setHost(root: string, session: string, host: Array<{ pid: number }> | undefined): Promise<void> {
+async function setHost(root: string, session: string, host: Array<{ pid: number; token?: string }> | undefined): Promise<void> {
   const path = openPathOf(root, session)
   const open = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
   if (host) open.host = host
@@ -246,6 +246,34 @@ export function registerManagedOrphanSuite(): void {
     await expect(recoverRecorder(root)).resolves.toMatchObject({ recovered: 0, expired: 0 })
     await expect(recorderQuarantinedOpenTurns(sessionDir)).resolves.toHaveLength(1)
     await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+  }, 40_000)
+
+  it('宿主状态读不到时保持不动，只有确认已退出才封存', async () => {
+    const root = await managedWorkspace()
+    await startManaged(root, 'orphan-host-unknown')
+    await setHost(root, 'orphan-host-unknown', [{ pid: process.pid, token: 'stale-token' }])
+    await backdateSession(root, 'orphan-host-unknown', 35)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 0, pending: 1, expired: 0 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
+    const [turn] = await recorderOpenTurns(join(root, '.scry'))
+    expect(turn).toMatchObject({ sessionId: 'orphan-host-unknown', managed: true })
+
+    await setHost(root, 'orphan-host-unknown', [{ pid: DEAD_PID }])
+    await backdateSession(root, 'orphan-host-unknown', 35)
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    await expect(listRecords(join(root, '.scry'))).resolves.toHaveLength(1)
+  }, 40_000)
+
+  it('没有宿主记录的历史托管轮次仍按静默时限封存', async () => {
+    const root = await managedWorkspace()
+    await startManaged(root, 'orphan-no-host')
+    await setHost(root, 'orphan-no-host', undefined)
+    await backdateSession(root, 'orphan-no-host', 35)
+
+    await expect(recoverRecorder(root)).resolves.toEqual({ recovered: 1, pending: 0, expired: 1 })
+    const [record] = await listRecords(join(root, '.scry'))
+    expect(record.termination?.omissionReason).toContain('no process is recorded as hosting it')
   }, 40_000)
 
   it('降级封存的记录只投递一次提交回调', async () => {

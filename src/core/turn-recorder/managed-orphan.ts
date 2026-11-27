@@ -42,12 +42,14 @@ export async function managedOrphanVerdict(args: {
   const threshold = args.thresholdMs ?? MANAGED_TURN_ORPHAN_MS
   const quietFor = now - await lastActivityAt(args.root, open, now)
   if (!Number.isFinite(quietFor) || quietFor < threshold) return undefined
-  if (await hostProcessState(open.host) === 'running') return undefined
+  const hosted = Boolean(open.host?.length)
+  const hostState = await hostProcessState(open.host)
+  if (hosted ? hostState !== 'gone' : hostState === 'running') return undefined
   const waiting = open.status === 'closing'
   return {
     status: waiting ? open.terminalFallbackStatus ?? 'completed' : 'interrupted',
     at: new Date(now).toISOString(),
-    reason: `${MANAGED_ORPHAN_REASON}: the turn was ${waiting ? 'waiting for its supervisor to seal it' : 'still open'}, nothing wrote to it for ${Math.round(quietFor / 60_000)} minutes, and no process recorded as hosting it is still running`
+    reason: `${MANAGED_ORPHAN_REASON}: the turn was ${waiting ? 'waiting for its supervisor to seal it' : 'still open'}, nothing wrote to it for ${Math.round(quietFor / 60_000)} minutes, and ${hosted ? 'the process recorded as hosting it is gone' : 'no process is recorded as hosting it'}`
   }
 }
 
