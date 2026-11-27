@@ -11,7 +11,7 @@ import {
 } from './commit-hook-trust'
 import { redeliverGrantedCommitHooksAtStartup } from './commit-hook-startup'
 import { handleRecorderHook } from '../core/turn-recorder/recorder'
-import { drainCommitNotifications, stableHash } from '../core/turn-recorder/store'
+import { drainCommitNotifications } from '../core/turn-recorder/store'
 
 const roots: string[] = []
 const fixture = async () => {
@@ -221,7 +221,7 @@ describe('commit hook bundle trust', () => {
     await expect(access(capture)).rejects.toThrow()
   })
 
-  it('冷启动只对当前指纹匹配的冻结 callback 重投最新 record', async () => {
+  it('冷启动只对当前指纹匹配的冻结 callback 重投未确认的 record', async () => {
     const value = await fixture()
     const capture = join(value.workspace, 'capture.jsonl')
     await writeFile(join(value.workspace, value.descriptor.entry), `#!/bin/sh\ncat >> ${JSON.stringify(capture)}\n`)
@@ -233,16 +233,14 @@ describe('commit hook bundle trust', () => {
     await store.grant(value.workspace, inspection.fingerprint)
     const capability = await store.materialize(inspection)
     await drainCommitNotifications(join(value.workspace, '.scry'), { ...process.env, ...capability.env })
-    const statePath = join(value.workspace, '.scry', 'notifications', 'commit-hooks', `${stableHash(inspection.fingerprint)}.json`)
-    const before = await readFile(statePath, 'utf8')
     await writeFile(capture, '')
+    await completeTurn(value.workspace, 'startup-3')
 
     await expect(redeliverGrantedCommitHooksAtStartup(value.userData)).resolves.toEqual({
       redelivered: 1, skipped: 0, errors: []
     })
     const rows = (await readFile(capture, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
-    expect(rows).toEqual([expect.objectContaining({ sessionId: 'startup-2', sequence: 2 })])
-    expect(await readFile(statePath, 'utf8')).toBe(before)
+    expect(rows).toEqual([expect.objectContaining({ sessionId: 'startup-3', sequence: 3 })])
 
     await writeFile(join(value.workspace, 'hooks', 'helper.txt'), 'dependency-v2\n')
     await writeFile(capture, '')
