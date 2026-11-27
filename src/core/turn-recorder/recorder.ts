@@ -6,7 +6,7 @@ import { recordProviderActivity } from './provider-activity.js'
 import { resolveRecorderEnablement } from './config.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, recordError, safeKey, updateHealth } from './store.js'
 import { HOOK_LOCK_WAIT_MS, withRecorderSessionLock } from './runtime-state.js'
-import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, providerTurnIdOf, sessionIdOf, type RecorderHookInput, type RecorderHookResult, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
+import { BACKGROUND_WAKE_PROVIDERS, END_EVENTS, START_EVENTS, providerTurnIdOf, sessionIdOf, committedDeliveryTrigger, type RecorderHookInput, type RecorderHookResult, CODEX_SUBAGENT_MARKER } from './recorder-contracts.js'
 import { applyHookLocked } from './recorder-hook-locked.js'
 import { isLockTimeout } from './recorder-hook-seal.js'
 import { replayQueuedHooks } from './recorder-hook-replay.js'
@@ -94,7 +94,7 @@ export async function handleRecorderHook(input: RecorderHookInput): Promise<Reco
         await drainCommitNotifications(
           enablement.dataRoot,
           await activatedCommitHookEnv(enablement, hookEnv),
-          { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS }
+          { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS, ...committedDeliveryTrigger(result) }
         )
       }
     } catch (error) {

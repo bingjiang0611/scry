@@ -7,12 +7,14 @@ export async function deliverCommitNotifications(
   dataRoot: string,
   env: NodeJS.ProcessEnv | undefined,
   delivery: CommitNotificationDelivery,
-  scope?: CommitNotificationScope
+  scope?: CommitNotificationScope,
+  triggerSequence?: number
 ): Promise<void> {
   const drain = (): Promise<unknown> => drainCommitNotifications(dataRoot, env, {
     maxRecords: HOOK_DRAIN_MAX_RECORDS,
     budgetMs: HOOK_DRAIN_BUDGET_MS,
-    ...(scope ? { scope } : {})
+    ...(scope ? { scope } : {}),
+    ...(triggerSequence === undefined ? {} : { triggerSequence })
   })
   if (delivery === 'detach') {
     void drain().catch(() => undefined)

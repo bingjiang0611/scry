@@ -18,11 +18,11 @@ describe('commit notification drain budget', () => {
     const hook = await commitHook(root)
     const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
 
-    await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2 }))
+    await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2, triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 2, pending: 1, truncated: true })
     await expect(readFile(commitAckPath(root), 'utf8'))
       .resolves.toContain('"ackedThrough":2')
-    await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2 }))
+    await expect(drainCommitNotifications(join(root, '.scry'), env, { maxRecords: 2, triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
     expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
@@ -35,7 +35,7 @@ describe('commit notification drain budget', () => {
     let clock = 0
     const now = (): number => (clock += 10_000)
 
-    await expect(drainCommitNotifications(join(root, '.scry'), env, { budgetMs: 1, now }))
+    await expect(drainCommitNotifications(join(root, '.scry'), env, { budgetMs: 1, now, triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 1, pending: 2, truncated: true })
   })
 
@@ -44,7 +44,7 @@ describe('commit notification drain budget', () => {
     await backlog(root, 2)
     const failing = await commitHook(root, 1)
 
-    await expect(drainCommitNotifications(join(root, '.scry'), { ...process.env, SCRY_RECORDER_COMMIT_HOOK: failing.path }, { maxRecords: 2 }))
+    await expect(drainCommitNotifications(join(root, '.scry'), { ...process.env, SCRY_RECORDER_COMMIT_HOOK: failing.path }, { maxRecords: 2, triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 0, pending: 2, truncated: false })
   })
 
@@ -53,7 +53,7 @@ describe('commit notification drain budget', () => {
     await backlog(root, 4)
     const hook = await commitHook(root)
 
-    await expect(drainCommitNotifications(join(root, '.scry'), { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }))
+    await expect(drainCommitNotifications(join(root, '.scry'), { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }, { triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 4, pending: 0, truncated: false })
   })
 })

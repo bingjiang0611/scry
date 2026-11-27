@@ -30,7 +30,7 @@ export function registerSuite5(): void {
     expect((await listRecords(join(root, '.scry'))).length).toBe(1)
     await expect(access(capture)).rejects.toMatchObject({ code: 'ENOENT' })
 
-    await drainRecorderDelivery(root, env)
+    await drainRecorderDelivery(root, env, 1)
     const delivered = (await readFile(capture, 'utf8')).trim().split('\n')
     expect(delivered).toHaveLength(1)
     expect(JSON.parse(delivered[0])).toMatchObject({ event: 'record-committed', sequence: 1 })

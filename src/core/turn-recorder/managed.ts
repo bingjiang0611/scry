@@ -341,6 +341,7 @@ export async function commitManagedRecorderTurn(input: {
     await writeJsonAtomic(existing.path, committedHandoff)
     return commitHandoff(enablement, root, committedHandoff)
   }, { waitMs: SESSION_LOCK_WAIT_MS })
-  await deliverCommitNotifications(enablement.dataRoot, input.env, input.commitNotifications ?? 'await')
+  await deliverCommitNotifications(enablement.dataRoot, input.env, input.commitNotifications ?? 'await', undefined,
+    result.status === 'committed' ? result.record.sequence : undefined)
   return result
 }

@@ -7,6 +7,7 @@ import { commitHookEnv, resolveCommitHookActivation } from './commit-hook-grant.
 import { resolveRecorderEnablement, type RecorderEnablement } from './config.js'
 import { recorderInboxEntries } from './inbox.js'
 import { HOOK_DRAIN_BUDGET_MS, HOOK_DRAIN_MAX_RECORDS, drainCommitNotifications, updateHealth } from './store.js'
+import { recordFiles } from './store-index.js'
 import { withRecorderSessionLock, withRecorderSessionKeyLock, recorderOpenPath as openPath, releaseStaleAttention, type RecorderOpenTurnState as OpenTurnState, SESSION_LOCK_WAIT_MS } from './runtime-state.js'
 import { clearSessionFailure, noteSessionFailure, sessionFailureKey } from './session-failures.js'
 import { deferQuietSession, recordSessionVisit } from './session-visit.js'
@@ -67,6 +68,7 @@ export async function recoverRecorder(
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return { recovered: 0, pending: 0, expired: 0 }
   const expiryMs = OPEN_TURN_EXPIRY_MS
+  const sequenceBefore = (await recordFiles(enablement.dataRoot)).at(-1)?.sequence ?? 0
   let recovered = 0
   let pending = 0
   let expired = 0
@@ -312,22 +314,25 @@ export async function recoverRecorder(
     })
     return { recovered, pending, expired }
   } finally {
+    const committedHere = (await recordFiles(enablement.dataRoot)).at(-1)?.sequence ?? 0
     await drainCommitNotifications(enablement.dataRoot, await activatedCommitHookEnv(enablement, env), {
-      ...(scope ? { scope } : {})
+      ...(scope ? { scope } : {}),
+      ...(committedHere > sequenceBefore ? { triggerSequence: sequenceBefore + 1 } : {})
     })
   }
 }
 
 export async function drainRecorderDelivery(
   workspace: string,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  triggerSequence?: number
 ): Promise<void> {
   const enablement = await resolveRecorderEnablement(workspace, env)
   if (!enablement.enabled) return
   await drainCommitNotifications(
     enablement.dataRoot,
     await activatedCommitHookEnv(enablement, env),
-    { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS }
+    { maxRecords: HOOK_DRAIN_MAX_RECORDS, budgetMs: HOOK_DRAIN_BUDGET_MS, ...(triggerSequence === undefined ? {} : { triggerSequence }) }
   ).catch(async (error) => {
     const message = error instanceof Error ? error.message : String(error)
     await appendRotatingLog(

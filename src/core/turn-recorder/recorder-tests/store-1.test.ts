@@ -75,7 +75,7 @@ export function registerSuite13(): void {
     const hook = await commitHook(root)
     const env = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
 
-    await expect(drainCommitNotifications(join(root, '.scry'), env)).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
+    await expect(drainCommitNotifications(join(root, '.scry'), env, { triggerSequence: 1 })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
     const notification = JSON.parse((await readFile(hook.capture, 'utf8')).trim()) as Record<string, unknown>
     expect(notification).toEqual({
       schemaVersion: 2,
@@ -99,7 +99,7 @@ export function registerSuite13(): void {
     const failed = await commitHook(root, 1)
     const base = { ...process.env, SCRY_RECORDER_COMMIT_HOOK: failed.path }
 
-    await expect(drainCommitNotifications(join(root, '.scry'), base))
+    await expect(drainCommitNotifications(join(root, '.scry'), base, { triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     expect(JSON.parse(await readFile(commitAckPath(root), 'utf8'))).toMatchObject({ ackedThrough: 0, processedThrough: 1, queueVersion: 2 })
     const pending = await commitNotificationStatus(join(root, '.scry'), base)
@@ -109,7 +109,7 @@ export function registerSuite13(): void {
     try {
       await expect(drainCommitNotifications(join(root, '.scry'), {
         ...base, SCRY_RECORDER_COMMIT_HOOK: hook.path
-      })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
+      }, { triggerSequence: 1 })).resolves.toEqual({ delivered: 1, pending: 0, truncated: false })
     } finally { clock.mockRestore() }
     await expect(readFile(commitAckPath(root), 'utf8'))
       .resolves.toContain('"ackedThrough":1')
@@ -139,7 +139,7 @@ export function registerSuite13(): void {
     const env = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path }
     const dataRoot = join(root, '.scry')
 
-    await expect(drainCommitNotifications(dataRoot, env))
+    await expect(drainCommitNotifications(dataRoot, env, { triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     await expect(redeliverLatestCommitNotification(dataRoot, env))
       .resolves.toMatchObject({ delivered: false, reason: 'scheduled retry; use normal notification drain' })
@@ -163,7 +163,7 @@ export function registerSuite13(): void {
     const dataRoot = join(root, '.scry')
     await expect(drainCommitNotifications(dataRoot, {
       PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path
-    })).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
+    }, { triggerSequence: 1 })).resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     const log = await readFile(join(dataRoot, 'logs', 'recorder.log'), 'utf8')
     expect(JSON.parse(log.trim().split('; diagnostic=')[1]))
       .toMatchObject({ acknowledged: false, reason: 'timeout', signal: 'SIGTERM', recorderPid: process.pid })
@@ -194,7 +194,7 @@ export function registerSuite13(): void {
     const dataRoot = join(root, '.scry')
     const statePath = commitAckPath(root, configured.SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT)
 
-    await expect(drainCommitNotifications(dataRoot, configured, { maxRecords: 1 }))
+    await expect(drainCommitNotifications(dataRoot, configured, { maxRecords: 1, triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 1, pending: 1, truncated: true })
     const saved = await readFile(statePath, 'utf8')
     const hosted = { ...env, SCRY_RECORDER_COMMIT_HOOK: hook.path }
@@ -209,7 +209,7 @@ export function registerSuite13(): void {
       .resolves.toEqual({ ackedThrough: 1, notifyBacklog: 1 })
     await writeFile(failure, '')
     expect(commitHookEnv(await activate(), env)).toEqual(restored)
-    await expect(drainCommitNotifications(dataRoot, restored))
+    await expect(drainCommitNotifications(dataRoot, restored, { triggerSequence: 1 }))
       .resolves.toEqual({ delivered: 0, pending: 1, truncated: false })
     const failedState = await readFile(statePath, 'utf8')
     expect(JSON.parse(failedState)).toMatchObject({ ...JSON.parse(saved), processedThrough: 2 })
@@ -232,13 +232,13 @@ export function registerSuite13(): void {
     const dataRoot = join(root, '.scry')
     const a = { PATH: '/usr/bin:/bin', SCRY_RECORDER_COMMIT_HOOK: hook.path, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'cli-bundle' }
     const b = { ...a, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'sha256:app-bundle' }
-    await expect(drainCommitNotifications(dataRoot, a)).resolves.toMatchObject({ delivered: 2, pending: 0 })
-    await expect(drainCommitNotifications(dataRoot, b, { maxRecords: 1 })).resolves.toMatchObject({ delivered: 0, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, a, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 2, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, b, { maxRecords: 1, triggerSequence: 1 })).resolves.toMatchObject({ delivered: 0, pending: 0 })
     await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
     await expect(commitNotificationStatus(dataRoot, b)).resolves.toEqual({ ackedThrough: 2, notifyBacklog: 0 })
     await completeTurn(root, 'identity-c')
-    await expect(drainCommitNotifications(dataRoot, a, { maxRecords: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
-    await expect(drainCommitNotifications(dataRoot, b)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, a, { maxRecords: 1, triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, b, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
     await expect(commitNotificationStatus(dataRoot, a)).resolves.toEqual({ ackedThrough: 3, notifyBacklog: 0 })
     await expect(commitNotificationStatus(dataRoot, b)).resolves.toEqual({ ackedThrough: 3, notifyBacklog: 0 })
     expect((await readFile(hook.capture, 'utf8')).trim().split('\n')).toHaveLength(4)

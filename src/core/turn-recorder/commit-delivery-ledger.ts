@@ -1,9 +1,9 @@
-import { opendir, rm } from 'node:fs/promises'
+import { opendir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { syncDirectory, writeJsonAtomic } from './io.js'
 import { parseRecordName, recordFiles, stableHash } from './store-index.js'
 import { readArchiveState } from './store-archive.js'
-import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitHookState, type CommitNotificationFailure, commitHookStatePath, deadLetterDirectory, readCommitHookAck, readDeadLetter, readNotificationObject, recordName, validFailure } from './commit-delivery-state.js'
+import { COMMIT_NOTIFICATION_MAX_FAILURES, type CommitHookState, type CommitNotificationFailure, commitHookStatePath, deadLetterDirectory, publishDeadLetter, readCommitHookAck, readDeadLetter, readNotificationObject, recordName, validFailure } from './commit-delivery-state.js'
 
 const RETRY_DELAYS_MS = [60_000, 300_000, 900_000, 3_600_000]
 const DETAILS_LIMIT = 20
@@ -151,31 +151,62 @@ export async function saveProgress(dataRoot: string, state: CommitHookState): Pr
   await writeJsonAtomic(commitHookStatePath(dataRoot, state.hookFingerprint), state)
 }
 
-export async function replacedCommitHookFingerprint(dataRoot: string, fingerprint: string): Promise<boolean> {
-  const own = `${stableHash(fingerprint)}.json`
-  let entries: AsyncIterable<{ name: string; isFile(): boolean }>
-  try {
-    entries = await opendir(join(dataRoot, 'notifications', 'commit-hooks'))
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw error
-  }
-  for await (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith('.json') && entry.name !== own) return true
-  }
-  return false
+export async function noDeliveryCheckpoint(dataRoot: string, fingerprint: string): Promise<boolean> {
+  const old = await readCommitHookAck(dataRoot, fingerprint)
+  return old.isolatedAck === null && old.legacyAck === null
 }
 
-export async function loadDeliveryState(dataRoot: string, fingerprint: string): Promise<CommitHookState> {
-  const old = await readCommitHookAck(dataRoot, fingerprint)
-  if (old.ackedThrough === null && await replacedCommitHookFingerprint(dataRoot, fingerprint)) {
-    const latest = (await recordFiles(dataRoot)).at(-1)
-    if (latest) {
-      const baseline: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: latest.sequence,
-        processedThrough: latest.sequence, queueVersion: 2 }
-      await saveProgress(dataRoot, baseline)
-      return baseline
+interface PreviousLedger {
+  fingerprint: string
+  ackedThrough: number
+}
+
+async function mostActivePreviousLedger(dataRoot: string, fingerprint: string): Promise<PreviousLedger | null> {
+  const own = `${stableHash(fingerprint)}.json`
+  const directory = join(dataRoot, 'notifications', 'commit-hooks')
+  let entries: AsyncIterable<{ name: string; isFile(): boolean }>
+  try { entries = await opendir(directory) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  const candidates: Array<PreviousLedger & { activity: number }> = []
+  for await (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json') || entry.name === own) continue
+    const raw = await readNotificationObject<CommitHookState>(join(directory, entry.name))
+    if (!raw || raw.schemaVersion !== 1 || typeof raw.hookFingerprint !== 'string' ||
+      !Number.isSafeInteger(raw.ackedThrough) || raw.ackedThrough < 0) continue
+    if (`${stableHash(raw.hookFingerprint)}.json` !== entry.name) continue
+    const { mtimeMs } = await stat(join(directory, entry.name))
+    candidates.push({ fingerprint: raw.hookFingerprint, ackedThrough: raw.ackedThrough, activity: mtimeMs })
+  }
+  candidates.sort((a, b) => b.activity - a.activity)
+  const [active] = candidates
+  return active ? { fingerprint: active.fingerprint, ackedThrough: active.ackedThrough } : null
+}
+
+async function adoptLedger(dataRoot: string, previous: PreviousLedger, fingerprint: string, after: number): Promise<void> {
+  for await (const outcome of outcomes(dataRoot, previous.fingerprint, after)) {
+    if (outcome.status === 'delivered') {
+      await saveOutcome(dataRoot, fingerprint, outcome)
+      continue
     }
+    if (outcome.status === 'replay' && outcome.historyKey !== undefined) {
+      const history = await readNotificationObject<CommitNotificationFailure>(historyPath(dataRoot, previous.fingerprint, outcome.historyKey))
+      if (history) await writeJsonAtomic(historyPath(dataRoot, fingerprint, outcome.historyKey), history)
+    }
+    await saveOutcome(dataRoot, fingerprint, outcome)
+    if (outcome.status === 'dead') await publishDeadLetter(dataRoot, fingerprint, outcome.failure)
+  }
+}
+
+export async function loadDeliveryState(dataRoot: string, fingerprint: string, triggerSequence?: number): Promise<CommitHookState> {
+  const old = await readCommitHookAck(dataRoot, fingerprint)
+  if (old.isolatedAck === null && old.legacyAck === null && triggerSequence !== undefined) {
+    const previous = await mostActivePreviousLedger(dataRoot, fingerprint)
+    const baseline = previous ? previous.ackedThrough : Math.max(0, triggerSequence - 1)
+    if (previous) await adoptLedger(dataRoot, previous, fingerprint, baseline)
+    return { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: baseline,
+      processedThrough: baseline, queueVersion: 2 }
   }
   const state: CommitHookState = { schemaVersion: 1, hookFingerprint: fingerprint, ackedThrough: old.ackedThrough ?? 0,
     processedThrough: old.processedThrough, queueVersion: 2 }

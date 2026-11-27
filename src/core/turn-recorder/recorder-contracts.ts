@@ -24,6 +24,10 @@ export interface RecorderHookInput {
   launchClient?: string
 }
 
+export function committedDeliveryTrigger(result: RecorderHookResult): { triggerSequence?: number } {
+  return result.status === 'committed' && result.record ? { triggerSequence: result.record.sequence } : {}
+}
+
 export interface RecorderHookResult {
   status: 'disabled' | 'ignored' | 'started' | 'recorded' | 'committed' | 'duplicate' | 'pending' | 'orphan'
   reason?: string

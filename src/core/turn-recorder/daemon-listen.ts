@@ -4,6 +4,7 @@ import { chmod, mkdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { type ProviderId } from '../../shared/provider.js'
 import { applyHookEnvironment } from './commit-environment.js'
+import { committedDeliveryTrigger } from './recorder-contracts.js'
 import { recorderEnablement, recoverRecorder, handleRecorderHook, drainRecorderDelivery } from './recorder.js'
 import { appendRotatingLog, readJson, withDirectoryLock, writeJsonAtomic, writeTextAtomic } from './io.js'
 import type { RecorderEnablement } from './config.js'
@@ -271,7 +272,7 @@ async function startRecorderDaemon(
       })
       scheduleRecovery(true)
       writeJson(response, 200, { ok: true, status: result.status })
-      const delivery = drainRecorderDelivery(enablement.workspaceRoot, env).catch(() => undefined)
+      const delivery = drainRecorderDelivery(enablement.workspaceRoot, env, committedDeliveryTrigger(result).triggerSequence).catch(() => undefined)
       deliveryInFlight.add(delivery)
       void delivery.finally(() => { deliveryInFlight.delete(delivery) })
     } catch (error) {
@@ -342,6 +343,7 @@ export async function serveRecorderDaemon(args: {
   idleUpdate?: () => Promise<string | null>
 }): Promise<void> {
   const handle = await listenRecorderDaemon(args)
+  await recoverRecorder(args.workspace, args.env, undefined, undefined, { qoderStopRecoveryScheduled: true }).catch(() => undefined)
   const shutdown = (): void => { void handle.close() }
   process.once('SIGTERM', shutdown)
   process.once('SIGINT', shutdown)

@@ -171,7 +171,7 @@ it('the capture-start process is the only one that sees the host callback, and i
   expect(records).toHaveLength(1)
   await expect(drainCommitNotifications(join(root, '.scry'), {
     ...env, SCRY_RECORDER_COMMIT_HOOK: hook, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: undefined
-  })).resolves.toMatchObject({ delivered: 1 })
+  }, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1 })
 })
 
 it('repeated claims are idempotent per captureId and never open a second generation', async () => {

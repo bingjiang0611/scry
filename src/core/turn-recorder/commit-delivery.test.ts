@@ -53,7 +53,9 @@ const fd = fs.openSync(target, 'r'); fs.fsyncSync(fd); fs.closeSync(fd)
   const readCalls = async () => (await readFile(calls, 'utf8')).trim().split('\n').map(Number)
   let clock = Date.now()
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
-  return { root, dataRoot, config, hook, env, blocked, records, statePath, readCalls, advance: (milliseconds: number) => { clock += milliseconds } }
+  const drain = (options: Parameters<typeof drainCommitNotifications>[2] = {}) =>
+    drainCommitNotifications(dataRoot, env, { ...options, triggerSequence: records[0].sequence })
+  return { root, dataRoot, config, hook, env, blocked, records, statePath, readCalls, drain, advance: (milliseconds: number) => { clock += milliseconds } }
 }
 
 async function doctor(f: Awaited<ReturnType<typeof fixture>>) {
@@ -69,16 +71,16 @@ async function doctor(f: Awaited<ReturnType<typeof fixture>>) {
 
 const backoffs = [60_000, 300_000, 900_000, 3_600_000]
 async function exhaust(f: Awaited<ReturnType<typeof fixture>>, maxRecords?: number) {
-  await drainCommitNotifications(f.dataRoot, f.env, { maxRecords })
+  await f.drain({ maxRecords })
   for (const delay of backoffs) {
     if (maxRecords === undefined) {
       const before = await commitNotificationStatus(f.dataRoot, f.env)
       f.advance(delay - 1)
-      await drainCommitNotifications(f.dataRoot, f.env)
+      await f.drain()
       expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual(before)
       f.advance(1)
     } else f.advance(delay)
-    await drainCommitNotifications(f.dataRoot, f.env, { maxRecords })
+    await f.drain({ maxRecords })
   }
 }
 
@@ -92,12 +94,12 @@ async function retry(f: Awaited<ReturnType<typeof fixture>>, flags: Map<string, 
 describe('persistent commit notification failures', () => {
   it('reports the failed sequence, dead-letters at five, and delivers later records without claiming a contiguous ACK', async () => {
     const f = await fixture()
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
       failure: { sequence: 1, attempts: 1, reason: 'exit', exitCode: 71 }
     })
     expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'warn', detail: expect.stringMatching(/sequence 1.*1 failed/) } })
-    for (const delay of backoffs) { f.advance(delay); await drainCommitNotifications(f.dataRoot, f.env) }
+    for (const delay of backoffs) { f.advance(delay); await f.drain() }
     expect(await f.readCalls()).toEqual([1, 2, 3, 1, 1, 1, 1])
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
       ackedThrough: 0, processedThrough: 3, notifyBacklog: 0, deadLetterCount: 1,
@@ -117,17 +119,17 @@ describe('persistent commit notification failures', () => {
     for (const sequence of [2, 3]) {
       expect(JSON.parse(await readFile(join(f.root, `accepted-${sequence}.json`), 'utf8'))).toMatchObject({ sequence })
     }
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await f.readCalls()).toEqual([1, 2, 3, 1, 1, 1, 1])
     const other = { ...f.env, SCRY_RECORDER_COMMIT_HOOK_FINGERPRINT: 'other-hook' }
     await expect(drainCommitNotifications(f.dataRoot, other)).resolves.toMatchObject({ delivered: 0 })
-    expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ ackedThrough: 3, notifyBacklog: 0 })
+    expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ ackedThrough: null, notifyBacklog: 3 })
     await writeFile(f.blocked, '[4]')
     for (const event of ['UserPromptSubmit', 'Stop']) {
       await handleRecorderHook({ workspace: f.root, provider: 'pi', event, deferDelivery: true,
         payload: { session_id: 'session', turn_id: 'turn-4', prompt: 'fixture' } }, f.env)
     }
-    await drainCommitNotifications(f.dataRoot, other)
+    await drainCommitNotifications(f.dataRoot, other, { triggerSequence: 4 })
     expect(await commitNotificationStatus(f.dataRoot, other)).toMatchObject({ failure: { sequence: 4, attempts: 1 } })
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ deadLetterCount: 1, notifyBacklog: 1 })
   }, 15_000)
@@ -136,7 +138,7 @@ describe('persistent commit notification failures', () => {
     const f = await fixture()
     await writeFile(f.blocked, '[1,2]')
     await exhaust(f, 1)
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
       ackedThrough: 0, processedThrough: 3, notifyBacklog: 1, deadLetterCount: 1,
       failure: { sequence: 2, attempts: 1 }
@@ -160,23 +162,23 @@ describe('persistent commit notification failures', () => {
 
   it('clears a failure on successful retry before the threshold', async () => {
     const f = await fixture()
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     f.advance(backoffs[0])
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ failure: { sequence: 1, attempts: 2 } })
     await writeFile(f.blocked, '[]')
     f.advance(backoffs[1])
-    expect(await drainCommitNotifications(f.dataRoot, f.env)).toMatchObject({ delivered: 1, pending: 0 })
+    expect(await f.drain()).toMatchObject({ delivered: 1, pending: 0 })
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual({ ackedThrough: 3, notifyBacklog: 0 })
     expect(await doctor(f)).toMatchObject({ code: 0, check: { status: 'pass' } })
   }, 15_000)
 
   it('retains a known failed sequence when its canonical source disappears, then progresses', async () => {
     const f = await fixture()
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     const filename = (await readdir(join(f.dataRoot, 'records'))).find(name => name.includes(f.records[0].recordId))!
     await rm(join(f.dataRoot, 'records', filename))
-    for (const delay of backoffs) { f.advance(delay); await drainCommitNotifications(f.dataRoot, f.env) }
+    for (const delay of backoffs) { f.advance(delay); await f.drain() }
     expect(await f.readCalls()).toEqual([1, 2, 3])
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
       processedThrough: 3, notifyBacklog: 0, deadLetterCount: 1,
@@ -186,8 +188,8 @@ describe('persistent commit notification failures', () => {
 
   it('recovers after durable dead-letter publication without a sixth callback', async () => {
     const f = await fixture()
-    await drainCommitNotifications(f.dataRoot, f.env)
-    for (const delay of backoffs.slice(0, 3)) { f.advance(delay); await drainCommitNotifications(f.dataRoot, f.env) }
+    await f.drain()
+    for (const delay of backoffs.slice(0, 3)) { f.advance(delay); await f.drain() }
     const original = io.writeJsonAtomic
     let injected = false
     const writer = vi.spyOn(io, 'writeJsonAtomic').mockImplementation(async (path, value, options) => {
@@ -195,24 +197,24 @@ describe('persistent commit notification failures', () => {
       if (path.includes('/dead-letters/')) { injected = true; throw new Error('fixture crash after dead publication') }
     })
     f.advance(backoffs[3])
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     writer.mockRestore()
     expect(injected).toBe(true)
     const calls = await f.readCalls()
     expect(calls).toEqual([1, 2, 3, 1, 1, 1, 1])
-    await drainCommitNotifications(f.dataRoot, f.env, { maxRecords: 1 })
+    await f.drain({ maxRecords: 1 })
     expect(await f.readCalls()).toEqual(calls)
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ deadLetterCount: 1, notifyBacklog: 0 })
   }, 15_000)
 
   it.each(['counter', 'null', 'identity'])('does not reset corrupt %s state or execute a callback with unavailable state', async corruption => {
     const f = await fixture()
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     const state = JSON.parse(await readFile(f.statePath, 'utf8')) as Record<string, unknown>
     const corrupt = corruption === 'null' ? null : corruption === 'identity' ? { ...state, hookFingerprint: 'wrong-identity' }
       : { ...state, failure: { sequence: 1, recordId: f.records[0].recordId, attempts: 'invalid' } }
     await writeFile(f.statePath, JSON.stringify(corrupt))
-    await expect(drainCommitNotifications(f.dataRoot, f.env)).rejects.toThrow(/notification.*state/)
+    await expect(f.drain()).rejects.toThrow(/notification.*state/)
     expect(await f.readCalls()).toEqual([1, 2, 3])
     expect(await doctor(f)).toMatchObject({ code: 5, check: { status: 'fail', detail: expect.stringContaining('unavailable') } })
   }, 15_000)
@@ -222,7 +224,7 @@ describe('persistent commit notification failures', () => {
     const config = { ...f.config, commitHook: { entry: 'receiver.cjs', files: ['receiver.cjs'] } }
     await writeFile(join(f.root, 'scry.config.json'), JSON.stringify(config))
     const baseEnv = { HOME: f.root, SCRY_GRANT_DIR: join(f.root, 'grants') }
-    await drainRecorderDelivery(f.root, baseEnv)
+    await drainRecorderDelivery(f.root, baseEnv, f.records[0].sequence)
     const { recorderEnablement } = await import('./recorder.js')
     const enabled = await recorderEnablement(f.root, baseEnv)
     if (!enabled.enabled) throw new Error('fixture not enabled')
@@ -238,9 +240,9 @@ describe('persistent commit notification failures', () => {
 
   it('rapid drains and cold-start wakeups respect the retry time while later records continue', async () => {
     const f = await fixture()
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     const nextRetryAt = new Date(Date.now() + backoffs[0]).toISOString()
-    for (let i = 0; i < 5; i++) await drainCommitNotifications(f.dataRoot, f.env)
+    for (let i = 0; i < 5; i++) await f.drain()
     expect(await f.readCalls()).toEqual([1, 2, 3])
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({
       ackedThrough: 0, processedThrough: 3, notifyBacklog: 1,
@@ -248,10 +250,10 @@ describe('persistent commit notification failures', () => {
     })
     expect((await doctor(f)).check?.detail).toContain(nextRetryAt)
     f.advance(backoffs[0] - 1)
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await f.readCalls()).toEqual([1, 2, 3])
     f.advance(1)
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await f.readCalls()).toEqual([1, 2, 3, 1])
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ failure: {
       attempts: 2, nextRetryAt: new Date(Date.now() + backoffs[1]).toISOString()
@@ -261,7 +263,7 @@ describe('persistent commit notification failures', () => {
   it('does not bypass a pending latest retry through automatic cold-start redelivery', async () => {
     const f = await fixture()
     await writeFile(f.blocked, '[3]')
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     for (let i = 0; i < 5; i++) expect(await redeliverLatestCommitNotification(f.dataRoot, f.env)).toMatchObject({ delivered: false })
     expect(await f.readCalls()).toEqual([1, 2, 3])
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ failure: { sequence: 3, attempts: 1 } })
@@ -278,7 +280,7 @@ describe('persistent commit notification failures', () => {
     })
     await writeFile(f.blocked, '[]')
     f.advance(backoffs[0])
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toMatchObject({ ackedThrough: 1, deadLetterCount: 1 })
     expect(await retry(f, new Map([['all-dead', true]]))).toBe(0)
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual({ ackedThrough: 3, notifyBacklog: 0 })
@@ -303,6 +305,7 @@ describe('persistent commit notification failures', () => {
   it('persists a first cold-start failure and rejects corrupt per-sequence counters without another callback', async () => {
     const f = await fixture()
     await writeFile(f.blocked, '[3]')
+    await drainCommitNotifications(f.dataRoot, f.env, { triggerSequence: 3, maxRecords: 0 })
     expect(await redeliverLatestCommitNotification(f.dataRoot, f.env)).toMatchObject({ delivered: false })
     await redeliverLatestCommitNotification(f.dataRoot, f.env)
     expect(await f.readCalls()).toEqual([3])
@@ -311,7 +314,7 @@ describe('persistent commit notification failures', () => {
     const saved = JSON.parse(await readFile(path, 'utf8'))
     saved.failure.attempts = 999
     await writeFile(path, JSON.stringify(saved))
-    await expect(drainCommitNotifications(f.dataRoot, f.env)).rejects.toThrow('invalid delivery')
+    await expect(f.drain()).rejects.toThrow('invalid delivery')
     expect(await f.readCalls()).toEqual([3])
   }, 15_000)
 
@@ -326,10 +329,10 @@ describe('persistent commit notification failures', () => {
     })
     await expect(retry(f, new Map([['sequence', '1']]))).rejects.toThrow('fixture after replay publication')
     writer.mockRestore()
-    expect(await drainCommitNotifications(f.dataRoot, f.env)).toMatchObject({ delivered: 1, pending: 0 })
+    expect(await f.drain()).toMatchObject({ delivered: 1, pending: 0 })
     expect(await commitNotificationStatus(f.dataRoot, f.env)).toEqual({ ackedThrough: 3, notifyBacklog: 0 })
     const calls = await f.readCalls()
-    await drainCommitNotifications(f.dataRoot, f.env)
+    await f.drain()
     expect(await f.readCalls()).toEqual(calls)
   }, 15_000)
 })

@@ -24,7 +24,7 @@ export function registerSuite21(): void {
     const dataRoot = join(root, '.scry')
     const hook = await commitHook(root)
     const env = deliveryEnv(hook)
-    await drainCommitNotifications(dataRoot, env)
+    await drainCommitNotifications(dataRoot, env, { triggerSequence: 1 })
     await expect(commitNotificationStatus(dataRoot, env)).resolves.toMatchObject({ ackedThrough: turns })
     return { root, dataRoot, hook, env }
   }
@@ -47,7 +47,7 @@ export function registerSuite21(): void {
     await completeTurn(f.root, 'turn-4')
 
     expect((await listRecords(f.dataRoot)).map(record => record.sequence)).toEqual([1, 2, 4])
-    await expect(drainCommitNotifications(f.dataRoot, f.env)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    await expect(drainCommitNotifications(f.dataRoot, f.env, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
     await expect(deliveredSequences(f.hook.capture)).resolves.toEqual([1, 2, 3, 4])
     await expect(commitNotificationStatus(f.dataRoot, f.env)).resolves.toEqual({ ackedThrough: 4, notifyBacklog: 0 })
   })
@@ -59,7 +59,7 @@ export function registerSuite21(): void {
     await completeTurn(f.root, 'turn-4')
 
     expect((await listRecords(f.dataRoot)).map(record => record.sequence)).toEqual([4])
-    await expect(drainCommitNotifications(f.dataRoot, f.env)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    await expect(drainCommitNotifications(f.dataRoot, f.env, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
     await expect(deliveredSequences(f.hook.capture)).resolves.toEqual([1, 2, 3, 4])
   })
 
@@ -77,7 +77,7 @@ export function registerSuite21(): void {
     await completeTurn(root, 'legacy-4')
 
     expect((await listRecords(dataRoot)).map(record => record.sequence)).toEqual([4])
-    await expect(drainCommitNotifications(dataRoot, env)).resolves.toMatchObject({ delivered: 1, pending: 0 })
+    await expect(drainCommitNotifications(dataRoot, env, { triggerSequence: 1 })).resolves.toMatchObject({ delivered: 1, pending: 0 })
     await expect(deliveredSequences(hook.capture)).resolves.toEqual([4])
   })
 
