@@ -98,6 +98,7 @@ export async function daemonRequest(
       method: options.method,
       path: options.path,
       headers: {
+        connection: 'close',
         ...(options.body ? { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(options.body)) } : {}),
         ...options.headers
       }
