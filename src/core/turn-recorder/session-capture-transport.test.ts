@@ -109,7 +109,7 @@ it('delivers a captured session straight to the daemon socket and publishes the 
       },
       body
     })
-    const mismatched = await post('0.0.0-other')
+    const mismatched = await post('99.0.0-other')
     expect(mismatched.statusCode).toBe(409)
     expect(await listRecords(join(root, '.scry'))).toHaveLength(0)
     const response = await post(RECORDER_VERSION)

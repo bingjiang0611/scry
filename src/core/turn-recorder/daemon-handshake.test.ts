@@ -33,32 +33,66 @@ function socketPath(root: string): string {
 }
 
 describe('recorder daemon version handshake', () => {
-  it('refuses a versioned hook from another recorder before applying it', async () => {
+  it('serves a hook from an older recorder instead of sending it away', async () => {
+    const root = await workspace()
+    const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
+    const socket = socketPath(root)
+    const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
+    const post = async (version: string | undefined, session: string): Promise<{ statusCode: number; body: Record<string, unknown> }> =>
+      daemonRequest(socket, {
+        method: 'POST',
+        path: HOOK_EVENT_PATH,
+        headers: {
+          'x-scry-protocol': '2',
+          ...(version === undefined ? {} : { [RECORDER_VERSION_HEADER]: version }),
+          'x-scry-provider': 'pi',
+          'x-scry-event': 'UserPromptSubmit',
+          'content-type': 'application/octet-stream'
+        },
+        body: encodeHookEnvironment(env, { session_id: session, prompt: 'apply' }),
+        timeoutMs: 5_000
+      })
+    try {
+      for (const [version, session] of [['0.2.65', 'older-patch'], ['0.2.64', 'much-older'], [undefined, 'unversioned']] as const) {
+        const response = await post(version, session)
+        expect(response.statusCode).toBe(200)
+        expect(response.body.ok).toBe(true)
+        await expect(access(join(root, '.scry', 'runtime', 'pi', safeKey(session), 'session.json'))).resolves.toBeUndefined()
+      }
+      const newer = await post('99.0.0', 'newer')
+      expect(newer.statusCode).toBe(409)
+      expect(newer.body).toMatchObject({ ok: false, error: 'recorder version mismatch', recorderVersion: RECORDER_VERSION })
+      await expect(access(join(root, '.scry', 'runtime', 'pi', safeKey('newer')))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await daemon.close()
+    }
+  })
+
+  it('still lets a newer hook take over the daemon', async () => {
     const root = await workspace()
     const env = { ...process.env, SCRY_RECORDER_SOCKET: socketPath(root) }
     const socket = socketPath(root)
     const daemon = await listenRecorderDaemon({ workspace: root, idleMs: 5_000, env })
     try {
-      for (const version of ['0.2.65', '0.2.64', '99.0.0', undefined]) {
-        const response = await daemonRequest(socket, {
-          method: 'POST',
-          path: HOOK_EVENT_PATH,
-          headers: {
-            'x-scry-protocol': '2',
-            ...(version === undefined ? {} : { [RECORDER_VERSION_HEADER]: version }),
-            'x-scry-provider': 'pi',
-            'x-scry-event': 'UserPromptSubmit',
-            'content-type': 'application/octet-stream'
-          },
-          body: encodeHookEnvironment(env, { session_id: `version-${version}`, prompt: 'must not apply' })
-        })
-        expect(response.statusCode).toBe(409)
-        expect(response.body).toMatchObject({ ok: false, error: 'recorder version mismatch', recorderVersion: RECORDER_VERSION })
-      }
-      await expect(listRecords(join(root, '.scry'))).resolves.toEqual([])
-      await expect(access(join(root, '.scry', 'runtime', 'pi'))).rejects.toMatchObject({ code: 'ENOENT' })
-      await sendRecorderDaemonHook({ workspace: root, provider: 'pi', env, event: 'UserPromptSubmit', payload: { session_id: 'version-current', prompt: 'apply' } })
-      await expect(access(join(root, '.scry', 'runtime', 'pi'))).resolves.toBeUndefined()
+      const response = await daemonRequest(socket, {
+        method: 'POST',
+        path: HOOK_EVENT_PATH,
+        headers: {
+          'x-scry-protocol': '2',
+          [RECORDER_VERSION_HEADER]: '99.0.0',
+          'x-scry-provider': 'pi',
+          'x-scry-event': 'UserPromptSubmit',
+          'content-type': 'application/octet-stream'
+        },
+        body: encodeHookEnvironment(env, { session_id: 'newer-hook', prompt: 'must not apply' })
+      })
+      expect(response.statusCode).toBe(409)
+      expect(response.body).toMatchObject({ recorderVersion: RECORDER_VERSION, expected: '99.0.0' })
+      const newer = await sendRecorderDaemonHook({
+        workspace: root, provider: 'pi', env, event: 'UserPromptSubmit', payload: { session_id: 'newer-hook', prompt: 'apply' }
+      }).catch((caught: unknown) => caught)
+      expect(newer).not.toBeInstanceOf(RecorderHookRejected)
+      await expect(access(join(root, '.scry', 'runtime', 'pi', safeKey('newer-hook'), 'session.json'))).resolves.toBeUndefined()
     } finally {
       await daemon.close()
     }
