@@ -109,8 +109,7 @@ export function validHostChain(value: unknown): HostProcess[] | undefined {
 
 async function resolveEntryCommand(entry: ProcessTableEntry, useProcCmdline: boolean): Promise<string | undefined> {
   const command = entry.command
-  if (!useProcCmdline || !command || command.includes(' ')) return command
-  if (!SCRIPT_RUNTIMES.has(normalizeExeName(command))) return command
+  if (!useProcCmdline) return command
   const raw = await readFile(`/proc/${entry.pid}/cmdline`, 'utf8').catch(() => undefined)
   if (!raw) return command
   const joined = raw.split('\0').filter(Boolean).join(' ').trim()
